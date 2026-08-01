@@ -48,6 +48,22 @@ const highDirAt = (t: TileType, r: number): Dir | null => {
   return def.isRamp && def.rampHighDir !== undefined ? rotDir(def.rampHighDir, r) : null
 }
 
+// ─── Seeded RNG ──────────────────────────────────────────────────────
+// Mulberry32: tiny deterministic PRNG. Given the same seed, the same maze is
+// produced every time — in preview, in the deployed World, everywhere. Makes
+// generator bugs reproducible: note the logged seed, and we can inspect the
+// exact same tile layout offline.
+let _seed = 0
+function rand(): number {
+  _seed |= 0
+  _seed = (_seed + 0x6D2B79F5) | 0
+  let t = _seed
+  t = Math.imul(t ^ (t >>> 15), t | 1)
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+function setSeed(s: number) { _seed = s | 0 }
+
 // ─── Grid ────────────────────────────────────────────────────────────
 const TILE_SCALE = 2            // uniform scale applied to every tile
 const CELL = 16 * TILE_SCALE    // world-space size of one grid cell (m)
@@ -269,7 +285,7 @@ function validate(): boolean {
 function shuffle<T>(a: T[]): T[] {
   const b = a.slice()
   for (let i = b.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = Math.floor(rand() * (i + 1))
     ;[b[i], b[j]] = [b[j], b[i]]
   }
   return b
@@ -298,8 +314,8 @@ function generate() {
   let seedsPlaced = 0
   let attempts = 0
   while (seedsPlaced < SEED_COUNT && attempts++ < 100) {
-    const sx = Math.floor(Math.random() * GRID_W)
-    const sz = Math.floor(Math.random() * GRID_H)
+    const sx = Math.floor(rand() * GRID_W)
+    const sz = Math.floor(rand() * GRID_H)
     if (grid.has(key(sx, sz, 0))) continue
     for (const r of shuffle([0, 1, 2, 3])) {
       if (canPlace('end', r, sx, sz, 0)) {
@@ -318,7 +334,7 @@ function generate() {
     const minY = Math.min(...frontier.map(f => f.y))
     const candidates: number[] = []
     for (let i = 0; i < frontier.length; i++) if (frontier[i].y === minY) candidates.push(i)
-    const idx = candidates[Math.floor(Math.random() * candidates.length)]
+    const idx = candidates[Math.floor(rand() * candidates.length)]
     const f = frontier.splice(idx, 1)[0]
     if (grid.has(key(f.x, f.z, f.y))) continue
 
@@ -342,22 +358,44 @@ function generate() {
   }
 }
 
+// Guard against the runtime calling main() more than once (can happen on
+// deployed Worlds during startup/realm transitions). Without this, a second
+// invocation clears `grid` and regenerates a fresh maze, but the entities
+// spawned by the first run remain in the engine → two mazes overlaid, densest
+// on the ground floor where both fill exhaustively.
+let hasRun = false
+
 export function main() {
-  //setupUi()
-  // Retry generation until we get a maze with no dangling openings.
+  if (hasRun) {
+    console.log('main() called again — skipping regeneration')
+    return
+  }
+  hasRun = true
+  setupUi()
+  // Deterministic generation. Iterate through seeds until one produces a maze
+  // that passes validation. The winning seed is logged so any bug can be
+  // reproduced exactly by hard-coding startSeed to that value.
   const MAX_ATTEMPTS = 500
+  // Pick a starting seed from the wall clock (fresh maze every load) OR set a
+  // specific number here to lock a known-good maze.
+  const startSeed = Math.floor(Math.random() * 0x7fffffff) || 1
   let success = false
+  let winningSeed = 0
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const trySeed = startSeed + i
+    setSeed(trySeed)
     grid.clear()
     generate()
     if (validate()) {
-      console.log(`Maze generated in ${i + 1} attempt(s), ${grid.size} tiles`)
+      winningSeed = trySeed
+      console.log(`Maze generated with seed ${trySeed} (attempt ${i + 1}), ${grid.size} tiles`)
       success = true
       break
     }
   }
   if (!success) {
-    console.log(`⚠️ Maze exhausted ${MAX_ATTEMPTS} attempts — showing last (invalid) attempt for debugging`)
+    console.log(`⚠️ Maze exhausted ${MAX_ATTEMPTS} seeds starting at ${startSeed} — aborting spawn`)
+    return
   }
   // Materialize entities from the (final) grid state
   for (const p of grid.values()) spawnTile(p)
