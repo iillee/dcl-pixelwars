@@ -23,6 +23,7 @@ export const uiMenu = () => (
                 padding: { top: 8, bottom: 8, left: 20, right: 20 },
                 justifyContent: 'center',
                 alignItems: 'center',
+                borderRadius: 20,
             }}
             uiBackground={{ color: Color4.create(0, 0, 0, 0.5) }}
         >
