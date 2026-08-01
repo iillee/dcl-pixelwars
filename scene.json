@@ -2,7 +2,7 @@
   "ecs7": true,
   "runtimeVersion": "7",
   "display": {
-    "title": "maze",
+    "title": "Labyrinthia",
     "description": "Empty Scene Template",
     "favicon": "favicon_asset",
     "navmapThumbnail": ""
@@ -161,6 +161,6 @@
   },
   "opendcl": true,
   "worldConfiguration": {
-    "name": "baskervill.dcl.eth"
+    "name": "labyrinthia.dcl.eth"
   }
 }
