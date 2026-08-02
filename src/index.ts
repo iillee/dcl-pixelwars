@@ -850,7 +850,7 @@ engine.addSystem((dt: number) => {
 // Looped ambient track. Parented to the camera so it's always at ear-level
 // regardless of where the player wanders in the 160m scene.
 const MUSIC_VOLUME = 0.4
-const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.wav'
+const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 let musicEnt: Entity = 0 as Entity
 let musicMuted = false
 // Track playback position across pause/resume so the song continues where it
