@@ -12,7 +12,7 @@ import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 export enum Team { None = 0, Red = 1, Blue = 2 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
-  [Team.None]: Color4.create(0.7, 0.7, 0.7, 1),
+  [Team.None]: Color4.create(1, 1, 1, 1),
   [Team.Red]:  Color4.create(1.0, 0.2, 0.35, 1),
   [Team.Blue]: Color4.create(0.2, 0.5, 1.0, 1),
 }
@@ -30,7 +30,10 @@ const TEAM_COLORS: Record<Team, Color4> = {
 //   Col last = east  edge (+X)
 export type Mask = string[]
 
-export const FLAT_OFFSET = 0.05 // Y lift above tile deck to avoid z-fighting
+// GLB floor is 0.25 local (0.5m world) above the tile origin. Sit paint cells
+// 0.26 local (0.52m world) above origin → 0.02m world above the walkable surface.
+// TILE_SCALE from index.ts is 2; hard-coded here to keep this module standalone.
+export const FLAT_OFFSET = 0.275 * 2 // 0.55m world above tile origin — clears the 0.5m floor + tilted-cell edge sag on inclines.
 
 // Placeholder masks — designer is re-exporting. Cross is going first so we'll
 // author its real mask against the new GLB once it lands. Everything else stays
@@ -44,31 +47,108 @@ const plusRow = (size: number, arm: number, mid: string, edge: string = '.') => 
   return repeat(edge, pad) + repeat(mid, arm) + repeat(edge, pad)
 }
 
-// PROVISIONAL cross mask: 32x32, arms 16 cells wide (middle band cols/rows 8–23),
-// corners void. Symmetric on all 4 axes so rotation is trivially correct.
-// Iterate against the real GLB once it lands.
-const CROSS_MASK: Mask = (() => {
-  const size = 32, arm = 16
+// All tile masks are 32x32 with a 20-cell-wide corridor (middle band cols/rows
+// 6–25) and 6-cell voids at the walls. Canonical (unrotated) orientations per
+// TILES in src/index.ts. Row 0 = south, col 0 = west (subject to visual
+// verification).
+// Cell resolution: SIZE cells across a tile (tile world width = CELL = 32m).
+// SIZE=16 → 2m cells (~256 max cells/tile); SIZE=32 → 1m cells (~1024/tile).
+// Dropped from 32 to 16 to relieve entity/draw-call load. All other mask
+// constants are ratios of SIZE so shapes stay the same.
+const SIZE = 16
+const ARM = SIZE * 20 / 32      // 10 — corridor width in cells (was 20 at SIZE=32)
+const LO = (SIZE - ARM) / 2     // 3
+const HI = (SIZE + ARM) / 2     // 13
+const END_CLOSED_VOID = SIZE * 6 / 32  // 3 — rows of void on the closed side of `end`
+const inCorridor = (i: number) => i >= LO && i < HI
+
+// Build a mask row-by-row from a predicate.
+const buildMask = (cellChar: (row: number, col: number) => string): Mask => {
   const rows: string[] = []
-  for (let r = 0; r < size; r++) {
-    if (r < (size - arm) / 2 || r >= (size + arm) / 2) {
-      // Corner rows: only the middle arm columns are walkable.
-      rows.push(plusRow(size, arm, 'F', '.'))
-    } else {
-      // Middle rows: full width walkable.
-      rows.push(repeat('F', size))
-    }
+  for (let r = 0; r < SIZE; r++) {
+    let s = ''
+    for (let c = 0; c < SIZE; c++) s += cellChar(r, c)
+    rows.push(s)
   }
   return rows
-})()
+}
 
+// Cross: opens N, E, S, W. Walkable = corridor rows OR corridor cols.
+const CROSS_MASK: Mask = buildMask((r, c) =>
+  (inCorridor(r) || inCorridor(c)) ? 'F' : '.'
+)
+
+// Straight: opens N, S. Corridor is the middle 20 columns, full length.
+const STRAIGHT_MASK: Mask = buildMask((r, c) => inCorridor(c) ? 'F' : '.')
+
+// End: opens N only. 16-cell-long chamber flush against the open (N/+Z) edge.
+// Row convention (confirmed via end tile): row 0 = south, row 31 = north.
+const END_MASK: Mask = buildMask((r, c) => (inCorridor(c) && r >= END_CLOSED_VOID) ? 'F' : '.')
+
+// Turn: opens N and E. L-shape — N-going corridor (middle cols, all rows)
+// clipped to rows LO..SIZE (removes the south leg), plus E-going corridor
+// (middle rows, cols LO..SIZE) removes the west leg. Equivalent: walkable if
+// (in corridor cols AND row >= LO) OR (in corridor rows AND col >= LO).
+const TURN_MASK: Mask = buildMask((r, c) => {
+  const nLeg = inCorridor(c) && r >= LO   // N opening → arm extends south from N edge, stops at center
+  const eLeg = inCorridor(r) && c >= LO   // E opening → arm extends west from E edge, stops at center
+  return (nLeg || eLeg) ? 'F' : '.'
+})
+
+// Fork: opens N, S, W. T-shape — full N-S corridor + W arm.
+const FORK_MASK: Mask = buildMask((r, c) => {
+  const nsLeg = inCorridor(c)                // full-length N-S corridor
+  const wLeg  = inCorridor(r) && c < HI     // W arm from west edge to center
+  return (nsLeg || wLeg) ? 'F' : '.'
+})
+
+// Ramp: opens N, S. Same 2D footprint as straight; Y is computed at spawn time
+// from the cell's canonical-row position along the slope axis (rampHighDir=N),
+// so rotation via the tile's `r` naturally rotates the slope direction too.
+const RAMP_MASK: Mask = STRAIGHT_MASK
+const RAMP_FLAT_END = 1 // cells of flat landing at each end of the ramp
+
+// Ramp geometry derived from CELL and STEP. Same math used by spawn and lookup
+// so cellIds agree.
+function rampGeometry(CELL: number, STEP: number) {
+  const cellSize = CELL / SIZE
+  const flatLen = RAMP_FLAT_END * cellSize
+  const inclineStart = flatLen
+  const inclineEnd = CELL - flatLen
+  const inclineLen = inclineEnd - inclineStart
+  const slopeLen = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
+  const nIncline = Math.round(slopeLen / cellSize)
+  const slopeCellSize = slopeLen / nIncline
+  const cosA = inclineLen / slopeLen
+  const sinA = STEP / slopeLen
+  return { cellSize, flatLen, inclineStart, inclineEnd, inclineLen, slopeLen, nIncline, slopeCellSize, cosA, sinA }
+}
+
+// Given canonical (lx, lz) on a ramp, return the cell (col, row) used in
+// cellId. Returns null if outside the walkable corridor.
+function rampCellIdxFromCanonical(lx: number, lz: number, geom: ReturnType<typeof rampGeometry>): { col: number; row: number } | null {
+  const col = Math.floor(lx / geom.cellSize)
+  if (col < LO || col >= HI) return null
+  let row: number
+  if (lz < geom.inclineStart) {
+    row = Math.floor(lz / geom.cellSize)                    // bottom landing (0..RAMP_FLAT_END-1)
+  } else if (lz >= geom.inclineEnd) {
+    row = RAMP_FLAT_END + geom.nIncline + Math.floor((lz - geom.inclineEnd) / geom.cellSize)
+  } else {
+    const slopeDist = (lz - geom.inclineStart) / geom.cosA
+    row = RAMP_FLAT_END + Math.floor(slopeDist / geom.slopeCellSize)
+  }
+  return { col, row }
+}
+
+// Enable masks one at a time as we visually verify each tile type.
 export const MASKS: Partial<Record<string, Mask>> = {
   cross: CROSS_MASK,
-  end: undefined,
-  straight: undefined,
-  turn: undefined,
-  fork: undefined,
-  ramp: undefined,
+  end: END_MASK,
+  straight: STRAIGHT_MASK,
+  turn: TURN_MASK,
+  fork: FORK_MASK,
+  ramp: RAMP_MASK,
 }
 
 // ─── Rotate a mask 90°×r CW (to match tile rotation) ─────────────────
@@ -82,11 +162,14 @@ export function rotateMask(m: Mask, r: number): Mask {
   return out
 }
 function rot90cw(m: Mask): Mask {
+  // 90° CW rotation: new[r][c] = old[c][N-1-r]. Matches the tile GLB rotation
+  // (Quaternion.fromEulerDegrees(0, r*90, 0) rotates local +Z → world +X, i.e.
+  // N → E for r=1, which is CW viewed from above).
   const h = m.length, w = m[0].length
   const rows: string[] = []
-  for (let r = 0; r < w; r++) {
+  for (let r = 0; r < h; r++) {
     let s = ''
-    for (let c = 0; c < h; c++) s += m[h - 1 - c][r]
+    for (let c = 0; c < w; c++) s += m[c][h - 1 - r]
     rows.push(s)
   }
   return rows
@@ -132,16 +215,102 @@ export function spawnCellsForTile(
   const tileWorldX = tx * CELL
   const tileWorldZ = tz * CELL
 
+  // Ramp height helper: canonical ramp rises +Z (N high). After tile rotation
+  // r, the slope axis rotates too. Given a world (wx, wz) on the tile, we
+  // recover the canonical local (lx, lz) via the same math ROT_OFFSET encodes:
+  // local +Z direction, in world frame, is (sin(r*90°), cos(r*90°)) applied to
+  // the vector from tile center to the point.
+  const isRamp = tileType === 'ramp'
+  const rad = r * Math.PI / 2
+  const sinR = Math.sin(rad), cosR = Math.cos(rad)
+  const geom = rampGeometry(CELL, STEP)
+  const slopeAngleDeg = Math.atan2(STEP, geom.inclineLen) * 180 / Math.PI
+
+  // Precomputed rotations. Cell base is -90° around X (face up). Incline cells
+  // add slope tilt (negative so the canonical +Z / high edge lifts up). Both
+  // then get the tile's yaw (r * 90° around Y) so the tilt axis rotates with
+  // the tile — canonical tilt is around world X, rotated versions tilt around
+  // the corresponding rotated axis.
+  const yaw = Quaternion.fromEulerDegrees(0, r * 90, 0)
+  const flatRot = Quaternion.multiply(yaw, Quaternion.fromEulerDegrees(-90, 0, 0))
+  const inclineRot = Quaternion.multiply(yaw, Quaternion.fromEulerDegrees(-90 - slopeAngleDeg, 0, 0))
+
+  // Convert canonical local (lx, lz) → world (wx, wz), applying the tile's CW
+  // yaw around its center. Same math ROT_OFFSET encodes.
+  const localToWorld = (lx: number, lz: number) => {
+    const cx = lx - CELL / 2, cz = lz - CELL / 2
+    const wxRel =  cx * cosR + cz * sinR
+    const wzRel = -cx * sinR + cz * cosR
+    return {
+      wx: tileWorldX + CELL / 2 + wxRel,
+      wz: tileWorldZ + CELL / 2 + wzRel,
+    }
+  }
+
+  const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
+    const id = cellId(tx, tz, ty, col, row)
+    const e = engine.addEntity()
+    Transform.create(e, {
+      position: Vector3.create(wx, wy, wz),
+      rotation: rot,
+      scale: Vector3.create(cellSize, scaleY, 1),
+    })
+    MeshRenderer.setPlane(e)
+    Material.setPbrMaterial(e, { albedoColor: TEAM_COLORS[Team.None] })
+    cellEntity.set(id, e)
+    cellTeam.set(id, Team.None)
+  }
+
+  // ─── Ramp: dedicated path ───────────────────────────────────────
+  // Space incline cells at cellSize intervals along the SLOPE (not horizontal)
+  // so they tile flush along the tilted surface without needing size scaling.
+  // (col, row) always come from rampCellIdxFromCanonical() so the ids agree
+  // with worldToCellId's lookup on the same tile.
+  if (isRamp) {
+    // Bottom landing
+    for (let i = 0; i < RAMP_FLAT_END; i++) {
+      const lz = (i + 0.5) * geom.cellSize
+      for (let col = LO; col < HI; col++) {
+        const lx = (col + 0.5) * geom.cellSize
+        const idx = rampCellIdxFromCanonical(lx, lz, geom)!
+        const { wx, wz } = localToWorld(lx, lz)
+        spawnOne(wx, ty + FLAT_OFFSET, wz, flatRot, idx.col, idx.row)
+      }
+    }
+    // Incline
+    for (let i = 0; i < geom.nIncline; i++) {
+      const slopeDist = (i + 0.5) * geom.slopeCellSize
+      const lz = geom.inclineStart + slopeDist * geom.cosA
+      const y  = ty + FLAT_OFFSET + slopeDist * geom.sinA
+      for (let col = LO; col < HI; col++) {
+        const lx = (col + 0.5) * geom.cellSize
+        const idx = rampCellIdxFromCanonical(lx, lz, geom)!
+        const { wx, wz } = localToWorld(lx, lz)
+        spawnOne(wx, y, wz, inclineRot, idx.col, idx.row, geom.slopeCellSize)
+      }
+    }
+    // Top landing
+    for (let i = 0; i < RAMP_FLAT_END; i++) {
+      const lz = geom.inclineEnd + (i + 0.5) * geom.cellSize
+      for (let col = LO; col < HI; col++) {
+        const lx = (col + 0.5) * geom.cellSize
+        const idx = rampCellIdxFromCanonical(lx, lz, geom)!
+        const { wx, wz } = localToWorld(lx, lz)
+        spawnOne(wx, ty + STEP + FLAT_OFFSET, wz, flatRot, idx.col, idx.row)
+      }
+    }
+    return
+  }
+
+  // ─── Non-ramp tiles: mask iteration ──────────────────────────────
+  const flatRotDefault = Quaternion.fromEulerDegrees(-90, 0, 0)
   for (let row = 0; row < h; row++) {
     for (let col = 0; col < w; col++) {
       const ch = mask[row][col]
       if (ch === '.') continue
-
-      // Cell center in world XZ.
       const wx = tileWorldX + (col + 0.5) * cellSize
       const wz = tileWorldZ + (row + 0.5) * cellSize
 
-      // Y: flat floor vs ramp height.
       let wy: number
       if (ch === 'F') {
         wy = ty + FLAT_OFFSET
@@ -151,18 +320,7 @@ export function spawnCellsForTile(
       } else {
         continue
       }
-
-      const id = cellId(tx, tz, ty, col, row)
-      const e = engine.addEntity()
-      Transform.create(e, {
-        position: Vector3.create(wx, wy, wz),
-        rotation: Quaternion.fromEulerDegrees(-90, 0, 0), // TODO ramp tilt
-        scale: Vector3.create(cellSize * 0.95, cellSize * 0.95, 1),
-      })
-      MeshRenderer.setPlane(e)
-      Material.setPbrMaterial(e, { albedoColor: TEAM_COLORS[Team.None] })
-      cellEntity.set(id, e)
-      cellTeam.set(id, Team.None)
+      spawnOne(wx, wy, wz, flatRotDefault, col, row)
     }
   }
 }
@@ -193,12 +351,32 @@ export function worldToCellId(
 
   const raw = MASKS[tile.type]
   if (!raw) return null
+
+  const tileWorldX = tx * CELL
+  const tileWorldZ = tz * CELL
+
+  // ─── Ramp branch: use shared canonical-frame helper ───────────────
+  if (tile.type === 'ramp') {
+    const geom = rampGeometry(CELL, STEP)
+    // Undo tile CW yaw to get canonical (lx, lz).
+    const rad = tile.r * Math.PI / 2
+    const sinR = Math.sin(rad), cosR = Math.cos(rad)
+    const dx = px - tileWorldX, dz = pz - tileWorldZ
+    const cx = dx - CELL / 2, cz = dz - CELL / 2
+    // CCW inverse of the tile's CW yaw:
+    const lx = cosR * cx - sinR * cz + CELL / 2
+    const lz = sinR * cx + cosR * cz + CELL / 2
+    const idx = rampCellIdxFromCanonical(lx, lz, geom)
+    if (!idx) return null
+    return cellId(tx, tz, tile.y, idx.col, idx.row)
+  }
+
   const mask = rotateMask(raw, tile.r)
   const w = mask[0].length
   const cellSize = CELL / w
 
-  const localX = px - tx * CELL
-  const localZ = pz - tz * CELL
+  const localX = px - tileWorldX
+  const localZ = pz - tileWorldZ
   const col = Math.floor(localX / cellSize)
   const row = Math.floor(localZ / cellSize)
   if (col < 0 || col >= w || row < 0 || row >= mask.length) return null

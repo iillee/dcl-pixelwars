@@ -24,6 +24,7 @@ import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { syncEntity } from '@dcl/sdk/network'
 import { setupUi } from './ui'
 import { runStress } from './stress'
+import { spawnCellsForTile, initPaintingSystem } from './paint'
 
 // ─── Stress-test toggle (Squareoff design §8.1) ──────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -513,6 +514,10 @@ function spawnTileWithGrow(p: Placed) {
     })
   }
   spawnedEntities.push(e)
+
+  // Squareoff: spawn the paint grid overlay on this tile. No-op unless a
+  // mask is defined for this tile type in src/paint.ts.
+  spawnCellsForTile(p.type, p.r, p.x, p.z, p.y, CELL, STEP)
 }
 
 // ─── Seed watcher ────────────────────────────────────────────────────
@@ -916,6 +921,17 @@ export function main() {
   setupBeacon()
   setupLeverAudio()
   setupCooldownLabel()
+  // Squareoff: painting system. lookupTile finds the highest-Y placed tile at
+  // the player's XZ column whose Y is at or below the player's feet.
+  initPaintingSystem(CELL, STEP, (tx, tz, py) => {
+    let best: Placed | null = null
+    for (const p of grid.values()) {
+      if (p.x !== tx || p.z !== tz) continue
+      if (p.y > py + 0.5) continue // above player's feet (small tolerance)
+      if (!best || p.y > best.y) best = p
+    }
+    return best ? { type: best.type, r: best.r, y: best.y } : null
+  })
   // Register the SeedHolder for cross-client sync. Doing this inside main()
   // (rather than at module top level) ensures the networking layer is ready.
   // Fixed networkId so every client's SeedHolder maps to the same synced entity.
