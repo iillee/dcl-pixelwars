@@ -12,6 +12,8 @@ import {
   MaterialTransparencyMode,
   Billboard,
   BillboardMode,
+  TextShape,
+  Font,
   AudioSource,
   MeshCollider,
   InputAction,
@@ -494,7 +496,7 @@ function spawnTileWithGrow(p: Placed) {
     audioClipUrl: 'assets/sounds/pop.mp3',
     playing: true,
     loop: false,
-    volume: 0.25,
+    volume: 0.5,
   })
   spawnedEntities.push(e)
 }
@@ -530,7 +532,7 @@ const knownLevers = new Set<Entity>()
 const leverSavedPointerEvents = new Map<Entity, any>()
 const leverSavedColliders = new Map<Entity, { visible: number; invisible: number }>()
 const leverBusy = new Set<Entity>()
-const POST_REBUILD_COOLDOWN = 0.6 // extra seconds after grow-in completes
+const POST_REBUILD_COOLDOWN = 30 // extra seconds after grow-in completes — gives climbers time to explore before someone regens
 let cooldownRemaining = 0
 
 function lockLever(entity: Entity) {
@@ -665,9 +667,9 @@ engine.addSystem((dt: number) => {
 let pullSoundEnt: Entity = 0 as Entity
 let errorSoundEnt: Entity = 0 as Entity
 
-function playSoundAt(entity: Entity, pos: Vector3, src: string) {
+function playSoundAt(entity: Entity, pos: Vector3, src: string, volume = 1) {
   Transform.getMutable(entity).position = pos
-  AudioSource.createOrReplace(entity, { audioClipUrl: src, playing: true, loop: false, volume: 1 })
+  AudioSource.createOrReplace(entity, { audioClipUrl: src, playing: true, loop: false, volume })
 }
 
 // Invisible clickable proxy: enabled (moved on top of the lever) while the
@@ -697,12 +699,70 @@ function setupLeverAudio() {
   )
 }
 
+// ─── Cooldown countdown label ────────────────────────────────────────
+// A billboarded 3D text label floating above the lever. Shows "Building..."
+// while tiles are spawning, then a live countdown of remaining cooldown seconds.
+// Hidden entirely when the lever is free to pull.
+let cooldownLabel: Entity = 0 as Entity
+let cooldownTickEnt: Entity = 0 as Entity
+let lastTickSecond = -1
+// Independent countdown clock: starts the instant leverBusy becomes non-empty
+// and ticks up every frame, so the displayed number begins falling immediately
+// (even while tiles are still growing in).
+let displayClock = 0
+const COOLDOWN_LABEL_Y_OFFSET = 2.2
+
+function setupCooldownLabel() {
+  cooldownLabel = engine.addEntity()
+  Transform.create(cooldownLabel, { position: Vector3.create(0, -200, 0) })
+  Billboard.create(cooldownLabel, { billboardMode: BillboardMode.BM_Y })
+  cooldownTickEnt = engine.addEntity()
+  Transform.create(cooldownTickEnt, { position: Vector3.create(0, -200, 0) })
+  TextShape.create(cooldownLabel, {
+    text: '',
+    fontSize: 6,
+    font: Font.F_SANS_SERIF,
+    textColor: Color4.White(),
+  })
+}
+
+engine.addSystem((dt: number) => {
+  if (!cooldownLabel) return
+  if (leverBusy.size > 0) displayClock += dt
+  else displayClock = 0
+  // Find the lever position (first known lever).
+  let leverPos: Vector3 | null = null
+  for (const e of knownLevers) {
+    const t = Transform.getOrNull(e)
+    if (t) { leverPos = t.position; break }
+  }
+  const tt = Transform.getMutable(cooldownLabel)
+  const ts = TextShape.getMutable(cooldownLabel)
+  if (!leverPos || leverBusy.size === 0) {
+    tt.position = Vector3.create(0, -200, 0)
+    ts.text = ''
+    lastTickSecond = -1
+    return
+  }
+  tt.position = Vector3.create(leverPos.x, leverPos.y + COOLDOWN_LABEL_Y_OFFSET, leverPos.z)
+  const displayRemaining = Math.max(0, POST_REBUILD_COOLDOWN - displayClock)
+  const secs = Math.max(0, Math.ceil(displayRemaining))
+  ts.text = `${secs}`
+  if (secs !== lastTickSecond && secs > 0) {
+    lastTickSecond = secs
+    playSoundAt(cooldownTickEnt, tt.position, 'assets/sounds/click.wav', 0.5)
+  }
+  const frac = displayRemaining - Math.floor(displayRemaining)
+  const pulse = 1 + 0.4 * frac * frac
+  tt.scale = Vector3.create(pulse, pulse, pulse)
+})
+
 // ─── Lever beacon ────────────────────────────────────────────────────
 // Two stacked billboarded planes (inner narrow + outer wide) with a pulsing
 // scale, planted above the lever so players can spot it from anywhere in the
 // 160m maze. Adapted from the power-scene staff beacon.
 const BEACON_HEIGHT = 30
-const BEACON_Y_OFFSET = 5.0
+const BEACON_Y_OFFSET = 3.0
 const INNER_WIDTH = 0.35
 const OUTER_WIDTH = 1.2
 const INNER_ALPHA = 0.45
@@ -785,6 +845,7 @@ export function main() {
   setupUi()
   setupBeacon()
   setupLeverAudio()
+  setupCooldownLabel()
   // Register the SeedHolder for cross-client sync. Doing this inside main()
   // (rather than at module top level) ensures the networking layer is ready.
   // Fixed networkId so every client's SeedHolder maps to the same synced entity.
