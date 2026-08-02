@@ -900,12 +900,129 @@ function setupMusic() {
   playStartMs = Date.now()
 }
 
+// ─── Paint system (drip) ─────────────────────────────────────────────
+// Pool of paint discs pre-allocated and parked below the map. Repositioned
+// as the player walks. No mid-round entity creation.
+const DROP_INTERVAL_M = 0.25
+const DECAL_RADIUS = 1.2
+const DECAL_Y_OFFSET = 0.05        // above the surface the player is standing on
+const DECAL_CAP = 3000
+const TEAM_BLUE = Color4.create(0.15, 0.45, 1.0, 0.9)
+const CIRCLE_TEXTURE = Material.Texture.Common({ src: 'assets/images/circle.png' })
+const decalPool: Entity[] = []
+let decalHead = 0
+let totalDrops = 0
+export function getEntityCount(): number {
+  let n = 0
+  for (const _ of engine.getEntitiesWith(Transform)) n++
+  return n
+}
+export function getDropCount(): number { return totalDrops }
+export function getPoolCap(): number { return DECAL_CAP }
+
+function paintDiscMaterial(e: Entity, color: Color4) {
+  Material.setPbrMaterial(e, {
+    texture: CIRCLE_TEXTURE,
+    albedoColor: color,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_TEST,
+    alphaTest: 0.5,
+    castShadows: false,
+  })
+}
+
+function setupPaintSystem() {
+  const HIDDEN = Vector3.create(0, -500, 0)
+  for (let i = 0; i < DECAL_CAP; i++) {
+    const e = engine.addEntity()
+    Transform.create(e, {
+      position: HIDDEN,
+      rotation: Quaternion.fromEulerDegrees(90, 0, 0),
+      scale: Vector3.create(DECAL_RADIUS * 2, DECAL_RADIUS * 2, 1),
+    })
+    MeshRenderer.setPlane(e)
+    paintDiscMaterial(e, TEAM_BLUE)
+    decalPool.push(e)
+  }
+
+  // Foot disc — parented to player, follows without JS jitter. Hidden while
+  // airborne by scaling to 0 (parent stays same so no reparent cost).
+  const foot = engine.addEntity()
+  Transform.create(foot, {
+    parent: engine.PlayerEntity,
+    position: Vector3.create(0, DECAL_Y_OFFSET + 0.03, 0),
+    rotation: Quaternion.fromEulerDegrees(90, 0, 0),
+    scale: Vector3.create(DECAL_RADIUS * 2, DECAL_RADIUS * 2, 1),
+  })
+  MeshRenderer.setPlane(foot)
+  paintDiscMaterial(foot, TEAM_BLUE)
+  const footScaleShown = Vector3.create(DECAL_RADIUS * 2, DECAL_RADIUS * 2, 1)
+  const footScaleHidden = Vector3.create(0, 0, 0)
+  let footVisible = true
+
+  // Movement tracker — spawn a disc every DROP_INTERVAL_M meters walked (XZ),
+  // but only while the player is grounded.
+  //
+  // Grounded latch with hysteresis:
+  //  - ANY frame with |vy| > VY_OFF_THRESHOLD immediately unsets grounded.
+  //  - It takes GROUND_CONFIRM_FRAMES consecutive calm frames to re-set it.
+  // This catches both jumps (upward spike) and falls (downward spike that
+  // accelerates through low values — the first frame past threshold latches
+  // off and keeps painting suppressed for the whole descent + landing frame).
+  const INTERVAL_SQ = DROP_INTERVAL_M * DROP_INTERVAL_M
+  const VY_OFF_THRESHOLD = 1.5      // m/s — anything faster than a gentle ramp descent
+  const VY_ON_THRESHOLD = 0.5       // m/s — calm-frame criterion
+  const GROUND_CONFIRM_FRAMES = 6   // ~100ms at 60fps of consecutive calm frames
+  let lastX = 0, lastY = 0, lastZ = 0, havePrev = false
+  let grounded = true
+  let calmFrames = 0
+  engine.addSystem((dt: number) => {
+    const t = Transform.getOrNull(engine.PlayerEntity)
+    if (!t) return
+    const { x, y, z } = t.position
+    if (!havePrev) { lastX = x; lastY = y; lastZ = z; havePrev = true; return }
+    const vy = dt > 0 ? Math.abs(y - lastY) / dt : 0
+    if (vy > VY_OFF_THRESHOLD) {
+      grounded = false
+      calmFrames = 0
+    } else if (vy < VY_ON_THRESHOLD) {
+      calmFrames++
+      if (calmFrames >= GROUND_CONFIRM_FRAMES) grounded = true
+    } else {
+      // Between thresholds: neither confirm nor break the latch.
+      calmFrames = 0
+    }
+    const dx = x - lastX, dz = z - lastZ
+    if (dx*dx + dz*dz >= INTERVAL_SQ) {
+      if (grounded) dropDecal(x, y, z)
+      lastX = x; lastZ = z
+    }
+    lastY = y
+    // Show/hide foot disc based on the same grounded latch.
+    if (grounded !== footVisible) {
+      Transform.getMutable(foot).scale = grounded ? footScaleShown : footScaleHidden
+      footVisible = grounded
+    }
+  })
+}
+
+function dropDecal(x: number, y: number, z: number) {
+  const e = decalPool[decalHead]
+  decalHead = (decalHead + 1) % DECAL_CAP
+  totalDrops++
+  // Sit disc just above wherever the player currently is (handles ramps &
+  // elevated tiles — falls apart visually on steep slopes since the disc is
+  // flat, but works for horizontal tiles at any Y).
+  const tr = Transform.getMutable(e)
+  tr.position = Vector3.create(x, y + DECAL_Y_OFFSET, z)
+}
+
 export function main() {
   setupUi()
   setupMusic()
   setupBeacon()
   setupLeverAudio()
   setupCooldownLabel()
+  setupPaintSystem()
   // Register the SeedHolder for cross-client sync. Doing this inside main()
   // (rather than at module top level) ensures the networking layer is ready.
   // Fixed networkId so every client's SeedHolder maps to the same synced entity.

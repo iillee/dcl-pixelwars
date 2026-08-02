@@ -1,6 +1,6 @@
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
-import { toggleMusic, isMusicMuted } from "./index"
+import { toggleMusic, isMusicMuted, getEntityCount, getDropCount, getPoolCap } from "./index"
 
 export function setupUi() {
     ReactEcsRenderer.setUiRenderer(uiMenu, { virtualWidth: 1920, virtualHeight: 1080 })
@@ -35,6 +35,24 @@ export const uiMenu = () => (
             <Label
                 value="pull the lever at 0,0 to regenerate labyrinth"
                 fontSize={18}
+                color={Color4.White()}
+                textAlign="middle-center"
+            />
+        </UiEntity>
+        <UiEntity
+            uiTransform={{
+                height: 40,
+                margin: { left: 8 },
+                padding: { top: 8, bottom: 8, left: 16, right: 16 },
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderRadius: 20,
+            }}
+            uiBackground={{ color: PILL_BG }}
+        >
+            <Label
+                value={`entities: ${getEntityCount()}  ·  drops: ${getDropCount()}  ·  live: ${Math.min(getDropCount(), getPoolCap())}/${getPoolCap()}`}
+                fontSize={16}
                 color={Color4.White()}
                 textAlign="middle-center"
             />
