@@ -23,6 +23,12 @@ import {
 import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { syncEntity } from '@dcl/sdk/network'
 import { setupUi } from './ui'
+import { runStress } from './stress'
+
+// ─── Stress-test toggle (Squareoff design §8.1) ──────────────────────
+// Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
+// Try: 5000, 15000, 30000. Read fps from the floating text at spawn.
+const STRESS_COUNT = 0
 
 // ─── Direction system ────────────────────────────────────────────────
 // N=+Z, E=+X, S=-Z, W=-X
@@ -90,12 +96,15 @@ function setSeed(s: number) { _seed = s | 0 }
 const TILE_SCALE = 2            // uniform scale applied to every tile
 const CELL = 16 * TILE_SCALE    // world-space size of one grid cell (m)
 const GRID_W = Math.floor(160 / CELL), GRID_H = Math.floor(160 / CELL)  // cells across the 160m scene
-const STEP = 5 * TILE_SCALE     // ramp Y increment (scales with tile height)
+const STEP = 5.3835 * TILE_SCALE  // ramp Y increment (scales with tile height). 5.3835m = floor-to-floor walkable surface in the new tile GLBs (upper deck top 5.6335m − 0.25m floor thickness).
 const MAX_Y = 120               // max stack height (still bound by scene ceiling)
 
 interface Placed { type: TileType; r: number; x: number; z: number; y: number; order: number }
 const grid = new Map<string, Placed>()
-const key = (x: number, z: number, y: number) => `${x},${z},${y}`
+// Y is quantized to STEP multiples but STEP is a float (10.767…), so raw
+// arithmetic like `y + STEP + STEP` drifts (….000000000002). Round to 3 decimal
+// places so grid lookups match regardless of accumulated float error.
+const key = (x: number, z: number, y: number) => `${x},${z},${Math.round(y * 1000) / 1000}`
 const inBounds = (x: number, z: number) => x >= 0 && x < GRID_W && z >= 0 && z < GRID_H
 
 // Check whether tile `t` at rotation `r` can be placed at (x, z, y)
@@ -902,6 +911,7 @@ function setupMusic() {
 
 export function main() {
   setupUi()
+  if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   setupMusic()
   setupBeacon()
   setupLeverAudio()
