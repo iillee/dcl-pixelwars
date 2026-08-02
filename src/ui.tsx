@@ -28,7 +28,7 @@ export const uiMenu = () => (
             uiBackground={{ color: Color4.create(0, 0, 0, 0.5) }}
         >
             <Label
-                value="reload scene to regenerate labyrinth"
+                value="pull the lever at 0,0 to regenerate labyrinth"
                 fontSize={18}
                 color={Color4.White()}
                 textAlign="middle-center"
