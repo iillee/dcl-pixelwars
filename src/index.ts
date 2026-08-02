@@ -181,6 +181,25 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
     }
   }
 
+  // No-two-ramps-in-a-row rule: a ramp cannot connect directly to another
+  // ramp. Forces at least one flat tile between elevation changes, breaking up
+  // long staircases and giving the maze more horizontal breathing room.
+  if (iAmRamp) {
+    for (const d of opens) {
+      const nx = x + DX[d], nz = z + DZ[d]
+      if (!inBounds(nx, nz)) continue
+      const ny = highDir === d ? y + STEP : y
+      const nb = grid.get(key(nx, nz, ny))
+      if (nb?.type === 'ramp') return false
+      // Also check the ramp-below case: if a lower ramp's high side reaches
+      // my opening's level, that's still a ramp-to-ramp connection.
+      if (ny >= STEP) {
+        const under = grid.get(key(nx, nz, ny - STEP))
+        if (under?.type === 'ramp' && highDirAt(under.type, under.r) === OPP[d]) return false
+      }
+    }
+  }
+
   for (const d of ALL_DIRS) {
     const isOpen = opens.has(d)
     const nx = x + DX[d], nz = z + DZ[d]
