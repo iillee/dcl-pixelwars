@@ -492,12 +492,17 @@ function spawnTileWithGrow(p: Placed) {
   // Soft pop as the tile appears. Positional (attached to the tile itself),
   // low volume so the cascade of ~100 tiles reads as ambient sparkle rather
   // than noise.
-  AudioSource.create(e, {
-    audioClipUrl: 'assets/sounds/pop.mp3',
-    playing: true,
-    loop: false,
-    volume: 0.5,
-  })
+  // Only every other tile pops — halves the sound density so the cascade
+  // reads as rhythmic sparkle rather than a rapid-fire buzz.
+  if (p.order % 2 === 0) {
+    AudioSource.create(e, {
+      audioClipUrl: 'assets/sounds/pop.mp3',
+      playing: true,
+      loop: false,
+      volume: 0.25,
+      global: true,
+    })
+  }
   spawnedEntities.push(e)
 }
 
@@ -750,7 +755,7 @@ engine.addSystem((dt: number) => {
   ts.text = `${secs}`
   if (secs !== lastTickSecond && secs > 0) {
     lastTickSecond = secs
-    playSoundAt(cooldownTickEnt, tt.position, 'assets/sounds/click.wav', 0.5)
+    playSoundAt(cooldownTickEnt, tt.position, 'assets/sounds/click.wav', 0.25)
   }
   const frac = displayRemaining - Math.floor(displayRemaining)
   const pulse = 1 + 0.4 * frac * frac
@@ -841,8 +846,63 @@ engine.addSystem((dt: number) => {
   oT.scale = Vector3.create(OUTER_WIDTH * (2 - pulse), BEACON_HEIGHT, 1)
 })
 
+// ─── Background music ──────────────────────────────────────────────────
+// Looped ambient track. Parented to the camera so it's always at ear-level
+// regardless of where the player wanders in the 160m scene.
+const MUSIC_VOLUME = 0.4
+const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.wav'
+let musicEnt: Entity = 0 as Entity
+let musicMuted = false
+// Track playback position across pause/resume so the song continues where it
+// left off instead of restarting. Pattern borrowed from flagtag's boomboxState:
+// the SDK reads currentTime on the playing:false→true transition, so we must
+// seek BEFORE setting playing=true.
+let playStartMs = 0
+let pausedPositionSec = 0
+let muteClickEnt: Entity = 0 as Entity
+export function isMusicMuted() { return musicMuted }
+export function toggleMusic() {
+  // UI click feedback — same click.wav used by the cooldown ticker.
+  if (muteClickEnt) {
+    AudioSource.createOrReplace(muteClickEnt, {
+      audioClipUrl: 'assets/sounds/click.wav',
+      playing: true, loop: false, volume: 0.5, global: true,
+    })
+  }
+  const a = AudioSource.getMutableOrNull(musicEnt) as
+    { volume: number; playing: boolean; currentTime?: number } | null
+  if (!a) return
+  if (!musicMuted) {
+    // Pause: bank the elapsed play time and stop.
+    pausedPositionSec += (Date.now() - playStartMs) / 1000
+    a.playing = false
+    musicMuted = true
+  } else {
+    // Resume: seek first, THEN flip playing on.
+    a.currentTime = pausedPositionSec
+    a.playing = true
+    playStartMs = Date.now()
+    musicMuted = false
+  }
+}
+function setupMusic() {
+  muteClickEnt = engine.addEntity()
+  Transform.create(muteClickEnt, { parent: engine.CameraEntity })
+  musicEnt = engine.addEntity()
+  Transform.create(musicEnt, { parent: engine.CameraEntity })
+  AudioSource.create(musicEnt, {
+    audioClipUrl: MUSIC_SRC,
+    playing: true,
+    loop: true,
+    volume: MUSIC_VOLUME,
+    global: true,
+  })
+  playStartMs = Date.now()
+}
+
 export function main() {
   setupUi()
+  setupMusic()
   setupBeacon()
   setupLeverAudio()
   setupCooldownLabel()
