@@ -1,5 +1,25 @@
-import { engine, Transform, GltfContainer, ColliderLayer } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion } from '@dcl/sdk/math'
+import {
+  engine,
+  Transform,
+  GltfContainer,
+  ColliderLayer,
+  Schemas,
+  Tween,
+  EasingFunction,
+  PointerEvents,
+  MeshRenderer,
+  Material,
+  MaterialTransparencyMode,
+  Billboard,
+  BillboardMode,
+  AudioSource,
+  MeshCollider,
+  InputAction,
+  pointerEventsSystem,
+  Entity
+} from '@dcl/sdk/ecs'
+import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
+import { syncEntity } from '@dcl/sdk/network'
 import { setupUi } from './ui'
 
 // ─── Direction system ────────────────────────────────────────────────
@@ -71,7 +91,7 @@ const GRID_W = Math.floor(160 / CELL), GRID_H = Math.floor(160 / CELL)  // cells
 const STEP = 5 * TILE_SCALE     // ramp Y increment (scales with tile height)
 const MAX_Y = 120               // max stack height (still bound by scene ceiling)
 
-interface Placed { type: TileType; r: number; x: number; z: number; y: number }
+interface Placed { type: TileType; r: number; x: number; z: number; y: number; order: number }
 const grid = new Map<string, Placed>()
 const key = (x: number, z: number, y: number) => `${x},${z},${y}`
 const inBounds = (x: number, z: number) => x >= 0 && x < GRID_W && z >= 0 && z < GRID_H
@@ -234,9 +254,13 @@ const ROT_OFFSET: Array<[number, number]> = [
   [CELL, 0],        // r=3: 270° CW
 ]
 
-// Record a tile in the grid (no entity spawned yet)
+// Record a tile in the grid (no entity spawned yet). `order` reflects the BFS
+// frontier walk in generate(): seeds first, then their neighbors, then their
+// neighbors' neighbors, with ramps carrying the wave upward. Used later to
+// spawn tiles in growth order for the reveal animation.
+let placeCounter = 0
 function placeTile(t: TileType, r: number, x: number, z: number, y: number) {
-  grid.set(key(x, z, y), { type: t, r, x, z, y })
+  grid.set(key(x, z, y), { type: t, r, x, z, y, order: placeCounter++ })
 }
 
 // Spawn an actual entity for a recorded tile
@@ -358,45 +382,394 @@ function generate() {
   }
 }
 
-// Guard against the runtime calling main() more than once (can happen on
-// deployed Worlds during startup/realm transitions). Without this, a second
-// invocation clears `grid` and regenerates a fresh maze, but the entities
-// spawned by the first run remain in the engine → two mazes overlaid, densest
-// on the ground floor where both fill exhaustively.
-let hasRun = false
+// ─── Shared seed (synced across all players) ─────────────────────────
+// A single synced component holds the current maze seed. All clients converge
+// on the same value via CRDT last-write-wins, so everyone sees the same maze.
+// seed=0 means "uninitialized" — no maze rendered yet, late joiners wait.
+const SeedHolder = engine.defineComponent('maze::seed-holder', { seed: Schemas.Int })
+const seedHolder = engine.addEntity()
+SeedHolder.create(seedHolder, { seed: 0 })
 
-export function main() {
-  if (hasRun) {
-    console.log('main() called again — skipping regeneration')
-    return
-  }
-  hasRun = true
-  setupUi()
-  // Deterministic generation. Iterate through seeds until one produces a maze
-  // that passes validation. The winning seed is logged so any bug can be
-  // reproduced exactly by hard-coding startSeed to that value.
+// ─── Rebuild pipeline ────────────────────────────────────────────────
+const spawnedEntities: Entity[] = []
+interface SpawnStep { p: Placed; delay: number }
+let spawnQueue: SpawnStep[] = []
+let spawnClock = 0
+let currentSeed = 0
+
+function rebuildMaze(seed: number) {
+  // Tear down previous maze
+  for (const e of spawnedEntities) engine.removeEntity(e)
+  spawnedEntities.length = 0
+  spawnQueue = []
+  spawnClock = 0
+  grid.clear()
+  placeCounter = 0
+
+  // Deterministic generation — iterate seeds until one validates. Both the
+  // starting seed and the iteration order are the same on every client, so
+  // everyone lands on the same winning seed and identical tile layout.
   const MAX_ATTEMPTS = 500
-  // Pick a starting seed from the wall clock (fresh maze every load) OR set a
-  // specific number here to lock a known-good maze.
-  const startSeed = Math.floor(Math.random() * 0x7fffffff) || 1
   let success = false
   let winningSeed = 0
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const trySeed = startSeed + i
+    const trySeed = seed + i
     setSeed(trySeed)
     grid.clear()
+    placeCounter = 0
     generate()
     if (validate()) {
       winningSeed = trySeed
-      console.log(`Maze generated with seed ${trySeed} (attempt ${i + 1}), ${grid.size} tiles`)
       success = true
       break
     }
   }
   if (!success) {
-    console.log(`⚠️ Maze exhausted ${MAX_ATTEMPTS} seeds starting at ${startSeed} — aborting spawn`)
+    console.log(`⚠️ Maze exhausted ${MAX_ATTEMPTS} seeds starting at ${seed} — aborting spawn`)
     return
   }
-  // Materialize entities from the (final) grid state
-  for (const p of grid.values()) spawnTile(p)
+  console.log(`Maze rebuilt from seed ${seed} → winning seed ${winningSeed}, ${grid.size} tiles`)
+
+  // Queue tiles to spawn in generation order: seeds first, then their
+  // neighbors, and so on — with ramps carrying the wave upward. Late joiners
+  // see the maze visibly grow from its origin points and climb.
+  const tiles = [...grid.values()].sort((a, b) => a.order - b.order)
+  const STAGGER = 0.03 // seconds between successive tile spawns
+  spawnQueue = tiles.map((p, i) => ({ p, delay: i * STAGGER }))
+}
+
+// Per-frame drain: pop tiles whose scheduled delay has elapsed and spawn them
+// with a scale-tween grow-in.
+engine.addSystem((dt: number) => {
+  if (spawnQueue.length === 0) return
+  spawnClock += dt
+  while (spawnQueue.length && spawnQueue[0].delay <= spawnClock) {
+    spawnTileWithGrow(spawnQueue.shift()!.p)
+  }
+})
+
+function spawnTileWithGrow(p: Placed) {
+  const [dx, dz] = ROT_OFFSET[p.r]
+  const e = engine.addEntity()
+  Transform.create(e, {
+    position: Vector3.create(p.x * CELL + dx, p.y, p.z * CELL + dz),
+    rotation: Quaternion.fromEulerDegrees(0, p.r * 90, 0),
+    scale: Vector3.create(0.001, 0.001, 0.001),
+  })
+  GltfContainer.create(e, {
+    src: TILES[p.type].model,
+    visibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS,
+  })
+  Tween.create(e, {
+    mode: Tween.Mode.Scale({
+      start: Vector3.create(0.001, 0.001, 0.001),
+      end: Vector3.create(TILE_SCALE, TILE_SCALE, TILE_SCALE),
+    }),
+    duration: 500,
+    easingFunction: EasingFunction.EF_EASEOUTBACK,
+  })
+  // Soft pop as the tile appears. Positional (attached to the tile itself),
+  // low volume so the cascade of ~100 tiles reads as ambient sparkle rather
+  // than noise.
+  AudioSource.create(e, {
+    audioClipUrl: 'assets/sounds/pop.mp3',
+    playing: true,
+    loop: false,
+    volume: 0.25,
+  })
+  spawnedEntities.push(e)
+}
+
+// ─── Seed watcher ────────────────────────────────────────────────────
+// Reacts to any change in the synced seed (from another player pulling the
+// lever, or from our own first-joiner init). Also locks every known lever so
+// the cooldown is symmetric across all clients — nobody can repull until the
+// rebuild has finished on all machines.
+engine.addSystem(() => {
+  const s = SeedHolder.get(seedHolder).seed
+  if (s !== 0 && s !== currentSeed) {
+    currentSeed = s
+    rebuildMaze(s)
+    for (const e of knownLevers) lockLever(e)
+    cooldownRemaining = POST_REBUILD_COOLDOWN
+  }
+})
+
+// ─── Lever watcher ───────────────────────────────────────────────────
+// The lever is a Creator Hub composite entity with an `asset-packs::States`
+// component that flips between "Activated"/"Deactivated" on click. When we
+// detect a fresh transition into "Activated", we generate a new random seed
+// and write it to SeedHolder — the seed watcher above then rebuilds the maze
+// on every client via CRDT sync.
+let leverStatesComp: any = null
+const leverLastState = new Map<Entity, string>()
+// Every entity we've ever seen with asset-packs::States — used so the seed
+// watcher can lock every lever, not just the one the local player pulled.
+const knownLevers = new Set<Entity>()
+// Snapshot of each lever's PointerEvents and GLTF collision masks so we can
+// restore them after cooldown.
+const leverSavedPointerEvents = new Map<Entity, any>()
+const leverSavedColliders = new Map<Entity, { visible: number; invisible: number }>()
+const leverBusy = new Set<Entity>()
+const POST_REBUILD_COOLDOWN = 0.6 // extra seconds after grow-in completes
+let cooldownRemaining = 0
+
+function lockLever(entity: Entity) {
+  if (leverBusy.has(entity)) return
+  leverBusy.add(entity)
+
+  // 1) Clear PointerEvents so any hover tooltip / feedback disappears.
+  const pe = PointerEvents.getOrNull(entity)
+  if (pe) {
+    leverSavedPointerEvents.set(entity, { pointerEvents: pe.pointerEvents.map(e => ({ ...e, eventInfo: { ...e.eventInfo } })) })
+  }
+  PointerEvents.createOrReplace(entity, { pointerEvents: [] })
+
+  // 2) Strip the CL_POINTER bit from the GLTF colliders. Without a pointer
+  // collider, raycasts can't hit the lever — so clicks (and the associated
+  // pull animation) are physically impossible until we restore it. This
+  // survives even if the asset-packs runtime re-injects PointerEvents.
+  const gltf = GltfContainer.getOrNull(entity)
+  if (gltf) {
+    const vis = gltf.visibleMeshesCollisionMask ?? 0
+    const inv = gltf.invisibleMeshesCollisionMask ?? 0
+    leverSavedColliders.set(entity, { visible: vis, invisible: inv })
+    GltfContainer.createOrReplace(entity, {
+      ...gltf,
+      visibleMeshesCollisionMask: vis & ~ColliderLayer.CL_POINTER,
+      invisibleMeshesCollisionMask: inv & ~ColliderLayer.CL_POINTER,
+    })
+  }
+
+  // 3) Move the invisible click-proxy on top of the lever so attempted clicks
+  // during cooldown land on it and play the error sound.
+  if (leverClickProxy) {
+    const t = Transform.getOrNull(entity)
+    if (t) {
+      Transform.getMutable(leverClickProxy).position = Vector3.create(t.position.x, t.position.y + 1.3, t.position.z)
+    }
+  }
+}
+
+function unlockLever(entity: Entity) {
+  if (!leverBusy.has(entity)) return
+  leverBusy.delete(entity)
+
+  const saved = leverSavedPointerEvents.get(entity)
+  if (saved) {
+    PointerEvents.createOrReplace(entity, saved)
+    leverSavedPointerEvents.delete(entity)
+  }
+
+  const savedCol = leverSavedColliders.get(entity)
+  const gltf = GltfContainer.getOrNull(entity)
+  if (savedCol && gltf) {
+    GltfContainer.createOrReplace(entity, {
+      ...gltf,
+      visibleMeshesCollisionMask: savedCol.visible,
+      invisibleMeshesCollisionMask: savedCol.invisible,
+    })
+    leverSavedColliders.delete(entity)
+  }
+
+  // Park the click-proxy far below the scene so it can't be interacted with.
+  if (leverClickProxy && leverBusy.size === 0) {
+    Transform.getMutable(leverClickProxy).position = Vector3.create(0, -200, 0)
+  }
+}
+
+engine.addSystem((dt: number) => {
+  if (!leverStatesComp) {
+    leverStatesComp = engine.getComponentOrNull('asset-packs::States')
+    if (!leverStatesComp) return
+  }
+  for (const [entity, states] of engine.getEntitiesWith(leverStatesComp)) {
+    knownLevers.add(entity)
+    const cur: string = (states as any).currentValue ?? (states as any).defaultValue ?? ''
+    const prev = leverLastState.get(entity)
+    // Trigger on ANY transition (Activated ↔ Deactivated). The lever's toggle
+    // model would otherwise create a dead pull after every rebuild where the
+    // animation plays but no regeneration fires.
+    if (prev !== undefined && prev !== cur && !leverBusy.has(entity)) {
+      const newSeed = Math.floor(Math.random() * 0x7fffffff) || 1
+      SeedHolder.createOrReplace(seedHolder, { seed: newSeed })
+      console.log(`Lever pulled → new seed ${newSeed}`)
+      const t = Transform.getOrNull(entity)
+      if (t) playSoundAt(pullSoundEnt, t.position, 'assets/sounds/pull.mp3')
+      // Lock immediately so the local player can't spam-click before the seed
+      // watcher runs next frame. The seed watcher will also lock every other
+      // known lever (and lock this one on remote clients).
+      lockLever(entity)
+      cooldownRemaining = POST_REBUILD_COOLDOWN
+    }
+    leverLastState.set(entity, cur)
+  }
+
+  // Unlock once the rebuild has fully finished (queue drained) AND a short
+  // post-rebuild grace period has elapsed — gives the grow-in time to settle.
+  if (leverBusy.size > 0) {
+    if (spawnQueue.length === 0) {
+      cooldownRemaining -= dt
+      if (cooldownRemaining <= 0) {
+        for (const e of [...leverBusy]) unlockLever(e)
+      }
+    } else {
+      cooldownRemaining = POST_REBUILD_COOLDOWN
+    }
+  }
+})
+
+// ─── First-joiner initialization ─────────────────────────────────────
+// If we've been in-scene for a grace period and the synced seed is still 0,
+// nobody has ever set it — we're the first player. Roll a seed so the scene
+// isn't empty forever. Subsequent joiners will receive the current seed via
+// CRDT sync before their timer fires, and skip this path.
+let initTimer = 0
+let initDone = false
+const INIT_GRACE = 1.5 // seconds
+engine.addSystem((dt: number) => {
+  if (initDone) return
+  initTimer += dt
+  if (initTimer < INIT_GRACE) return
+  initDone = true
+  if (SeedHolder.get(seedHolder).seed === 0) {
+    const s = Math.floor(Math.random() * 0x7fffffff) || 1
+    console.log(`No existing maze seed after ${INIT_GRACE}s — initializing with ${s}`)
+    SeedHolder.createOrReplace(seedHolder, { seed: s })
+  }
+})
+
+// ─── Lever sounds ───────────────────────────────────────────────────
+// Two dedicated audio entities we reposition to the lever each time we fire a
+// sound. Recreating AudioSource with playing:true retriggers playback even if
+// the previous play hadn't finished.
+let pullSoundEnt: Entity = 0 as Entity
+let errorSoundEnt: Entity = 0 as Entity
+
+function playSoundAt(entity: Entity, pos: Vector3, src: string) {
+  Transform.getMutable(entity).position = pos
+  AudioSource.createOrReplace(entity, { audioClipUrl: src, playing: true, loop: false, volume: 1 })
+}
+
+// Invisible clickable proxy: enabled (moved on top of the lever) while the
+// lever is locked so that clicks land on _it_ instead of passing through, and
+// play the error sound. When unlocked we teleport it far away so it can't be
+// clicked, restoring normal lever behavior.
+let leverClickProxy: Entity = 0 as Entity
+
+function setupLeverAudio() {
+  pullSoundEnt = engine.addEntity()
+  Transform.create(pullSoundEnt, { position: Vector3.create(0, -200, 0) })
+  errorSoundEnt = engine.addEntity()
+  Transform.create(errorSoundEnt, { position: Vector3.create(0, -200, 0) })
+
+  leverClickProxy = engine.addEntity()
+  Transform.create(leverClickProxy, {
+    position: Vector3.create(0, -200, 0),
+    scale: Vector3.create(1.6, 2.6, 1.6),
+  })
+  MeshCollider.setBox(leverClickProxy, ColliderLayer.CL_POINTER)
+  pointerEventsSystem.onPointerDown(
+    { entity: leverClickProxy, opts: { button: InputAction.IA_POINTER, hoverText: 'Regenerating...' } },
+    () => {
+      const pos = Transform.get(leverClickProxy).position
+      playSoundAt(errorSoundEnt, pos, 'assets/sounds/error.mp3')
+    }
+  )
+}
+
+// ─── Lever beacon ────────────────────────────────────────────────────
+// Two stacked billboarded planes (inner narrow + outer wide) with a pulsing
+// scale, planted above the lever so players can spot it from anywhere in the
+// 160m maze. Adapted from the power-scene staff beacon.
+const BEACON_HEIGHT = 30
+const BEACON_Y_OFFSET = 5.0
+const INNER_WIDTH = 0.35
+const OUTER_WIDTH = 1.2
+const INNER_ALPHA = 0.45
+const OUTER_ALPHA = 0.18
+const EMISSIVE_INNER = 3.0
+const EMISSIVE_OUTER = 2.0
+const PULSE_SPEED = 2.5
+const PULSE_RANGE = 0.15
+// Warm amber — pairs well with the pirate lever's brass fittings.
+const BEACON_COLOR = { r: 1.0, g: 0.75, b: 0.35 }
+const HIDDEN_POS = Vector3.create(0, -200, 0)
+
+let innerBeacon: Entity = 0 as Entity
+let outerBeacon: Entity = 0 as Entity
+let beaconPulseTime = 0
+
+function setupBeacon() {
+  innerBeacon = engine.addEntity()
+  Transform.create(innerBeacon, { position: HIDDEN_POS, scale: Vector3.create(INNER_WIDTH, BEACON_HEIGHT, 1) })
+  MeshRenderer.setPlane(innerBeacon)
+  Billboard.create(innerBeacon, { billboardMode: BillboardMode.BM_Y })
+
+  outerBeacon = engine.addEntity()
+  Transform.create(outerBeacon, { position: HIDDEN_POS, scale: Vector3.create(OUTER_WIDTH, BEACON_HEIGHT, 1) })
+  MeshRenderer.setPlane(outerBeacon)
+  Billboard.create(outerBeacon, { billboardMode: BillboardMode.BM_Y })
+
+  const c = BEACON_COLOR
+  const gradient = Material.Texture.Common({ src: 'assets/images/beacon-gradient.png' })
+  const alpha = Material.Texture.Common({ src: 'assets/images/beacon-alpha.png' })
+  Material.setPbrMaterial(innerBeacon, {
+    texture: gradient,
+    alphaTexture: alpha,
+    albedoColor: Color4.create(c.r, c.g, c.b, INNER_ALPHA),
+    emissiveColor: Color3.create(c.r, c.g, c.b),
+    emissiveIntensity: EMISSIVE_INNER,
+    transparencyMode: MaterialTransparencyMode.MTM_AUTO,
+    castShadows: false,
+  })
+  Material.setPbrMaterial(outerBeacon, {
+    texture: gradient,
+    alphaTexture: alpha,
+    albedoColor: Color4.create(c.r, c.g, c.b, OUTER_ALPHA),
+    emissiveColor: Color3.create(c.r, c.g, c.b),
+    emissiveIntensity: EMISSIVE_OUTER,
+    transparencyMode: MaterialTransparencyMode.MTM_AUTO,
+    castShadows: false,
+  })
+}
+
+// Follows the first known lever's world position. Uses the same knownLevers
+// set the cooldown system maintains, so no extra discovery logic needed.
+engine.addSystem((dt: number) => {
+  if (!innerBeacon) return
+  beaconPulseTime += dt
+  const pulse = 1 + PULSE_RANGE * Math.sin(beaconPulseTime * PULSE_SPEED)
+
+  let leverPos: Vector3 | null = null
+  for (const e of knownLevers) {
+    const t = Transform.getOrNull(e)
+    if (t) { leverPos = t.position; break }
+  }
+
+  if (!leverPos) {
+    Transform.getMutable(innerBeacon).position = HIDDEN_POS
+    Transform.getMutable(outerBeacon).position = HIDDEN_POS
+    return
+  }
+
+  const beaconY = leverPos.y + BEACON_Y_OFFSET + BEACON_HEIGHT / 2
+  const iT = Transform.getMutable(innerBeacon)
+  iT.position = Vector3.create(leverPos.x, beaconY, leverPos.z)
+  iT.scale = Vector3.create(INNER_WIDTH * pulse, BEACON_HEIGHT, 1)
+  const oT = Transform.getMutable(outerBeacon)
+  oT.position = Vector3.create(leverPos.x, beaconY, leverPos.z)
+  oT.scale = Vector3.create(OUTER_WIDTH * (2 - pulse), BEACON_HEIGHT, 1)
+})
+
+export function main() {
+  setupUi()
+  setupBeacon()
+  setupLeverAudio()
+  // Register the SeedHolder for cross-client sync. Doing this inside main()
+  // (rather than at module top level) ensures the networking layer is ready.
+  // Fixed networkId so every client's SeedHolder maps to the same synced entity.
+  syncEntity(seedHolder, [SeedHolder.componentId], 3000)
+  // Maze construction is fully event-driven from here: the seed watcher will
+  // build the maze the moment a non-zero seed arrives (from sync or init).
 }
