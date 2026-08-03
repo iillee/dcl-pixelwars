@@ -131,7 +131,10 @@ const TILE_SCALE = 2            // uniform scale applied to every tile
 const CELL = 16 * TILE_SCALE    // world-space size of one grid cell (m)
 const GRID_W = Math.floor(160 / CELL), GRID_H = Math.floor(160 / CELL)  // cells across the 160m scene
 const STEP = 5.3835 * TILE_SCALE  // ramp Y increment (scales with tile height). 5.3835m = floor-to-floor walkable surface in the new tile GLBs (upper deck top 5.6335m − 0.25m floor thickness).
-const MAX_Y = 120               // max stack height (still bound by scene ceiling)
+const MAX_Y = 60                // max stack height. Halved from 120 to keep
+                                // the maze more horizontal — fewer vertical
+                                // escape routes = more player collisions and
+                                // contested paint on shared floors.
 
 interface Placed { type: TileType; r: number; x: number; z: number; y: number; order: number }
 const grid = new Map<string, Placed>()
