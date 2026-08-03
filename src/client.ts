@@ -55,14 +55,9 @@ export function getMyTeam(): Team { return myTeam }
 // distributes hex wallet addresses across parity buckets. Every client
 // computes the same team for the same userId, which is why remote players'
 // team indicators can be attached locally with no sync.
-function teamFromUserId(uid: string): Team {
-  let h = 2166136261
-  for (let i = 0; i < uid.length; i++) {
-    h ^= uid.charCodeAt(i)
-    h = (h * 16777619) >>> 0
-  }
-  return (h & 1) ? Team.Red : Team.Blue
-}
+// Team is now server-assigned (see teamAssigned handler in main()).
+// Phase 3's client-hash approach is retired — the server guarantees
+// alternation by join order, fixing the two-blue-players-in-a-row bug.
 
 // ─── Stress-test toggle (Squareoff design §8.1) ──────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -1053,18 +1048,23 @@ export async function setupClient() {
     return best ? { type: best.type, r: best.r, y: best.y } : null
   }, () => myTeam)
 
-  // Team assignment system: derive team from a hash of the local player's
-  // userId (wallet address or guest id). Stateless — no race with remote
-  // players' ECS data propagating, no reliance on join order. Balance is
-  // statistical (~50/50 for random populations) which is fine for Phase 3.
-  // Phase 4 can upgrade to an authoritative synced roster for guaranteed
-  // balance when we tackle CRDT paint sync.
+  // Team assignment (Phase 4 Step 2): server-authoritative.
+  // One joinRoster on boot after userId is available; teamAssigned reply
+  // sets myTeam. Guest fallback: if PlayerIdentityData never populates,
+  // we stay on Team.None — painting no-ops, no crash.
+  room.onMessage('teamAssigned', ({ team }) => {
+    // Wire values: 1 = Red, 2 = Blue (matches Team enum in src/paint.ts).
+    myTeam = team as Team
+    console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
+  })
+  let joinSent = false
   engine.addSystem(() => {
-    if (myTeam !== Team.None) return
+    if (joinSent) return
     const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
-    if (!pid || !pid.address) return // wait until userId is populated
-    myTeam = teamFromUserId(pid.address)
-    console.log(`Squareoff: assigned team ${myTeam === Team.Red ? 'RED' : 'BLUE'} (userId ${pid.address})`)
+    if (!pid || !pid.address) return
+    joinSent = true
+    console.log(`[Client] → joinRoster ${pid.address}`)
+    room.send('joinRoster', { userId: pid.address })
   })
 
   // (Foot-disc team indicator removed — visual felt intrusive. Team is
