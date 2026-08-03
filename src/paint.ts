@@ -264,14 +264,31 @@ export function drainPaintOutbox(): string[] {
 
 /**
  * Register a cell the local player has stepped on. Adds to the outbox for
- * the next server flush. NO local material update — waits for the server's
- * paintDelta echo (~100–200ms). Trade-off: brief visual delay for our own
- * paint, in exchange for guaranteed consistency across all clients. If
- * playtesting shows the delay is uncomfortable we can add optimistic
- * local paint with rollback — kept out of scope for Phase 4.
+ * the next server flush AND applies optimistic local paint so our own
+ * cells color instantly (no server roundtrip delay behind the avatar).
+ *
+ * Reconciliation is safe by construction:
+ *  - Server echoes our paint back in the next delta — applyRemotePaint's
+ *    idempotent guard (`if (cellTeam.get(id) === team) return`) no-ops it.
+ *  - If an opponent stole the cell in the intervening ~200ms, their color
+ *    arrives in the same delta and overwrites ours. Brief wrong-color
+ *    flash, then correct. Much better than persistent lag.
+ *
+ * If localTeam is None (pre-teamAssigned race), we skip the local paint
+ * and just enqueue — server will drop it anyway (pre-roster), no harm.
  */
 export function noteLocalPaintCandidate(id: string): void {
   paintOutbox.add(id)
+  if (localTeam !== Team.None) {
+    applyRemotePaint(id, localTeam)
+  }
+}
+
+// Set from client.ts when teamAssigned arrives. Read by noteLocalPaintCandidate
+// for optimistic local paint. Stays None on guest / pre-roster clients.
+let localTeam: Team = Team.None
+export function setLocalTeam(team: Team): void {
+  localTeam = team
 }
 
 /**
@@ -455,16 +472,26 @@ function spawnCellsForTileImmediate(
 }
 
 // ─── Public: coverage counter ────────────────────────────────────────
-// Reads server-authoritative counters when available (populated by every
-// paintDelta), falls back to local map scan pre-first-delta.
+// red / blue = absolute painted-cell counts (server-authoritative when
+// paintDelta has arrived, otherwise a local fallback).
+// total = WALKABLE CELLS IN THE MAZE, not "cells that have been touched."
+// Previously used cellTeam.size, which is only cells with a recorded team
+// — that made red=5, total=5, red% = 100% even with a huge unpainted maze.
+// cellEntity.size is authoritative for "how many paint targets exist"
+// because we spawn one entity per walkable mask cell. During round
+// teardown it briefly drops toward 0 as tiles are removed and climbs back
+// as new tiles spawn; % briefly overshoots then settles, which is fine.
 export function coverage(): { red: number; blue: number; total: number } {
-  if (serverCoverage !== null) return serverCoverage
+  const total = cellEntity.size
+  if (serverCoverage !== null) {
+    return { red: serverCoverage.red, blue: serverCoverage.blue, total }
+  }
   let red = 0, blue = 0
   for (const t of cellTeam.values()) {
     if (t === Team.Red) red++
     else if (t === Team.Blue) blue++
   }
-  return { red, blue, total: cellTeam.size }
+  return { red, blue, total }
 }
 
 // ─── Coord math: world pos → cell ID ─────────────────────────────────

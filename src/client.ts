@@ -29,7 +29,7 @@ import { room } from './shared/messages'
 import { SeedHolder, seedHolder } from './shared/components'
 import { setupUi } from './ui'
 import { runStress } from './stress'
-import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage, drainPaintOutbox, applyRemotePaint, setServerCoverage } from './paint'
+import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage, drainPaintOutbox, applyRemotePaint, setServerCoverage, setLocalTeam } from './paint'
 import { getRoundIndex, showRoundEndBanner } from './round'
 import { movePlayerTo } from '~system/RestrictedActions'
 
@@ -1087,6 +1087,7 @@ export async function setupClient() {
   room.onMessage('teamAssigned', ({ team }) => {
     // Wire values: 1 = Red, 2 = Blue (matches Team enum in src/paint.ts).
     myTeam = team as Team
+    setLocalTeam(myTeam)  // enables optimistic local paint in paint.ts
     console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
   })
   let joinSent = false
