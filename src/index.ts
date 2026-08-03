@@ -18,13 +18,49 @@ import {
   MeshCollider,
   InputAction,
   pointerEventsSystem,
-  Entity
+  Entity,
+  PlayerIdentityData,
+  AvatarAttach,
+  AvatarAnchorPointType
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { syncEntity } from '@dcl/sdk/network'
 import { setupUi } from './ui'
 import { runStress } from './stress'
-import { spawnCellsForTile, initPaintingSystem } from './paint'
+import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage } from './paint'
+import { getRoundIndex, showRoundEndBanner } from './round'
+import { movePlayerTo } from '~system/RestrictedActions'
+
+// ─── Dev / manual lever toggle ────────────────────────────────────────────
+// With UTC-boundary rounds driving auto-regen, the lever is no longer the
+// primary rebuild trigger — kept as decorative + optional dev override.
+// Set DEV_LEVER = true to restore manual pull (useful for iterating on maze
+// generation without waiting for a boundary).
+const DEV_LEVER = false
+
+
+// ─── Squareoff team assignment ────────────────────────────────────────
+// Odd/even auto-balance based on ECS-visible player count at the moment we
+// join: 1st player=Red, 2nd=Blue, 3rd=Red... Perfect for sequential joins,
+// statistical for simultaneous joins — good enough for Phase 3 (no sync
+// yet, so any imbalance is invisible until Phase 4).
+// Assigned exactly once per session; the value never flips mid-game so paint
+// behavior and the HUD indicator stay stable.
+let myTeam: Team = Team.None
+export function getMyTeam(): Team { return myTeam }
+
+// Deterministic team from userId. FNV-1a 32-bit hash — tiny, evenly
+// distributes hex wallet addresses across parity buckets. Every client
+// computes the same team for the same userId, which is why remote players'
+// team indicators can be attached locally with no sync.
+function teamFromUserId(uid: string): Team {
+  let h = 2166136261
+  for (let i = 0; i < uid.length; i++) {
+    h ^= uid.charCodeAt(i)
+    h = (h * 16777619) >>> 0
+  }
+  return (h & 1) ? Team.Red : Team.Blue
+}
 
 // ─── Stress-test toggle (Squareoff design §8.1) ──────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -429,8 +465,12 @@ let spawnClock = 0
 let currentSeed = 0
 
 function rebuildMaze(seed: number) {
-  // Tear down previous maze
-  for (const e of spawnedEntities) engine.removeEntity(e)
+  // Reset scoring state instantly so coverage % pill snaps to 0 and no
+  // painting-system logic touches stale ids. Actual entity removal is
+  // queued and drained in chunks below (see teardownQueue) — doing
+  // ~150 tiles + ~30k paint cells synchronously stalls a frame.
+  clearAllPaintState()
+  for (const e of spawnedEntities) teardownQueue.push(e)
   spawnedEntities.length = 0
   spawnQueue = []
   spawnClock = 0
@@ -517,14 +557,30 @@ function spawnTileWithGrow(p: Placed) {
 
   // Squareoff: spawn the paint grid overlay on this tile. No-op unless a
   // mask is defined for this tile type in src/paint.ts.
-  spawnCellsForTile(p.type, p.r, p.x, p.z, p.y, CELL, STEP)
+  spawnCellsForTile(p.type, p.r, p.x, p.z, p.y, CELL, STEP, e)
 }
 
+// Chunked tile teardown. Each tile carries its paint cells with it via
+// removePaintForTile(), so paint disappears in the same frame as the tile it
+// belongs to — no ghost paint hanging in the air. Draining TILE_TEARDOWN_PER_FRAME
+// tiles per frame spreads the total cost (~30k entities on a full maze) over
+// ~5–10 frames, which reads as a quick sweep rather than a hitch.
+const teardownQueue: Entity[] = []
+const TILE_TEARDOWN_PER_FRAME = 25
+engine.addSystem(() => {
+  if (teardownQueue.length === 0) return
+  const n = Math.min(TILE_TEARDOWN_PER_FRAME, teardownQueue.length)
+  for (let i = 0; i < n; i++) {
+    const e = teardownQueue.pop()!
+    removePaintForTile(e)
+    engine.removeEntity(e)
+  }
+})
+
 // ─── Seed watcher ────────────────────────────────────────────────────
-// Reacts to any change in the synced seed (from another player pulling the
-// lever, or from our own first-joiner init). Also locks every known lever so
-// the cooldown is symmetric across all clients — nobody can repull until the
-// rebuild has finished on all machines.
+// Reacts to any change in the synced seed (from our first-joiner init, from
+// the round-boundary auto-regen, or from a DEV_LEVER pull). Also locks every
+// known lever so its cooldown is symmetric across all clients.
 engine.addSystem(() => {
   const s = SeedHolder.get(seedHolder).seed
   if (s !== 0 && s !== currentSeed) {
@@ -535,24 +591,19 @@ engine.addSystem(() => {
   }
 })
 
-// ─── Lever watcher ───────────────────────────────────────────────────
-// The lever is a Creator Hub composite entity with an `asset-packs::States`
-// component that flips between "Activated"/"Deactivated" on click. When we
-// detect a fresh transition into "Activated", we generate a new random seed
-// and write it to SeedHolder — the seed watcher above then rebuilds the maze
-// on every client via CRDT sync.
+// ─── Lever watcher state ─────────────────────────────────────────────────
+// See lockLever/unlockLever and the watcher system below for behavior. State
+// declarations hoisted here so they're in scope for the seed watcher above.
 let leverStatesComp: any = null
 const leverLastState = new Map<Entity, string>()
-// Every entity we've ever seen with asset-packs::States — used so the seed
-// watcher can lock every lever, not just the one the local player pulled.
 const knownLevers = new Set<Entity>()
-// Snapshot of each lever's PointerEvents and GLTF collision masks so we can
-// restore them after cooldown.
 const leverSavedPointerEvents = new Map<Entity, any>()
 const leverSavedColliders = new Map<Entity, { visible: number; invisible: number }>()
 const leverBusy = new Set<Entity>()
-const POST_REBUILD_COOLDOWN = 30 // extra seconds after grow-in completes — gives climbers time to explore before someone regens
+const POST_REBUILD_COOLDOWN = 30
 let cooldownRemaining = 0
+
+
 
 function lockLever(entity: Entity) {
   if (leverBusy.has(entity)) return
@@ -630,10 +681,10 @@ engine.addSystem((dt: number) => {
     // Trigger on ANY transition (Activated ↔ Deactivated). The lever's toggle
     // model would otherwise create a dead pull after every rebuild where the
     // animation plays but no regeneration fires.
-    if (prev !== undefined && prev !== cur && !leverBusy.has(entity)) {
+    if (prev !== undefined && prev !== cur && !leverBusy.has(entity) && DEV_LEVER) {
       const newSeed = Math.floor(Math.random() * 0x7fffffff) || 1
       SeedHolder.createOrReplace(seedHolder, { seed: newSeed })
-      console.log(`Lever pulled → new seed ${newSeed}`)
+      console.log(`[DEV] Lever pulled → new seed ${newSeed}`)
       const t = Transform.getOrNull(entity)
       if (t) playSoundAt(pullSoundEnt, t.position, 'assets/sounds/pull.mp3')
       // Lock immediately so the local player can't spam-click before the seed
@@ -673,9 +724,41 @@ engine.addSystem((dt: number) => {
   if (initTimer < INIT_GRACE) return
   initDone = true
   if (SeedHolder.get(seedHolder).seed === 0) {
-    const s = Math.floor(Math.random() * 0x7fffffff) || 1
-    console.log(`No existing maze seed after ${INIT_GRACE}s — initializing with ${s}`)
+    // Seed from the current UTC round index: every client that computes this
+    // at the same moment (within a round) gets the same seed → same maze,
+    // no CRDT race. Late joiners also get sync from the SeedHolder.
+    const s = getRoundIndex() || 1
+    console.log(`No existing maze seed after ${INIT_GRACE}s — initializing with round index ${s}`)
     SeedHolder.createOrReplace(seedHolder, { seed: s })
+  }
+})
+
+// ─── Round-boundary auto-regen ─────────────────────────────────────
+// Watches the UTC round index. When it ticks over (every ROUND_LENGTH_MINUTES
+// from wall-clock midnight UTC), snapshot the just-finished round's coverage
+// for the win banner, then write the new roundIndex to SeedHolder — the
+// existing seed watcher takes it from there and rebuilds the maze on every
+// client identically (since every client computed the same roundIndex).
+let lastRoundIndex = 0
+engine.addSystem(() => {
+  if (!initDone) return // wait past INIT_GRACE so we don't fight the first-joiner init
+  const idx = getRoundIndex()
+  if (lastRoundIndex === 0) { lastRoundIndex = idx; return }
+  if (idx !== lastRoundIndex) {
+    const { red, blue, total } = coverage()
+    showRoundEndBanner(red, blue, total)
+    lastRoundIndex = idx
+    SeedHolder.createOrReplace(seedHolder, { seed: idx })
+    // Teleport the local player to scene center at round-end. movePlayerTo
+    // affects only the caller (each client teleports itself), which
+    // effectively resets everyone since every client runs this simultaneously
+    // on the same UTC boundary. Requires ALLOW_TO_MOVE_PLAYER_INSIDE_SCENE
+    // permission (already granted in scene.json).
+    movePlayerTo({
+      newRelativePosition: { x: 80, y: 2, z: 80 },
+      cameraTarget: { x: 80, y: 2, z: 88 },
+    }).catch(() => {})
+    console.log(`Round boundary crossed → new round ${idx} (final: red ${red}/${total}, blue ${blue}/${total})`)
   }
 })
 
@@ -745,10 +828,16 @@ function setupCooldownLabel() {
   })
 }
 
-engine.addSystem((dt: number) => {
+engine.addSystem((_dt: number) => {
   if (!cooldownLabel) return
-  if (leverBusy.size > 0) displayClock += dt
-  else displayClock = 0
+  // Round-timer countdown pill in the HUD supersedes this label; hide it
+  // unless DEV_LEVER is on (in which case it's still useful for iterating).
+  if (!DEV_LEVER) {
+    const tt = Transform.getMutable(cooldownLabel)
+    tt.position = Vector3.create(0, -200, 0)
+    TextShape.getMutable(cooldownLabel).text = ''
+    return
+  }
   // Find the lever position (first known lever).
   let leverPos: Vector3 | null = null
   for (const e of knownLevers) {
@@ -764,7 +853,19 @@ engine.addSystem((dt: number) => {
     return
   }
   tt.position = Vector3.create(leverPos.x, leverPos.y + COOLDOWN_LABEL_Y_OFFSET, leverPos.z)
-  const displayRemaining = Math.max(0, POST_REBUILD_COOLDOWN - displayClock)
+
+  // While the spawn queue is still draining, cooldownRemaining is force-held
+  // at POST_REBUILD_COOLDOWN by the lever watcher — don't show "30" static or
+  // a fake countdown that would then stick at 0. Show a status message
+  // instead. Once grow-in finishes, mirror the real cooldownRemaining directly
+  // so display and unlock always agree.
+  if (spawnQueue.length > 0) {
+    ts.text = 'Building...'
+    tt.scale = Vector3.One()
+    lastTickSecond = -1
+    return
+  }
+  const displayRemaining = Math.max(0, cooldownRemaining)
   const secs = Math.max(0, Math.ceil(displayRemaining))
   ts.text = `${secs}`
   if (secs !== lastTickSecond && secs > 0) {
@@ -932,7 +1033,25 @@ export function main() {
       if (!best || p.y > best.y) best = p
     }
     return best ? { type: best.type, r: best.r, y: best.y } : null
+  }, () => myTeam)
+
+  // Team assignment system: derive team from a hash of the local player's
+  // userId (wallet address or guest id). Stateless — no race with remote
+  // players' ECS data propagating, no reliance on join order. Balance is
+  // statistical (~50/50 for random populations) which is fine for Phase 3.
+  // Phase 4 can upgrade to an authoritative synced roster for guaranteed
+  // balance when we tackle CRDT paint sync.
+  engine.addSystem(() => {
+    if (myTeam !== Team.None) return
+    const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+    if (!pid || !pid.address) return // wait until userId is populated
+    myTeam = teamFromUserId(pid.address)
+    console.log(`Squareoff: assigned team ${myTeam === Team.Red ? 'RED' : 'BLUE'} (userId ${pid.address})`)
   })
+
+  // (Foot-disc team indicator removed — visual felt intrusive. Team is
+  // still tracked internally so painting works; a subtler indicator can be
+  // added later if needed.)
   // Register the SeedHolder for cross-client sync. Doing this inside main()
   // (rather than at module top level) ensures the networking layer is ready.
   // Fixed networkId so every client's SeedHolder maps to the same synced entity.

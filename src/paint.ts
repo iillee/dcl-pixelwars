@@ -180,6 +180,11 @@ function rot90cw(m: Mask): Mask {
 // Format: `${tileX},${tileZ},${tileY}:${cellCol},${cellRow}` (post-rotation local).
 const cellTeam = new Map<string, Team>()
 const cellEntity = new Map<string, Entity>()
+// Reverse index: tile entity → all paint cell entities spawned for it, plus
+// their cell ids. Used by removePaintForTile() so tile teardown can strip its
+// paint in the same chunked pass — no ghost cells linger after the tile is
+// gone, and coverage state stays consistent.
+const paintByTile = new Map<Entity, { entities: Entity[]; ids: string[] }>()
 
 export function cellId(tx: number, tz: number, ty: number, col: number, row: number): string {
   return `${tx},${tz},${ty}:${col},${row}`
@@ -211,6 +216,24 @@ engine.addSystem((dt: number) => {
   }
 })
 
+// Wipe scoring state immediately (so coverage % snaps to 0) without touching
+// entities. Actual paint entity removal is driven per-tile by
+// removePaintForTile() during the chunked tile teardown in index.ts — that
+// way paint disappears in the same frame as its tile, avoiding ghost cells,
+// while the total ~30k removeEntity() cost is spread across several frames.
+export function clearAllPaintState() {
+  cellTeam.clear()
+  // cellEntity is left in place; entries are pruned as tiles are torn down.
+}
+
+export function removePaintForTile(tileEntity: Entity) {
+  const rec = paintByTile.get(tileEntity)
+  if (!rec) return
+  for (const e of rec.entities) engine.removeEntity(e)
+  for (const id of rec.ids) cellEntity.delete(id)
+  paintByTile.delete(tileEntity)
+}
+
 export function paintCell(id: string, team: Team) {
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
@@ -227,14 +250,15 @@ export function spawnCellsForTile(
   tileType: string,
   r: number,
   tx: number, tz: number, ty: number,
-  CELL: number, STEP: number
+  CELL: number, STEP: number,
+  tileEntity: Entity
 ) {
   const raw = MASKS[tileType]
   if (!raw) return // designer hasn't authored this tile's mask yet
   // Defer the actual spawn so cells appear after the GLB's grow-in tween.
   deferredSpawns.push({
     dueMs: spawnClockMs + SPAWN_DELAY_MS,
-    run: () => spawnCellsForTileImmediate(tileType, r, tx, tz, ty, CELL, STEP),
+    run: () => spawnCellsForTileImmediate(tileType, r, tx, tz, ty, CELL, STEP, tileEntity),
   })
 }
 
@@ -242,7 +266,8 @@ function spawnCellsForTileImmediate(
   tileType: string,
   r: number,
   tx: number, tz: number, ty: number,
-  CELL: number, STEP: number
+  CELL: number, STEP: number,
+  tileEntity: Entity
 ) {
   const raw = MASKS[tileType]
   if (!raw) return
@@ -287,6 +312,12 @@ function spawnCellsForTileImmediate(
     }
   }
 
+  let tileRec = paintByTile.get(tileEntity)
+  if (!tileRec) {
+    tileRec = { entities: [], ids: [] }
+    paintByTile.set(tileEntity, tileRec)
+  }
+
   const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
     const id = cellId(tx, tz, ty, col, row)
     const e = engine.addEntity()
@@ -299,6 +330,8 @@ function spawnCellsForTileImmediate(
     Material.setPbrMaterial(e, cellMaterial(Team.None))
     cellEntity.set(id, e)
     cellTeam.set(id, Team.None)
+    tileRec!.entities.push(e)
+    tileRec!.ids.push(id)
   }
 
   // ─── Ramp: dedicated path ───────────────────────────────────────
