@@ -15,9 +15,27 @@
 // team values match Team enum in src/paint.ts: 1 = Red, 2 = Blue.
 const cellTeam = new Map<string, number>()
 
+// Changes accumulated since the last drainDelta(). Map (not array) so
+// last-write-wins within a tick — if Red then Blue paint the same cell
+// in the same 200ms window, only Blue ends up in the broadcast.
+const dirty = new Map<string, number>()
+
 /** Apply a paint from a validated sender. Overwrites existing color. */
 export function applyPaint(id: string, team: number): void {
   cellTeam.set(id, team)
+  dirty.set(id, team)
+}
+
+/**
+ * Drain the dirty buffer for broadcast. Called by the 5Hz server tick.
+ * Returns [] when nothing changed (broadcast skipped, save the bandwidth).
+ */
+export function drainDelta(): Array<{ id: string; team: number }> {
+  if (dirty.size === 0) return []
+  const out: Array<{ id: string; team: number }> = []
+  for (const [id, team] of dirty) out.push({ id, team })
+  dirty.clear()
+  return out
 }
 
 /** Live coverage counters. Called by the 5s log tick. */
@@ -33,4 +51,5 @@ export function coverage(): { red: number; blue: number; total: number } {
 /** Round reset (Step 6 will call this). */
 export function clearAll(): void {
   cellTeam.clear()
+  dirty.clear()
 }

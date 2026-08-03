@@ -223,7 +223,20 @@ engine.addSystem((dt: number) => {
 // while the total ~30k removeEntity() cost is spread across several frames.
 export function clearAllPaintState() {
   cellTeam.clear()
+  serverCoverage = null
+  paintOutbox.clear()
   // cellEntity is left in place; entries are pruned as tiles are torn down.
+}
+
+// ─── Server-authoritative coverage mirror (Phase 4 Step 4) ─────────────────
+// Each paintDelta includes the current coverage totals. Storing them here
+// means the HUD (which reads coverage() below) shows GLOBAL truth — all
+// players' paint — not just cells visible to the local client. Before the
+// first delta arrives, coverage() falls back to a local scan (returns
+// zeros on fresh join, which is fine — Step 5's snapshot fills the gap).
+let serverCoverage: { red: number; blue: number; total: number } | null = null
+export function setServerCoverage(c: { red: number; blue: number; total: number }): void {
+  serverCoverage = c
 }
 
 export function removePaintForTile(tileEntity: Entity) {
@@ -235,10 +248,11 @@ export function removePaintForTile(tileEntity: Entity) {
 }
 
 // ─── Network outbox (Phase 4 Step 3) ────────────────────────────────
-// Cell ids painted by the local client since the last drain. Client.ts
-// flushes this to the server via WS (paintTick message) at 10 Hz. Empty
-// in single-player. Populated only when the LOCAL client paints — remote
-// updates (Step 4+) will bypass paintCell entirely to avoid echoing.
+// Cell ids the local player has walked onto since the last flush. Client.ts
+// drains this at 10Hz and sends paintTick { ids } to the server. Server
+// attributes to the sender's team and broadcasts paintDelta — which is
+// how OUR paint eventually becomes visible on our own screen too.
+// (We do NOT paint locally anymore — pure server-authoritative.)
 const paintOutbox = new Set<string>()
 export function drainPaintOutbox(): string[] {
   if (paintOutbox.size === 0) return []
@@ -248,14 +262,33 @@ export function drainPaintOutbox(): string[] {
   return out
 }
 
-export function paintCell(id: string, team: Team) {
+/**
+ * Register a cell the local player has stepped on. Adds to the outbox for
+ * the next server flush. NO local material update — waits for the server's
+ * paintDelta echo (~100–200ms). Trade-off: brief visual delay for our own
+ * paint, in exchange for guaranteed consistency across all clients. If
+ * playtesting shows the delay is uncomfortable we can add optimistic
+ * local paint with rollback — kept out of scope for Phase 4.
+ */
+export function noteLocalPaintCandidate(id: string): void {
+  paintOutbox.add(id)
+}
+
+/**
+ * Apply a paint change received from the server (paintDelta). Updates
+ * both the local team-map (so coverage() reads consistently) and the
+ * visible material. Does NOT add to the outbox — would infinite-loop.
+ */
+export function applyRemotePaint(id: string, team: Team): void {
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
-  paintOutbox.add(id)
   const e = cellEntity.get(id)
   if (e !== undefined) {
     Material.setPbrMaterial(e, cellMaterial(team))
   }
+  // Note: if the cell entity hasn't spawned yet (grow-in delay window),
+  // cellTeam still records the color — spawnOne() adopts it when the
+  // entity is created, preserving paint through the 500ms teardown gap.
 }
 
 // ─── Public: spawn cells for a tile ──────────────────────────────────
@@ -335,6 +368,14 @@ function spawnCellsForTileImmediate(
 
   const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
     const id = cellId(tx, tz, ty, col, row)
+    // Adopt any paint that landed on this id BEFORE the entity existed.
+    // Repro: round rebuild queues a 500ms grow-in delay; a fast-moving
+    // player paints cells during that window — paintCell() sets cellTeam
+    // but there's no entity to color yet. Without this check we'd
+    // overwrite the team back to None and the cell would render white
+    // forever despite having been "painted". Preserves the pre-Phase-4
+    // invariant that walk-over-cell = colored-cell.
+    const preexisting = cellTeam.get(id) ?? Team.None
     const e = engine.addEntity()
     Transform.create(e, {
       position: Vector3.create(wx, wy, wz),
@@ -342,9 +383,9 @@ function spawnCellsForTileImmediate(
       scale: Vector3.create(cellSize, scaleY, 1),
     })
     MeshRenderer.setPlane(e)
-    Material.setPbrMaterial(e, cellMaterial(Team.None))
+    Material.setPbrMaterial(e, cellMaterial(preexisting))
     cellEntity.set(id, e)
-    cellTeam.set(id, Team.None)
+    cellTeam.set(id, preexisting)
     tileRec!.entities.push(e)
     tileRec!.ids.push(id)
   }
@@ -414,7 +455,10 @@ function spawnCellsForTileImmediate(
 }
 
 // ─── Public: coverage counter ────────────────────────────────────────
+// Reads server-authoritative counters when available (populated by every
+// paintDelta), falls back to local map scan pre-first-delta.
 export function coverage(): { red: number; blue: number; total: number } {
+  if (serverCoverage !== null) return serverCoverage
   let red = 0, blue = 0
   for (const t of cellTeam.values()) {
     if (t === Team.Red) red++
@@ -492,7 +536,6 @@ const WALKABLE_TOP = 0.5
 export function initPaintingSystem(
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null,
-  myTeam: () => Team = () => Team.Red
 ) {
   const GROUND_TOLERANCE = 0.4
   // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
@@ -503,22 +546,21 @@ export function initPaintingSystem(
     [-step,     0], [0,     0], [step,     0],
     [-step,  step], [0,  step], [step,  step],
   ]
+  // Phase 4 Step 4: this system no longer touches cellTeam or materials.
+  // It just enqueues candidate cell ids into the outbox; the server owns
+  // team attribution and echoes back paintDelta, which is what actually
+  // colors cells (via applyRemotePaint in the client's delta handler).
   engine.addSystem(() => {
     const t = Transform.getOrNull(engine.PlayerEntity)
     if (!t) return
     const { x, y, z } = t.position
-    // Center-cell grounded check gates the whole footprint. Jumping/gliding
-    // silences all 5 cells, not just the middle one.
     const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
     if (!center || y - center.groundY > GROUND_TOLERANCE) return
-    const team = myTeam()
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue
-      // Skip neighbors far above/below the player's foot Y (e.g. a neighbor
-      // cell on a different level or the void beside a ramp).
       if (Math.abs(y - hit.groundY) > 1.5) continue
-      paintCell(hit.id, team)
+      noteLocalPaintCandidate(hit.id)
     }
   })
 }

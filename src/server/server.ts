@@ -12,7 +12,7 @@
 import { engine } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
-import { applyPaint, coverage } from './paintState'
+import { applyPaint, coverage, drainDelta } from './paintState'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -71,8 +71,26 @@ export async function setupServer(): Promise<void> {
     for (const id of ids) applyPaint(id, team)
   })
 
-  // Coverage log tick (5s). Silent when nothing painted yet; once activity
-  // starts, this is the health signal that Step 3 is working end-to-end.
+  // Broadcast tick (Phase 4 Step 4). 5Hz — the SATURATION_BUDGET rate
+  // from src/shared/messages.ts. Drains accumulated paint changes and
+  // sends paintDelta to ALL clients (no `to:`). Coverage rides in every
+  // message so HUDs stay in sync without a separate poll. Silent tick
+  // (drainDelta returns []) skips the send entirely.
+  const BROADCAST_HZ = 5
+  const BROADCAST_INTERVAL = 1 / BROADCAST_HZ
+  let broadcastClock = 0
+  engine.addSystem((dt: number) => {
+    broadcastClock += dt
+    if (broadcastClock < BROADCAST_INTERVAL) return
+    broadcastClock = 0
+    const changes = drainDelta()
+    if (changes.length === 0) return
+    const c = coverage()
+    room.send('paintDelta', { changes, red: c.red, blue: c.blue, total: c.total })
+  })
+
+  // Coverage log tick (5s). Kept as a low-frequency health signal;
+  // paintDelta is the real-time path.
   let coverageClock = 0
   engine.addSystem((dt: number) => {
     coverageClock += dt
@@ -84,5 +102,5 @@ export async function setupServer(): Promise<void> {
     }
   })
 
-  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick.')
+  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick; broadcasting paintDelta at 5Hz.')
 }

@@ -29,7 +29,7 @@ import { room } from './shared/messages'
 import { SeedHolder, seedHolder } from './shared/components'
 import { setupUi } from './ui'
 import { runStress } from './stress'
-import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage, drainPaintOutbox } from './paint'
+import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage, drainPaintOutbox, applyRemotePaint, setServerCoverage } from './paint'
 import { getRoundIndex, showRoundEndBanner } from './round'
 import { movePlayerTo } from '~system/RestrictedActions'
 
@@ -1046,7 +1046,19 @@ export async function setupClient() {
       if (!best || p.y > best.y) best = p
     }
     return best ? { type: best.type, r: best.r, y: best.y } : null
-  }, () => myTeam)
+  })
+
+  // Paint delta receiver (Phase 4 Step 4). Server broadcasts every 200ms
+  // with all changes since the last tick + current coverage. This is the
+  // ONLY path that colors cells now — both our own paint (echoed back)
+  // and other players' paint arrive through here uniformly. Coverage HUD
+  // gets the global truth (all players) rather than local-only counts.
+  room.onMessage('paintDelta', ({ changes, red, blue, total }) => {
+    for (const { id, team } of changes) {
+      applyRemotePaint(id, team as Team)
+    }
+    setServerCoverage({ red, blue, total })
+  })
 
   // Team assignment (Phase 4 Step 2): server-authoritative.
   // One joinRoster on boot after userId is available; teamAssigned reply

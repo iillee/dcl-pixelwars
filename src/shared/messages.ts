@@ -45,6 +45,18 @@ export const Messages = {
   // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
   // is 90 max; anything larger is dropped as suspicious).
   paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String) }),
+
+  // Server → Client: broadcast of paint state changes accumulated since
+  // the last server tick (5Hz). Every delta carries the current coverage
+  // counters so no separate poll message is needed — HUD stays in sync
+  // for free. Sent to ALL clients on every non-empty tick.
+  // last-write-wins per cellId within a tick (server dedupes in a Map).
+  paintDelta: Schemas.Map({
+    changes: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
+    red: Schemas.Int,
+    blue: Schemas.Int,
+    total: Schemas.Int,
+  }),
 }
 
 export const room = registerMessages(Messages)
