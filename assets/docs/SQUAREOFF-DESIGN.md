@@ -72,14 +72,16 @@ Two approaches prototyped on a scratch `drip` branch (kept locally for reference
 | Cell material | Matte PBR (`roughness=1`, `metallic=0`), one shared per team color | Engine dedupes identical materials. |
 | Ramp cell rotation | Match ramp slope (single shared quaternion per ramp) | Avoids clipping. |
 
-### Entity budget (100-parcel scene, as measured)
+### Entity budget (121-parcel scene, as measured)
 
-- Total budget: **51,200 entities**
-- Maze tiles worst case: ~150
-- Paint cells: ~200 avg walkable per tile × 150 tiles ≈ **~30,000**
-- Overhead (UI, audio, players, effects): ~500
-- **Measured use: ~30,700 (~60% budget)**
-- Comfortable headroom for combat (Phases 5+).
+- Total budget: **~24,200 entities** (121 parcels × 200)
+- Maze tiles worst case: ~30 (5×5 grid × up to 4 Y levels; BFS rarely fills every slot)
+- Paint cells: ~150 avg walkable per tile × 25 tiles ≈ **~3,800**
+- Teleport orbs: 2 bodies + 2 wireframes + 2 lights + 2 sound emitters = **8**
+- Overhead (UI, audio, players): ~50
+- **Measured use: ~3,900 (~16% budget)** — huge headroom for combat/items (Phases 5+).
+
+**Note:** we experimented with 1m paint cells (`SIZE = 32`, ~15k entities) for higher-res paint but the WebGL client couldn't sustain that many individual PBR-material planes; the paint pipeline lagged 3–4s behind player movement. Reverted to 2m cells.
 
 ---
 
@@ -246,12 +248,13 @@ src/
 ├── paint.ts                    paint mechanic + initPaintNet subscriber
 ├── round.ts                    timer + banner + initRoundNet subscriber
 ├── stress.ts                   load-test harness
+├── teleportOrbs.ts             paired teleport portals (deterministic per seed)
 ├── ui.tsx                      HUD (React-ECS)
 ├── client/
 │   ├── index.ts                orchestrator, setupClient()
 │   ├── clientHandler.ts        SOLE owner of room.on/send — WS boundary
 │   ├── audio.ts                music + mute + click SFX
-│   ├── player.ts               round-reset teleport subscriber
+│   ├── player.ts               initial spawn + round-reset teleport to center
 │   └── waitForLoad.ts          startup gate (available, not yet wired)
 ├── maze/
 │   ├── tiles.ts                pure — Dir + TILES catalog
@@ -310,16 +313,34 @@ Recommended path for the next session:
 
 ## Appendix — key constants (as of Aug 2026)
 
+**Scene layout:** 11×11 parcels (176m × 176m). Deployed to `labyrinthia.dcl.eth`.
+
+**Persistent center cross:** the generator always seeds a single `cross` tile at the exact grid center (cell (2,2), world (88, 88, 0)). It's the mandatory rally point — same world position every round, four symmetric arms fanning N/S/E/W. `rebuildMaze()` preserves the center tile entity across round rebuilds (no tear-down / grow-in on the tile players are standing on); its paint resets in place via `resetPaintForTile()`.
+
 **[`src/maze/generator.ts`](../../src/maze/generator.ts):**
 ```ts
 export const TILE_SCALE = 2                            // tiles scaled 2x on spawn
 export const CELL = 16 * TILE_SCALE                    // = 32m per maze grid cell
-export const GRID_W = Math.floor(160 / CELL)           // = 5 cells across
-export const GRID_H = Math.floor(160 / CELL)           // = 5 cells across
+export const SCENE_SIZE = 176                          // 11×11 parcels
+export const GRID_W = Math.floor(SCENE_SIZE / CELL)    // = 5 cells across
+export const GRID_H = Math.floor(SCENE_SIZE / CELL)    // = 5 cells across
+export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W*CELL)/2 // = 8m border (5×5 grid centered in scene)
 export const STEP = 5.3835 * TILE_SCALE                // = 10.767m ramp Y rise
-export const MAX_Y = 60                                // halved from 120 to
-                                                       // keep the maze horizontal
+export const MAX_Y = 40                                // 4 levels max (Y = 0, 10.77,
+                                                       // 21.53, 32.30) — lowered from 60
+                                                       // to push players closer together
 ```
+
+**Center-cross seeding:** `generate()` places a `cross` tile at `(Math.floor(GRID_W/2), Math.floor(GRID_H/2), 0)` before BFS growth. Frontier expansion fans out from its 4 openings, so every maze has radial symmetry around the rally point.
+
+**[`src/teleportOrbs.ts`](../../src/teleportOrbs.ts):**
+One pair of gold d20 teleport orbs spawns each round, deterministic on the current seed. Rules:
+- Both tiles must be non-ramp (flat landing).
+- Both tiles must be outside the 3×3 block around the center cross (no orb on spawn or any adjacent tile).
+- The two tiles must sit on different Y levels (guaranteed vertical shortcut).
+- Fallback (rare, single-level maze): warn + place on same level.
+
+Orbs use the flagtag gold-orb visual: d20 body + wireframe overlay (both scaled 0.8), orange-gold point light (`Color3(1, 0.45, 0)`, intensity 150, range 12), spin + bob animation, positional teleport SFX. Trigger radius 1.2m, 1s cooldown, lands 2.5m from destination orb to avoid re-trigger.
 
 **[`src/paint.ts`](../../src/paint.ts):**
 ```ts

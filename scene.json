@@ -24,7 +24,7 @@
       "default": true,
       "position": {
         "x": [86, 90],
-        "y": [2, 2],
+        "y": [6, 6],
         "z": [86, 90]
       },
       "cameraTarget": {

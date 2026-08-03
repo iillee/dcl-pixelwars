@@ -29,6 +29,7 @@ import {
 } from './generator'
 import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
+import { spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
 import { SeedHolder, seedHolder } from '../shared/components'
 
@@ -97,6 +98,12 @@ export function rebuildMaze(seed: number): void {
   spawnQueue = tiles
     .filter(p => !(skipCenter && isCenterTile(p)))
     .map((p, i) => ({ p, delay: i * STAGGER }))
+
+  // Teleport orb pair — deterministic on the current seed: generateWithRetry
+  // leaves the RNG in a fixed state, so every client picks the same tile
+  // pair without any network sync. Called after tiles are queued so the
+  // tiles array is stable.
+  spawnTeleportOrbsForMaze(tiles)
 }
 
 /** For diagnostics / debug HUD only. */
