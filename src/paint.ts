@@ -13,8 +13,8 @@ export enum Team { None = 0, Red = 1, Blue = 2 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
   [Team.None]: Color4.create(1, 1, 1, 1),
-  [Team.Red]:  Color4.create(1.0, 0.2, 0.35, 1),
-  [Team.Blue]: Color4.create(0.2, 0.5, 1.0, 1),
+  [Team.Red]:  Color4.create(255/255, 117/255, 119/255, 1), // pallet.jpeg #FF7577
+  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC (queued for Phase 3)
 }
 
 // ─── Mask format ─────────────────────────────────────────────────────
@@ -186,12 +186,23 @@ export function cellId(tx: number, tz: number, ty: number, col: number, row: num
 }
 
 // ─── Public: paint a cell (idempotent for same team) ─────────────────
+// Matte PBR material spec for a team. Roughness=1 + metallic=0 + no specular
+// kills the shine so paint reads as flat pigment, not plastic.
+function cellMaterial(team: Team) {
+  return {
+    albedoColor: TEAM_COLORS[team],
+    roughness: 1.0,
+    metallic: 0.0,
+    specularIntensity: 0.0,
+  }
+}
+
 export function paintCell(id: string, team: Team) {
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) {
-    Material.setPbrMaterial(e, { albedoColor: TEAM_COLORS[team] })
+    Material.setPbrMaterial(e, cellMaterial(team))
   }
 }
 
@@ -256,7 +267,7 @@ export function spawnCellsForTile(
       scale: Vector3.create(cellSize, scaleY, 1),
     })
     MeshRenderer.setPlane(e)
-    Material.setPbrMaterial(e, { albedoColor: TEAM_COLORS[Team.None] })
+    Material.setPbrMaterial(e, cellMaterial(Team.None))
     cellEntity.set(id, e)
     cellTeam.set(id, Team.None)
   }
@@ -339,11 +350,13 @@ export function coverage(): { red: number; blue: number; total: number } {
 // Reverses spawnCellsForTile. Requires a tile lookup callback so we don't
 // need to import the maze grid directly.
 // Returns null if the player isn't standing on a known walkable cell.
+// groundY is the expected walkable-surface Y for the cell — use it to detect
+// airborne states (jumping / gliding / falling) by comparing to player.y.
 export function worldToCellId(
   px: number, py: number, pz: number,
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null
-): string | null {
+): { id: string; groundY: number } | null {
   const tx = Math.floor(px / CELL)
   const tz = Math.floor(pz / CELL)
   const tile = lookupTile(tx, tz, py)
@@ -358,17 +371,23 @@ export function worldToCellId(
   // ─── Ramp branch: use shared canonical-frame helper ───────────────
   if (tile.type === 'ramp') {
     const geom = rampGeometry(CELL, STEP)
-    // Undo tile CW yaw to get canonical (lx, lz).
     const rad = tile.r * Math.PI / 2
     const sinR = Math.sin(rad), cosR = Math.cos(rad)
     const dx = px - tileWorldX, dz = pz - tileWorldZ
     const cx = dx - CELL / 2, cz = dz - CELL / 2
-    // CCW inverse of the tile's CW yaw:
     const lx = cosR * cx - sinR * cz + CELL / 2
     const lz = sinR * cx + cosR * cz + CELL / 2
     const idx = rampCellIdxFromCanonical(lx, lz, geom)
     if (!idx) return null
-    return cellId(tx, tz, tile.y, idx.col, idx.row)
+    // groundY = walkable surface Y (top of 0.5m floor slab, then + slope rise).
+    let surfaceY: number
+    if (lz < geom.inclineStart) surfaceY = tile.y + WALKABLE_TOP
+    else if (lz >= geom.inclineEnd) surfaceY = tile.y + STEP + WALKABLE_TOP
+    else {
+      const slopeDist = (lz - geom.inclineStart) / geom.cosA
+      surfaceY = tile.y + WALKABLE_TOP + slopeDist * geom.sinA
+    }
+    return { id: cellId(tx, tz, tile.y, idx.col, idx.row), groundY: surfaceY }
   }
 
   const mask = rotateMask(raw, tile.r)
@@ -383,8 +402,12 @@ export function worldToCellId(
   const ch = mask[row][col]
   if (ch === '.') return null
 
-  return cellId(tx, tz, tile.y, col, row)
+  return { id: cellId(tx, tz, tile.y, col, row), groundY: tile.y + WALKABLE_TOP }
 }
+
+// Top of the tile's floor slab in world meters. Matches how player.y reads when
+// the avatar is grounded on a flat tile at tile.y = 0.
+const WALKABLE_TOP = 0.5
 
 // ─── Painting system (per-frame, single-player for now) ──────────────
 // Reads player position, resolves current cell, paints it.
@@ -394,11 +417,31 @@ export function initPaintingSystem(
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null,
   myTeam: () => Team = () => Team.Red
 ) {
+  const GROUND_TOLERANCE = 0.4
+  // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
+  // in world meters; one cell is CELL / SIZE = 2m.
+  const step = CELL / SIZE
+  const OFFSETS: Array<[number, number]> = [
+    [-step, -step], [0, -step], [step, -step],
+    [-step,     0], [0,     0], [step,     0],
+    [-step,  step], [0,  step], [step,  step],
+  ]
   engine.addSystem(() => {
     const t = Transform.getOrNull(engine.PlayerEntity)
     if (!t) return
     const { x, y, z } = t.position
-    const id = worldToCellId(x, y, z, CELL, STEP, lookupTile)
-    if (id) paintCell(id, myTeam())
+    // Center-cell grounded check gates the whole footprint. Jumping/gliding
+    // silences all 5 cells, not just the middle one.
+    const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
+    if (!center || y - center.groundY > GROUND_TOLERANCE) return
+    const team = myTeam()
+    for (const [dx, dz] of OFFSETS) {
+      const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
+      if (!hit) continue
+      // Skip neighbors far above/below the player's foot Y (e.g. a neighbor
+      // cell on a different level or the void beside a ramp).
+      if (Math.abs(y - hit.groundY) > 1.5) continue
+      paintCell(hit.id, team)
+    }
   })
 }
