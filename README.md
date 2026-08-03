@@ -10,7 +10,7 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Live:** [labyrinthia.dcl.eth](https://play.decentraland.org/?realm=labyrinthia.dcl.eth)
 
-The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`SQUAREOFF-DESIGN.md`](SQUAREOFF-DESIGN.md) for the game design doc.
+The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`assets/docs/SQUAREOFF-DESIGN.md`](assets/docs/SQUAREOFF-DESIGN.md) for the game design doc.
 
 ---
 

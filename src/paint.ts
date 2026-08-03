@@ -1,7 +1,7 @@
 // ─── Squareoff paint grid ────────────────────────────────────────────
 // Phase 1 scaffolding. Single-player, single-team for now.
 //
-// Design doc: SQUAREOFF-DESIGN.md
+// Design doc: assets/docs/SQUAREOFF-DESIGN.md
 // Depends on constants exposed from index.ts (CELL, STEP, TILE_SCALE) and the
 // tile grid Map — passed in via init() to keep this module standalone.
 
