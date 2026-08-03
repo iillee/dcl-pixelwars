@@ -1,6 +1,6 @@
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
-import { toggleMusic, isMusicMuted } from "./index"
+import { toggleMusic, isMusicMuted } from "./client"
 import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 
@@ -74,7 +74,7 @@ export const uiMenu = () => (
               <UiEntity
                 uiTransform={{
                   width: 24, height: 24,
-                  positionType: 'absolute', position: { top: 22, right: 12 },
+                  positionType: 'absolute', position: { top: 22, right: 18 },
                   pointerFilter: 'block',
                 }}
                 uiBackground={{

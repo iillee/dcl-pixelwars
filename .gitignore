@@ -12,3 +12,4 @@ yarn-error.log*
 *.blend1
 *.blend2
 *.skb
+server.log
