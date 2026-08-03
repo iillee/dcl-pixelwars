@@ -99,11 +99,19 @@ const plusRow = (size: number, arm: number, mid: string, edge: string = '.') => 
 // SIZE=16 → 2m cells (~256 max cells/tile); SIZE=32 → 1m cells (~1024/tile).
 // Dropped from 32 to 16 to relieve entity/draw-call load. All other mask
 // constants are ratios of SIZE so shapes stay the same.
-const SIZE = 32
-const ARM = SIZE * 20 / 32      // 20 — corridor width in cells
-const LO = (SIZE - ARM) / 2     // 6
-const HI = (SIZE + ARM) / 2     // 26
-const END_CLOSED_VOID = SIZE * 6 / 32  // 6 — rows of void on the closed side of `end`
+// NOTE: Attempted SIZE=32 (1m cells, ~15k entities) but the WebGL client
+// couldn't handle that many individual paint planes — each cell carries
+// its own PBR material instance (no batching), so draw-call / material
+// overhead tanked framerate and the whole paint pipeline lagged 3-4s
+// behind player movement. Back to SIZE=16 (2m cells, ~3.8k entities).
+// To increase resolution safely we'd need to either: (a) share materials
+// across cells with the same team, or (b) use fewer, larger planes with
+// dynamic textures instead of per-cell entities.
+const SIZE = 16
+const ARM = SIZE * 20 / 32      // 10 — corridor width in cells (was 20 at SIZE=32)
+const LO = (SIZE - ARM) / 2     // 3
+const HI = (SIZE + ARM) / 2     // 13
+const END_CLOSED_VOID = SIZE * 6 / 32  // 3 — rows of void on the closed side of `end`
 const inCorridor = (i: number) => i >= LO && i < HI
 
 // Build a mask row-by-row from a predicate.
