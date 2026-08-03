@@ -57,6 +57,23 @@ export const Messages = {
     blue: Schemas.Int,
     total: Schemas.Int,
   }),
+
+  // Client → Server: request the current authoritative paint state.
+  // Sent once after teamAssigned so a reloaded/late-joining client sees
+  // the round's existing paint instead of a blank maze. Server rate-limits
+  // (1 per 5s per sender) to prevent snapshot floods.
+  requestSnapshot: Schemas.Map({}),
+
+  // Server → Client (addressed): full paint map at the moment of send.
+  // At ~1500 walkable cells max per maze, worst case ~30KB — fits in one
+  // WS frame with room to spare, no chunking. If mazes grow or we go
+  // Uint8Array-backed in Step 5+, add a sequence tag and split.
+  snapshot: Schemas.Map({
+    entries: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
+    red: Schemas.Int,
+    blue: Schemas.Int,
+    total: Schemas.Int,
+  }),
 }
 
 export const room = registerMessages(Messages)

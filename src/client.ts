@@ -1089,6 +1089,26 @@ export async function setupClient() {
     myTeam = team as Team
     setLocalTeam(myTeam)  // enables optimistic local paint in paint.ts
     console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
+    // Ask for the current authoritative paint state (Phase 4 Step 5).
+    // Fixes: reloading during a round used to wipe our view of already-
+    // painted cells; now we get them back. Fires once per teamAssigned;
+    // server has a 5s cooldown against abuse.
+    console.log('[Client] → requestSnapshot')
+    room.send('requestSnapshot', {})
+  })
+
+  // Snapshot receiver: apply every entry via applyRemotePaint (same path
+  // as paintDelta so material updates and cellTeam bookkeeping stay
+  // consistent). If the client's tile entities haven't finished spawning
+  // yet (grow-in delay), applyRemotePaint records into cellTeam and
+  // spawnOne() adopts the color when the entity is created — same
+  // adopt-preexisting-paint fix that solved the round-rebuild white patches.
+  room.onMessage('snapshot', ({ entries, red, blue, total }) => {
+    console.log(`[Client] snapshot received: ${entries.length} cells`)
+    for (const { id, team } of entries) {
+      applyRemotePaint(id, team as Team)
+    }
+    setServerCoverage({ red, blue, total })
   })
   let joinSent = false
   engine.addSystem(() => {

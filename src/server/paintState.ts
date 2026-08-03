@@ -48,6 +48,17 @@ export function coverage(): { red: number; blue: number; total: number } {
   return { red, blue, total: cellTeam.size }
 }
 
+/**
+ * Full state dump for the snapshot message. Returns every painted cell
+ * as a fresh array so the caller can serialize without touching internal
+ * state. Empty when nothing's been painted this round.
+ */
+export function getFullState(): Array<{ id: string; team: number }> {
+  const out: Array<{ id: string; team: number }> = []
+  for (const [id, team] of cellTeam) out.push({ id, team })
+  return out
+}
+
 /** Round reset (Step 6 will call this). */
 export function clearAll(): void {
   cellTeam.clear()

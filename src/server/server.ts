@@ -12,7 +12,7 @@
 import { engine } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
-import { applyPaint, coverage, drainDelta } from './paintState'
+import { applyPaint, coverage, drainDelta, getFullState } from './paintState'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -102,5 +102,27 @@ export async function setupServer(): Promise<void> {
     }
   })
 
-  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick; broadcasting paintDelta at 5Hz.')
+  // Snapshot handler (Phase 4 Step 5). Late/reloading clients ask once
+  // after teamAssigned; we reply with the full paint map addressed to
+  // just them. Rate limit: 1 per 5s per sender — a rapid reconnect loop
+  // (or a bad actor) can't flood us with big payloads.
+  const SNAPSHOT_COOLDOWN_MS = 5000
+  const lastSnapshotAt = new Map<string, number>()
+  room.onMessage('requestSnapshot', (_data, context) => {
+    const from = context?.from
+    if (!from) return
+    const now = Date.now()
+    const last = lastSnapshotAt.get(from) ?? 0
+    if (now - last < SNAPSHOT_COOLDOWN_MS) {
+      console.log(`[Server] requestSnapshot from ${from} rate-limited (${now - last}ms since last)`)
+      return
+    }
+    lastSnapshotAt.set(from, now)
+    const entries = getFullState()
+    const c = coverage()
+    console.log(`[Server] snapshot → ${from} (${entries.length} cells, red=${c.red} blue=${c.blue})`)
+    room.send('snapshot', { entries, red: c.red, blue: c.blue, total: c.total }, { to: [from] })
+  })
+
+  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz.')
 }
