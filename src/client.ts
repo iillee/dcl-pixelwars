@@ -1033,9 +1033,26 @@ export async function setupClient() {
   setupUi()
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   setupMusic()
-  setupBeacon()
-  setupLeverAudio()
-  setupCooldownLabel()
+  // Lever + beacon retired: with UTC-boundary rounds driving auto-regen
+  // the lever has no game function, and DEV_LEVER stays false in prod.
+  // The lever entity is placed by the scene composite (main.composite),
+  // so we can't remove it there without disturbing a lot of interdependent
+  // asset-packs data. Instead, a one-shot system below scrubs it from the
+  // engine as soon as it appears. setupBeacon/LeverAudio/CooldownLabel
+  // calls removed so no floating text, click-proxy, or beacon materials
+  // ever get created.
+  //   setupBeacon()          // removed
+  //   setupLeverAudio()      // removed
+  //   setupCooldownLabel()   // removed
+  engine.addSystem(() => {
+    const statesComp = engine.getComponentOrNull('asset-packs::States')
+    if (!statesComp) return
+    for (const [entity] of engine.getEntitiesWith(statesComp)) {
+      // Also nukes any child audio/action entities parented under it
+      // (asset-packs removes descendants when the parent is removed).
+      engine.removeEntity(entity)
+    }
+  })
   // Squareoff: painting system. lookupTile finds the highest-Y placed tile at
   // the player's XZ column whose Y is at or below the player's feet.
   initPaintingSystem(CELL, STEP, (tx, tz, py) => {
