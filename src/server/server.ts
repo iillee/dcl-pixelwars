@@ -9,8 +9,15 @@
  * Domain modules (roster, paintState, roundLoop) arrive in later steps.
  */
 
+import { engine } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize } from './roster'
+import { assignTeam, rosterSize, getTeam } from './roster'
+import { applyPaint, coverage } from './paintState'
+
+// Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
+// the generous cap; anything beyond is either a bug or a cheater and we drop
+// the whole message rather than half-apply.
+const MAX_IDS_PER_TICK = 100
 
 export async function setupServer(): Promise<void> {
   console.log('[Server] Starting Squareoff server...')
@@ -48,5 +55,34 @@ export async function setupServer(): Promise<void> {
     room.send('teamAssigned', { team }, { to: [from] })
   })
 
-  console.log('[Server] ✅ Ready — listening for ping, joinRoster.')
+  // Paint ingest — client-authored cell ids, attributed to sender's team.
+  // If sender hasn't joined the roster yet (race: paint fires before
+  // teamAssigned round-trips), drop silently — client will resend on the
+  // next tick as new cells accumulate in its outbox.
+  room.onMessage('paintTick', ({ ids }, context) => {
+    const from = context?.from
+    if (!from) return
+    const team = getTeam(from)
+    if (team === null) return  // pre-roster paint, retry on next tick
+    if (ids.length > MAX_IDS_PER_TICK) {
+      console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${MAX_IDS_PER_TICK}`)
+      return
+    }
+    for (const id of ids) applyPaint(id, team)
+  })
+
+  // Coverage log tick (5s). Silent when nothing painted yet; once activity
+  // starts, this is the health signal that Step 3 is working end-to-end.
+  let coverageClock = 0
+  engine.addSystem((dt: number) => {
+    coverageClock += dt
+    if (coverageClock < 5) return
+    coverageClock = 0
+    const c = coverage()
+    if (c.total > 0) {
+      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total}`)
+    }
+  })
+
+  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick.')
 }

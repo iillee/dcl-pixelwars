@@ -34,6 +34,17 @@ export const Messages = {
   // and guaranteed to alternate (fixes the "two blue players in a row"
   // issue the Phase 3 client hash could produce).
   teamAssigned: Schemas.Map({ team: Schemas.Int }),
+
+  // Client → Server: cells painted by the sender since the last flush.
+  // Sent at 10 Hz. Server looks up sender's team from roster, applies to
+  // the authoritative paint map, logs coverage.
+  // WHY ids and not positions: server doesn't have the maze generator (it's
+  // client-only for now), so it can't resolve position -> cell. Client
+  // authors ids via worldToCellId locally; server trusts them for Phase 4.
+  // Anti-cheat (position validation) is deferred to Phase 5 per the plan.
+  // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
+  // is 90 max; anything larger is dropped as suspicious).
+  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String) }),
 }
 
 export const room = registerMessages(Messages)

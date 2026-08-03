@@ -234,9 +234,24 @@ export function removePaintForTile(tileEntity: Entity) {
   paintByTile.delete(tileEntity)
 }
 
+// ─── Network outbox (Phase 4 Step 3) ────────────────────────────────
+// Cell ids painted by the local client since the last drain. Client.ts
+// flushes this to the server via WS (paintTick message) at 10 Hz. Empty
+// in single-player. Populated only when the LOCAL client paints — remote
+// updates (Step 4+) will bypass paintCell entirely to avoid echoing.
+const paintOutbox = new Set<string>()
+export function drainPaintOutbox(): string[] {
+  if (paintOutbox.size === 0) return []
+  const out: string[] = []
+  for (const id of paintOutbox) out.push(id)
+  paintOutbox.clear()
+  return out
+}
+
 export function paintCell(id: string, team: Team) {
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
+  paintOutbox.add(id)
   const e = cellEntity.get(id)
   if (e !== undefined) {
     Material.setPbrMaterial(e, cellMaterial(team))

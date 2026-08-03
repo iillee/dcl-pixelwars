@@ -34,3 +34,14 @@ export function assignTeam(userId: string): number {
 export function rosterSize(): number {
   return roster.length
 }
+
+/**
+ * Look up a userId's team without side effects. Returns 1 (Red), 2 (Blue),
+ * or null if the user has never called joinRoster. Used by the paintTick
+ * handler to attribute paint to a team.
+ */
+export function getTeam(userId: string): number | null {
+  const idx = roster.indexOf(userId)
+  if (idx === -1) return null
+  return (idx % 2 === 0) ? 1 : 2
+}

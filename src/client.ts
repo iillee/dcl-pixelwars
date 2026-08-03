@@ -29,7 +29,7 @@ import { room } from './shared/messages'
 import { SeedHolder, seedHolder } from './shared/components'
 import { setupUi } from './ui'
 import { runStress } from './stress'
-import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage } from './paint'
+import { spawnCellsForTile, initPaintingSystem, clearAllPaintState, removePaintForTile, Team, coverage, drainPaintOutbox } from './paint'
 import { getRoundIndex, showRoundEndBanner } from './round'
 import { movePlayerTo } from '~system/RestrictedActions'
 
@@ -1065,6 +1065,21 @@ export async function setupClient() {
     joinSent = true
     console.log(`[Client] → joinRoster ${pid.address}`)
     room.send('joinRoster', { userId: pid.address })
+  })
+
+  // Paint outbox flusher (Phase 4 Step 3): drain locally-painted cell ids
+  // and send to the server every 100ms (10Hz). Server attributes to the
+  // sender's team, applies to its authoritative map, logs coverage every
+  // 5s. No broadcast back yet — Step 4 wires paintDelta so other players
+  // see our paint.
+  let paintFlushClock = 0
+  engine.addSystem((dt: number) => {
+    paintFlushClock += dt
+    if (paintFlushClock < 0.1) return
+    paintFlushClock = 0
+    const ids = drainPaintOutbox()
+    if (ids.length === 0) return
+    room.send('paintTick', { ids })
   })
 
   // (Foot-disc team indicator removed — visual felt intrusive. Team is
