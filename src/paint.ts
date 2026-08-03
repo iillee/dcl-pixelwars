@@ -99,11 +99,11 @@ const plusRow = (size: number, arm: number, mid: string, edge: string = '.') => 
 // SIZE=16 → 2m cells (~256 max cells/tile); SIZE=32 → 1m cells (~1024/tile).
 // Dropped from 32 to 16 to relieve entity/draw-call load. All other mask
 // constants are ratios of SIZE so shapes stay the same.
-const SIZE = 16
-const ARM = SIZE * 20 / 32      // 10 — corridor width in cells (was 20 at SIZE=32)
-const LO = (SIZE - ARM) / 2     // 3
-const HI = (SIZE + ARM) / 2     // 13
-const END_CLOSED_VOID = SIZE * 6 / 32  // 3 — rows of void on the closed side of `end`
+const SIZE = 32
+const ARM = SIZE * 20 / 32      // 20 — corridor width in cells
+const LO = (SIZE - ARM) / 2     // 6
+const HI = (SIZE + ARM) / 2     // 26
+const END_CLOSED_VOID = SIZE * 6 / 32  // 6 — rows of void on the closed side of `end`
 const inCorridor = (i: number) => i >= LO && i < HI
 
 // Build a mask row-by-row from a predicate.
@@ -287,7 +287,17 @@ export function removePaintForTile(tileEntity: Entity) {
   const rec = paintByTile.get(tileEntity)
   if (!rec) return
   for (const e of rec.entities) engine.removeEntity(e)
-  for (const id of rec.ids) cellEntity.delete(id)
+  for (const id of rec.ids) {
+    cellEntity.delete(id)
+    // Also drop the team association — the cell no longer exists, so any
+    // stale entry would "poison" a future tile that happens to spawn at
+    // the same (tx, tz, ty) with the same cellId. Race repro: a
+    // paintDelta arriving between clearAllPaintState() and tile teardown
+    // re-populates cellTeam for a cell that's about to be destroyed; if
+    // we didn't clear it here, the next round's tile in that slot would
+    // adopt the ghost color via spawnOne()'s `preexisting` lookup.
+    cellTeam.delete(id)
+  }
   paintByTile.delete(tileEntity)
 }
 
