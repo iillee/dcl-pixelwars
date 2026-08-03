@@ -74,6 +74,21 @@ export const Messages = {
     blue: Schemas.Int,
     total: Schemas.Int,
   }),
+
+  // Server → Client (broadcast): UTC round boundary crossed. Carries the
+  // authoritative final score of the just-ended round (all clients show
+  // the same banner — no more "one player sees red won, another sees
+  // tie") plus the seed for the new round. Server has already cleared its
+  // paint state before sending, so the next paintDelta — if any — shows
+  // the new round's counts.
+  // finalTotal is server-side painted-cell count; client re-derives the
+  // banner denominator from its own walkable-cell count (same math as HUD).
+  roundReset: Schemas.Map({
+    seed: Schemas.Int,
+    finalRed: Schemas.Int,
+    finalBlue: Schemas.Int,
+    finalTotal: Schemas.Int,
+  }),
 }
 
 export const room = registerMessages(Messages)

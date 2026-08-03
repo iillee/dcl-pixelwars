@@ -462,11 +462,20 @@ let spawnClock = 0
 let currentSeed = 0
 
 function rebuildMaze(seed: number) {
-  // Reset scoring state instantly so coverage % pill snaps to 0 and no
-  // painting-system logic touches stale ids. Actual entity removal is
-  // queued and drained in chunks below (see teardownQueue) — doing
-  // ~150 tiles + ~30k paint cells synchronously stalls a frame.
-  clearAllPaintState()
+  // NOTE (Phase 4 Step 6 fix): we intentionally do NOT call
+  // clearAllPaintState() here. That call now lives in the roundReset
+  // handler (server-driven boundaries). Previously it wiped cellTeam
+  // on EVERY rebuild, including the one triggered by SeedHolder syncing
+  // on reload — which nuked the just-received snapshot data and left
+  // the maze white despite paint clearly existing server-side.
+  //
+  // With cellTeam preserved across rebuild, snapshot data (or paintDelta
+  // arriving concurrently) populates the map, and spawnOne's adopt-
+  // preexisting-paint code colors new cells correctly as they spawn.
+  //
+  // Round boundary safety: roundReset handler now explicitly calls
+  // clearAllPaintState() BEFORE bumping the seed, so ghost paint from
+  // cellId collisions between old and new mazes can't bleed through.
   for (const e of spawnedEntities) teardownQueue.push(e)
   spawnedEntities.length = 0
   spawnQueue = []
@@ -736,12 +745,17 @@ engine.addSystem((dt: number) => {
 // for the win banner, then write the new roundIndex to SeedHolder — the
 // existing seed watcher takes it from there and rebuilds the maze on every
 // client identically (since every client computed the same roundIndex).
-let lastRoundIndex = 0
-engine.addSystem(() => {
-  if (!initDone) return // wait past INIT_GRACE so we don't fight the first-joiner init
+// DISABLED (Phase 4 Step 6): server now owns the boundary. Kept as dead
+// code for one commit so the diff is easy to review — the server sends
+// roundReset with authoritative counts, and the roundReset handler in
+// main() below does the banner + rebuild + teleport. Delete after verify.
+let lastRoundIndex_UNUSED = 0
+void lastRoundIndex_UNUSED
+/* engine.addSystem(() => {
+  if (!initDone) return
   const idx = getRoundIndex()
-  if (lastRoundIndex === 0) { lastRoundIndex = idx; return }
-  if (idx !== lastRoundIndex) {
+  if (lastRoundIndex_UNUSED === 0) { lastRoundIndex_UNUSED = idx; return }
+  if (idx !== lastRoundIndex_UNUSED) {
     const { red, blue, total } = coverage()
     showRoundEndBanner(red, blue, total)
     lastRoundIndex = idx
@@ -757,7 +771,7 @@ engine.addSystem(() => {
     }).catch(() => {})
     console.log(`Round boundary crossed → new round ${idx} (final: red ${red}/${total}, blue ${blue}/${total})`)
   }
-})
+}) */
 
 // ─── Lever sounds ───────────────────────────────────────────────────
 // Two dedicated audio entities we reposition to the lever each time we fire a
@@ -1109,6 +1123,36 @@ export async function setupClient() {
       applyRemotePaint(id, team as Team)
     }
     setServerCoverage({ red, blue, total })
+  })
+
+  // Round reset (Phase 4 Step 6). Server owns the UTC boundary and
+  // broadcasts one authoritative message with final counts + new seed.
+  // Fixes two playtest bugs at once:
+  //   - winner-mismatch across clients (all now read the same numbers)
+  //   - stale HUD % after rebuild (server clears its state; we zero locally)
+  //   - ghost paint from cellId collisions between old/new mazes (server
+  //     state was empty when new round's first paint lands)
+  // Banner denominator uses client's walkable-cell count (same as HUD),
+  // not server's painted-cell count, otherwise you'd get 100% when only
+  // one team painted this round.
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
+    const localTotal = coverage().total
+    console.log(`[Client] roundReset seed=${seed} final red=${finalRed} blue=${finalBlue} serverTotal=${finalTotal} localTotal=${localTotal}`)
+    showRoundEndBanner(finalRed, finalBlue, localTotal)
+    setServerCoverage({ red: 0, blue: 0, total: 0 })
+    // Clear paint state BEFORE bumping seed. Two reasons:
+    // 1) rebuildMaze() no longer clears (see comment there) so snapshot
+    //    data survives reload — but genuine round transitions still need
+    //    a clean slate to avoid ghost paint from old cellId collisions.
+    // 2) Explicit here = obvious in the diff which code path clears vs
+    //    preserves. The only two callers are this handler and (later, if
+    //    DEV_LEVER ever comes back) a manual admin action.
+    clearAllPaintState()
+    SeedHolder.createOrReplace(seedHolder, { seed })
+    movePlayerTo({
+      newRelativePosition: { x: 80, y: 2, z: 80 },
+      cameraTarget: { x: 80, y: 2, z: 88 },
+    }).catch(() => {})
   })
   let joinSent = false
   engine.addSystem(() => {

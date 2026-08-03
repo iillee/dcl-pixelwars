@@ -12,7 +12,17 @@
 import { engine } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
-import { applyPaint, coverage, drainDelta, getFullState } from './paintState'
+import { applyPaint, coverage, drainDelta, getFullState, clearAll as clearPaintState } from './paintState'
+
+// Round loop constants — MUST match src/round.ts on the client. Server
+// can't import round.ts because that file lives in the client tree; we
+// duplicate the constant deliberately and note it here so nobody edits
+// one without the other.
+const ROUND_LENGTH_MINUTES = 4
+const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
+function currentRoundIndex(): number {
+  return Math.floor(Date.now() / ROUND_INTERVAL_MS)
+}
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -124,5 +134,23 @@ export async function setupServer(): Promise<void> {
     room.send('snapshot', { entries, red: c.red, blue: c.blue, total: c.total }, { to: [from] })
   })
 
-  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz.')
+  // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:
+  // 1) snapshot final coverage BEFORE clearing (banner needs it),
+  // 2) broadcast roundReset with authoritative counts + new seed,
+  // 3) clear paint state so the new round starts clean.
+  // Order matters: broadcast BEFORE clearAll so the message we send
+  // carries the ending round's counts, not zeros.
+  let lastRoundIndex = 0
+  engine.addSystem(() => {
+    const idx = currentRoundIndex()
+    if (lastRoundIndex === 0) { lastRoundIndex = idx; return }
+    if (idx === lastRoundIndex) return
+    const c = coverage()
+    console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
+    room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    clearPaintState()
+    lastRoundIndex = idx
+  })
+
+  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz + roundReset on UTC boundaries.')
 }
