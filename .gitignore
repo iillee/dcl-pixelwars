@@ -8,3 +8,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .editor
+# Blender / SketchUp autosaves & backups
+*.blend1
+*.blend2
+*.skb

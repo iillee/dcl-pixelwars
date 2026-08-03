@@ -866,7 +866,8 @@ engine.addSystem((dt: number) => {
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 let musicEnt: Entity = 0 as Entity
-let musicMuted = false
+// Start muted so scene loads quietly; player unmutes via the UI pill.
+let musicMuted = true
 // Track playback position across pause/resume so the song continues where it
 // left off instead of restarting. Pattern borrowed from flagtag's boomboxState:
 // the SDK reads currentTime on the playing:false→true transition, so we must
@@ -906,7 +907,7 @@ function setupMusic() {
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
     audioClipUrl: MUSIC_SRC,
-    playing: true,
+    playing: !musicMuted,
     loop: true,
     volume: MUSIC_VOLUME,
     global: true,

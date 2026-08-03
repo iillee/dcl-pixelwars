@@ -197,6 +197,20 @@ function cellMaterial(team: Team) {
   }
 }
 
+// ─── Deferred-spawn queue ──────────────────────────────────
+// Paint cells are held back until the tile's grow-in tween finishes so the
+// GLB is fully visible before its grid appears. All entries use the same
+// delay, so the queue naturally stays FIFO-ordered by dueMs.
+const SPAWN_DELAY_MS = 500 // matches spawnTileWithGrow's tween duration
+const deferredSpawns: Array<{ dueMs: number; run: () => void }> = []
+let spawnClockMs = 0
+engine.addSystem((dt: number) => {
+  spawnClockMs += dt * 1000
+  while (deferredSpawns.length && deferredSpawns[0].dueMs <= spawnClockMs) {
+    deferredSpawns.shift()!.run()
+  }
+})
+
 export function paintCell(id: string, team: Team) {
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
@@ -217,6 +231,21 @@ export function spawnCellsForTile(
 ) {
   const raw = MASKS[tileType]
   if (!raw) return // designer hasn't authored this tile's mask yet
+  // Defer the actual spawn so cells appear after the GLB's grow-in tween.
+  deferredSpawns.push({
+    dueMs: spawnClockMs + SPAWN_DELAY_MS,
+    run: () => spawnCellsForTileImmediate(tileType, r, tx, tz, ty, CELL, STEP),
+  })
+}
+
+function spawnCellsForTileImmediate(
+  tileType: string,
+  r: number,
+  tx: number, tz: number, ty: number,
+  CELL: number, STEP: number
+) {
+  const raw = MASKS[tileType]
+  if (!raw) return
   const mask = rotateMask(raw, r)
   const h = mask.length, w = mask[0].length
   // World meters per mask cell. Mask is authored at 1 cell = 1m; the tile
