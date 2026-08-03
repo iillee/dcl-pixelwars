@@ -1,6 +1,6 @@
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
-import { toggleMusic, isMusicMuted } from "./client"
+import { toggleMusic, isMusicMuted } from "./client/audio"
 import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 

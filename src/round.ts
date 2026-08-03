@@ -6,20 +6,18 @@
 // from roundIndex, so all clients converge on the same maze at the same
 // instant just by reading Date.now().
 //
-// Chosen cadence: 4 minutes. Long enough to explore a 160m maze with
-// verticality, short enough that respawning (Phase 6+) won't feel punishing.
-// Splatoon Turf War for comparison runs 3 min.
+// Cadence + pure helpers live in src/shared/roundTiming.ts so the server
+// (headless runtime) can import them too. This file adds client-only
+// concerns: countdown formatting and the round-end banner state.
 
-export const ROUND_LENGTH_MINUTES = 4
-const INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
+export {
+  ROUND_LENGTH_MINUTES,
+  ROUND_INTERVAL_MS,
+  getRoundIndex,
+  getRoundEndMs,
+} from './shared/roundTiming'
 
-export function getRoundIndex(): number {
-  return Math.floor(Date.now() / INTERVAL_MS)
-}
-
-export function getRoundEndMs(): number {
-  return (getRoundIndex() + 1) * INTERVAL_MS
-}
+import { getRoundEndMs } from './shared/roundTiming'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -71,4 +69,25 @@ export function getBanner(): BannerState {
     banner.visible = false
   }
   return banner
+}
+
+// ─── Server event subscriber ────────────────────────────────────
+import { events } from './shared/events'
+import { coverage } from './paint'
+
+/**
+ * initRoundNet — shows the end-of-round banner when the server declares
+ * a round boundary. Denominator uses the client's walkable-cell count
+ * (from paint.coverage) rather than the server's painted-cell count —
+ * otherwise a round where only one team painted would show 100%.
+ */
+export function initRoundNet(): void {
+  events.on('round:reset', ({ seed, finalRed, finalBlue, finalTotal }) => {
+    const localTotal = coverage().total
+    console.log(
+      `[Client] roundReset seed=${seed} final red=${finalRed} blue=${finalBlue} ` +
+      `serverTotal=${finalTotal} localTotal=${localTotal}`
+    )
+    showRoundEndBanner(finalRed, finalBlue, localTotal)
+  })
 }

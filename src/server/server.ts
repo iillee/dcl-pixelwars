@@ -5,8 +5,9 @@
  * process (hammurabi-server). No 3D, no ~system/RestrictedActions —
  * pure state + WS message handling.
  *
- * PHASE 4 STEP 1: hello-world only. Handles ping → broadcasts pong.
- * Domain modules (roster, paintState, roundLoop) arrive in later steps.
+ * Responsibilities: roster/team assignment, authoritative paint state,
+ * 5Hz paintDelta broadcasts, snapshot requests, and UTC-boundary
+ * roundReset. See src/shared/messages.ts for the wire schema.
  */
 
 import { engine } from '@dcl/sdk/ecs'
@@ -14,15 +15,10 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
 import { applyPaint, coverage, drainDelta, getFullState, clearAll as clearPaintState } from './paintState'
 
-// Round loop constants — MUST match src/round.ts on the client. Server
-// can't import round.ts because that file lives in the client tree; we
-// duplicate the constant deliberately and note it here so nobody edits
-// one without the other.
-const ROUND_LENGTH_MINUTES = 4
-const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
-function currentRoundIndex(): number {
-  return Math.floor(Date.now() / ROUND_INTERVAL_MS)
-}
+// Round loop constants — single source of truth lives in shared/roundTiming.ts
+// so client (src/round.ts) and server share the exact same cadence. Do not
+// redefine here; edit the shared module if the cadence changes.
+import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -31,17 +27,6 @@ const MAX_IDS_PER_TICK = 100
 
 export async function setupServer(): Promise<void> {
   console.log('[Server] Starting Squareoff server...')
-
-  // Ping handler — echo a pong to the sender. Kept for Phase 4 diagnostics;
-  // will retire once real gameplay messages are the health signal.
-  room.onMessage('ping', ({ t }, context) => {
-    const from = context?.from ?? '<unknown>'
-    const serverT = Date.now()
-    console.log(`[Server] ping from ${from} (client t=${t}) → pong ${serverT}`)
-    if (context?.from) {
-      room.send('pong', { t, serverT }, { to: [context.from] })
-    }
-  })
 
   // Roster handler — assign or look up a player's team.
   // Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
@@ -152,5 +137,5 @@ export async function setupServer(): Promise<void> {
     lastRoundIndex = idx
   })
 
-  console.log('[Server] ✅ Ready — listening for ping, joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz + roundReset on UTC boundaries.')
+  console.log('[Server] ✅ Ready — listening for joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz + roundReset on UTC boundaries.')
 }

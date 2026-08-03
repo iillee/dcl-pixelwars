@@ -9,7 +9,50 @@ import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 
 // ─── Teams ───────────────────────────────────────────────────────────
-export enum Team { None = 0, Red = 1, Blue = 2 }
+// Team enum lives in shared/ so the server can reference it symbolically.
+// Re-exported here so existing `import { Team } from './paint'` call sites
+// keep working during the refactor.
+export { Team } from './shared/team'
+import { Team } from './shared/team'
+import { events } from './shared/events'
+
+/**
+ * initPaintNet — wire this module's server-event subscribers.
+ *
+ * Publishers (clientHandler.ts) don't know we exist. We subscribe here
+ * to keep all paint-related side effects in the paint module. Call once
+ * from setupClient() after paint state is initialized.
+ */
+export function initPaintNet(): void {
+  // Server broadcasts every 200ms with all changes since the last tick
+  // + current coverage. This is the ONLY path that colors cells now —
+  // both our own paint (echoed back) and other players' paint arrive
+  // through here uniformly.
+  events.on('paint:delta', ({ changes, red, blue, total }) => {
+    for (const { id, team } of changes) applyRemotePaint(id, team)
+    setServerCoverage({ red, blue, total })
+  })
+
+  // Snapshot arrives once per teamAssigned (or on manual requestSnapshot).
+  // Same processing path as paint:delta — material updates and cellTeam
+  // bookkeeping stay consistent whether the client's tile entities have
+  // finished spawning yet or not (spawnOne adopts pre-existing paint).
+  events.on('paint:snapshot', ({ entries, red, blue, total }) => {
+    for (const { id, team } of entries) applyRemotePaint(id, team)
+    setServerCoverage({ red, blue, total })
+  })
+
+  // Round boundary: clear the paint map BEFORE the seed watcher sees
+  // the new seed and rebuilds. Two reasons:
+  // 1) rebuildMaze does NOT clear (so mid-round snapshots survive reload).
+  //    Real round transitions still need a clean slate here to avoid
+  //    ghost paint from cellId collisions between old/new mazes.
+  // 2) Zero the coverage HUD immediately — next paintDelta will refill it.
+  events.on('round:reset', () => {
+    clearAllPaintState()
+    setServerCoverage({ red: 0, blue: 0, total: 0 })
+  })
+}
 
 const TEAM_COLORS: Record<Team, Color4> = {
   [Team.None]: Color4.create(1, 1, 1, 1),

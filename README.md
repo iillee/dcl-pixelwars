@@ -1,12 +1,16 @@
-# Labyrinthia
+# Labyrinthia · Squareoff
 
-A procedurally generated 3D maze for Decentraland, built with SDK7.
+A team tile-coverage game played on a procedurally generated 3D maze, built for Decentraland with SDK7.
 
-Every time the scene loads, a fresh maze is grown from a small set of modular tile pieces — corridors, forks, crossings, and multi‑level ramps that stack into a labyrinth spanning 10×10 parcels (160m × 160m).
+**Squareoff** — two teams (Red and Blue) run around a fresh maze every round, painting the walkable surface in their color just by walking on it. Highest coverage at the round timer wins. Inspired by Splatoon's *Turf War*.
+
+**Labyrinthia** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 10×10 parcel labyrinth (160m × 160m). Seed is derived from a UTC round boundary so every player sees the same maze at the same instant with zero sync overhead.
+
+**Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
 **Live:** [labyrinthia.dcl.eth](https://play.decentraland.org/?realm=labyrinthia.dcl.eth)
 
-This project is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set.
+The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`SQUAREOFF-DESIGN.md`](SQUAREOFF-DESIGN.md) for the game design doc.
 
 ---
 
@@ -45,7 +49,7 @@ Maze growth is a frontier‑based flood‑fill with vertical stacking:
 1. **Seed** — about 1 seed per 25 parcels are dropped as `end` tiles at random cells on the ground level.
 2. **Grow** — the open edges of placed tiles feed a frontier queue. Cells are consumed lowest‑Y first (so each floor fills horizontally before ramps climb).
 3. **Pick a tile** — a weighted pool favours branching/ramp tiles (`ramp ×3, cross ×2, fork ×2, turn, straight`), falling back to `end` only when nothing else fits.
-4. **Validate placement** — each candidate must pass strict connectivity checks: openings can't face off‑grid or into a wall, ramps can't collide vertically, and multi‑level ramp interactions must "handshake" correctly (see [`canPlace()`](src/index.ts) for the full ruleset).
+4. **Validate placement** — each candidate must pass strict connectivity checks: openings can't face off‑grid or into a wall, ramps can't collide vertically, and multi‑level ramp interactions must "handshake" correctly (see `canPlace()` in [`src/client.ts`](src/client.ts) for the full ruleset).
 5. **Validate result** — after growth, every opening on every placed tile must connect to a matching neighbour. If any dangle, discard and retry with a new seed (up to 500 attempts).
 
 Ramps are the tricky part. Because a ramp's high side lands one level up in an adjacent cell, they interact with neighbours on multiple Y levels simultaneously. The generator enforces several rules to keep stairs walkable:
@@ -60,7 +64,7 @@ Generation is deterministic given a seed: the RNG is a small mulberry32, and the
 
 ## Remix guide
 
-The whole generator is a single file: [`src/index.ts`](src/index.ts). Common tweaks:
+The maze generator lives in [`src/client.ts`](src/client.ts) (it runs on the client since it's purely visual — the server only tracks paint state). Common tweaks:
 
 | Want to… | Change |
 |---|---|
@@ -69,10 +73,10 @@ The whole generator is a single file: [`src/index.ts`](src/index.ts). Common twe
 | Bias the tile mix | `GROWTH_PRIMARY` weighted array |
 | More/fewer seed points | `SEED_COUNT` formula in `generate()` |
 | Cap tower height | `MAX_Y` |
-| Lock a specific maze | Set `startSeed` in `main()` to a known‑good number |
+| Lock a specific maze | Hard‑code a seed instead of deriving from `getRoundIndex()` in `client.ts` |
 | Swap the geometry | Replace files in `assets/models/` (keep the same names & pivot at SW corner) |
 
-Tile pivots are at the south‑west corner with geometry extending `+X` / `+Z`. If you author replacements with a centred pivot you'll need to adjust `ROT_OFFSET` in `src/index.ts`.
+Tile pivots are at the south‑west corner with geometry extending `+X` / `+Z`. If you author replacements with a centred pivot you'll need to adjust `ROT_OFFSET` in `src/client.ts`.
 
 ---
 
@@ -102,15 +106,27 @@ To deploy to your own World, change `worldConfiguration.name` to a DCL NAME or E
 ```
 maze/
 ├── assets/
-│   ├── blender/       # Blender source (.blend)
-│   ├── sketchup/      # SketchUp source (.skp)
-│   ├── images/        # Design reference art
-│   ├── models/        # Exported .glb tiles used by the scene
-│   └── scene/         # Creator Hub composite
+│   ├── blender/            # Blender source (.blend)
+│   ├── sketchup/           # SketchUp source (.skp)
+│   ├── images/             # Design reference art
+│   ├── models/             # Exported .glb tiles used by the scene
+│   └── scene/              # Creator Hub composite
 ├── src/
-│   ├── index.ts       # Generator + scene entry point
-│   └── ui.tsx         # Hint banner UI
-├── scene.json         # Parcels, spawn points, world config
+│   ├── index.ts            # Entry router — branches on isServer()
+│   ├── client.ts           # Maze rendering, painting, input, audio (client runtime)
+│   ├── paint.ts            # Grid + paint mechanic
+│   ├── round.ts            # Client round timer + end-of-round banner
+│   ├── ui.tsx              # HUD (React-ECS)
+│   ├── stress.ts           # Load-test harness
+│   ├── server/             # Headless authoritative server
+│   │   ├── server.ts       # Orchestrator, round loop, message handlers
+│   │   ├── roster.ts       # Team assignment
+│   │   └── paintState.ts   # Authoritative paint map
+│   └── shared/             # Imported by both client and server
+│       ├── messages.ts     # WS message schema
+│       ├── components.ts   # Shared ECS components
+│       └── roundTiming.ts  # Round cadence + UTC helpers
+├── scene.json              # Parcels, spawn points, world config
 └── package.json
 ```
 
