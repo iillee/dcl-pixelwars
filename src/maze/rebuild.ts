@@ -23,11 +23,12 @@ import {
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 
 import {
-  Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET,
+  Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
+  GRID_W, GRID_H,
   generateWithRetry, getPlacedTilesInOrder, gridSize,
 } from './generator'
 import { TILES } from './tiles'
-import { spawnCellsForTile, removePaintForTile } from '../paint'
+import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { events } from '../shared/events'
 import { SeedHolder, seedHolder } from '../shared/components'
 
@@ -42,6 +43,19 @@ let spawnQueue: SpawnStep[] = []
 let spawnClock = 0
 let currentSeed = 0
 const teardownQueue: Entity[] = []
+
+// ─── Persistent center cross ────────────────────────────────────────
+// The generator always places a `cross` tile at grid center (see
+// generate() in generator.ts). We spawn it once on the first rebuild
+// and keep the same entity forever so players standing on it during a
+// round boundary aren't shoved by the tear-down / grow-in animation.
+// On subsequent rebuilds we skip it in both teardown and spawn queues,
+// and reset its paint via resetPaintForTile() instead.
+let centerTileEntity: Entity | null = null
+const CENTER_X = Math.floor(GRID_W / 2)
+const CENTER_Z = Math.floor(GRID_H / 2)
+const isCenterTile = (p: Placed) =>
+  p.x === CENTER_X && p.z === CENTER_Z && p.y === 0
 const TILE_TEARDOWN_PER_FRAME = 25
 const STAGGER = 0.03 // seconds between successive tile spawns
 
@@ -53,8 +67,17 @@ export function isRebuilding(): boolean {
 // ─── Rebuild entry point ────────────────────────────────────────────
 export function rebuildMaze(seed: number): void {
   // Push existing tiles into the teardown queue (drained per-frame below).
-  for (const e of spawnedEntities) teardownQueue.push(e)
+  // The center tile is preserved: skip its teardown and reset its paint
+  // in place so players standing on it aren't disturbed.
+  for (const e of spawnedEntities) {
+    if (e === centerTileEntity) {
+      resetPaintForTile(e)
+    } else {
+      teardownQueue.push(e)
+    }
+  }
   spawnedEntities.length = 0
+  if (centerTileEntity !== null) spawnedEntities.push(centerTileEntity)
   spawnQueue = []
   spawnClock = 0
 
@@ -67,7 +90,13 @@ export function rebuildMaze(seed: number): void {
   console.log(`Maze rebuilt from seed ${seed} → winning seed ${winningSeed}, ${gridSize()} tiles`)
 
   const tiles = getPlacedTilesInOrder()
-  spawnQueue = tiles.map((p, i) => ({ p, delay: i * STAGGER }))
+  // Skip the center tile on rebuilds — it already exists as a persistent
+  // entity. On the very first rebuild (centerTileEntity === null) we spawn
+  // it like any other tile; spawnTileWithGrow() will latch onto it.
+  const skipCenter = centerTileEntity !== null
+  spawnQueue = tiles
+    .filter(p => !(skipCenter && isCenterTile(p)))
+    .map((p, i) => ({ p, delay: i * STAGGER }))
 }
 
 /** For diagnostics / debug HUD only. */
@@ -102,8 +131,14 @@ engine.addSystem((dt: number) => {
 function spawnTileWithGrow(p: Placed): void {
   const [dx, dz] = ROT_OFFSET[p.r]
   const e = engine.addEntity()
+  // Latch the center tile's entity on first spawn so all future rebuilds
+  // can preserve it. (Only reached when centerTileEntity is null; the
+  // rebuild filter skips this tile on subsequent rounds.)
+  if (centerTileEntity === null && isCenterTile(p)) {
+    centerTileEntity = e
+  }
   Transform.create(e, {
-    position: Vector3.create(p.x * CELL + dx, p.y, p.z * CELL + dz),
+    position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, p.y, p.z * CELL + dz + MAZE_ORIGIN),
     rotation: Quaternion.fromEulerDegrees(0, p.r * 90, 0),
     scale: Vector3.create(0.001, 0.001, 0.001),
   })

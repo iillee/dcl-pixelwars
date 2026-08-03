@@ -12,11 +12,11 @@
 
 **Squareoff** is a team-based tile-coverage game built on top of the procedural maze scene at `labyrinthia.dcl.eth`. Inspired by Splatoon's *Turf War* mode.
 
-**Core fantasy:** Teams compete to claim the maze's walkable surface — subdivided into 2m grid squares — in their team's color. Walking over a square flips it to your color, overwriting the enemy's if present. At round end (every 4 minutes on the UTC boundary), the team with the highest coverage percentage wins.
+**Core fantasy:** Teams compete to claim the maze's walkable surface — subdivided into 2m grid squares — in their team's color. Walking over a square flips it to your color, overwriting the enemy's if present. At round end (every 5 minutes on the UTC boundary), the team with the highest coverage percentage wins.
 
 **Name:** *Squareoff* = a face-off + literal squares.
 
-**Why on the maze?** The procedurally-generated multi-level labyrinth gives every round a fresh battleground — no static map memorization, verticality via ramps, natural chokepoints. The UTC-boundary round system regenerates the seed every 4 minutes, so no two rounds share terrain.
+**Why on the maze?** The procedurally-generated multi-level labyrinth gives every round a fresh battleground — no static map memorization, verticality via ramps, natural chokepoints. The UTC-boundary round system regenerates the seed every 5 minutes, so no two rounds share terrain.
 
 ---
 
@@ -149,7 +149,7 @@ Coverage counters are updated by the server on every 5 Hz `paintDelta` broadcast
 
 **Trust model:** all `userId` values come from `context.from` (server-authenticated), never from payload fields. Team assignment is `roster.indexOf(userId) % 2` — stable across rejoin, guaranteed alternation by join order.
 
-**Round timing:** UTC-aligned 4-minute boundaries. Single source of truth in [`src/shared/roundTiming.ts`](../../src/shared/roundTiming.ts); both client and server compute the same `getRoundIndex()`.
+**Round timing:** UTC-aligned 5-minute boundaries. Single source of truth in [`src/shared/roundTiming.ts`](../../src/shared/roundTiming.ts); both client and server compute the same `getRoundIndex()`.
 
 ---
 
@@ -335,7 +335,7 @@ const GROUND_TOLERANCE = 0.4                           // grounded threshold for
 
 **[`src/shared/roundTiming.ts`](../../src/shared/roundTiming.ts):**
 ```ts
-export const ROUND_LENGTH_MINUTES = 4
+export const ROUND_LENGTH_MINUTES = 5
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 ```
 

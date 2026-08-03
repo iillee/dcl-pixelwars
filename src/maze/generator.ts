@@ -26,14 +26,23 @@ import { rand, setSeed } from './rng'
 // its per-tile cell grids consistently.
 export const TILE_SCALE = 2                                          // uniform GLB scale
 export const CELL = 16 * TILE_SCALE                                  // one grid cell = 32 m
-export const GRID_W = Math.floor(160 / CELL)                         // scene is 160×160 m
-export const GRID_H = Math.floor(160 / CELL)
+// Scene is 11×11 parcels = 176×176 m. 176/32 = 5.5, so we use a 5×5
+// maze grid (160 m) centered inside the scene with an 8 m border on all
+// sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
+// so cell (2,2) — the true center — lands exactly at world (88, 88).
+export const SCENE_SIZE = 176
+export const GRID_W = Math.floor(SCENE_SIZE / CELL)
+export const GRID_H = Math.floor(SCENE_SIZE / CELL)
+export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 8 m border
 export const STEP = 5.3835 * TILE_SCALE                              // ramp Y increment
                                                                      // (5.3835 m = walkable floor-to-floor in the new tile GLBs)
-export const MAX_Y = 60                                              // stack cap — halved from
-                                                                     // 120 to keep the maze
-                                                                     // horizontal → more player
-                                                                     // collisions → more contested paint
+export const MAX_Y = 40                                              // stack cap — 4 levels max
+                                                                     // (Y = 0, 10.77, 21.53, 32.30).
+                                                                     // STEP is 10.767 so 40 blocks
+                                                                     // level 4 (43.07) while allowing
+                                                                     // level 3. Keeps play flat → more
+                                                                     // player collisions → more
+                                                                     // contested paint.
 
 // ─── Tile record type ───────────────────────────────────────────────
 export interface Placed {
@@ -342,23 +351,15 @@ function frontierFrom(
 export function generate(): void {
   const frontier: { x: number; z: number; y: number }[] = []
 
-  // Roughly 1 seed per 25 parcels. For 10×10 that's 4 seeds — enough
-  // for horizontal variety without exploding the retry budget.
-  const SEED_COUNT = Math.max(1, Math.round((GRID_W * GRID_H) / 25))
-  let seedsPlaced = 0
-  let attempts = 0
-  while (seedsPlaced < SEED_COUNT && attempts++ < 100) {
-    const sx = Math.floor(rand() * GRID_W)
-    const sz = Math.floor(rand() * GRID_H)
-    if (grid.has(key(sx, sz, 0))) continue
-    for (const r of shuffle([0, 1, 2, 3])) {
-      if (canPlace('end', r, sx, sz, 0)) {
-        placeTile('end', r, sx, sz, 0)
-        frontierFrom(grid.get(key(sx, sz, 0))!, frontier)
-        seedsPlaced++
-        break
-      }
-    }
+  // Fixed center seed: place a `cross` tile (4 openings) at the exact
+  // grid center. This is the mandatory rally point — same world position
+  // every round, four symmetric arms fanning out to N/S/E/W. Downstream
+  // teleport-home / respawn logic can rely on it always being there.
+  const cx = Math.floor(GRID_W / 2)
+  const cz = Math.floor(GRID_H / 2)
+  if (canPlace('cross', 0, cx, cz, 0)) {
+    placeTile('cross', 0, cx, cz, 0)
+    frontierFrom(grid.get(key(cx, cz, 0))!, frontier)
   }
 
   let safety = 5000

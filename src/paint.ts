@@ -7,6 +7,7 @@
 
 import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
+import { MAZE_ORIGIN } from './maze/generator'
 
 // ─── Teams ───────────────────────────────────────────────────────────
 // Team enum lives in shared/ so the server can reference it symbolically.
@@ -290,6 +291,23 @@ export function removePaintForTile(tileEntity: Entity) {
   paintByTile.delete(tileEntity)
 }
 
+/**
+ * Reset paint on a tile without destroying its entities. Used for the
+ * persistent center-cross tile at round boundaries: the tile geometry
+ * stays in place (so players standing on it aren't shoved by grow-in),
+ * but its paint cells snap back to Team.None so the new round starts
+ * with a clean slate underfoot.
+ */
+export function resetPaintForTile(tileEntity: Entity) {
+  const rec = paintByTile.get(tileEntity)
+  if (!rec) return
+  const noneMat = cellMaterial(Team.None)
+  for (let i = 0; i < rec.entities.length; i++) {
+    Material.setPbrMaterial(rec.entities[i], noneMat)
+    cellTeam.set(rec.ids[i], Team.None)
+  }
+}
+
 // ─── Network outbox (Phase 4 Step 3) ────────────────────────────────
 // Cell ids the local player has walked onto since the last flush. Client.ts
 // drains this at 10Hz and sends paintTick { ids } to the server. Server
@@ -385,8 +403,8 @@ function spawnCellsForTileImmediate(
   // fills CELL x CELL world meters, so w should equal CELL.
   const cellSize = CELL / w
 
-  const tileWorldX = tx * CELL
-  const tileWorldZ = tz * CELL
+  const tileWorldX = tx * CELL + MAZE_ORIGIN
+  const tileWorldZ = tz * CELL + MAZE_ORIGIN
 
   // Ramp height helper: canonical ramp rises +Z (N high). After tile rotation
   // r, the slope axis rotates too. Given a world (wx, wz) on the tile, we
@@ -548,16 +566,16 @@ export function worldToCellId(
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null
 ): { id: string; groundY: number } | null {
-  const tx = Math.floor(px / CELL)
-  const tz = Math.floor(pz / CELL)
+  const tx = Math.floor((px - MAZE_ORIGIN) / CELL)
+  const tz = Math.floor((pz - MAZE_ORIGIN) / CELL)
   const tile = lookupTile(tx, tz, py)
   if (!tile) return null
 
   const raw = MASKS[tile.type]
   if (!raw) return null
 
-  const tileWorldX = tx * CELL
-  const tileWorldZ = tz * CELL
+  const tileWorldX = tx * CELL + MAZE_ORIGIN
+  const tileWorldZ = tz * CELL + MAZE_ORIGIN
 
   // ─── Ramp branch: use shared canonical-frame helper ───────────────
   if (tile.type === 'ramp') {
