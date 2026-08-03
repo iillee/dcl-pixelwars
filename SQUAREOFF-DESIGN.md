@@ -1,6 +1,6 @@
 # Squareoff — Design Document
 
-**Status:** Design phase, pre-implementation. Living on local `squareoff` branch off the `labyrinthia` maze project (not pushed to GitHub).
+**Status:** Phase 1 complete and deployed live at `labyrinthia.dcl.eth`. Painting is per-client (no cross-player sync yet). Own private repo at `github.com/iillee/squareoff` (branch `squareoff`).
 
 **Session handoff:** This document is the starting point for a fresh session. Read it, then continue from **Next Steps** at the bottom.
 
@@ -30,7 +30,7 @@
 | **6** | Damage in enemy paint (Splatoon mechanic). Respawn at team base. | Medium |
 | **7** | Squid-swim mobility on own team's paint (fast travel through own color). Special weapons. | High |
 
-**Focus for the next session:** Phase 1 only.
+**Focus for the next session:** Phase 3 (two teams) recommended — makes multiplayer meaningful before adding sync in Phase 4. See Next Steps at bottom for details.
 
 ---
 
@@ -175,44 +175,96 @@ Coverage counter walks the master painted-cells map periodically (not every fram
 
 ## 9. Repo state at handoff
 
-**Branch:** `squareoff` (local only, not pushed)
-**Base:** `main` branch of `labyrinthia` repo (deployed to `labyrinthia.dcl.eth`)
-**Reference branch:** `drip` (local only) — contains the rejected trail-approach prototype. Look here if you want to see what was tried and why it was abandoned.
+**Branch:** `squareoff` (tracks `squareoff` remote at `github.com/iillee/squareoff`, private).
+**Base:** `main` branch of `labyrinthia` repo (still on `origin`, public, not modified by squareoff work).
+**Reference branch:** `drip` (local only) — contains the rejected trail-approach prototype.
 
-**Files of interest on `squareoff`:**
-- `src/index.ts` — clean maze code, no paint experiments. Squareoff grid system to be added.
-- `src/ui.tsx` — mute button, lever-cooldown label. Needs a coverage % display for squareoff.
-- `assets/models/tile-*.glb` — the 6 tile GLBs; being re-exported by designer.
-- `assets/images/subdivisions.jpg` — designer's mockup of the 1m grid overlay on each tile type.
+**History note:** The squareoff remote had its history rewritten with `git filter-branch` to purge `HomeAgain_Loop.wav` (52MB) from all reachable commits. Clone size is ~3MB. Local `main` and `drip` still contain the WAV since they weren't rewritten — harmless.
+
+**Files of interest:**
+- `src/index.ts` — maze code + wiring for paint. `spawnCellsForTile` called from `spawnTileWithGrow` (line ~520); `initPaintingSystem` called from `main()` with a `lookupTile` closure over the maze grid.
+- `src/paint.ts` — the whole paint system: masks, `rampGeometry`, `spawnCellsForTile`, `worldToCellId`, coverage, painting system with grounded gating + 3x3 footprint.
+- `src/ui.tsx` — hint pill + mute button + coverage pill (red% — blue%).
+- `src/stress.ts` — dormant plane-spawn stress harness (`STRESS_COUNT = 0`).
+- `assets/models/tile-*.glb` — re-exported tiles with 1m-grid-aligned walkable footprints, white surfaces, floor slab 0.25 local (0.5m world) above origin.
+- `assets/images/pallet.jpeg` — team color source: red `#FF7577`, blue `#6A99FC`.
+- `assets/images/subdivisions.jpg` — designer's mockup that guided mask authoring.
 - `SQUAREOFF-DESIGN.md` — this file.
 
 ---
 
-## 10. Next Steps (in order)
+## 10. Phase 1 — what actually shipped
 
-For the fresh session picking this up:
+All checklist items done, live on `labyrinthia.dcl.eth`.
 
-1. **Wait for re-exported tile GLBs + confirmed dimensions from the designer.** Don't code masks against the old GLBs — they're changing.
-2. **Author 6 tile masks** based on new GLB dimensions. Start with rough guesses if the designer isn't ready; iterate live.
-3. **Implement grid spawn on tile placement.** Hook into the existing tile spawn system in `spawnTileWithGrow` — after the tile appears, spawn its child paint cells with the mask.
-4. **Implement painting.** Per-frame: read player pos → tile lookup → local cell math → color change.
-5. **Add coverage % pill to UI** next to the existing lever-hint pill.
-6. **Stress test:** Force-generate a full maze, walk everywhere, check FPS. If it tanks → drop to 2m cells.
-7. **Only then** move to Phase 2 (round timer + win state).
+**Mask conventions (canonical / unrotated):**
+- Row 0 = south (–Z), row `SIZE-1` = north (+Z).
+- Col 0 = west (–X), col `SIZE-1` = east (+X).
+- Mask is rotated 90° CW per tile `r` via `rot90cw` before iteration.
+- Chars: `.` = void, `F` = flat cell, `0`–`9` = height digit (unused now that ramps take a dedicated path).
 
-**Do NOT** attempt Phases 3+ until Phase 1 feels tight in single-player.
+**Ramp handling (dedicated path in `spawnCellsForTile`):**
+- Flat landings at both ends (1 cell wide each; controlled by `RAMP_FLAT_END`).
+- Incline cells spaced at `cellSize` intervals *along the slope* (not horizontally) so 2m squares tile flush across the tilted surface with no gaps and no size compensation.
+- Incline cells tilted around the tile's slope axis by `atan(STEP / inclineLen)`.
+- `rampCellIdxFromCanonical` is shared by spawn and `worldToCellId` so painting-under-player uses the exact same cell IDs the spawner assigned.
+
+**Painting behavior:**
+- 3×3 cell footprint centered on player.
+- Grounded gate: center-cell `groundY` must be within `0.4m` of player Y or the whole footprint is skipped (rejects jumps / glides / falls). Neighbor cells additionally reject if `|player.y – cellGroundY| > 1.5m` (skips cells on other floors).
+- Cell materials: matte PBR (`roughness=1`, `metallic=0`, `specularIntensity=0`).
+- Paint cells spawn 500ms after the tile's grow-in tween so tiles pop in before their grid appears.
+
+**Deploy workflow (important — don't use `/deploy` alone):**
+```
+npx sdk-commands build
+npx sdk-commands deploy --skip-build --target-content https://worlds-content-server.decentraland.org
+```
+
+The built-in `/deploy` (and plain `sdk-commands deploy`) internally runs a `--production` build. In production mode the bundler treats `assets/scene/main.composite` (Creator Hub visual editor artifact + `@dcl/asset-packs` runtime) as the primary scene source and tree-shakes our TypeScript entry, producing a broken 585KB bundle with none of our code. The two-step workflow avoids this by using the non-production 6.5MB bundle. See open question in §8 for a proper long-term fix.
 
 ---
 
-## Appendix — key constants from `src/index.ts` (as of session end)
+## 11. Next Steps (in order)
 
+Recommended path for the next session:
+
+1. **Real-world stress observations.** With the scene deployed live, note any FPS issues, dropped frames during tile grow-in, regen churn from lever spam, etc. If problems appear, tune (drop SIZE further, shrink footprint, etc.) before adding features.
+2. **Phase 3 first (before Phase 2).** Add two-team support (Red + Blue, palette colors already in `TEAM_COLORS`). Team assignment via a simple UI button or auto-assign on join. Once two teams exist, painting is competitive and interesting even before round timers or sync.
+3. **Phase 2.** Round timer + win banner + reset. Now meaningful because coverage % is a two-sided race.
+4. **Phase 4 (sync).** The big one before any competitive multiplayer. Approach per §7: one synced entity holding the whole paint bitfield (NOT one entity per cell), debounced batched writes per player, snapshot-on-join for late joiners.
+5. **Phases 5–7.** Combat, damage in enemy paint, squid-swim. Only after Phases 2–4 are solid.
+
+**Also worth doing when convenient:**
+- Investigate the composite / production-build issue properly. Options: annotate `main()` to preserve it, mark `src/index.ts` as `sideEffects: true` in `package.json`, or delete `main.composite` (after reproducing the SpawnArea1 + Labyrinthia asset it contains in code).
+- Foot color indicator under the player (mentioned as §8.5 open question). Nice UX polish once teams exist.
+
+**Do NOT** attempt Phases 5+ until Phases 2–4 are solid.
+
+---
+
+## Appendix — key constants (as of Phase 1 close)
+
+**`src/index.ts`:**
 ```ts
-const TILE_SCALE = 2                                  // tiles are scaled 2x on spawn
+const TILE_SCALE = 2                                  // tiles scaled 2x on spawn
 const CELL = 16 * TILE_SCALE                          // = 32m per maze grid cell
 const GRID_W = Math.floor(160 / CELL)                 // = 5 cells across
 const GRID_H = Math.floor(160 / CELL)                 // = 5 cells across
-const STEP = 5 * TILE_SCALE                           // = 10m ramp Y rise
+const STEP = 5.3835 * TILE_SCALE                      // = 10.767m ramp Y rise (from new GLB geometry)
 const MAX_Y = 120                                     // max stack height
 ```
 
-Do not change these — the paint grid is a subdivision within each `CELL`-sized tile.
+**`src/paint.ts`:**
+```ts
+const SIZE = 16                                       // cells across a tile → 2m cells
+const ARM = 10                                        // corridor width in cells (= SIZE * 20/32)
+const LO = 3, HI = 13                                 // corridor band bounds
+const RAMP_FLAT_END = 1                               // cells of flat landing at each ramp end
+export const FLAT_OFFSET = 0.275 * 2                  // = 0.55m world above tile origin
+const WALKABLE_TOP = 0.5                              // top of floor slab in world meters
+const SPAWN_DELAY_MS = 500                            // paint cells wait for tile grow-in tween
+const GROUND_TOLERANCE = 0.4                          // grounded threshold for painting
+```
+
+The grid `Map` key in `src/index.ts` rounds Y to 3 decimals — `STEP` is a float now and raw arithmetic drifts, which previously silently broke the "no tile above ramp" rule.
