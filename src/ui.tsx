@@ -1,8 +1,33 @@
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
-import { toggleMusic, isMusicMuted } from "./client/audio"
+import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
+import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
+import { room } from "./shared/messages"
+
+// Popup open/close state — module-local, driven by star-button clicks.
+// React-ECS re-renders every frame so a plain variable is enough.
+let leaderboardOpen = false
+function toggleLeaderboard(): void {
+  playUiClick()
+  leaderboardOpen = !leaderboardOpen
+  if (leaderboardOpen) {
+    // Ask server for the freshest snapshot when opening; response arrives
+    // as a CRDT update to LeaderboardState within a frame or two.
+    room.send('requestLeaderboard', {})
+  }
+}
+
+interface LbEntry { userId: string; name: string; cellsPainted: number }
+function readLeaderboard(): LbEntry[] {
+  const s = LeaderboardState.getOrNull(leaderboardStateEntity)
+  if (!s || !s.json) return []
+  try {
+    const arr = JSON.parse(s.json)
+    return Array.isArray(arr) ? arr : []
+  } catch { return [] }
+}
 
 export function setupUi() {
   ReactEcsRenderer.setUiRenderer(uiMenu, { virtualWidth: 1920, virtualHeight: 1080 })
@@ -69,12 +94,26 @@ export const uiMenu = () => (
               uiBackground={{ color: COUNTDOWN_BG }}
             >
               <Label value={formatMMSS(secs)} fontSize={42} color={Color4.White()} textAlign="middle-center" />
+              {/* Star icon on the left, mirror position to the mute icon on
+                  the right. Placeholder — no handler yet; wire onMouseDown
+                  when we decide what it does (leaderboard? favorites?). */}
+              <UiEntity
+                uiTransform={{
+                  width: 19, height: 19,
+                  positionType: 'absolute', position: { top: 25, left: 20 },
+                  justifyContent: 'center', alignItems: 'center',
+                  pointerFilter: 'block',
+                }}
+                onMouseDown={toggleLeaderboard}
+              >
+                <Label value="★" fontSize={22} color={Color4.White()} textAlign="middle-center" />
+              </UiEntity>
               {/* Mute icon docked inside the timer panel on the right. No pill
                   background — just the icon sitting on the panel. */}
               <UiEntity
                 uiTransform={{
-                  width: 24, height: 24,
-                  positionType: 'absolute', position: { top: 22, right: 18 },
+                  width: 19, height: 19,
+                  positionType: 'absolute', position: { top: 25, right: 20 },
                   pointerFilter: 'block',
                 }}
                 uiBackground={{
@@ -96,6 +135,67 @@ export const uiMenu = () => (
               <Label value="  —  "              fontSize={16} color={Color4.White()} textAlign="middle-center" />
               <Label value={coveragePct().blue} fontSize={16} color={BLUE_COLOR}    textAlign="middle-center" />
             </UiEntity>
+          </UiEntity>
+        </UiEntity>
+      )
+    })()}
+
+    {/* ─── Leaderboard popup: centered modal ────────────────────────
+        Renders when leaderboardOpen is true. Star button in the timer
+        panel toggles this + fires requestLeaderboard for a fresh snapshot. */}
+    {leaderboardOpen && (() => {
+      const rows = readLeaderboard()
+      return (
+        <UiEntity
+          uiTransform={{
+            width: '100%', height: '100%',
+            positionType: 'absolute', position: { top: 0, left: 0 },
+            justifyContent: 'center', alignItems: 'center',
+          }}
+          uiBackground={{ color: BANNER_BG }}
+          onMouseDown={toggleLeaderboard}
+        >
+          {/* Modal card. Any click anywhere (card, X, backdrop) closes the
+              popup — no stop-propagation, so the outer overlay's onMouseDown
+              handles it uniformly. */}
+          <UiEntity
+            uiTransform={{
+              width: 520, height: 640, borderRadius: 20,
+              padding: 24, flexDirection: 'column', alignItems: 'stretch',
+            }}
+            uiBackground={{ color: Color4.create(0.08, 0.08, 0.08, 0.98) }}
+            onMouseDown={toggleLeaderboard}
+          >
+            {/* Header */}
+            <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Label value="★ TOP PAINTERS" fontSize={28} color={Color4.White()} textAlign="middle-left" />
+              <UiEntity
+                uiTransform={{ width: 32, height: 32, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
+                onMouseDown={toggleLeaderboard}
+              >
+                <Label value="✕" fontSize={22} color={Color4.White()} textAlign="middle-center" />
+              </UiEntity>
+            </UiEntity>
+            {/* Column headers */}
+            <UiEntity uiTransform={{ width: '100%', height: 28, margin: { top: 12 }, flexDirection: 'row', alignItems: 'center' }}>
+              <Label value="#"     fontSize={14} color={Color4.Gray()} textAlign="middle-left"  uiTransform={{ width: 40 }} />
+              <Label value="PLAYER" fontSize={14} color={Color4.Gray()} textAlign="middle-left"  uiTransform={{ width: 340 }} />
+              <Label value="CELLS"  fontSize={14} color={Color4.Gray()} textAlign="middle-right" uiTransform={{ width: 90 }} />
+            </UiEntity>
+            {/* Rows */}
+            {rows.length === 0 ? (
+              <UiEntity uiTransform={{ width: '100%', height: 60, margin: { top: 12 }, justifyContent: 'center', alignItems: 'center' }}>
+                <Label value="No painters yet — be the first!" fontSize={16} color={Color4.Gray()} textAlign="middle-center" />
+              </UiEntity>
+            ) : rows.map((r, i) => (
+              <UiEntity
+                uiTransform={{ width: '100%', height: 26, margin: { top: 2 }, flexDirection: 'row', alignItems: 'center' }}
+              >
+                <Label value={`${i + 1}`}                   fontSize={16} color={i < 3 ? Color4.Yellow() : Color4.White()} textAlign="middle-left"  uiTransform={{ width: 40 }} />
+                <Label value={r.name}                       fontSize={16} color={Color4.White()} textAlign="middle-left"  uiTransform={{ width: 340 }} />
+                <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={Color4.White()} textAlign="middle-right" uiTransform={{ width: 90 }} />
+              </UiEntity>
+            ))}
           </UiEntity>
         </UiEntity>
       )

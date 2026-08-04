@@ -13,3 +13,6 @@ yarn-error.log*
 *.blend2
 *.skb
 server.log
+
+# Local env vars (secrets — never commit)
+.env

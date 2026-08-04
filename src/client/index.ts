@@ -24,7 +24,7 @@
 
 import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
-import { SeedHolder, seedHolder } from '../shared/components'
+import { SeedHolder, seedHolder, LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { setupUi } from '../ui'
 import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
@@ -116,6 +116,9 @@ export async function setupClient(): Promise<void> {
   // ready. Fixed networkId (3000) so every client's SeedHolder maps to
   // the same synced entity.
   syncEntity(seedHolder, [SeedHolder.componentId], 3000)
+  // Same pattern for the LeaderboardState: fixed networkId (3001) so the
+  // server's publish() lands on this exact entity on every client.
+  syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
 }

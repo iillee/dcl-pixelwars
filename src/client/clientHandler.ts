@@ -17,7 +17,7 @@
  * Pattern borrowed from stom66/dcl-sky-chaser (clientHandler.ts + eventBus).
  */
 
-import { engine, PlayerIdentityData } from '@dcl/sdk/ecs'
+import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
@@ -27,6 +27,22 @@ import { drainPaintOutbox, setLocalTeam } from '../paint'
 // only to log the human-readable team name. paint.ts owns the "does this
 // client's paint go anywhere" logic via setLocalTeam.
 let myTeam: Team = Team.None
+
+/**
+ * Send our display name to the server once for the leaderboard directory.
+ * Uses PlayerIdentityData.name when available, falls back to a short form
+ * of the address (or guest id) so guests still show a readable label.
+ */
+function sendDisplayName(address: string): void {
+  const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+  // AvatarBase.name is the primary avatar name (works for both wallet users
+  // and named guests). PlayerIdentityData doesn't carry the name field.
+  const av = AvatarBase.getOrNull(engine.PlayerEntity)
+  const name = av?.name || `Guest ${address.slice(-4)}`
+  console.log(`[Client] → updateName "${name}"`)
+  room.send('updateName', { name })
+  void pid  // eslint: keep the reference explicit for future name sources
+}
 
 export function initClientHandler(): void {
   wireInbound()
@@ -84,16 +100,43 @@ function wireTeamAssigned(): void {
 // ─── Outbound: room.send from local systems ───────────────────────────
 function wireOutbound(): void {
   // joinRoster one-shot. Waits for PlayerIdentityData to populate (avatar
-  // wallet address); Team.None guests never fire and painting no-ops for
-  // them (see paint.ts). Fires exactly once per session.
+  // wallet address). If the address never appears within FALLBACK_MS (as
+  // happens with anonymous local-preview guests) we synthesize a stable
+  // guest id so the pipeline still works end-to-end for local dev.
   let joinSent = false
-  engine.addSystem(() => {
+  let joinClock = 0
+  const FALLBACK_MS = 3000
+  let lastDiagLog = 0
+  engine.addSystem((dt: number) => {
     if (joinSent) return
+    joinClock += dt * 1000
     const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
-    if (!pid || !pid.address) return
-    joinSent = true
-    console.log(`[Client] → joinRoster ${pid.address}`)
-    room.send('joinRoster', { userId: pid.address })
+
+    // Every 1s until we join: dump what we're seeing so local-preview
+    // stalls are debuggable without adding print-statements ad-hoc.
+    if (joinClock - lastDiagLog > 1000) {
+      lastDiagLog = joinClock
+      console.log(`[Client] joinRoster wait (${(joinClock/1000).toFixed(1)}s): pid=${pid ? 'present' : 'null'}, address="${pid?.address ?? ''}", isGuest=${pid?.isGuest}`)
+    }
+
+    if (pid?.address) {
+      joinSent = true
+      console.log(`[Client] → joinRoster ${pid.address}`)
+      room.send('joinRoster', { userId: pid.address })
+      sendDisplayName(pid.address)
+      return
+    }
+    // Fallback: after FALLBACK_MS without a wallet address, use a synthetic
+    // guest id so local single-player preview can paint. The server uses
+    // context.from (authoritative) for team assignment, so this payload id
+    // is really only for our own logging.
+    if (joinClock >= FALLBACK_MS) {
+      joinSent = true
+      const guestId = 'guest-' + Math.floor(Math.random() * 1e9).toString(16)
+      console.log(`[Client] → joinRoster (fallback guest ${guestId}) after ${(joinClock/1000).toFixed(1)}s with no PlayerIdentityData.address`)
+      room.send('joinRoster', { userId: guestId })
+      sendDisplayName(guestId)
+    }
   })
 
   // Paint outbox flusher: 10 Hz. Drain locally-painted cell ids and send

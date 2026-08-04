@@ -51,6 +51,7 @@
   },
   "opendcl": true,
   "authoritativeMultiplayer": true,
+  "logsPermissions": ["0x1e93e534c5e26b01ed242410b43ae23dd0faa52b"],
   "worldConfiguration": {
     "name": "labyrinthia.dcl.eth"
   }

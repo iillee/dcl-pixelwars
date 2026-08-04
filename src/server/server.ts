@@ -11,9 +11,20 @@
  */
 
 import { engine } from '@dcl/sdk/ecs'
+import { syncEntity } from '@dcl/sdk/network'
+import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
 import { applyPaint, coverage, drainDelta, getFullState, clearAll as clearPaintState } from './paintState'
+import {
+  loadFromStorage as loadLeaderboard,
+  saveToStorage as saveLeaderboard,
+  incrementPaint as leaderboardIncrement,
+  updateName as leaderboardUpdateName,
+  publish as publishLeaderboard,
+  getName as leaderboardGetName,
+} from './leaderboard'
+import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } from './discord'
 
 // Round loop constants — single source of truth lives in shared/roundTiming.ts
 // so client (src/round.ts) and server share the exact same cadence. Do not
@@ -27,6 +38,23 @@ const MAX_IDS_PER_TICK = 100
 
 export async function setupServer(): Promise<void> {
   console.log('[Server] Starting Squareoff server...')
+
+  // Load leaderboard from Storage before any paintTicks land, so we don't
+  // clobber persisted state with a fresh empty board. loadFromStorage()
+  // also publishes to the CRDT-synced LeaderboardState so late-joining
+  // clients see it immediately without waiting for a round boundary.
+  await loadLeaderboard()
+
+  // Register the LeaderboardState entity on the CRDT sync mesh with a
+  // fixed networkId (3001) matching the client. Server mutations to this
+  // component now propagate to every connected client.
+  syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
+
+  // Discord webhook + realm/preview detection. Wire the name resolver so
+  // the notifier can pull display names captured via updateName. Silent
+  // no-op if DISCORD_PLAYER_JOIN_WEBHOOK isn't set or we're in preview.
+  bindNameResolver(leaderboardGetName)
+  await initDiscord()
 
   // Roster handler — assign or look up a player's team.
   // Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
@@ -48,6 +76,9 @@ export async function setupServer(): Promise<void> {
     const team = assignTeam(from)
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()})`)
     room.send('teamAssigned', { team }, { to: [from] })
+    // Queue a Discord join notification (debounced 5s to let updateName
+    // arrive so we send the real display name, not the wallet hash).
+    schedulePlayerJoin(from)
   })
 
   // Paint ingest — client-authored cell ids, attributed to sender's team.
@@ -64,6 +95,28 @@ export async function setupServer(): Promise<void> {
       return
     }
     for (const id of ids) applyPaint(id, team)
+    // Attribute cellsPainted to the sender for the top-painters board.
+    // Uses raw ids.length — slight over-count when the same cell is
+    // painted twice by the same player in one tick, but that's rare and
+    // the effort to dedupe isn't worth the loss of simplicity.
+    leaderboardIncrement(from, ids.length)
+  })
+
+  // Name capture — client sends once on join with PlayerIdentityData.name.
+  // Server keeps the map in memory and patches existing leaderboard rows.
+  room.onMessage('updateName', ({ name }, context) => {
+    const from = context?.from
+    if (!from) return
+    leaderboardUpdateName(from, name)
+  })
+
+  // On-demand leaderboard refresh — client asks when opening the popup.
+  // We simply republish the CRDT-synced component; the requesting client
+  // (and everyone else, harmlessly) picks up the new snapshot on next
+  // engine tick. No addressed reply needed — CRDT delivers to all.
+  room.onMessage('requestLeaderboard', (_data, context) => {
+    if (!context?.from) return
+    publishLeaderboard()
   })
 
   // Broadcast tick (Phase 4 Step 4). 5Hz — the SATURATION_BUDGET rate
@@ -134,7 +187,24 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
+    // Round boundary is our persistence + publish cadence for the
+    // leaderboard: 5 min is frequent enough that a server crash loses at
+    // most one round of paint credit, infrequent enough that Storage
+    // writes are cheap. Fire-and-forget — don't block round advancement
+    // on I/O.
+    void saveLeaderboard()
+    publishLeaderboard()
     lastRoundIndex = idx
+  })
+
+  // Discord flush tick — low frequency; the delay is 5s so 1Hz polling
+  // gives us more-than-fast-enough drain. Cheap when nothing's pending.
+  let discordFlushClock = 0
+  engine.addSystem((dt: number) => {
+    discordFlushClock += dt
+    if (discordFlushClock < 1) return
+    discordFlushClock = 0
+    flushPendingJoins()
   })
 
   console.log('[Server] ✅ Ready — listening for joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz + roundReset on UTC boundaries.')

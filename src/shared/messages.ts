@@ -85,6 +85,17 @@ export const Messages = {
     finalBlue: Schemas.Int,
     finalTotal: Schemas.Int,
   }),
+
+  // Client → Server: send this player's display name once on join so
+  // the leaderboard shows human-readable names instead of wallet hashes.
+  // Server captures into its player-name directory and patches existing
+  // leaderboard entries in place.
+  updateName: Schemas.Map({ name: Schemas.String }),
+
+  // Client → Server: request an immediate fresh copy of the leaderboard.
+  // Fires when the player opens the popup mid-round so they see current
+  // standings without waiting for the next round boundary broadcast.
+  requestLeaderboard: Schemas.Map({}),
 }
 
 export const room = registerMessages(Messages)

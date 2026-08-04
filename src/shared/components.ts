@@ -18,3 +18,11 @@ import { engine, Schemas } from '@dcl/sdk/ecs'
 export const SeedHolder = engine.defineComponent('maze::seed-holder', { seed: Schemas.Int })
 export const seedHolder = engine.addEntity()
 SeedHolder.create(seedHolder, { seed: 0 })
+
+// ─── LeaderboardState ────────────────────────────────────────────────
+// CRDT-synced JSON snapshot of the top-N painters. Server writes on boot
+// (after load-from-storage) and on each round boundary. Clients read
+// synchronously when rendering the leaderboard popup — no round-trip.
+export const LeaderboardState = engine.defineComponent('leaderboard::state', { json: Schemas.String })
+export const leaderboardStateEntity = engine.addEntity()
+LeaderboardState.create(leaderboardStateEntity, { json: '[]' })

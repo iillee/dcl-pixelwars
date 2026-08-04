@@ -45,14 +45,21 @@ export function isMusicMuted(): boolean {
   return musicMuted
 }
 
+/**
+ * Play the shared UI click SFX. Fire from any button that wants the same
+ * feedback as the mute toggle — star, popup close, etc. Reuses the same
+ * entity as the mute click so we don't leak audio sources per-button.
+ */
+export function playUiClick(): void {
+  if (!muteClickEnt) return
+  AudioSource.createOrReplace(muteClickEnt, {
+    audioClipUrl: CLICK_SRC,
+    playing: true, loop: false, volume: 0.5, global: true,
+  })
+}
+
 export function toggleMusic(): void {
-  // UI click feedback for the mute toggle.
-  if (muteClickEnt) {
-    AudioSource.createOrReplace(muteClickEnt, {
-      audioClipUrl: CLICK_SRC,
-      playing: true, loop: false, volume: 0.5, global: true,
-    })
-  }
+  playUiClick()
   const a = AudioSource.getMutableOrNull(musicEnt) as
     { volume: number; playing: boolean; currentTime?: number } | null
   if (!a) return
