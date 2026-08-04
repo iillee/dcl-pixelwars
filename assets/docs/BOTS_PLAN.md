@@ -1,6 +1,61 @@
 # Bots — Work Plan (Phase 5a)
 
-Status: **Not started.** Estimate: 4–6 focused days (MVP ~2 days, polish ~2–4 days).
+Status: **MVP shipped on branch `bots`.** All steps 1–7B complete plus
+solo-mode simplification and scraper filter. Not yet merged — next
+session will focus on visual polish (avatar shape, movement smoothing,
+name/label).
+
+---
+
+## Progress log (chronological)
+
+| Step | Status | Notes |
+|---|---|---|
+| 1. Walkable adjacency graph | ✅ | `shared/mazeGraph.ts` — seed 1 -> 11780 cells, fully connected, 45ms build |
+| 2. BFS pathfinding | ✅ | avg 1.6ms/path over 100 random pairs; 260-step full-map traversal in 7ms |
+| 3. Bot state machine | ✅ | `server/bots/bot.ts` — accumulator model, MAX_STEPS_PER_TICK=3 safety cap |
+| 4. Smart target heuristics | ✅ | 60/30/10 neutral/enemy/centre + deep-corridor bias (added post-playtest) |
+| 5. Population manager | ✅ | `server/bots/manager.ts` — wired into 5Hz broadcast tick |
+| 6. Round-loop wiring | ✅ | Absorbed into step 5; `rebuildBotGraph(seed)` fires on `round:reset` |
+| 7A. Invisible bots (paint-only) | ✅ | Shipped first; feel-check confirmed we needed visible form |
+| 7B. Visible box entities | ✅ | `client/botVisual.ts` — team-coloured emissive box, 2Hz position broadcast |
+| 7C. Avatar shapes | ⏳ | Next session — replace box with `AvatarShape` for real "opponent" feel |
+| 8. Tuning pass | ⏳ | Jitter / pauses / difficulty knobs; iterate live once merged |
+
+### Fixes shipped after initial MVP
+
+- **Ramp cellId convention** — paint.ts stores ramp cellIds in canonical
+  (pre-rotation) frame; graph originally used world-axis. Rotated ramps
+  painted perpendicular to bot movement. Fixed by emitting canonical
+  ramp cellIds + world-position matching for cross-tile ramp edges.
+  Also picked up the missing top-landing row (17 rows, not 16).
+- **3x3 paint footprint** — was 5-cell plus-shape; now matches the human
+  9-cell stamp via cellId arithmetic + graph.nodes lookup.
+- **Wall-hugging avoidance** — target picker prefers cells at least
+  DEEP_MARGIN=2 from either corridor edge, keeping the full 3x3 stamp
+  inside the walkable band.
+- **Color-swap on server restart** — client no longer rebuilds bot entity
+  on `botId` team-mismatch; recolours material in place. Handles the
+  bot-id-reuse case cleanly.
+
+### Simplifications made after playtest
+
+- **Solo-mode only** — dropped the 4-active target + 3-max-bot design in
+  favour of "exactly 1 bot iff exactly 1 active human, always on the
+  opposite team". Simpler mental model + matches Foundation D7 story
+  (the point is to *not* land in an empty scene, not to fill the maze).
+- **Active-painter filter for humanCount** — scraper accounts that
+  connect but never paint no longer suppress bot spawning. Tracked via
+  `roster.markActive()` on paintTick + joinRoster with a 60s window.
+
+---
+
+## Original plan below (preserved for reference)
+
+Original estimate: 4–6 focused days (MVP ~2 days, polish ~2–4 days).
+Actual: MVP in ~1 focused session, all 7B done + fixes in a second.
+Ratio 3:1 to estimate, which the plan calls out as expected once the
+graph module was in place.
 
 ## Why bots are the highest-leverage D7 lever
 
