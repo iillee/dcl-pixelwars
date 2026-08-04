@@ -18,11 +18,29 @@
  * cell.
  */
 
-import { WalkableGraph, findPath, LO, HI } from '../../shared/mazeGraph'
+import { WalkableGraph, findPath, DEEP_MARGIN } from '../../shared/mazeGraph'
 import { GRID_W, GRID_H } from '../../maze/generator'
 
-/** Steps per second the bot walks. 4 ≈ human paint pace. */
-export const DEFAULT_STEPS_PER_SEC = 4
+/**
+ * Steps per second the bot walks. Cells are 1m at paint SIZE=16 per 16m
+ * tile, so this maps 1:1 to m/s. Tuning:
+ *   4.0 = DCL walk pace, feels sluggish; player outruns easily
+ *   4.5 = a hair faster than walk. Player has to sprint to catch it but
+ *         it doesn't feel frantic. Current setting.
+ *   6.0 = matches sprint. Felt too aggressive for solo-mode presence.
+ * Actual per-step time is jittered ±JITTER_FRAC to break the metronome.
+ */
+export const DEFAULT_STEPS_PER_SEC = 4.6
+
+/** Randomise each step by ±this fraction of the base interval. 0.15 =
+ *  ±15%. Too high and the bot looks laggy; too low and it looks robotic. */
+const JITTER_FRAC = 0.15
+
+/** After reaching a target, this fraction of the time the bot pauses
+ *  before picking the next one. Reads as "looking around". */
+const PAUSE_CHANCE = 0.20
+const PAUSE_MIN_MS = 800
+const PAUSE_MAX_MS = 1800
 
 export type PickTarget = (self: Bot, graph: WalkableGraph) => string | null
 
@@ -57,9 +75,13 @@ export interface PaintReader {
 const SAMPLE_K = 48
 
 function sampleNodes(graph: WalkableGraph, k: number): string[] {
-  // Reservoir-free: cheap random-index sampling. Duplicates possible but
-  // harmless — we're just looking for any matching candidate.
-  const arr = [...graph.nodes]
+  // Sample ONLY from the eroded (deep) subgraph. Combined with
+  // useDeepOnly=true in findPath below, this guarantees the bot can
+  // neither target nor traverse a wall-adjacent cell. If deepNodes is
+  // empty (extreme edge case), fall back to full nodes so the bot
+  // still moves.
+  const src = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
+  const arr = [...src]
   const out: string[] = []
   for (let i = 0; i < k; i++) out.push(arr[Math.floor(Math.random() * arr.length)])
   return out
@@ -77,52 +99,53 @@ function isNearCenter(cellId: string, dist: number): boolean {
   return Math.abs(tx - cx) <= dist && Math.abs(tz - cz) <= dist
 }
 
-// Corridor "deep center" range — cells with col AND row this many steps
-// from an edge get preference as targets. A bot that only ever paths
-// through deep-centre cells won't wall-hug, so its 3x3 footprint stays
-// entirely inside the walkable corridor.
-const DEEP_MARGIN = 2 // must be < ARM/2 (=5) so plenty of candidates remain
+// A cell is "deep centre" iff its Manhattan distance from the nearest
+// wall is at least DEEP_MARGIN. Uses graph.distToWall which is computed
+// once at build time (see mazeGraph.ts). Shape-agnostic — handles L,
+// T, corner tiles + ramps + cross-tile openings correctly, unlike the
+// old fixed-LO/HI midpoint heuristic which only worked for straight
+// corridors and produced the wall-hugging we saw in playtest.
+//
+// Post-erosion: "deep" is now defined structurally by membership in
+// graph.deepNodes (built once in mazeGraph.ts with DEEP_MARGIN). The
+// bot samples from that set AND pathfinds on graph.deepAdj, so wall
+// cells are physically unreachable — no post-hoc filtering needed.
 
-function isDeepCentre(cellId: string): boolean {
-  const colon = cellId.indexOf(':')
-  if (colon < 0) return false
-  const [c, r] = cellId.slice(colon + 1).split(',').map(Number)
-  // Corridor spans LO..HI on the mask axis; "deep" = at least DEEP_MARGIN
-  // cells inside from either edge. For ramps (canonical, row 0..RAMP_ROWS)
-  // the row check still works because it's about lateral not longitudinal
-  // position — wait, actually col is lateral for ramps too. Fine.
-  return c >= LO + DEEP_MARGIN && c < HI - DEEP_MARGIN &&
-         r >= LO + DEEP_MARGIN && r < HI - DEEP_MARGIN
+function isDeepCentre(cellId: string, graph: WalkableGraph): boolean {
+  return graph.deepNodes.has(cellId)
 }
 
-export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget {
-  const enemyTeam = myTeam === 1 ? 2 : 1
-  return (self, graph) => {
-    const roll = Math.random()
-    const mode: 'neutral' | 'enemy' | 'center' =
-      roll < 0.60 ? 'neutral' :
-      roll < 0.90 ? 'enemy'   :
-                    'center'
+// ─── smartTarget priority (revised after playtest) ───────────────────
+// Old: probabilistic 60/30/10 neutral/enemy/center. Produced visible
+// backtracking because a 60% neutral roll would often pick a neutral
+// cell PAST the bot's own painted tail rather than the nearest frontier.
+//
+// New strict priority (first match wins):
+//   1. Any deep-centre UNCLAIMED cell = neutral (0) or enemy team.
+//      Both are "worth painting" for us; own team is never a target.
+//   2. Any deep-centre non-self cell (last resort — may include own
+//      paint if the local area is fully claimed).
+//
+// isNearCenter and the enemy tier are no longer separately weighted —
+// the map-centre bias is redundant now that we always chase unclaimed
+// tiles (which tend to appear anywhere paint is thin).
 
+export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget {
+  return (self, graph) => {
     const candidates = sampleNodes(graph, SAMPLE_K)
-    // Two-pass: prefer deep-centre matches, fall back to any match.
-    let fallback: string | null = null
+
+    // Tier 1: nearest deep-centre unclaimed cell (neutral or enemy).
     for (const c of candidates) {
       if (c === self.currentCell) continue
+      if (!isDeepCentre(c, graph)) continue
       const t = paint.teamOf(c)
-      const modeMatch =
-        (mode === 'neutral' && t === 0) ||
-        (mode === 'enemy'   && t === enemyTeam) ||
-        (mode === 'center'  && isNearCenter(c, 1))
-      if (!modeMatch) continue
-      if (isDeepCentre(c)) return c    // ⭐ preferred
-      if (fallback === null) fallback = c
+      if (t !== myTeam) return c   // unclaimed = anything not our own paint
     }
-    if (fallback) return fallback
-    // Nothing matched the mode at all — pick a random non-self cell,
-    // preferring deep-centre if any candidate qualifies.
-    for (const c of candidates) if (c !== self.currentCell && isDeepCentre(c)) return c
-    for (const c of candidates) if (c !== self.currentCell) return c
+    // Tier 2: any deep-centre non-self cell (may include own paint).
+    for (const c of candidates) {
+      if (c !== self.currentCell && isDeepCentre(c, graph)) return c
+    }
+    // Very small maze / mostly-edge graph — last-resort random walkable.
     return randomTarget(self, graph)
   }
 }
@@ -132,15 +155,23 @@ export interface BotOpts {
   startCell: string
   stepsPerSec?: number
   pickTarget?: PickTarget
+  /** Optional paint reader. When supplied, the bot's pathfinder
+   *  penalises own-team painted cells so it avoids re-walking its own
+   *  trail (the visible backtracking we saw in playtest). Enemy paint
+   *  and neutral cells keep the base cost of 1. */
+  paint?: PaintReader
 }
 
 export class Bot {
   readonly team: number
   currentCell: string
-  private path: string[] = []      // future cells not yet stepped onto
-  private stepIntervalMs: number
-  private stepAccumMs = 0          // grows with dt, drained by stepIntervalMs per step
+  path: string[] = []              // future cells not yet stepped onto (public for visual interp)
+  private baseStepIntervalMs: number   // mean step interval (from stepsPerSec)
+  private stepIntervalMs: number       // current step's actual interval (jittered)
+  private stepAccumMs = 0              // grows with dt, drained by stepIntervalMs per step
+  private pauseRemainingMs = 0         // if >0, bot is holding for a "look around" pause
   private pick: PickTarget
+  private paint?: PaintReader
 
   /** Safety cap: never step more than this many cells in a single tick,
    *  even if the server stalled and dt is huge. Prevents "teleport paint"
@@ -150,8 +181,17 @@ export class Bot {
   constructor(opts: BotOpts) {
     this.team = opts.team
     this.currentCell = opts.startCell
-    this.stepIntervalMs = 1000 / (opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC)
+    this.baseStepIntervalMs = 1000 / (opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC)
+    this.stepIntervalMs = this.jitteredInterval()
     this.pick = opts.pickTarget ?? randomTarget
+    this.paint = opts.paint
+  }
+
+  /** Base interval ±JITTER_FRAC. Recomputed per step so consecutive
+   *  steps aren't identical — breaks the metronome cadence. */
+  private jitteredInterval(): number {
+    const j = 1 + (Math.random() * 2 - 1) * JITTER_FRAC
+    return this.baseStepIntervalMs * j
   }
 
   /**
@@ -166,17 +206,56 @@ export class Bot {
    * a bot to teleport-paint 20 cells in one frame.
    */
   tick(dtMs: number, graph: WalkableGraph): string[] {
+    // Honour any active "look around" pause before advancing the step
+    // accumulator. Zeroing the accum during a pause keeps the bot cleanly
+    // stationary; visualPosition() returns raw currentCell (path is
+    // empty) so it also reads as still on the client.
+    if (this.pauseRemainingMs > 0) {
+      this.pauseRemainingMs -= dtMs
+      this.stepAccumMs = 0
+      if (this.pauseRemainingMs > 0) return []
+      this.pauseRemainingMs = 0
+    }
+
     this.stepAccumMs += dtMs
     const stepped: string[] = []
 
     while (this.stepAccumMs >= this.stepIntervalMs && stepped.length < Bot.MAX_STEPS_PER_TICK) {
       this.stepAccumMs -= this.stepIntervalMs
+      // Roll the next interval for the step AFTER this one, so no two
+      // consecutive steps share timing.
+      this.stepIntervalMs = this.jitteredInterval()
 
       // Refill path if exhausted (reached target, or first step).
       if (this.path.length === 0) {
+        // Chance to pause here — "human looking around at a junction"
+        // feel. Skips this whole step; resumes on next tick.
+        if (Math.random() < PAUSE_CHANCE) {
+          this.pauseRemainingMs = PAUSE_MIN_MS + Math.random() * (PAUSE_MAX_MS - PAUSE_MIN_MS)
+          this.stepAccumMs = 0
+          break
+        }
         const target = this.pick(this, graph)
         if (target === null || target === this.currentCell) break
-        const p = findPath(graph, this.currentCell, target)
+        // useDeepOnly=true: the pathfinder cannot traverse wall cells
+        // even to reach a deep target. If currentCell has drifted off the
+        // deep set (shouldn't happen post-spawn, but paranoia), fall back
+        // to the full graph for one path so the bot can rejoin the deep
+        // interior on the next target roll.
+        const onDeep = graph.deepNodes.has(this.currentCell) && graph.deepNodes.has(target)
+        // Cost function: own-team paint is 3x more expensive than
+        // neutral / enemy cells. Result: the pathfinder takes a detour
+        // through un-owned tiles when the detour is <=2 extra steps,
+        // but still crosses its own paint when there's no alternative
+        // (e.g. the target is behind a fully-owned stretch). This
+        // eliminates the "turn around and paint the same tail again"
+        // roomba behaviour without ever stranding the bot.
+        const paint = this.paint
+        const myTeam = this.team
+        const costOf = paint
+          ? (id: string) => (paint.teamOf(id) === myTeam ? 3 : 1)
+          : undefined
+        const p = findPath(graph, this.currentCell, target, 20000, onDeep, costOf)
         if (!p || p.length < 2) break
         this.path = p.slice(1) // drop index 0 (currentCell)
       }
@@ -198,5 +277,36 @@ export class Bot {
   /** Manager can call this to force target re-selection (e.g. round reset). */
   clearPath(): void {
     this.path = []
+  }
+
+  /**
+   * Interpolated world position for visual broadcast. Lerps from
+   * currentCell toward path[0] based on how far into the current step
+   * interval we are (stepAccumMs / stepIntervalMs). Returns the raw
+   * currentCell position if there's no next cell (idle, at target, or
+   * mid-repath).
+   *
+   * Why this exists: currentCell snaps to the destination the instant a
+   * step fires, then holds for 250ms until the next step. Broadcasting
+   * that raw = teleport-then-hold pattern, which reads as stutter no
+   * matter what the client Tween rate is. Sub-step interp turns the
+   * broadcast into continuous motion so the Tween only has to smooth
+   * out network jitter.
+   */
+  visualPosition(graph: WalkableGraph): [number, number, number] | null {
+    const cur = graph.worldPos.get(this.currentCell)
+    if (!cur) return null
+    const nextId = this.path[0]
+    if (!nextId) return [cur[0], cur[1], cur[2]]
+    const next = graph.worldPos.get(nextId)
+    if (!next) return [cur[0], cur[1], cur[2]]
+    // Fraction of the way to next cell. Clamped [0,1] — accum can briefly
+    // exceed intervalMs when the server tick is late.
+    const f = Math.max(0, Math.min(1, this.stepAccumMs / this.stepIntervalMs))
+    return [
+      cur[0] + (next[0] - cur[0]) * f,
+      cur[1] + (next[1] - cur[1]) * f,
+      cur[2] + (next[2] - cur[2]) * f,
+    ]
   }
 }

@@ -189,7 +189,30 @@ export interface WalkableGraph {
   /** World-space (x,y,z) of the top-center of each walkable cell. Used by
    *  server-side bot position broadcasts. Populated during buildWalkableGraph. */
   worldPos: Map<string, [number, number, number]>
+  /** Manhattan distance from each walkable cell to the nearest wall.
+   *  Higher = deeper in the corridor. Wall = a same-tile grid neighbour
+   *  that is non-walkable in the mask, OR a tile-boundary direction that
+   *  is not an opening. Ramps' N/S canonical ends and openings are NOT
+   *  walls. */
+  distToWall: Map<string, number>
+  /**
+   * Eroded subgraph: only cells with distToWall >= DEEP_MARGIN (2 =
+   * bot's 3x3 paint stamp fits fully off the wall). The bot uses this
+   * exclusively for movement + pathfinding, so it CANNOT enter a wall
+   * cell — the wall cells literally do not exist in its map.
+   *
+   * If erosion would fragment the graph (would happen only in unusually
+   * narrow topology), we fall back to the full graph and log a warning
+   * — keeps the bot alive at the cost of the wall guarantee.
+   */
+  deepNodes: Set<string>
+  deepAdj: Map<string, string[]>
 }
+
+/** Minimum distToWall for a cell to be considered "deep centre" and
+ *  safe for the bot to occupy. 2 keeps the 3x3 paint stamp fully off
+ *  the wall. Exported so bot.ts / manager.ts share the definition. */
+export const DEEP_MARGIN = 1
 
 // Height offset above tile origin so bot boxes / paint discs sit clear of
 // the floor mesh. Must match paint.ts FLAT_OFFSET so bots stand on the same
@@ -407,7 +430,147 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
     }
   }
 
-  return { nodes, adj, worldPos }
+  // ─── Adjacency sort: bias BFS toward corridor-centre paths ──────────
+  //
+  // BFS returns *a* shortest path; when many are tied (typical in an open
+  // corridor), the winner is decided by neighbor enumeration order. The
+  // graph was originally wired in insertion order, which biased paths to
+  // one corridor edge — bots visibly wall-hugged even when the target
+  // was deep-centre.
+  //
+  // Fix: for each walkable cell, compute distance-to-nearest-WALL via a
+  // one-time multi-source BFS seeded from wall-adjacent cells. Sort each
+  // adjacency list DESCENDING by neighbor distToWall so BFS discovers
+  // deep-interior cells first; path reconstruction then picks the
+  // corridor-centre route on any tie.
+  //
+  // Seed correctness: earlier version seeded from cells with <4 graph
+  // neighbours, which incorrectly flagged junctions / T-intersections /
+  // dead-end cells as walls (they legitimately have <4 neighbours but
+  // sit in open space). That made the metric useless on any non-straight
+  // tile. Now we seed from the actual per-tile mask:
+  //   - A same-tile grid neighbour that is NOT walkable in the mask = wall.
+  //   - A tile-boundary direction that is NOT in this tile's openings = wall.
+  //   - Openings ("open ends") and ramps' N/S canonical exits = NOT walls
+  //     — those are where the corridor continues into the next tile.
+  //
+  // Cost: one pass over placed tiles + one BFS over walkable cells
+  // (<15ms total on ~12k cells). Per-tick pathfinding unchanged.
+  const distToWall = new Map<string, number>()
+  const wallBfs: string[] = []
+  for (const p of placed) {
+    const isRamp = TILES[p.type].isRamp
+    const local = cellsByTile.get(tileKey(p))!
+    const openings = openingsAt(p.type, p.r)
+    for (const cellStr of local) {
+      const [col, row] = cellStr.split(',').map(Number)
+      let wallAdj = false
+      for (const d of [N, E, S, W] as Dir[]) {
+        const { dc, dr } = dirVec[d]
+        const nc = col + dc
+        const nr = row + dr
+        const inBounds = isRamp
+          ? (nc >= LO && nc < HI && nr >= 0 && nr < RAMP_ROWS)
+          : (nc >= 0 && nc < SIZE && nr >= 0 && nr < SIZE)
+        if (inBounds) {
+          // Same-tile: wall iff the neighbour cell isn't walkable.
+          if (!local.has(`${nc},${nr}`)) { wallAdj = true; break }
+        } else {
+          // Tile boundary. For ramps the canonical N/S rows are open
+          // ends (connect to upper/lower tiles) — never walls. E/W of a
+          // ramp are always side walls (ramp mask = straight corridor).
+          // For flat tiles: a boundary is a wall iff no opening in that
+          // direction.
+          if (isRamp) {
+            if (d === N || d === S) continue
+            wallAdj = true; break
+          } else {
+            if (!openings.has(d)) { wallAdj = true; break }
+          }
+        }
+      }
+      if (wallAdj) {
+        const id = cellId(p.x, p.z, p.y, col, row)
+        distToWall.set(id, 0)
+        wallBfs.push(id)
+      }
+    }
+  }
+  // Standard multi-source BFS — head index avoids O(n) Array.shift.
+  let bfsHead = 0
+  while (bfsHead < wallBfs.length) {
+    const cur = wallBfs[bfsHead++]
+    const curDist = distToWall.get(cur)!
+    for (const nb of adj.get(cur) ?? []) {
+      if (distToWall.has(nb)) continue
+      distToWall.set(nb, curDist + 1)
+      wallBfs.push(nb)
+    }
+  }
+  // Sort neighbors: higher distToWall first (deeper cells preferred).
+  // Fallback of 0 for any unreached cell shouldn't occur on a connected
+  // graph but keeps the sort well-defined.
+  const wallDist = (id: string): number => distToWall.get(id) ?? 0
+  for (const [, list] of adj) {
+    list.sort((a, b) => wallDist(b) - wallDist(a))
+  }
+
+  // ─── Eroded ("deep") subgraph ─────────────────────────────────
+  // Every previous attempt to keep the bot off walls via sorting or
+  // filtering target selection failed to eliminate visible wall-hugging,
+  // because the pathfinder could still traverse wall cells to reach deep
+  // targets. Definitive fix: give the bot a graph that literally has no
+  // wall cells. Now it cannot possibly step on one.
+  //
+  // Connectivity fallback: with ARM=10 corridors, erosion by 2 leaves
+  // 6-cell-wide corridors, well-connected in practice. But if any future
+  // tile type had a narrower band, erosion could disconnect regions and
+  // strand the bot. In that case we log + fall back to the full graph
+  // (visible wall-hugging returns but the bot still moves).
+  let deepNodes = new Set<string>()
+  let deepAdj = new Map<string, string[]>()
+  for (const id of nodes) {
+    if ((distToWall.get(id) ?? 0) >= DEEP_MARGIN) deepNodes.add(id)
+  }
+  for (const id of deepNodes) {
+    const filtered = (adj.get(id) ?? []).filter(n => deepNodes.has(n))
+    deepAdj.set(id, filtered)
+  }
+  // Connectivity check: BFS from an arbitrary deep node and count.
+  const firstDeep = deepNodes.values().next().value as string | undefined
+  let deepReachable = 0
+  if (firstDeep) {
+    const seen = new Set<string>([firstDeep])
+    const q: string[] = [firstDeep]
+    let h = 0
+    while (h < q.length) {
+      for (const nb of deepAdj.get(q[h++]) ?? []) {
+        if (!seen.has(nb)) { seen.add(nb); q.push(nb) }
+      }
+    }
+    deepReachable = seen.size
+  }
+  const deepFragmented = deepNodes.size > 0 && deepReachable < deepNodes.size * 0.95
+  if (deepFragmented) {
+    console.log(`[Bots] WARN: eroded graph fragmented (${deepReachable}/${deepNodes.size} reachable). Falling back to full graph — wall-hugging may return.`)
+    deepNodes = new Set(nodes)
+    deepAdj = new Map()
+    for (const [id, list] of adj) deepAdj.set(id, [...list])
+  }
+
+  // ─── Diagnostic: distToWall distribution + deep-graph stats ─────────────
+  const hist = new Map<number, number>()
+  let maxDist = 0
+  for (const d of distToWall.values()) {
+    hist.set(d, (hist.get(d) ?? 0) + 1)
+    if (d > maxDist) maxDist = d
+  }
+  const histStr = [...hist.entries()].sort((a, b) => a[0] - b[0])
+    .map(([d, n]) => `${d}:${n}`).join(' ')
+  const pct = nodes.size === 0 ? 0 : Math.round(100 * deepNodes.size / nodes.size)
+  console.log(`[Bots] distToWall hist: ${histStr} | maxDist=${maxDist} | deep(≥${DEEP_MARGIN})=${deepNodes.size}/${nodes.size} (${pct}%) reachable=${deepReachable}`)
+
+  return { nodes, adj, worldPos, distToWall, deepNodes, deepAdj }
 }
 
 /**
@@ -447,33 +610,149 @@ export function findPath(
   start: string,
   goal: string,
   maxNodes: number = 20000,
+  useDeepOnly: boolean = false,
+  /** Optional per-cell traversal cost. When supplied, the pathfinder
+   *  switches from plain BFS to Dijkstra so higher-cost cells are only
+   *  used when it saves overall distance. Used to make bots prefer
+   *  un-owned tiles (own-team paint costs more → avoided unless the
+   *  detour would be longer). Default cost = 1. */
+  costOf?: (cellId: string) => number,
 ): string[] | null {
+  // When useDeepOnly is set, pathfind on the eroded subgraph — bot can't
+  // traverse wall cells even to reach a deep target. If start/goal aren't
+  // in the deep set, we fail here and the bot picks a new target.
+  const nodeSet = useDeepOnly ? graph.deepNodes : graph.nodes
+  const adj     = useDeepOnly ? graph.deepAdj   : graph.adj
   if (start === goal) return [start]
-  if (!graph.nodes.has(start) || !graph.nodes.has(goal)) return null
+  if (!nodeSet.has(start) || !nodeSet.has(goal)) return null
+
+  // Shuffle a neighbour list in place. Cheap Fisher–Yates. Used to give
+  // paths an organic, non-axis-aligned feel: BFS with a fixed neighbour
+  // order produces "drain one axis then the other" L-shaped paths (the
+  // roomba look). Randomising the expansion order interleaves the axes
+  // so paths zig-zag naturally toward the goal at no extra cost.
+  const shuffled = (list: string[]): string[] => {
+    const a = list.slice()
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const t = a[i]; a[i] = a[j]; a[j] = t
+    }
+    return a
+  }
 
   const parent = new Map<string, string>()
-  const visited = new Set<string>([start])
-  const queue: string[] = [start]
-  let head = 0 // avoid O(n) Array.shift on large queues
-  let expanded = 0
 
-  while (head < queue.length) {
-    const cur = queue[head++]
-    if (++expanded > maxNodes) return null
-    for (const nb of graph.adj.get(cur) ?? []) {
-      if (visited.has(nb)) continue
-      visited.add(nb)
-      parent.set(nb, cur)
-      if (nb === goal) {
-        // Reconstruct path from goal back to start.
-        const path: string[] = [nb]
-        let step = cur
-        while (step !== start) { path.push(step); step = parent.get(step)! }
-        path.push(start)
-        path.reverse()
-        return path
+  // ── Fast path: unweighted BFS when no cost function is supplied ─────
+  if (!costOf) {
+    const visited = new Set<string>([start])
+    const queue: string[] = [start]
+    let head = 0
+    let expanded = 0
+    while (head < queue.length) {
+      const cur = queue[head++]
+      if (++expanded > maxNodes) return null
+      for (const nb of shuffled(adj.get(cur) ?? [])) {
+        if (visited.has(nb)) continue
+        visited.add(nb)
+        parent.set(nb, cur)
+        if (nb === goal) {
+          const path: string[] = [nb]
+          let step = cur
+          while (step !== start) { path.push(step); step = parent.get(step)! }
+          path.push(start); path.reverse()
+          return path
+        }
+        queue.push(nb)
       }
-      queue.push(nb)
+    }
+    return null
+  }
+
+  // ── Weighted path: Dijkstra with a binary min-heap keyed by g-cost ──
+  // Small maze + short paths → a simple heap outperforms sorted arrays
+  // once we start avoiding "cheap" cells (costOf returns 1 for good,
+  // >1 for own-paint). Ties broken by insertion order via a counter.
+  const dist = new Map<string, number>([[start, 0]])
+  const heap: Array<{ id: string; g: number; seq: number }> = []
+  let seq = 0
+  const push = (id: string, g: number) => {
+    heap.push({ id, g, seq: seq++ })
+    let i = heap.length - 1
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      if (heap[p].g <= heap[i].g) break
+      const tmp = heap[p]; heap[p] = heap[i]; heap[i] = tmp
+      i = p
+    }
+  }
+  const pop = (): { id: string; g: number; seq: number } | undefined => {
+    if (heap.length === 0) return undefined
+    const top = heap[0]
+    const last = heap.pop()!
+    if (heap.length > 0) {
+      heap[0] = last
+      let i = 0
+      const n = heap.length
+      while (true) {
+        const l = i * 2 + 1, r = l + 1
+        let best = i
+        if (l < n && heap[l].g < heap[best].g) best = l
+        if (r < n && heap[r].g < heap[best].g) best = r
+        if (best === i) break
+        const tmp = heap[best]; heap[best] = heap[i]; heap[i] = tmp
+        i = best
+      }
+    }
+    return top
+  }
+
+  // Zig-zag bias: a tiny extra cost applied when the next step continues
+  // in the same direction as the previous step. Both directions are
+  // read from worldPos so this works across tile boundaries and ramps.
+  // Value chosen so N alternating steps cost less than N-1 straight +
+  // 1 turn ONLY when Manhattan-equivalent — never lets the pathfinder
+  // pick a genuinely longer route. On open stretches this converts
+  // "straight line then 90°" into a diagonal-looking staircase, which
+  // is exactly the organic look we want.
+  const STRAIGHT_PENALTY = 0.15
+  const dirOf = (fromId: string, toId: string): [number, number] | null => {
+    const a = graph.worldPos.get(fromId)
+    const b = graph.worldPos.get(toId)
+    if (!a || !b) return null
+    return [Math.sign(b[0] - a[0]), Math.sign(b[2] - a[2])]
+  }
+
+  push(start, 0)
+  let expanded = 0
+  while (heap.length > 0) {
+    const cur = pop()!
+    if (cur.g !== dist.get(cur.id)) continue // stale entry
+    if (cur.id === goal) {
+      const path: string[] = [goal]
+      let step = goal
+      while (step !== start) { step = parent.get(step)!; path.push(step) }
+      path.reverse()
+      return path
+    }
+    if (++expanded > maxNodes) return null
+    // Direction of the step that brought us into cur (null at start).
+    const prev = parent.get(cur.id)
+    const inDir = prev ? dirOf(prev, cur.id) : null
+    for (const nb of shuffled(adj.get(cur.id) ?? [])) {
+      let w = Math.max(1, costOf(nb))
+      if (inDir) {
+        const outDir = dirOf(cur.id, nb)
+        if (outDir && outDir[0] === inDir[0] && outDir[1] === inDir[1]) {
+          w += STRAIGHT_PENALTY
+        }
+      }
+      const ng = cur.g + w
+      const old = dist.get(nb)
+      if (old === undefined || ng < old) {
+        dist.set(nb, ng)
+        parent.set(nb, cur.id)
+        push(nb, ng)
+      }
     }
   }
   return null

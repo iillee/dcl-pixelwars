@@ -84,13 +84,18 @@ function pickTeamForNewBot(): number {
 
 function spawnBot(): void {
   if (!graph || !deps) return
-  const nodesArr = [...graph.nodes]
+  // Spawn on the deep (eroded) subgraph so the bot's very first path
+  // stays off walls. Fall back to full nodes only in the pathological
+  // case where the deep set is empty (shouldn't happen with ARM=10).
+  const spawnSet = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
+  const nodesArr = [...spawnSet]
   const startCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
   const team = pickTeamForNewBot()
   const bot = new Bot({
     team,
     startCell,
     pickTarget: makeSmartTarget(deps.paint, team),
+    paint: deps.paint,   // enables own-paint-avoidance in pathfinding
   }) as Bot & { botId: number }
   botIdCounter++
   bot.botId = botIdCounter
@@ -157,8 +162,11 @@ export function getBotPositions(): Array<{ id: number; team: number; x: number; 
   if (!graph) return []
   const out: Array<{ id: number; team: number; x: number; y: number; z: number }> = []
   for (const b of bots) {
-    const pos = graph.worldPos.get(b.currentCell)
-    if (!pos) continue // shouldn't happen — currentCell always comes from graph
+    // Sub-step interpolated position — lerps between currentCell and
+    // path[0] based on step accumulator. Turns the broadcast into
+    // continuous motion instead of teleport-then-hold. See Bot.visualPosition().
+    const pos = b.visualPosition(graph)
+    if (!pos) continue
     out.push({ id: b.botId, team: b.team, x: pos[0], y: pos[1], z: pos[2] })
   }
   return out
