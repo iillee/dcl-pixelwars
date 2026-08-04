@@ -20,10 +20,20 @@ const cellTeam = new Map<string, number>()
 // in the same 200ms window, only Blue ends up in the broadcast.
 const dirty = new Map<string, number>()
 
-/** Apply a paint from a validated sender. Overwrites existing color. */
-export function applyPaint(id: string, team: number): void {
+/**
+ * Apply a paint from a validated sender. Overwrites existing color.
+ * Returns true only when the cell actually changed team (unpainted →
+ * this team, or enemy → this team). Callers use the return value to
+ * attribute leaderboard credit only to real "gained" cells, so a player
+ * standing still on their own paint doesn't inflate their score by
+ * ~90/sec (9-cell footprint × 10 Hz outbox flush).
+ */
+export function applyPaint(id: string, team: number): boolean {
+  const prev = cellTeam.get(id)
+  if (prev === team) return false
   cellTeam.set(id, team)
   dirty.set(id, team)
+  return true
 }
 
 /**

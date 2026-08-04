@@ -94,12 +94,14 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${MAX_IDS_PER_TICK}`)
       return
     }
-    for (const id of ids) applyPaint(id, team)
-    // Attribute cellsPainted to the sender for the top-painters board.
-    // Uses raw ids.length — slight over-count when the same cell is
-    // painted twice by the same player in one tick, but that's rare and
-    // the effort to dedupe isn't worth the loss of simplicity.
-    leaderboardIncrement(from, ids.length)
+    // Count only cells that actually changed team — a player standing
+    // still on their own paint re-sends the same 9 cellIds every 100ms;
+    // crediting all of them would inflate the leaderboard by ~90/sec.
+    let gained = 0
+    for (const id of ids) {
+      if (applyPaint(id, team)) gained++
+    }
+    if (gained > 0) leaderboardIncrement(from, gained)
   })
 
   // Name capture — client sends once on join with PlayerIdentityData.name.
