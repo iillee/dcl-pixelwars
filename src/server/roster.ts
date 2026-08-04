@@ -19,6 +19,16 @@
 
 const roster: string[] = []
 
+// Last-activity timestamps per userId. Populated by markActive() from
+// paintTick + joinRoster handlers. Used by activeCount / activeSoloTeam
+// to filter out invisible scraper bots that connect but never paint.
+const lastActiveAt = new Map<string, number>()
+
+/** 60s of no paint activity = considered idle/scraper. Real players
+ *  paint constantly while moving; even AFK players usually resume
+ *  within a minute. Tuneable if we see too many false-idle boots. */
+const ACTIVE_WINDOW_MS = 60000
+
 /** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue). */
 export function assignTeam(userId: string): number {
   let idx = roster.indexOf(userId)
@@ -33,6 +43,39 @@ export function assignTeam(userId: string): number {
 /** For diagnostics / future admin tools. */
 export function rosterSize(): number {
   return roster.length
+}
+
+/** Mark a userId as having done something "player-like" (painted, joined).
+ *  Called from server.ts on paintTick and joinRoster. */
+export function markActive(userId: string): void {
+  lastActiveAt.set(userId, Date.now())
+}
+
+/** Count roster members who've been active in the last ACTIVE_WINDOW_MS.
+ *  Filters out invisible/scraper accounts that connect but never paint. */
+export function activeHumanCount(): number {
+  const cutoff = Date.now() - ACTIVE_WINDOW_MS
+  let n = 0
+  for (const uid of roster) {
+    const last = lastActiveAt.get(uid) ?? 0
+    if (last >= cutoff) n++
+  }
+  return n
+}
+
+/** Team of the single active human, or null if the active count isn't
+ *  exactly 1. Used by the bot manager to pick the opposite colour. */
+export function activeSoloHumanTeam(): number | null {
+  const cutoff = Date.now() - ACTIVE_WINDOW_MS
+  let found: string | null = null
+  for (const uid of roster) {
+    const last = lastActiveAt.get(uid) ?? 0
+    if (last < cutoff) continue
+    if (found !== null) return null // more than one active
+    found = uid
+  }
+  if (!found) return null
+  return getTeam(found)
 }
 
 /**

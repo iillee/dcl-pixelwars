@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, getTeamAt } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, activeHumanCount, activeSoloHumanTeam } from './roster'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
@@ -64,11 +64,10 @@ export async function setupServer(): Promise<void> {
   initBots({
     applyPaint,
     paint: { teamOf: teamOfCell },
-    humanCount: rosterSize,
-    // Solo player is always roster index 0. If we later shrink the roster
-    // on disconnect this needs to become "team of the currently-connected
-    // human", but that's a follow-up when hammurabi exposes active peers.
-    soloHumanTeam: () => getTeamAt(0),
+    // "Active" = has painted (or joined) within the last 60s. Filters out
+    // invisible scraper accounts that connect but never touch the ground.
+    humanCount: activeHumanCount,
+    soloHumanTeam: activeSoloHumanTeam,
   })
   rebuildBotGraph(currentRoundIndex())
 
@@ -90,7 +89,8 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] joinRoster payload/from mismatch (payload=${userId}, from=${from}) — using from`)
     }
     const team = assignTeam(from)
-    console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()})`)
+    markActive(from) // count them as present immediately; paint activity will refresh it
+    console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     // Queue a Discord join notification (debounced 5s to let updateName
     // arrive so we send the real display name, not the wallet hash).
@@ -117,6 +117,10 @@ export async function setupServer(): Promise<void> {
     for (const id of ids) {
       if (applyPaint(id, team)) gained++
     }
+    // Even if nothing changed team (walking on own paint), the paintTick
+    // itself is proof the player is real — mark them active so scraper
+    // bots that never send paintTick are filtered out.
+    markActive(from)
     if (gained > 0) leaderboardIncrement(from, gained)
   })
 
