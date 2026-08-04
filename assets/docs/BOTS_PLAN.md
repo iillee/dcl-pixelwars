@@ -1,9 +1,10 @@
 # Bots — Work Plan (Phase 5a)
 
-Status: **MVP shipped on branch `bots`.** All steps 1–7B complete plus
-solo-mode simplification and scraper filter. Not yet merged — next
-session will focus on visual polish (avatar shape, movement smoothing,
-name/label).
+Status: **MVP + behavioural polish shipped on branch `bots`, deployed to
+`labyrinthia.dcl.eth`.** All steps 1–7 complete; step 8 (tuning pass) is
+an ongoing iterative loop and is currently in a good state (see "Second
+polish pass" below). Not yet merged — next session: bot jump/glide
+mobility (see "Jump/glide feature" below) + optional codebase cleanup.
 
 ---
 
@@ -14,13 +15,13 @@ name/label).
 | 1. Walkable adjacency graph | ✅ | `shared/mazeGraph.ts` — seed 1 -> 11780 cells, fully connected, 45ms build |
 | 2. BFS pathfinding | ✅ | avg 1.6ms/path over 100 random pairs; 260-step full-map traversal in 7ms |
 | 3. Bot state machine | ✅ | `server/bots/bot.ts` — accumulator model, MAX_STEPS_PER_TICK=3 safety cap |
-| 4. Smart target heuristics | ✅ | 60/30/10 neutral/enemy/centre + deep-corridor bias (added post-playtest) |
+| 4. Smart target heuristics | ✅ | Rewritten twice — see "Second polish pass" below. Current: strict priority (enemy 70% → neutral → own) with erosion-based deep-only movement. |
 | 5. Population manager | ✅ | `server/bots/manager.ts` — wired into 5Hz broadcast tick |
 | 6. Round-loop wiring | ✅ | Absorbed into step 5; `rebuildBotGraph(seed)` fires on `round:reset` |
 | 7A. Invisible bots (paint-only) | ✅ | Shipped first; feel-check confirmed we needed visible form |
 | 7B. Visible box entities | ✅ | `client/botVisual.ts` — team-coloured emissive box, 2Hz position broadcast |
-| 7C. Avatar shapes | ⏳ | Next session — replace box with `AvatarShape` for real "opponent" feel |
-| 8. Tuning pass | ⏳ | Jitter / pauses / difficulty knobs; iterate live once merged |
+| 7C. Ghost model + light | ✅ | Shipped `ghost.glb` + coloured `LightSource` + ambient bob/drift/pulse + dead-reckoning lerp (not Tween). AvatarShape deferred — ghost reads better for a floating opponent and costs ~1/50th. |
+| 8. Tuning pass | ✅ (ongoing) | Speed, jitter, pauses shipped. Wall-hugging fixed via erosion. Backtracking fixed via own-paint Dijkstra cost. Roomba-look fixed via shuffle + zig-zag bias. Enemy-hunter tier added for offensive play. |
 
 ### Fixes shipped after initial MVP
 
@@ -47,6 +48,82 @@ name/label).
 - **Active-painter filter for humanCount** — scraper accounts that
   connect but never paint no longer suppress bot spawning. Tracked via
   `roster.markActive()` on paintTick + joinRoster with a 60s window.
+
+### Second polish pass — movement quality + offensive play
+
+After merging the MVP the ghost felt "botty" in three specific ways.
+Each was fixed in a distinct commit; the code paths are documented
+inline in `mazeGraph.ts` / `bot.ts` / `paintState.ts`.
+
+1. **Wall-hugging → eroded deep-graph pathfinding.** Attempts to bias
+   BFS via neighbour sorting or post-hoc target filtering all failed:
+   the pathfinder could still *traverse* wall cells to reach a deep
+   target. Fix: `buildWalkableGraph` now emits a second graph
+   (`deepNodes` / `deepAdj`) containing only cells with
+   `distToWall >= DEEP_MARGIN`. Bot samples targets from `deepNodes`
+   and pathfinds on `deepAdj` (`findPath(..., useDeepOnly=true)`), so
+   wall cells are physically absent from its world. Connectivity
+   fallback logs a WARN if erosion would fragment the graph.
+   `DEEP_MARGIN` currently = 1 (2 was too conservative for the
+   ARM=10 corridor width).
+
+2. **Backtracking over own trail → weighted Dijkstra with own-paint cost.**
+   `findPath` now accepts an optional `costOf(cellId)` and switches to
+   a binary-heap Dijkstra when supplied. Bot sets own-team cells to
+   cost 3, everything else to 1: the pathfinder detours through
+   un-owned tiles when the detour is ≤2 steps longer but still crosses
+   its own paint when there's no alternative — never strands the bot.
+
+3. **Roomba-look (L-shaped paths on open ground) → shuffle + zig-zag bias.**
+   Neighbour expansion order is shuffled in both BFS and Dijkstra
+   branches (organic feel on ties). Additionally, a `STRAIGHT_PENALTY`
+   of 0.15 is added when the next step continues in the same direction
+   as the previous one, so on Manhattan-equivalent open stretches the
+   pathfinder prefers a staircase over a straight-then-turn. The bump
+   is small enough that a genuinely shorter straight path still wins.
+
+4. **Passive floor-filler → enemy-hunter target tier.** The old smart
+   picker treated neutral and enemy cells equally, so early round
+   (mostly-neutral map) the ghost never contested territory. New
+   `paintState.sampleEnemyCells(team, k)` uses reservoir sampling to
+   expose enemy paint to the picker. `makeSmartTarget` now has a
+   Tier 0 that rolls at `ENEMY_BIAS = 0.70` and targets a random deep
+   enemy cell. Falls through cleanly when there's no enemy paint
+   (round start) or when sampled enemy cells are all wall-adjacent.
+
+5. **Randomised starting team.** `roster.ts` picks a one-shot
+   `teamParityFlip` at server startup so the first joiner is Red or
+   Blue 50/50, without breaking alternation or rejoin-stability (all
+   three team lookups route through `teamFromIndex`).
+
+**Current tuning knobs** (all easy to find in the code):
+
+| Constant | File | Value | Meaning |
+|---|---|---|---|
+| `DEFAULT_STEPS_PER_SEC` | `bot.ts` | 4.8 | Slightly faster than DCL walk; catchable by jog/sprint. |
+| `DEEP_MARGIN` | `mazeGraph.ts` | 1 | Erosion depth (cells from wall). |
+| `STRAIGHT_PENALTY` | `mazeGraph.ts` | 0.15 | Zig-zag bias in Dijkstra. |
+| `ENEMY_BIAS` | `bot.ts` | 0.70 | Probability of enemy-hunter tier per target roll. |
+| Own-paint cost multiplier | `bot.ts` (inline) | 3 | Detour weight in Dijkstra. |
+
+### Deferred / next-session ideas
+
+- **Jump/glide feature.** A pass over the graph that adds one-way
+  "aerial" edges (deep-cell → deep-cell within XZ radius, equal-or-lower
+  Y) so the bot can shortcut across gaps humans use jumping/gliding for.
+  Would need edge tagging + parabolic Y arc in `Bot.visualPosition` +
+  distance-scaled step timing. Rough scope: ~80 lines across mazeGraph.ts
+  and bot.ts. Do this *after* offensive play is dialled in — no point
+  giving the ghost mobility if it's still painting blank floor.
+- **Anti-follow: distance-from-player weight** in target selection.
+  Server already knows player position via paintTick sender. Bias
+  targets toward the opposite side of the map from the current human.
+- **Trail memory:** skip targets within radius R of the last N cells
+  the bot painted, so it doesn't wander back into fresh contested space.
+- **Codebase cleanup** (see review notes): mask defs duplicated between
+  `paint.ts` and `shared/mazeGraph.ts`; split the 759-line `mazeGraph.ts`
+  into masks + graph + pathfind modules; prune obsolete `isNearCenter`
+  and `PAUSE_*` code paths in `bot.ts` now that motion is organic.
 
 ---
 
