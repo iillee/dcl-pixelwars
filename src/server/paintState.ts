@@ -48,6 +48,15 @@ export function drainDelta(): Array<{ id: string; team: number }> {
   return out
 }
 
+/**
+ * Point lookup by cellId. Used by bot smart-targeting (samples ~48
+ * cells per target selection); would be O(N) if we scanned getFullState.
+ * Returns 0 when unpainted so callers can treat "team 0 = neutral".
+ */
+export function teamOfCell(id: string): number {
+  return cellTeam.get(id) ?? 0
+}
+
 /** Live coverage counters. Called by the 5s log tick. */
 export function coverage(): { red: number; blue: number; total: number } {
   let red = 0, blue = 0

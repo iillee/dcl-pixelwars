@@ -15,7 +15,8 @@ import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
-import { applyPaint, coverage, drainDelta, getFullState, clearAll as clearPaintState } from './paintState'
+import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, clearAll as clearPaintState } from './paintState'
+import { initBots, rebuildBotGraph, tickBots, botCount } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
   saveToStorage as saveLeaderboard,
@@ -55,6 +56,17 @@ export async function setupServer(): Promise<void> {
   // no-op if DISCORD_PLAYER_JOIN_WEBHOOK isn't set or we're in preview.
   bindNameResolver(leaderboardGetName)
   await initDiscord()
+
+  // Bot subsystem — Phase 5a. Server-side virtual painters that keep the
+  // scene alive when human count < TARGET_ACTIVE. Retire gracefully as
+  // humans join; never appear on the leaderboard.
+  //
+  initBots({
+    applyPaint,
+    paint: { teamOf: teamOfCell },
+    humanCount: rosterSize,
+  })
+  rebuildBotGraph(currentRoundIndex())
 
   // Roster handler — assign or look up a player's team.
   // Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
@@ -132,6 +144,10 @@ export async function setupServer(): Promise<void> {
   engine.addSystem((dt: number) => {
     broadcastClock += dt
     if (broadcastClock < BROADCAST_INTERVAL) return
+    // Tick bots BEFORE draining, so any paint they generate this frame
+    // rides out on the same broadcast — no extra latency and no wasted
+    // "skip empty" checks.
+    tickBots(broadcastClock)
     broadcastClock = 0
     const changes = drainDelta()
     if (changes.length === 0) return
@@ -148,7 +164,7 @@ export async function setupServer(): Promise<void> {
     coverageClock = 0
     const c = coverage()
     if (c.total > 0) {
-      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total}`)
+      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total} bots=${botCount()}`)
     }
   })
 
@@ -189,6 +205,7 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
+    rebuildBotGraph(idx)
     // Round boundary is our persistence + publish cadence for the
     // leaderboard: 5 min is frequent enough that a server crash loses at
     // most one round of paint credit, infrequent enough that Storage
