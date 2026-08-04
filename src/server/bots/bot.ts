@@ -30,7 +30,7 @@ import { GRID_W, GRID_H } from '../../maze/generator'
  *   6.0 = matches sprint. Felt too aggressive for solo-mode presence.
  * Actual per-step time is jittered ±JITTER_FRAC to break the metronome.
  */
-export const DEFAULT_STEPS_PER_SEC = 4.6
+export const DEFAULT_STEPS_PER_SEC = 4.8
 
 /** Randomise each step by ±this fraction of the base interval. 0.15 =
  *  ±15%. Too high and the bot looks laggy; too low and it looks robotic. */
@@ -70,6 +70,12 @@ export const randomTarget: PickTarget = (self, graph) => {
 export interface PaintReader {
   /** Return the team painted on this cell, or 0 if unpainted. */
   teamOf(cellId: string): number
+  /** Optional: return up to `k` random cellIds currently held by the
+   *  opposing team. Used to make the bot play offensively (contest
+   *  enemy paint instead of only chasing blank floor). If undefined,
+   *  the bot falls back to the neutral-cell strategy — keeps unit
+   *  tests trivial. */
+  sampleEnemy?(myTeam: number, k: number): string[]
 }
 
 const SAMPLE_K = 48
@@ -115,23 +121,48 @@ function isDeepCentre(cellId: string, graph: WalkableGraph): boolean {
   return graph.deepNodes.has(cellId)
 }
 
-// ─── smartTarget priority (revised after playtest) ───────────────────
-// Old: probabilistic 60/30/10 neutral/enemy/center. Produced visible
-// backtracking because a 60% neutral roll would often pick a neutral
-// cell PAST the bot's own painted tail rather than the nearest frontier.
+// ─── smartTarget priority (revised after "ghost too passive" playtest) ─
+// Problem: bot treated neutral and enemy cells equally, so early round
+// (mostly-neutral map) it almost never contested territory — the human
+// could paint uncontested, then camp behind the bot to repaint its trail.
+// The ghost never played offense.
 //
 // New strict priority (first match wins):
-//   1. Any deep-centre UNCLAIMED cell = neutral (0) or enemy team.
-//      Both are "worth painting" for us; own team is never a target.
+//   0. ENEMY_BIAS chance: aim for a random deep enemy-held cell.
+//      Turns the ghost into an aggressor instead of a floor-filler.
+//      Falls through when there is no enemy paint yet (round start) or
+//      when the sampled enemy cells all lie in the wall band.
+//   1. Any deep-centre non-own cell (neutral or enemy) — the old
+//      tier 1. Handles the common early-round case.
 //   2. Any deep-centre non-self cell (last resort — may include own
 //      paint if the local area is fully claimed).
-//
-// isNearCenter and the enemy tier are no longer separately weighted —
-// the map-centre bias is redundant now that we always chase unclaimed
-// tiles (which tend to appear anywhere paint is thin).
+
+/** Probability of rolling the offensive (enemy-hunter) target strategy
+ *  on each new target pick. 0.7 was chosen so late-round the bot is
+ *  clearly contesting enemy paint (visible "comes back to overpaint
+ *  what you just did" behavior) while early round (little enemy paint
+ *  yet) the 30% neutral roll + the fall-through keep it moving. Tune
+ *  down to 0.5 if it feels too clingy, up to 0.85 for max pressure. */
+const ENEMY_BIAS = 0.70
+/** How many enemy cells to sample per target roll. 24 is well above the
+ *  probability of missing a well-covered region while remaining cheap
+ *  when the map is mostly enemy paint (reservoir sampling is O(N) but
+ *  N here is bounded by cellTeam size, low thousands worst case). */
+const ENEMY_SAMPLE_K = 24
 
 export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget {
   return (self, graph) => {
+    // Tier 0: enemy hunter. Only rolls if the paint reader supports
+    // enemy sampling AND the RNG says so this tick.
+    if (paint.sampleEnemy && Math.random() < ENEMY_BIAS) {
+      const enemies = paint.sampleEnemy(myTeam, ENEMY_SAMPLE_K)
+      for (const c of enemies) {
+        if (c === self.currentCell) continue
+        if (isDeepCentre(c, graph)) return c
+      }
+      // No deep enemy cells found — fall through to the neutral tier.
+    }
+
     const candidates = sampleNodes(graph, SAMPLE_K)
 
     // Tier 1: nearest deep-centre unclaimed cell (neutral or enemy).

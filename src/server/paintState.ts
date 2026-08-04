@@ -78,6 +78,33 @@ export function getFullState(): Array<{ id: string; team: number }> {
   return out
 }
 
+/**
+ * Reservoir-sample up to `k` cellIds currently painted by any team
+ * OTHER than `myTeam` (i.e. enemy cells; neutral/unpainted cells are
+ * excluded). Used by the bot's smart-target picker to bias movement
+ * toward contested territory instead of blank floor.
+ *
+ * Reservoir sampling (Algorithm R): single O(N) pass with no
+ * intermediate array of enemy ids, so it scales cleanly even when the
+ * map is mostly enemy paint. Empty result = no enemy paint exists;
+ * caller falls back to the neutral-cell strategy.
+ */
+export function sampleEnemyCells(myTeam: number, k: number): string[] {
+  const out: string[] = []
+  let seen = 0
+  for (const [id, t] of cellTeam) {
+    if (t === 0 || t === myTeam) continue
+    if (out.length < k) {
+      out.push(id)
+    } else {
+      const j = Math.floor(Math.random() * (seen + 1))
+      if (j < k) out[j] = id
+    }
+    seen++
+  }
+  return out
+}
+
 /** Round reset (Step 6 will call this). */
 export function clearAll(): void {
   cellTeam.clear()

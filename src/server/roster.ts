@@ -19,6 +19,19 @@
 
 const roster: string[] = []
 
+// Coin-flip chosen ONCE at server startup. 0 = first joiner is Red
+// (roster idx 0 -> team 1), 1 = first joiner is Blue (roster idx 0 ->
+// team 2). Applied identically to every team lookup so alternation and
+// rejoin-stability are preserved — all we're doing is randomising which
+// team lands on the even slots. Kept in RAM: a server restart re-rolls,
+// which is fine (the roster is also RAM-only).
+const teamParityFlip: 0 | 1 = Math.random() < 0.5 ? 0 : 1
+console.log(`[Roster] team parity: first joiner will be ${teamParityFlip === 0 ? 'RED' : 'BLUE'}`)
+
+function teamFromIndex(idx: number): number {
+  return ((idx + teamParityFlip) % 2 === 0) ? 1 : 2
+}
+
 // Last-activity timestamps per userId. Populated by markActive() from
 // paintTick + joinRoster handlers. Used by activeCount / activeSoloTeam
 // to filter out invisible scraper bots that connect but never paint.
@@ -36,8 +49,9 @@ export function assignTeam(userId: string): number {
     roster.push(userId)
     idx = roster.length - 1
   }
-  // idx even = Red (1), odd = Blue (2). Matches Team enum in src/paint.ts.
-  return (idx % 2 === 0) ? 1 : 2
+  // Parity + one-time random flip: matches Team enum in src/paint.ts
+  // (1 = Red, 2 = Blue). See teamParityFlip declaration above.
+  return teamFromIndex(idx)
 }
 
 /** For diagnostics / future admin tools. */
@@ -85,7 +99,7 @@ export function activeSoloHumanTeam(): number | null {
  */
 export function getTeamAt(index: number): number | null {
   if (index < 0 || index >= roster.length) return null
-  return (index % 2 === 0) ? 1 : 2
+  return teamFromIndex(index)
 }
 
 /**
@@ -96,5 +110,5 @@ export function getTeamAt(index: number): number | null {
 export function getTeam(userId: string): number | null {
   const idx = roster.indexOf(userId)
   if (idx === -1) return null
-  return (idx % 2 === 0) ? 1 : 2
+  return teamFromIndex(idx)
 }

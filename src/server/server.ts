@@ -15,7 +15,7 @@ import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, activeHumanCount, activeSoloHumanTeam } from './roster'
-import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, clearAll as clearPaintState } from './paintState'
+import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
@@ -63,7 +63,13 @@ export async function setupServer(): Promise<void> {
   //
   initBots({
     applyPaint,
-    paint: { teamOf: teamOfCell },
+    paint: {
+      teamOf: teamOfCell,
+      // Enables the bot's enemy-hunter target tier (bot.ts ENEMY_BIAS).
+      // Without this the ghost only chases neutral cells and plays
+      // pure defense — easy to counter by camping its trail.
+      sampleEnemy: sampleEnemyCells,
+    },
     // "Active" = has painted (or joined) within the last 60s. Filters out
     // invisible scraper accounts that connect but never touch the ground.
     humanCount: activeHumanCount,
@@ -163,10 +169,15 @@ export async function setupServer(): Promise<void> {
     room.send('paintDelta', { changes, red: c.red, blue: c.blue, total: c.total })
   })
 
-  // Bot position broadcast (2 Hz). Cheap enough to always send — 3 bots
-  // × ≈20 bytes = <100 bytes/message, 200 bytes/sec. Clients render one
-  // box per entry (see client-side bots visualiser).
-  const BOT_POS_HZ = 2
+  // Bot position broadcast (10 Hz). Payload trivial — 3 bots × ≈20 bytes
+  // = ~600 bytes/sec. Clients Tween between updates (100ms per segment)
+  // for continuous walking motion.
+  //
+  // Rate history: 2Hz teleport-hop -> 4Hz Tweened (visible aliasing between
+  // bot step cadence and broadcast cadence, uneven segment lengths) -> 10Hz
+  // Tweened. Higher than 10Hz adds no value: bots only step 4x/sec, so any
+  // faster broadcast just re-sends the same position (Tween no-ops).
+  const BOT_POS_HZ = 10
   const BOT_POS_INTERVAL = 1 / BOT_POS_HZ
   let botPosClock = 0
   engine.addSystem((dt: number) => {
