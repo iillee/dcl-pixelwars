@@ -130,13 +130,21 @@ export function tickBots(dtSec: number): void {
   // felt like the bots weren't really contesting territory.
   const dtMs = dtSec * 1000
   for (const b of bots) {
-    for (const cellId of b.tick(dtMs, graph)) {
-      deps.applyPaint(cellId, b.team)
-      // 1-hop neighbors ≈ 3x3 stamp (center + up-to-4 orthogonal). Diagonals
-      // would need a 2-hop query — not worth the cost; the visual difference
-      // from missing diagonals is minor and it stays cheap.
-      for (const nb of graph.adj.get(cellId) ?? []) {
-        deps.applyPaint(nb, b.team)
+    for (const stepId of b.tick(dtMs, graph)) {
+      // Paint the full 3x3 stamp around the stepped cell (matches human
+      // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
+      // off-corridor positions are filtered.
+      const colonIdx = stepId.indexOf(':')
+      if (colonIdx < 0) continue
+      const prefix = stepId.slice(0, colonIdx + 1)
+      const [colStr, rowStr] = stepId.slice(colonIdx + 1).split(',')
+      const col = parseInt(colStr, 10)
+      const row = parseInt(rowStr, 10)
+      for (let dc = -1; dc <= 1; dc++) {
+        for (let dr = -1; dr <= 1; dr++) {
+          const nid = `${prefix}${col + dc},${row + dr}`
+          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team)
+        }
       }
     }
   }

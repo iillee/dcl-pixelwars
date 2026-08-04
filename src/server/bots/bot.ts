@@ -18,7 +18,7 @@
  * cell.
  */
 
-import { WalkableGraph, findPath } from '../../shared/mazeGraph'
+import { WalkableGraph, findPath, LO, HI } from '../../shared/mazeGraph'
 import { GRID_W, GRID_H } from '../../maze/generator'
 
 /** Steps per second the bot walks. 4 ≈ human paint pace. */
@@ -77,6 +77,24 @@ function isNearCenter(cellId: string, dist: number): boolean {
   return Math.abs(tx - cx) <= dist && Math.abs(tz - cz) <= dist
 }
 
+// Corridor "deep center" range — cells with col AND row this many steps
+// from an edge get preference as targets. A bot that only ever paths
+// through deep-centre cells won't wall-hug, so its 3x3 footprint stays
+// entirely inside the walkable corridor.
+const DEEP_MARGIN = 2 // must be < ARM/2 (=5) so plenty of candidates remain
+
+function isDeepCentre(cellId: string): boolean {
+  const colon = cellId.indexOf(':')
+  if (colon < 0) return false
+  const [c, r] = cellId.slice(colon + 1).split(',').map(Number)
+  // Corridor spans LO..HI on the mask axis; "deep" = at least DEEP_MARGIN
+  // cells inside from either edge. For ramps (canonical, row 0..RAMP_ROWS)
+  // the row check still works because it's about lateral not longitudinal
+  // position — wait, actually col is lateral for ramps too. Fine.
+  return c >= LO + DEEP_MARGIN && c < HI - DEEP_MARGIN &&
+         r >= LO + DEEP_MARGIN && r < HI - DEEP_MARGIN
+}
+
 export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget {
   const enemyTeam = myTeam === 1 ? 2 : 1
   return (self, graph) => {
@@ -87,16 +105,23 @@ export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget 
                     'center'
 
     const candidates = sampleNodes(graph, SAMPLE_K)
+    // Two-pass: prefer deep-centre matches, fall back to any match.
+    let fallback: string | null = null
     for (const c of candidates) {
       if (c === self.currentCell) continue
       const t = paint.teamOf(c)
-      if (mode === 'neutral' && t === 0) return c
-      if (mode === 'enemy'   && t === enemyTeam) return c
-      if (mode === 'center'  && isNearCenter(c, 1)) return c
+      const modeMatch =
+        (mode === 'neutral' && t === 0) ||
+        (mode === 'enemy'   && t === enemyTeam) ||
+        (mode === 'center'  && isNearCenter(c, 1))
+      if (!modeMatch) continue
+      if (isDeepCentre(c)) return c    // ⭐ preferred
+      if (fallback === null) fallback = c
     }
-    // Fallback: no match in sample — return any non-self random cell.
-    // Happens when the mode's category is scarce (e.g. no enemy paint yet
-    // in round 1) or the sample happens to miss it.
+    if (fallback) return fallback
+    // Nothing matched the mode at all — pick a random non-self cell,
+    // preferring deep-centre if any candidate qualifies.
+    for (const c of candidates) if (c !== self.currentCell && isDeepCentre(c)) return c
     for (const c of candidates) if (c !== self.currentCell) return c
     return randomTarget(self, graph)
   }
