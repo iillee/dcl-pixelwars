@@ -259,7 +259,7 @@ src/
 ├── client/
 │   ├── index.ts                orchestrator, setupClient()
 │   ├── clientHandler.ts        SOLE owner of room.on/send — WS boundary
-│   ├── audio.ts                music + mute + click SFX (playUiClick shared)
+│   ├── audio.ts                music + mute + click SFX + tile-claim SFX (local, per-flip)
 │   ├── player.ts               initial spawn + round-reset teleport to center
 │   └── waitForLoad.ts          startup gate (available, not yet wired)
 ├── maze/

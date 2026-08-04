@@ -19,9 +19,11 @@ import { AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
+const CLAIM_SRC = 'assets/sounds/pop.mp3'
 
 let musicEnt: Entity = 0 as Entity
 let muteClickEnt: Entity = 0 as Entity
+let claimSfxEnt: Entity = 0 as Entity
 let musicMuted = true
 let playStartMs = 0
 let pausedPositionSec = 0
@@ -29,6 +31,8 @@ let pausedPositionSec = 0
 export function initAudio(): void {
   muteClickEnt = engine.addEntity()
   Transform.create(muteClickEnt, { parent: engine.CameraEntity })
+  claimSfxEnt = engine.addEntity()
+  Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   musicEnt = engine.addEntity()
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
@@ -55,6 +59,21 @@ export function playUiClick(): void {
   AudioSource.createOrReplace(muteClickEnt, {
     audioClipUrl: CLICK_SRC,
     playing: true, loop: false, volume: 0.5, global: true,
+  })
+}
+
+/**
+ * Play the tile-claim SFX for the local player only (camera-parented,
+ * global=true so no 3D falloff). Fires once per new claim — caller
+ * (noteLocalPaintCandidate) already guards against re-walking own tiles,
+ * so no additional throttle needed. Low volume so continuous painting
+ * reads as a soft rhythmic sparkle, not a machine gun.
+ */
+export function playClaimSfx(): void {
+  if (!claimSfxEnt) return
+  AudioSource.createOrReplace(claimSfxEnt, {
+    audioClipUrl: CLAIM_SRC,
+    playing: true, loop: false, volume: 0.15, global: true,
   })
 }
 

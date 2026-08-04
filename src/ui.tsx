@@ -80,7 +80,7 @@ export const uiMenu = () => (
       return (
         <UiEntity
           uiTransform={{
-            positionType: 'absolute', position: { top: 2, left: 0 },
+            positionType: 'absolute', position: { top: 10, left: 0 },
             width: '100%', flexDirection: 'row', justifyContent: 'center',
             pointerFilter: 'none',
           }}

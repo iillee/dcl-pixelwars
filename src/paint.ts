@@ -7,6 +7,7 @@
 
 import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
+import { playClaimSfx } from './client/audio'
 import { MAZE_ORIGIN } from './maze/generator'
 
 // ─── Teams ───────────────────────────────────────────────────────────
@@ -359,7 +360,11 @@ export function drainPaintOutbox(): string[] {
 export function noteLocalPaintCandidate(id: string): void {
   paintOutbox.add(id)
   if (localTeam !== Team.None) {
+    // Detect a real new claim (cell not already ours) BEFORE applying,
+    // so the SFX only fires when the tile actually flips to our team.
+    const wasOurs = cellTeam.get(id) === localTeam
     applyRemotePaint(id, localTeam)
+    if (!wasOurs) playClaimSfx()
   }
 }
 
