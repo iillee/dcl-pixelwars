@@ -36,6 +36,16 @@ export function rosterSize(): number {
 }
 
 /**
+ * Team of the Nth roster slot (0 = first joiner). Returns null if the
+ * roster is shorter than that. Used by the bot manager to pick the
+ * opposite colour of the sole human player when spawning a solo-mode bot.
+ */
+export function getTeamAt(index: number): number | null {
+  if (index < 0 || index >= roster.length) return null
+  return (index % 2 === 0) ? 1 : 2
+}
+
+/**
  * Look up a userId's team without side effects. Returns 1 (Red), 2 (Blue),
  * or null if the user has never called joinRoster. Used by the paintTick
  * handler to attribute paint to a team.

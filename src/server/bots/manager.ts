@@ -23,10 +23,10 @@ import { generateWithRetry, getPlacedTilesInOrder } from '../../maze/generator'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { Bot, makeSmartTarget, PaintReader } from './bot'
 
-// Tuning knobs — Foundation may want to tweak once we ship telemetry.
-const TARGET_ACTIVE = 4          // desired total painters (humans + bots)
-const MAX_BOTS      = 3          // hard cap regardless of humanCount
-const MIN_HUMANS    = 1          // bots only exist when at least one human present
+// Solo-mode: exactly one bot appears when there is exactly one human,
+// always on the OPPOSITE team so the solo player has an opponent. Two+
+// humans = no bots; zero humans = no bots.
+const SOLO_HUMAN_COUNT = 1
 
 export interface ManagerDeps {
   /** Attribute paint to a team. Returns true if the cell actually flipped. */
@@ -35,6 +35,8 @@ export interface ManagerDeps {
   paint: PaintReader
   /** Currently-connected (or ever-connected) human count. */
   humanCount: () => number
+  /** Team (1 or 2) of the sole human when humanCount===1, else null. */
+  soloHumanTeam: () => number | null
 }
 
 let deps: ManagerDeps | null = null
@@ -44,7 +46,7 @@ let botIdCounter = 0
 
 export function initBots(d: ManagerDeps): void {
   deps = d
-  console.log('[Bots] initialised (targetActive=' + TARGET_ACTIVE + ', maxBots=' + MAX_BOTS + ')')
+  console.log('[Bots] initialised (solo-mode: 1 bot when 1 human, opposite team)')
 }
 
 /**
@@ -73,11 +75,11 @@ export function rebuildBotGraph(seed: number): void {
   }
 }
 
-/** Team with fewer bots (ties → Red). Balances the bot population. */
+/** Solo-mode: bot team is opposite of the sole human. Defaults to Blue
+ *  if soloHumanTeam is somehow unavailable at spawn time. */
 function pickTeamForNewBot(): number {
-  const red = bots.filter(b => b.team === 1).length
-  const blue = bots.length - red
-  return red <= blue ? 1 : 2
+  const humanTeam = deps?.soloHumanTeam() ?? 1
+  return humanTeam === 1 ? 2 : 1
 }
 
 function spawnBot(): void {
@@ -97,13 +99,8 @@ function spawnBot(): void {
 }
 
 function retireBot(): void {
-  // Retire the bot on the currently-larger bot team to maintain balance.
-  const red = bots.filter(b => b.team === 1).length
-  const blue = bots.length - red
-  const targetTeam = red >= blue ? 1 : 2
-  const idx = bots.findIndex(b => b.team === targetTeam)
-  if (idx === -1) return
-  const removed = bots.splice(idx, 1)[0]
+  const removed = bots.pop()
+  if (!removed) return
   console.log(`[Bots] retire: team ${removed.team === 1 ? 'RED' : 'BLUE'} (pop ${bots.length})`)
 }
 
@@ -117,9 +114,7 @@ export function tickBots(dtSec: number): void {
 
   // ── 1. Population control ──────────────────────────────────────────
   const humans = deps.humanCount()
-  const desired = humans >= MIN_HUMANS
-    ? Math.min(MAX_BOTS, Math.max(0, TARGET_ACTIVE - humans))
-    : 0
+  const desired = humans === SOLO_HUMAN_COUNT ? 1 : 0
   while (bots.length < desired) spawnBot()
   while (bots.length > desired) retireBot()
 

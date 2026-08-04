@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam } from './roster'
+import { assignTeam, rosterSize, getTeam, getTeamAt } from './roster'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
@@ -65,6 +65,10 @@ export async function setupServer(): Promise<void> {
     applyPaint,
     paint: { teamOf: teamOfCell },
     humanCount: rosterSize,
+    // Solo player is always roster index 0. If we later shrink the roster
+    // on disconnect this needs to become "team of the currently-connected
+    // human", but that's a follow-up when hammurabi exposes active peers.
+    soloHumanTeam: () => getTeamAt(0),
   })
   rebuildBotGraph(currentRoundIndex())
 
