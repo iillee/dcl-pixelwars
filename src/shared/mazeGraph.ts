@@ -278,3 +278,54 @@ export function reachableCount(graph: WalkableGraph, start: string): number {
   }
   return visited.size
 }
+
+/**
+ * BFS shortest path between two cells. Uniform edge cost (every step is
+ * one cell), so BFS gives optimal path with no priority-queue overhead.
+ * A* would only help if we later add non-uniform costs (e.g. "avoid
+ * enemy paint").
+ *
+ * Returns the path as [start, ..., goal] inclusive, or null if goal is
+ * unreachable (should be impossible on a valid maze but bots must fail
+ * safe if a race condition ever hands them a stale cellId).
+ *
+ * `maxNodes` bounds the search to guard against pathological cases
+ * (partial graph, cycles from a future bug). At ~12k cells per maze,
+ * 20k is a safe ceiling that still permits full-map traversal.
+ */
+export function findPath(
+  graph: WalkableGraph,
+  start: string,
+  goal: string,
+  maxNodes: number = 20000,
+): string[] | null {
+  if (start === goal) return [start]
+  if (!graph.nodes.has(start) || !graph.nodes.has(goal)) return null
+
+  const parent = new Map<string, string>()
+  const visited = new Set<string>([start])
+  const queue: string[] = [start]
+  let head = 0 // avoid O(n) Array.shift on large queues
+  let expanded = 0
+
+  while (head < queue.length) {
+    const cur = queue[head++]
+    if (++expanded > maxNodes) return null
+    for (const nb of graph.adj.get(cur) ?? []) {
+      if (visited.has(nb)) continue
+      visited.add(nb)
+      parent.set(nb, cur)
+      if (nb === goal) {
+        // Reconstruct path from goal back to start.
+        const path: string[] = [nb]
+        let step = cur
+        while (step !== start) { path.push(step); step = parent.get(step)! }
+        path.push(start)
+        path.reverse()
+        return path
+      }
+      queue.push(nb)
+    }
+  }
+  return null
+}
