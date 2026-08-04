@@ -19,6 +19,7 @@
  */
 
 import { WalkableGraph, findPath } from '../../shared/mazeGraph'
+import { GRID_W, GRID_H } from '../../maze/generator'
 
 /** Steps per second the bot walks. 4 ≈ human paint pace. */
 export const DEFAULT_STEPS_PER_SEC = 4
@@ -35,6 +36,70 @@ export const randomTarget: PickTarget = (self, graph) => {
     if (pick !== self.currentCell) return pick
   }
   return arr[0]
+}
+
+// ─── smartTarget ──────────────────────────────────────────────────────────────────
+// Behavioral mix from BOTS_PLAN.md §5.4:
+//   60% neutral bias  (paint an unpainted cell)
+//   30% enemy bias    (overpaint an enemy-owned cell — territorial pressure)
+//   10% center bias   (stay visible near the middle tile)
+//
+// Implementation: roll a strategy per target, then sample K random graph
+// cells and pick the first that matches. Sampling (not full-scan) keeps
+// this O(K) regardless of maze size — at K=48 the miss probability for a
+// well-populated category is <1%. If sampling fails, fall back to random.
+
+export interface PaintReader {
+  /** Return the team painted on this cell, or 0 if unpainted. */
+  teamOf(cellId: string): number
+}
+
+const SAMPLE_K = 48
+
+function sampleNodes(graph: WalkableGraph, k: number): string[] {
+  // Reservoir-free: cheap random-index sampling. Duplicates possible but
+  // harmless — we're just looking for any matching candidate.
+  const arr = [...graph.nodes]
+  const out: string[] = []
+  for (let i = 0; i < k; i++) out.push(arr[Math.floor(Math.random() * arr.length)])
+  return out
+}
+
+/** Return true if the cellId's tile coord is within `dist` of maze center. */
+function isNearCenter(cellId: string, dist: number): boolean {
+  // cellId format: "tx,tz,ty:col,row". Only tx,tz matter for center check.
+  const comma1 = cellId.indexOf(',')
+  const comma2 = cellId.indexOf(',', comma1 + 1)
+  const tx = parseInt(cellId.slice(0, comma1), 10)
+  const tz = parseInt(cellId.slice(comma1 + 1, comma2), 10)
+  const cx = Math.floor(GRID_W / 2)
+  const cz = Math.floor(GRID_H / 2)
+  return Math.abs(tx - cx) <= dist && Math.abs(tz - cz) <= dist
+}
+
+export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget {
+  const enemyTeam = myTeam === 1 ? 2 : 1
+  return (self, graph) => {
+    const roll = Math.random()
+    const mode: 'neutral' | 'enemy' | 'center' =
+      roll < 0.60 ? 'neutral' :
+      roll < 0.90 ? 'enemy'   :
+                    'center'
+
+    const candidates = sampleNodes(graph, SAMPLE_K)
+    for (const c of candidates) {
+      if (c === self.currentCell) continue
+      const t = paint.teamOf(c)
+      if (mode === 'neutral' && t === 0) return c
+      if (mode === 'enemy'   && t === enemyTeam) return c
+      if (mode === 'center'  && isNearCenter(c, 1)) return c
+    }
+    // Fallback: no match in sample — return any non-self random cell.
+    // Happens when the mode's category is scarce (e.g. no enemy paint yet
+    // in round 1) or the sample happens to miss it.
+    for (const c of candidates) if (c !== self.currentCell) return c
+    return randomTarget(self, graph)
+  }
 }
 
 export interface BotOpts {
