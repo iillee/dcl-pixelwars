@@ -47,13 +47,22 @@ export function initBotVisual(): void {
     for (const b of bots) {
       seenIds.add(b.id)
       let rec = botEntities.get(b.id)
-      if (!rec || rec.team !== b.team) {
-        // New bot, or team changed (retired + respawned with same id — unlikely
-        // but safe). Rebuild the entity so the material is right.
-        if (rec) engine.removeEntity(rec.entity)
-        const entity = createBotEntity(b.team)
-        rec = { entity, team: b.team }
+      if (!rec) {
+        // First sight of this bot id — spawn a fresh entity.
+        rec = { entity: createBotEntity(b.team), team: b.team }
         botEntities.set(b.id, rec)
+      } else if (rec.team !== b.team) {
+        // Team mismatch on an existing id. Normally impossible (Bot.team is
+        // readonly, ids are monotonic) but happens after a server restart:
+        // ids reset to 1 while the client still has stale entities. Just
+        // recolour in place — no entity churn, no visual flash.
+        Material.setPbrMaterial(rec.entity, {
+          albedoColor: b.team === 1 ? RED : BLUE,
+          emissiveColor: b.team === 1 ? RED : BLUE,
+          emissiveIntensity: 0.4,
+          roughness: 0.6, metallic: 0.0,
+        })
+        rec.team = b.team
       }
       Transform.createOrReplace(rec.entity, {
         position: Vector3.create(b.x, b.y + BOX_Y_OFFSET, b.z),

@@ -117,7 +117,23 @@ interface CellCoord { tx: number; tz: number; ty: number; col: number; row: numb
 
 const cellKey = (c: CellCoord) => cellId(c.tx, c.tz, c.ty, c.col, c.row)
 
-/** Enumerate all walkable cells for a single placed tile (post-rotation). */
+/**
+ * Enumerate all walkable cells for a single placed tile.
+ *
+ * KNOWN LIMITATION: for RAMPS, paint.ts uses canonical (pre-rotation)
+ * (col,row) cellIds spanning 17 rows, while this graph emits world-axis
+ * (col,row) cellIds over 16 rows. On rotated ramps (r=1..3) this means:
+ *   - The graph's cellIds don't match paint.ts's cellIds
+ *   - Bots painting those cells send ids that don't correspond to a
+ *     rendered cell entity — those paints are effectively lost
+ *   - Result: rotated ramps look partially painted where bots walk them
+ *
+ * Fixing this properly requires unifying the two conventions (or teaching
+ * the graph both, plus cross-tile adjacency that translates canonical
+ * exits to world neighbours). Tracked for Phase 5b. For now: humans paint
+ * ramps correctly (they use worldToCellId which does the canonical math);
+ * bots leave partial coverage on rotated ramps but don't break anything.
+ */
 export function walkableCellsForTile(p: Placed): CellCoord[] {
   const mask = MASKS[p.type]
   if (!mask) return []
@@ -166,24 +182,18 @@ function cellCenterWorld(p: Placed, col: number, row: number): [number, number, 
   const cellSize = CELL / SIZE
   const tileWorldX = p.x * CELL + MAZE_ORIGIN
   const tileWorldZ = p.z * CELL + MAZE_ORIGIN
-  const rad = p.r * Math.PI / 2
-  const sinR = Math.sin(rad), cosR = Math.cos(rad)
 
-  // Canonical local center. Note: paint.ts uses `col` ↔ lx and `row` ↔ lz
-  // AFTER rotation is applied to the mask (rotateMask). Since our cellIds
-  // are indexed against the rotated mask, we can treat (col,row) directly
-  // as post-rotation world-axis-aligned indices from tile SW corner.
-  const lx = (col + 0.5) * cellSize
-  const lz = (row + 0.5) * cellSize
-  const wx = tileWorldX + lx
-  const wz = tileWorldZ + lz
+  // (col, row) are world-axis after rotateMask, so no rotation transform.
+  const wx = tileWorldX + (col + 0.5) * cellSize
+  const wz = tileWorldZ + (row + 0.5) * cellSize
 
-  // Y: flat tiles = base + offset. Ramps = interpolate along the slope.
+  // Y: flat = base + offset. Ramps interpolated along whichever world-axis
+  // matches the high side. Slightly inaccurate because ramp cellIds are
+  // actually canonical (see walkableCellsForTile note) — approximation is
+  // fine for the floating box marker.
   let wy = p.y + FLAT_OFFSET
   if (TILES[p.type].isRamp) {
-    // Determine which world-axis direction the ramp climbs, then use that
-    // axis's cell index (col or row) as t in [0,1].
-    const high = highDirAt(p.type, p.r) // world Dir the high edge faces
+    const high = highDirAt(p.type, p.r)
     let t = 0
     if (high === N)      t = row / (SIZE - 1)
     else if (high === S) t = 1 - row / (SIZE - 1)
@@ -191,12 +201,6 @@ function cellCenterWorld(p: Placed, col: number, row: number): [number, number, 
     else if (high === W) t = 1 - col / (SIZE - 1)
     wy = p.y + FLAT_OFFSET + t * STEP
   }
-
-  // (Rotation matrix removed — empirically the mask-index space already lines
-  // up with world axes after rotateMask(). If bot positions ever drift on
-  // rotated tiles, uncomment the wxRel/wzRel transform.)
-  void sinR; void cosR
-
   return [wx, wy, wz]
 }
 
