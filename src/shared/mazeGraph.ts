@@ -61,6 +61,26 @@ const FORK_MASK: Mask     = buildMask((r, c) => {
 const RAMP_MASK: Mask     = STRAIGHT_MASK
 export const RAMP_FLAT_END = 1 // cells of flat landing at each end of the ramp
 
+// Ramp cells span (SIZE + 1) rows on the canonical slope axis: top landing
+// at row=SIZE, matching paint.ts's RAMP_FLAT_END + nIncline + RAMP_FLAT_END
+// for our SIZE=16 / CELL=32 / STEP=10.767 tuning. Kept in sync manually.
+export const RAMP_ROWS = SIZE + 1
+
+// Cached ramp geometry — mirrors paint.ts rampGeometry(). Only depends on
+// CELL, STEP, SIZE, RAMP_FLAT_END so we can build it eagerly at module load.
+function computeRampGeometry() {
+  const cellSize = CELL / SIZE
+  const flatLen = RAMP_FLAT_END * cellSize
+  const inclineStart = flatLen
+  const inclineEnd = CELL - flatLen
+  const inclineLen = inclineEnd - inclineStart
+  const slopeLen = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
+  const nIncline = Math.round(slopeLen / cellSize)
+  const sinA = STEP / slopeLen
+  return { cellSize, flatLen, inclineStart, inclineEnd, nIncline, sinA }
+}
+const RAMP_GEO = computeRampGeometry()
+
 export const MASKS: Partial<Record<TileType, Mask>> = {
   cross: CROSS_MASK,
   end: END_MASK,
@@ -120,25 +140,32 @@ const cellKey = (c: CellCoord) => cellId(c.tx, c.tz, c.ty, c.col, c.row)
 /**
  * Enumerate all walkable cells for a single placed tile.
  *
- * KNOWN LIMITATION: for RAMPS, paint.ts uses canonical (pre-rotation)
- * (col,row) cellIds spanning 17 rows, while this graph emits world-axis
- * (col,row) cellIds over 16 rows. On rotated ramps (r=1..3) this means:
- *   - The graph's cellIds don't match paint.ts's cellIds
- *   - Bots painting those cells send ids that don't correspond to a
- *     rendered cell entity — those paints are effectively lost
- *   - Result: rotated ramps look partially painted where bots walk them
+ * Rotation-convention split (matches paint.ts):
+ *   - Flat tiles: cellIds are WORLD-AXIS-ALIGNED (col,row). Mask is rotated
+ *     via rotateMask() so mask[row][col] indexes world-relative position.
+ *   - Ramps: cellIds are CANONICAL (pre-rotation) (col,row). paint.ts's
+ *     worldToCellId rotates the player's world position back to canonical
+ *     frame via rampCellIdxFromCanonical(). We must emit the same
+ *     canonical cellIds or bot paint lands on ids that don't render.
  *
- * Fixing this properly requires unifying the two conventions (or teaching
- * the graph both, plus cross-tile adjacency that translates canonical
- * exits to world neighbours). Tracked for Phase 5b. For now: humans paint
- * ramps correctly (they use worldToCellId which does the canonical math);
- * bots leave partial coverage on rotated ramps but don't break anything.
+ * Ramps also have RAMP_ROWS (=SIZE+1=17) rows, not SIZE, because paint.ts
+ * spawns an extra top landing row at row=SIZE.
  */
 export function walkableCellsForTile(p: Placed): CellCoord[] {
   const mask = MASKS[p.type]
   if (!mask) return []
-  const rotated = rotateMask(mask, p.r)
   const out: CellCoord[] = []
+
+  if (TILES[p.type].isRamp) {
+    for (let row = 0; row < RAMP_ROWS; row++) {
+      for (let col = LO; col < HI; col++) {
+        out.push({ tx: p.x, tz: p.z, ty: p.y, col, row })
+      }
+    }
+    return out
+  }
+
+  const rotated = rotateMask(mask, p.r)
   for (let row = 0; row < SIZE; row++) {
     for (let col = 0; col < SIZE; col++) {
       if (rotated[row][col] === 'F') {
@@ -183,24 +210,41 @@ function cellCenterWorld(p: Placed, col: number, row: number): [number, number, 
   const tileWorldX = p.x * CELL + MAZE_ORIGIN
   const tileWorldZ = p.z * CELL + MAZE_ORIGIN
 
-  // (col, row) are world-axis after rotateMask, so no rotation transform.
+  if (TILES[p.type].isRamp) {
+    // Canonical (col, row). Compute canonical local (lx, lz) matching the
+    // sample positions rampCellIdxFromCanonical would classify to (col, row).
+    // Then rotate to world via paint.ts's localToWorld math.
+    const lx = (col + 0.5) * cellSize
+    let lz: number, wy: number
+    if (row < RAMP_FLAT_END) {
+      lz = (row + 0.5) * cellSize
+      wy = p.y + FLAT_OFFSET
+    } else if (row >= RAMP_FLAT_END + RAMP_GEO.nIncline) {
+      lz = RAMP_GEO.inclineEnd + (row - RAMP_FLAT_END - RAMP_GEO.nIncline + 0.5) * cellSize
+      wy = p.y + STEP + FLAT_OFFSET
+    } else {
+      const slopeIdx = row - RAMP_FLAT_END
+      // Midpoint of this slope cell along canonical Z (approximate; enough for a marker).
+      const slopeDist = (slopeIdx + 0.5) * cellSize
+      lz = RAMP_GEO.inclineStart + slopeDist * (RAMP_GEO.inclineEnd - RAMP_GEO.inclineStart) /
+           (RAMP_GEO.nIncline * cellSize)
+      wy = p.y + FLAT_OFFSET + slopeDist * RAMP_GEO.sinA
+    }
+    const cx = lx - CELL / 2
+    const cz = lz - CELL / 2
+    const rad = p.r * Math.PI / 2
+    const sinR = Math.sin(rad), cosR = Math.cos(rad)
+    const wxRel =  cx * cosR + cz * sinR
+    const wzRel = -cx * sinR + cz * cosR
+    const wx = tileWorldX + CELL / 2 + wxRel
+    const wz = tileWorldZ + CELL / 2 + wzRel
+    return [wx, wy, wz]
+  }
+
+  // Flat tile: (col, row) world-axis after rotateMask, no rotation.
   const wx = tileWorldX + (col + 0.5) * cellSize
   const wz = tileWorldZ + (row + 0.5) * cellSize
-
-  // Y: flat = base + offset. Ramps interpolated along whichever world-axis
-  // matches the high side. Slightly inaccurate because ramp cellIds are
-  // actually canonical (see walkableCellsForTile note) — approximation is
-  // fine for the floating box marker.
-  let wy = p.y + FLAT_OFFSET
-  if (TILES[p.type].isRamp) {
-    const high = highDirAt(p.type, p.r)
-    let t = 0
-    if (high === N)      t = row / (SIZE - 1)
-    else if (high === S) t = 1 - row / (SIZE - 1)
-    else if (high === E) t = col / (SIZE - 1)
-    else if (high === W) t = 1 - col / (SIZE - 1)
-    wy = p.y + FLAT_OFFSET + t * STEP
-  }
+  const wy = p.y + FLAT_OFFSET
   return [wx, wy, wz]
 }
 
@@ -258,11 +302,14 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
     adj.set(a, list)
   }
 
+  // ─── Flat-tile adjacency (same-tile + flat↔flat cross-tile) ──────────────────
+  // Ramps are handled below via world-position matching: their cellIds are
+  // canonical (pre-rotation) so world-direction indexing doesn't apply.
   for (const p of placed) {
+    const isRamp = TILES[p.type].isRamp
     const tk = tileKey(p)
     const local = cellsByTile.get(tk)!
     const openings = openingsAt(p.type, p.r)
-    const rampHigh = highDirAt(p.type, p.r) // world dir of high edge, or null
 
     for (const cellStr of local) {
       const [col, row] = cellStr.split(',').map(Number)
@@ -273,47 +320,87 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
         const nc = col + dc
         const nr = row + dr
 
-        // Same-tile neighbor
-        if (nc >= 0 && nc < SIZE && nr >= 0 && nr < SIZE) {
+        // Same-tile neighbour. Bounds differ for ramps (canonical LO..HI × 0..RAMP_ROWS).
+        const inBounds = isRamp
+          ? (nc >= LO && nc < HI && nr >= 0 && nr < RAMP_ROWS)
+          : (nc >= 0 && nc < SIZE && nr >= 0 && nr < SIZE)
+        if (inBounds) {
           if (local.has(`${nc},${nr}`)) {
             addEdge(from, cellId(p.x, p.z, p.y, nc, nr))
-            continue
           }
-          // Else: hit a wall inside the same tile — no edge.
           continue
         }
 
-        // Cross-tile: only if this tile opens in direction `d`
+        // Cross-tile. Ramps handled in the world-position pass below.
+        if (isRamp) continue
         if (!openings.has(d)) continue
 
-        // Determine target Y: for ramps, the "high" edge exits at y+STEP
-        // (approx — ramp connects to whatever tile is placed one level up),
-        // all other openings exit at same Y. We resolve by picking whichever
-        // placed neighbor tile at (x+dx, z+dz) opens back toward us.
         const neighborsAtXZ = tilesByXZ.get(xzKey(p.x + dx, p.z + dz)) ?? []
         for (const np of neighborsAtXZ) {
+          if (TILES[np.type].isRamp) continue // ramp neighbours handled below
           const npOpenings = openingsAt(np.type, np.r)
           const back: Dir = ((d + 2) % 4) as Dir
           if (!npOpenings.has(back)) continue
-          // Y check: same level, OR ramp-high edge going to y+STEP tile
-          const sameY = Math.abs(np.y - p.y) < 0.01
-          const isRampHighExit = rampHigh === d && np.y > p.y + 0.01
-          const isRampLowLandingFromAbove =
-            highDirAt(np.type, np.r) === back && np.y < p.y - 0.01
-          if (!sameY && !isRampHighExit && !isRampLowLandingFromAbove) continue
+          if (Math.abs(np.y - p.y) > 0.01) continue // flat↔flat is same-Y only
 
-          // Compute mirrored (col,row) on np's edge.
-          // We're exiting p at (col,row) through direction d, entering np
-          // through direction `back` at the flush cell across the shared edge.
           let ncol = col, nrow = row
-          if (d === N)      { nrow = 0 }
-          else if (d === S) { nrow = SIZE - 1 }
-          else if (d === E) { ncol = 0 }
-          else if (d === W) { ncol = SIZE - 1 }
+          if (d === N)      nrow = 0
+          else if (d === S) nrow = SIZE - 1
+          else if (d === E) ncol = 0
+          else if (d === W) ncol = SIZE - 1
 
           const npLocal = cellsByTile.get(tileKey(np))
           if (npLocal?.has(`${ncol},${nrow}`)) {
             addEdge(from, cellId(np.x, np.z, np.y, ncol, nrow))
+          }
+        }
+      }
+    }
+  }
+
+  // ─── Ramp cross-tile edges via world-position matching ──────────────────────
+  // For each ramp's canonical S exit (row=0) and N exit (row=SIZE) and each
+  // corridor column, find the flush cell in the neighbour tile by matching
+  // world (x,z) within half a cell. Uniform whether neighbour is flat or
+  // another ramp — both have worldPos populated.
+  const cellSizeM = CELL / SIZE
+  const posEps = cellSizeM * 0.5
+  for (const p of placed) {
+    if (!TILES[p.type].isRamp) continue
+    const exits: Array<{ canonRow: number; canonDir: Dir; exitY: number }> = [
+      { canonRow: 0,    canonDir: S, exitY: p.y },
+      { canonRow: SIZE, canonDir: N, exitY: p.y + STEP },
+    ]
+    for (const { canonRow, canonDir, exitY } of exits) {
+      const worldDir = rotDir(canonDir, p.r)
+      const { dx, dz } = dirVec[worldDir]
+      const neighborsAtXZ = tilesByXZ.get(xzKey(p.x + dx, p.z + dz)) ?? []
+      for (let col = LO; col < HI; col++) {
+        const fromId = cellId(p.x, p.z, p.y, col, canonRow)
+        const fromPos = worldPos.get(fromId)
+        if (!fromPos) continue
+        const targetX = fromPos[0] + dx * cellSizeM
+        const targetZ = fromPos[2] + dz * cellSizeM
+        for (const np of neighborsAtXZ) {
+          if (Math.abs(np.y - exitY) > 0.01) continue
+          const npLocal = cellsByTile.get(tileKey(np))
+          if (!npLocal) continue
+          let bestId: string | null = null
+          let bestDist = Infinity
+          for (const localStr of npLocal) {
+            const [nc, nr] = localStr.split(',').map(Number)
+            const nId = cellId(np.x, np.z, np.y, nc, nr)
+            const nPos = worldPos.get(nId)
+            if (!nPos) continue
+            const dxp = nPos[0] - targetX, dzp = nPos[2] - targetZ
+            const dist = Math.sqrt(dxp * dxp + dzp * dzp)
+            if (dist < posEps && dist < bestDist) {
+              bestDist = dist; bestId = nId
+            }
+          }
+          if (bestId) {
+            addEdge(fromId, bestId)
+            addEdge(bestId, fromId)
           }
         }
       }
