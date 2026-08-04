@@ -1,5 +1,5 @@
 /**
- * server.ts — Squareoff authoritative server entry point.
+ * server.ts — Pixelwars authoritative server entry point.
  *
  * Thin orchestrator, flagtag-pattern. Runs in the headless SDK server
  * process (hammurabi-server). No 3D, no ~system/RestrictedActions —
@@ -37,7 +37,7 @@ import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
 const MAX_IDS_PER_TICK = 100
 
 export async function setupServer(): Promise<void> {
-  console.log('[Server] Starting Squareoff server...')
+  console.log('[Server] Starting Pixelwars server...')
 
   // Load leaderboard from Storage before any paintTicks land, so we don't
   // clobber persisted state with a fresh empty board. loadFromStorage()

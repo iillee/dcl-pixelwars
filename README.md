@@ -1,16 +1,16 @@
-# Labyrinthia · Squareoff
+# Pixelwars
 
 A team tile-coverage game played on a procedurally generated 3D maze, built for Decentraland with SDK7.
 
-**Squareoff** — two teams (Red and Blue) run around a fresh maze every round, painting the walkable surface in their color just by walking on it. Highest coverage at the round timer wins. Inspired by Splatoon's *Turf War*.
+**Pixelwars** — two teams (Red and Blue) run around a fresh maze every round, painting the walkable surface in their color just by walking on it. Highest coverage at the round timer wins. Inspired by Splatoon's *Turf War*.
 
-**Labyrinthia** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 10×10 parcel labyrinth (160m × 160m). Seed is derived from a UTC round boundary so every player sees the same maze at the same instant with zero sync overhead.
+**Pixelwars** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 10×10 parcel labyrinth (160m × 160m). Seed is derived from a UTC round boundary so every player sees the same maze at the same instant with zero sync overhead.
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
 **Live:** [labyrinthia.dcl.eth](https://play.decentraland.org/?realm=labyrinthia.dcl.eth)
 
-The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`assets/docs/SQUAREOFF-DESIGN.md`](assets/docs/SQUAREOFF-DESIGN.md) for the game design doc.
+The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`assets/docs/PIXELWARS-DESIGN.md`](assets/docs/PIXELWARS-DESIGN.md) for the game design doc.
 
 ---
 

@@ -1,5 +1,5 @@
 // ─── Draw-call stress test ───────────────────────────────────────────
-// Throwaway. Answers Squareoff design doc §8.1: "Does DCL SDK7 batch
+// Throwaway. Answers Pixelwars design doc §8.1: "Does DCL SDK7 batch
 // same-material planes across entities?"
 //
 // Spawns N MeshRenderer.setPlane entities in a flat NxN grid at spawn,

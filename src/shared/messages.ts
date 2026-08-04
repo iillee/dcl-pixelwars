@@ -1,5 +1,5 @@
 /**
- * messages.ts — shared WS message schema for Squareoff auth server.
+ * messages.ts — shared WS message schema for Pixelwars auth server.
  *
  * Registered from both client and server (identical schema). Follows the
  * flagtag pattern of a single `room` handle returned by registerMessages().

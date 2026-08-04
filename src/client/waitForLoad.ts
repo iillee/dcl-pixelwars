@@ -16,7 +16,7 @@
  *   - CameraEntity has a Transform (renderer is up)
  *   - PlayerIdentityData exists with an address (wallet or guest id populated)
  *
- * We don't gate on isStateSyncronized() because Squareoff's authoritative
+ * We don't gate on isStateSyncronized() because Pixelwars's authoritative
  * server is the source of truth — a joining client either gets a snapshot
  * from the server after teamAssigned, or is the first-joiner (whose seed
  * watcher rolls a fresh maze).

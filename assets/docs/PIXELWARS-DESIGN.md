@@ -1,6 +1,6 @@
-# Squareoff — Design Document
+# Pixelwars — Design Document
 
-**Status:** Phases 1–4 shipped. Live at `labyrinthia.dcl.eth`. Server-authoritative multiplayer working: team assignment, cross-player paint sync, snapshot-on-join, UTC-boundary round reset. Repo: `github.com/iillee/squareoff` (branch `squareoff`).
+**Status:** Phases 1–4 shipped. Live at `labyrinthia.dcl.eth`. Server-authoritative multiplayer working: team assignment, cross-player paint sync, snapshot-on-join, UTC-boundary round reset. Repo: `github.com/iillee/pixelwars` (branch `pixelwars`).
 
 **Latest refactor (Aug 2026):** event-driven modular architecture (sky-chaser style). `client.ts` went from 1,191 → 121 lines split across `client/`, `maze/`, `shared/` module trees connected by a typed event bus. See [`../../README.md`](../../README.md) and §12 below.
 
@@ -10,11 +10,11 @@
 
 ## 1. Vision
 
-**Squareoff** is a team-based tile-coverage game built on top of the procedural maze scene at `labyrinthia.dcl.eth`. Inspired by Splatoon's *Turf War* mode.
+**Pixelwars** is a team-based tile-coverage game built on top of the procedural maze scene at `labyrinthia.dcl.eth`. Inspired by Splatoon's *Turf War* mode.
 
 **Core fantasy:** Teams compete to claim the maze's walkable surface — subdivided into 2m grid squares — in their team's color. Walking over a square flips it to your color, overwriting the enemy's if present. At round end (every 5 minutes on the UTC boundary), the team with the highest coverage percentage wins.
 
-**Name:** *Squareoff* = a face-off + literal squares.
+**Name:** *Pixelwars* = a face-off + literal squares.
 
 **Why on the maze?** The procedurally-generated multi-level labyrinth gives every round a fresh battleground — no static map memorization, verticality via ramps, natural chokepoints. The UTC-boundary round system regenerates the seed every 5 minutes, so no two rounds share terrain.
 
@@ -87,7 +87,7 @@ Two approaches prototyped on a scratch `drip` branch (kept locally for reference
 
 ## 4. Tile geometry
 
-The tile GLBs were re-exported for Squareoff to align cleanly with the paint grid, based on the mockup in `../images/subdivisions.jpg`:
+The tile GLBs were re-exported for Pixelwars to align cleanly with the paint grid, based on the mockup in `../images/subdivisions.jpg`:
 - Walkable footprints are integer-meter dimensions.
 - **Tile origin, cell size (32m maze cell), and rotation conventions preserved** — `ROT_OFFSET`, rotation math, ramp stacking unchanged.
 - Only geometry inside each tile was adjusted.
@@ -174,11 +174,11 @@ Any new synced component **must** be registered on both server and client via `s
 
 ## 9. Repo state
 
-**Branch:** `squareoff` (tracks `squareoff` remote at `github.com/iillee/squareoff`, private).
-**Base:** `main` branch of `labyrinthia` repo (public, not modified by squareoff work).
+**Branch:** `pixelwars` (tracks `pixelwars` remote at `github.com/iillee/pixelwars`, private).
+**Base:** `main` branch of `labyrinthia` repo (public, not modified by pixelwars work).
 **Reference branch:** `drip` (local only) — contains the rejected trail-approach prototype.
 
-**History note:** The squareoff remote had its history rewritten with `git filter-branch` to purge `HomeAgain_Loop.wav` (52MB) from all reachable commits. Clone size is ~3MB.
+**History note:** The pixelwars remote had its history rewritten with `git filter-branch` to purge `HomeAgain_Loop.wav` (52MB) from all reachable commits. Clone size is ~3MB.
 
 **Files of interest** (post-refactor — see §12 for the full module tree):
 - [`src/paint.ts`](../../src/paint.ts) — masks, `rampGeometry`, `spawnCellsForTile`, `worldToCellId`, coverage, painting system with grounded gating + 3×3 footprint, event subscribers (`initPaintNet`).

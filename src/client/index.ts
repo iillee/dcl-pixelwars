@@ -35,7 +35,7 @@ import { initPlayerNet } from './player'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
 
-// ─── Stress-test toggle (Squareoff design §8.1) ─────────────────────
+// ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
 // Try: 5000, 15000, 30000. Read fps from the floating text at spawn.
 const STRESS_COUNT = 0

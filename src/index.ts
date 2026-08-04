@@ -1,5 +1,5 @@
 /**
- * index.ts — thin entry-point router for Squareoff.
+ * index.ts — thin entry-point router for Pixelwars.
  *
  * Runs in TWO runtimes:
  *   - Client (browser QuickJS): renders the maze, painting, UI, audio.
