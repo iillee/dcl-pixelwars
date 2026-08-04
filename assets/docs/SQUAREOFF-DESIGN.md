@@ -141,8 +141,14 @@ Coverage counters are updated by the server on every 5 Hz `paintDelta` broadcast
 **Architecture:** authoritative headless server (hammurabi-server) owns paint state and round clock. See [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) for the design rationale and [`src/shared/messages.ts`](../../src/shared/messages.ts) for the wire schema.
 
 **Message set:**
-- Client → Server: `joinRoster`, `paintTick` (10 Hz), `requestSnapshot`
+- Client → Server: `joinRoster`, `paintTick` (10 Hz), `requestSnapshot`, `updateName` (once on join), `requestLeaderboard` (on popup open)
 - Server → Client: `teamAssigned`, `paintDelta` (5 Hz), `snapshot` (on request), `roundReset` (UTC boundary)
+
+**Synced (CRDT) components** ([`src/shared/components.ts`](../../src/shared/components.ts)):
+- `SeedHolder` (networkId 3000) — current maze seed. Written by first-joiner init and by the round-reset handler.
+- `LeaderboardState` (networkId 3001) — JSON string of top-N painters. Written by server on boot (after Storage load) and on each round boundary; also republished on `requestLeaderboard`.
+
+Any new synced component **must** be registered on both server and client via `syncEntity(entity, [Component.componentId], <networkId>)` with matching IDs. Without the server-side call, mutations never leave the server process — root cause of the leaderboard-popup-was-empty bug fixed Aug 2026.
 
 **Saturation discipline (see §2 of PHASE_4_PLAN):**
 - Server broadcast: 5 Hz max
@@ -249,11 +255,11 @@ src/
 ├── round.ts                    timer + banner + initRoundNet subscriber
 ├── stress.ts                   load-test harness
 ├── teleportOrbs.ts             paired teleport portals (deterministic per seed)
-├── ui.tsx                      HUD (React-ECS)
+├── ui.tsx                      HUD + leaderboard popup (React-ECS)
 ├── client/
 │   ├── index.ts                orchestrator, setupClient()
 │   ├── clientHandler.ts        SOLE owner of room.on/send — WS boundary
-│   ├── audio.ts                music + mute + click SFX
+│   ├── audio.ts                music + mute + click SFX (playUiClick shared)
 │   ├── player.ts               initial spawn + round-reset teleport to center
 │   └── waitForLoad.ts          startup gate (available, not yet wired)
 ├── maze/
@@ -266,11 +272,13 @@ src/
 │   ├── team.ts                 Team enum (client + server)
 │   ├── roundTiming.ts          single source of round cadence
 │   ├── messages.ts             WS schema (registerMessages)
-│   └── components.ts           ECS components (SeedHolder)
+│   └── components.ts           ECS components (SeedHolder, LeaderboardState)
 └── server/                     headless authoritative server
     ├── server.ts               orchestrator + round loop
     ├── roster.ts               team assignment
-    └── paintState.ts           authoritative paint map
+    ├── paintState.ts           authoritative paint map (applyPaint → bool)
+    ├── leaderboard.ts          top-painters accumulator + Storage persistence
+    └── discord.ts              join-notification webhook (env-var loaded)
 ```
 
 **Event map** ([`src/shared/events.ts`](../../src/shared/events.ts)):
@@ -288,6 +296,41 @@ type Events = {
 - Publishers emit; they don't call subscribers. Adding a "fanfare on round end" is a one-liner in `client/audio.ts`.
 - Modules never import from other feature modules — only from `shared/` and (for subscribers) `shared/events.ts`.
 - `maze/tiles.ts` and `maze/rng.ts` are pure. `maze/generator.ts` uses no engine imports — the visual side lives in `maze/rebuild.ts`.
+
+---
+
+## 12b. Server-side subsystems (added Aug 2026)
+
+### Leaderboard (`src/server/leaderboard.ts`)
+
+**Metric:** cells **captured** (unpainted → yours, or enemy → yours). Standing on your own paint credits 0 — otherwise the 9-cell footprint × 10 Hz outbox would inflate a stationary player's count by ~90/sec, which was the actual observed bug (leaderboard started at ~58K, incremented on every popup open). Fix: `applyPaint()` now returns `bool` (true = state changed), and the paintTick handler only credits gained cells.
+
+**Persistence:** `Storage.set('leaderboard-v1', json)` on every round boundary (5 min). Load on boot before any paintTicks land. Safe parsing (`?? []`) — malformed data logs + resets rather than losing all future writes to a stuck strict-parse.
+
+**Publish cadence:** CRDT-synced `LeaderboardState` written on:
+1. Boot (after Storage load) — so late joiners see standings immediately.
+2. Round boundary — refresh for all connected clients.
+3. `requestLeaderboard` message — on-demand refresh when a player opens the popup.
+
+Steady-state bandwidth: ~2 KB every 5 min per client. Negligible.
+
+**Not (yet) implemented** — daily vs all-time split, serialized mutation queue, strict-recovery path (all present in flagtag/leaderboard.ts). Deliberately trimmed — add if the game grows to need them.
+
+### Discord webhook (`src/server/discord.ts`)
+
+**Setup:** webhook URL is loaded via `EnvVar.get('DISCORD_PLAYER_JOIN_WEBHOOK')` — **never hardcoded**, since scene bundles are publicly downloadable.
+- **Local dev:** `.env` file (gitignored) with `DISCORD_PLAYER_JOIN_WEBHOOK=https://...`.
+- **Production:** `npx sdk-commands storage env set DISCORD_PLAYER_JOIN_WEBHOOK --value "https://..."`.
+
+**Preview suppression:** `getRealm({}).realmInfo.isPreview` — skip sends during local testing to avoid spamming the channel.
+
+**Debounced send:** join is queued for 5s before firing; server checks `leaderboard.getName(userId)` at flush time so real display names appear in Discord instead of wallet hashes. Falls back to short address (`0x1e93…a52b`) after 15s if the name never resolves (likely a bot / weird client).
+
+**Anti-abuse:** `allowed_mentions.parse: []` in the POST body — a player named literally `@everyone` cannot ping the Discord server.
+
+### Star popup UI
+
+Toggled by a star button in the timer panel (mirror position to the mute button). Backdrop is click-to-close; anywhere inside the modal card also closes. Rows show rank (top-3 in yellow), player name, cell count. Reads from the CRDT-synced `LeaderboardState` component — no per-frame render cost beyond JSON.parse.
 
 ---
 
@@ -311,7 +354,25 @@ Recommended path for the next session:
 
 ---
 
-## Appendix — key constants (as of Aug 2026)
+## Appendix A — local dev setup
+
+**scene.json requirements** for the authoritative server to work in Creator Hub / CLI preview:
+- `"authoritativeMultiplayer": true`
+- `"worldConfiguration": { "name": "labyrinthia.dcl.eth" }`
+- `"logsPermissions": ["0x1e93e534c5e26b01ed242410b43ae23dd0faa52b"]` — without this, server `console.log()` output is hidden and the server *appears* broken when it's just silent.
+
+**Local preview issues** and their causes:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Preview shows old code even after edit | Creator Hub watcher not rebuilding the bundle | `npx sdk-commands build` manually; check `stat bin/index.js` vs `stat src/ui.tsx` timestamps |
+| Paint doesn't propagate in single-player preview | Guest player has no wallet → no `joinRoster` → server drops paintTicks | 3-second fallback in `clientHandler.ts` sends `joinRoster` with a synthetic guest id if PlayerIdentityData.address never populates |
+| Discord webhook silent locally | Preview realm auto-detected | Expected — `[Discord] preview realm detected — join notifications disabled` in server logs |
+| Stale CRDT after schema change | `main.crdt` / `main1.crdt` cached | `rm main.crdt main1.crdt` and restart preview |
+
+---
+
+## Appendix B — key constants (as of Aug 2026)
 
 **Scene layout:** 11×11 parcels (176m × 176m). Deployed to `labyrinthia.dcl.eth`.
 
