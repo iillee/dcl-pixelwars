@@ -74,6 +74,10 @@ function wireInbound(): void {
     })
   })
 
+  room.onMessage('botPositions', ({ bots }) => {
+    events.emit('bots:positions', { bots })
+  })
+
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
     events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
   })

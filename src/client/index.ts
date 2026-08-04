@@ -31,6 +31,7 @@ import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
 import { initAudio } from './audio'
+import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
@@ -106,6 +107,7 @@ export async function setupClient(): Promise<void> {
   initMazeNet()
   initRoundNet()
   initPlayerNet()
+  initBotVisual()
 
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.

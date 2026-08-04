@@ -16,7 +16,7 @@ import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam } from './roster'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
   saveToStorage as saveLeaderboard,
@@ -153,6 +153,21 @@ export async function setupServer(): Promise<void> {
     if (changes.length === 0) return
     const c = coverage()
     room.send('paintDelta', { changes, red: c.red, blue: c.blue, total: c.total })
+  })
+
+  // Bot position broadcast (2 Hz). Cheap enough to always send — 3 bots
+  // × ≈20 bytes = <100 bytes/message, 200 bytes/sec. Clients render one
+  // box per entry (see client-side bots visualiser).
+  const BOT_POS_HZ = 2
+  const BOT_POS_INTERVAL = 1 / BOT_POS_HZ
+  let botPosClock = 0
+  engine.addSystem((dt: number) => {
+    botPosClock += dt
+    if (botPosClock < BOT_POS_INTERVAL) return
+    botPosClock = 0
+    const positions = getBotPositions()
+    if (positions.length === 0) return
+    room.send('botPositions', { bots: positions })
   })
 
   // Coverage log tick (5s). Kept as a low-frequency health signal;

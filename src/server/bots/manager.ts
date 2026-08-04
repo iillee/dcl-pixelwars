@@ -39,7 +39,7 @@ export interface ManagerDeps {
 
 let deps: ManagerDeps | null = null
 let graph: WalkableGraph | null = null
-let bots: Bot[] = []
+let bots: Array<Bot & { botId: number }> = []
 let botIdCounter = 0
 
 export function initBots(d: ManagerDeps): void {
@@ -89,9 +89,10 @@ function spawnBot(): void {
     team,
     startCell,
     pickTarget: makeSmartTarget(deps.paint, team),
-  })
-  bots.push(bot)
+  }) as Bot & { botId: number }
   botIdCounter++
+  bot.botId = botIdCounter
+  bots.push(bot)
   console.log(`[Bots] spawn #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
 }
 
@@ -123,13 +124,39 @@ export function tickBots(dtSec: number): void {
   while (bots.length > desired) retireBot()
 
   // ── 2. Tick each bot ───────────────────────────────────────────────
+  // Each step paints the stepped cell AND its walkable neighbors, matching
+  // the ~3x3 footprint human players apply via paintTick. Without this, a
+  // bot painted 1 cell vs the human's 9 per stride — ~9x weaker, and it
+  // felt like the bots weren't really contesting territory.
   const dtMs = dtSec * 1000
   for (const b of bots) {
     for (const cellId of b.tick(dtMs, graph)) {
       deps.applyPaint(cellId, b.team)
+      // 1-hop neighbors ≈ 3x3 stamp (center + up-to-4 orthogonal). Diagonals
+      // would need a 2-hop query — not worth the cost; the visual difference
+      // from missing diagonals is minor and it stays cheap.
+      for (const nb of graph.adj.get(cellId) ?? []) {
+        deps.applyPaint(nb, b.team)
+      }
     }
   }
 }
 
 /** Diagnostics for the coverage log. */
 export function botCount(): number { return bots.length }
+
+/**
+ * Snapshot of every bot's current world position. Called by the server's
+ * 2 Hz botPositions broadcast tick. Empty array = no bots (broadcast
+ * skipped by the caller so we don't fan out zero-payloads).
+ */
+export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number }> {
+  if (!graph) return []
+  const out: Array<{ id: number; team: number; x: number; y: number; z: number }> = []
+  for (const b of bots) {
+    const pos = graph.worldPos.get(b.currentCell)
+    if (!pos) continue // shouldn't happen — currentCell always comes from graph
+    out.push({ id: b.botId, team: b.team, x: pos[0], y: pos[1], z: pos[2] })
+  }
+  return out
+}

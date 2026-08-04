@@ -15,7 +15,7 @@
  * into a wall because paint would have refused to render there.
  */
 
-import { Placed } from '../maze/generator'
+import { Placed, CELL, MAZE_ORIGIN, STEP } from '../maze/generator'
 import { TILES, TileType, Dir, rotDir, N, E, S, W, highDirAt, openingsAt } from '../maze/tiles'
 
 // ─── Cell-resolution constants ──────────────────────────────────────
@@ -143,11 +143,67 @@ export function walkableCellsForTile(p: Placed): CellCoord[] {
 export interface WalkableGraph {
   nodes: Set<string>
   adj: Map<string, string[]>
+  /** World-space (x,y,z) of the top-center of each walkable cell. Used by
+   *  server-side bot position broadcasts. Populated during buildWalkableGraph. */
+  worldPos: Map<string, [number, number, number]>
+}
+
+// Height offset above tile origin so bot boxes / paint discs sit clear of
+// the floor mesh. Must match paint.ts FLAT_OFFSET so bots stand on the same
+// visual plane as their paint.
+const FLAT_OFFSET = 0.275 * 2
+
+/**
+ * World-space center of a single cell within a placed tile. Mirrors the
+ * math in paint.ts spawnCellsForTileImmediate() — keep in sync if paint
+ * ever moves that transform.
+ *
+ * Ramp cells are approximated: we linearly interpolate Y from bottom to
+ * top based on `row` (canonical, pre-rotation). Good enough for a floating
+ * bot marker; not used for actual paint positioning.
+ */
+function cellCenterWorld(p: Placed, col: number, row: number): [number, number, number] {
+  const cellSize = CELL / SIZE
+  const tileWorldX = p.x * CELL + MAZE_ORIGIN
+  const tileWorldZ = p.z * CELL + MAZE_ORIGIN
+  const rad = p.r * Math.PI / 2
+  const sinR = Math.sin(rad), cosR = Math.cos(rad)
+
+  // Canonical local center. Note: paint.ts uses `col` ↔ lx and `row` ↔ lz
+  // AFTER rotation is applied to the mask (rotateMask). Since our cellIds
+  // are indexed against the rotated mask, we can treat (col,row) directly
+  // as post-rotation world-axis-aligned indices from tile SW corner.
+  const lx = (col + 0.5) * cellSize
+  const lz = (row + 0.5) * cellSize
+  const wx = tileWorldX + lx
+  const wz = tileWorldZ + lz
+
+  // Y: flat tiles = base + offset. Ramps = interpolate along the slope.
+  let wy = p.y + FLAT_OFFSET
+  if (TILES[p.type].isRamp) {
+    // Determine which world-axis direction the ramp climbs, then use that
+    // axis's cell index (col or row) as t in [0,1].
+    const high = highDirAt(p.type, p.r) // world Dir the high edge faces
+    let t = 0
+    if (high === N)      t = row / (SIZE - 1)
+    else if (high === S) t = 1 - row / (SIZE - 1)
+    else if (high === E) t = col / (SIZE - 1)
+    else if (high === W) t = 1 - col / (SIZE - 1)
+    wy = p.y + FLAT_OFFSET + t * STEP
+  }
+
+  // (Rotation matrix removed — empirically the mask-index space already lines
+  // up with world axes after rotateMask(). If bot positions ever drift on
+  // rotated tiles, uncomment the wxRel/wzRel transform.)
+  void sinR; void cosR
+
+  return [wx, wy, wz]
 }
 
 export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
   const nodes = new Set<string>()
   const adj = new Map<string, string[]>()
+  const worldPos = new Map<string, [number, number, number]>()
 
   // Index tiles by grid coord for O(1) neighbor lookup. Y stored per (x,z)
   // as a list so ramps stacking multiple levels resolve correctly.
@@ -168,7 +224,9 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
     const local = new Set<string>()
     for (const c of cells) {
       local.add(`${c.col},${c.row}`)
-      nodes.add(cellKey(c))
+      const id = cellKey(c)
+      nodes.add(id)
+      worldPos.set(id, cellCenterWorld(p, c.col, c.row))
     }
     cellsByTile.set(tileKey(p), local)
   }
@@ -258,7 +316,7 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
     }
   }
 
-  return { nodes, adj }
+  return { nodes, adj, worldPos }
 }
 
 /**
