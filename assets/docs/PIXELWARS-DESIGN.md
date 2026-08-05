@@ -1,6 +1,6 @@
 # Pixelwars — Design Document
 
-**Status:** Phases 1–5a shipped. Live at `pixelwars.dcl.eth` (previously `labyrinthia.dcl.eth` — world moved with the rebrand). Server-authoritative multiplayer + server-side ghost opponent (Phase 5a) with enemy-hunter targeting, own-paint avoidance, and organic zig-zag pathfinding. See `BOTS_PLAN.md` for the ghost architecture. Repo: `github.com/iillee/labyrinthia` (branch `bots`, pending merge).
+**Status:** Phases 1–5a shipped. Live at `pixelwars.dcl.eth` (previously `labyrinthia.dcl.eth` — world moved with the rebrand). Server-authoritative multiplayer + server-side ghost opponent (Phase 5a) with enemy-hunter targeting, own-paint avoidance, organic zig-zag pathfinding, and clean spawn/despawn on human count transitions (see `BOTS_PLAN.md`). `bots` merged to `main` Aug 2026.
 
 **Latest refactor (Aug 2026):** event-driven modular architecture (sky-chaser style). `client.ts` went from 1,191 → 121 lines split across `client/`, `maze/`, `shared/` module trees connected by a typed event bus. See [`../../README.md`](../../README.md) and §12 below.
 

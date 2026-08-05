@@ -39,6 +39,25 @@ cleanup.
 - **Color-swap on server restart** — client no longer rebuilds bot entity
   on `botId` team-mismatch; recolours material in place. Handles the
   bot-id-reuse case cleanly.
+- **Ghost freeze on 2nd human join** — server's `botPositions` broadcast
+  short-circuited when `positions.length === 0`, so clients never got a
+  message with the retired bot missing and their reap loop never ran.
+  Fix: track `lastBotCount` and send one final empty payload on the
+  n→0 transition; subsequent zero-payload ticks are still skipped.
+- **Bot didn't respawn quickly on 2nd human leave** — `activeHumanCount()`
+  relied on a 60s activity window, so a leaver counted as "present" for
+  up to a minute. Fix: wire `onLeaveScene` from `@dcl/sdk/players` to
+  call `roster.markInactive(userId)` which clears their `lastActiveAt`.
+  Roster slot is preserved (rejoin stability). Bot now respawns within
+  one manager tick (~200ms) and `pickTeamForNewBot()` reads the
+  remaining human's team via `activeSoloHumanTeam()` and inverts it, so
+  the fresh ghost always opposes whoever's actually still in the scene.
+- **Blank paint on fast rejoin** — unrelated to bots but surfaced during
+  bot testing. Server's `requestSnapshot` had a 5s per-user cooldown
+  (anti-flood); a rejoin within that window got silently dropped and
+  the client stayed white. `onLeaveScene` now also clears the user's
+  `lastSnapshotAt` entry so rejoins always get a fresh snapshot.
+  In-session flood protection is unchanged.
 
 ### Simplifications made after playtest
 

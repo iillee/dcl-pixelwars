@@ -14,7 +14,8 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, activeHumanCount, activeSoloHumanTeam } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam } from './roster'
+import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
@@ -76,6 +77,26 @@ export async function setupServer(): Promise<void> {
     soloHumanTeam: activeSoloHumanTeam,
   })
   rebuildBotGraph(currentRoundIndex())
+
+  // Snapshot rate-limit map, hoisted so onLeaveScene can clear a user's
+  // entry on disconnect. Without this, a rejoin within SNAPSHOT_COOLDOWN_MS
+  // gets its requestSnapshot silently dropped and the client stays blank
+  // (no paint history). The cooldown still protects against in-session
+  // snapshot floods from a single connected client.
+  const SNAPSHOT_COOLDOWN_MS = 5000
+  const lastSnapshotAt = new Map<string, number>()
+
+  // Detect real disconnects so the bot respawns immediately when a
+  // second player leaves (instead of waiting up to 60s for the activity
+  // window to expire). markInactive() keeps the roster slot for rejoin
+  // stability — only the activity timestamp is cleared.
+  onLeaveScene((userId: string) => {
+    markInactive(userId)
+    // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
+    // instead of being rate-limited into a blank map.
+    lastSnapshotAt.delete(userId)
+    console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
+  })
 
   // Roster handler — assign or look up a player's team.
   // Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
@@ -180,12 +201,18 @@ export async function setupServer(): Promise<void> {
   const BOT_POS_HZ = 10
   const BOT_POS_INTERVAL = 1 / BOT_POS_HZ
   let botPosClock = 0
+  // Track prev count so we can emit ONE final empty payload on the
+  // n→0 transition. Without this, clients never learn a bot retired
+  // (their reap loop only fires when a botPositions message arrives),
+  // so the ghost freezes in place after a 2nd human joins.
+  let lastBotCount = 0
   engine.addSystem((dt: number) => {
     botPosClock += dt
     if (botPosClock < BOT_POS_INTERVAL) return
     botPosClock = 0
     const positions = getBotPositions()
-    if (positions.length === 0) return
+    if (positions.length === 0 && lastBotCount === 0) return
+    lastBotCount = positions.length
     room.send('botPositions', { bots: positions })
   })
 
@@ -206,8 +233,6 @@ export async function setupServer(): Promise<void> {
   // after teamAssigned; we reply with the full paint map addressed to
   // just them. Rate limit: 1 per 5s per sender — a rapid reconnect loop
   // (or a bad actor) can't flood us with big payloads.
-  const SNAPSHOT_COOLDOWN_MS = 5000
-  const lastSnapshotAt = new Map<string, number>()
   room.onMessage('requestSnapshot', (_data, context) => {
     const from = context?.from
     if (!from) return

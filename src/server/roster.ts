@@ -65,6 +65,14 @@ export function markActive(userId: string): void {
   lastActiveAt.set(userId, Date.now())
 }
 
+/** Mark a userId as gone. Called from server.ts on onLeaveScene so the
+ *  active-human count drops immediately instead of waiting for the 60s
+ *  activity window to expire. Roster slot is preserved (rejoin stability);
+ *  only the activity timestamp is cleared. */
+export function markInactive(userId: string): void {
+  lastActiveAt.delete(userId)
+}
+
 /** Count roster members who've been active in the last ACTIVE_WINDOW_MS.
  *  Filters out invisible/scraper accounts that connect but never paint. */
 export function activeHumanCount(): number {
