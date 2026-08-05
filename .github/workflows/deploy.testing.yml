@@ -1,0 +1,57 @@
+name: Deploy to Test Server
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - 'testing'
+  workflow_dispatch:  # Allows manual execution from the Actions page
+
+env:
+  DCL_PRIVATE_KEY: ${{ secrets.DCL_PRIVATE_KEY }}
+
+jobs:
+  deploy:
+    name: Deploy to Test Server
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: dcl
+        
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Generate version file
+      run: |
+        DATE=$(date +'%Y%m%d%H%M')
+        COMMIT_ID=$(git rev-parse --short HEAD)
+        VERSION="v-$DATE-$COMMIT_ID"
+
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        echo "Generated version: $VERSION"
+
+        FILE_PATH="src/shared/data/version.ts"
+        mkdir -p "$(dirname "$FILE_PATH")"
+
+        {
+          echo "// Auto-generated version file"
+          echo "export const VERSION = \"$VERSION\""
+        } > "$FILE_PATH"
+
+
+    - name: Configure node.js
+      uses: actions/setup-node@v6
+    
+    - name: Install npm packages
+      run: |
+        npm install
+        
+    - name: Build scene
+      run: |
+        npm run build:ci
+        
+    - name: Deploy scene
+      run: |
+        npm run deploy:testing
