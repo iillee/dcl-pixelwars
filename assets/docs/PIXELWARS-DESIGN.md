@@ -1,6 +1,6 @@
 # Pixelwars — Design Document
 
-**Status:** Phases 1–4 shipped. Live at `labyrinthia.dcl.eth`. Server-authoritative multiplayer working: team assignment, cross-player paint sync, snapshot-on-join, UTC-boundary round reset. Repo: `github.com/iillee/pixelwars` (branch `pixelwars`).
+**Status:** Phases 1–5a shipped. Live at `pixelwars.dcl.eth` (previously `labyrinthia.dcl.eth` — world moved with the rebrand). Server-authoritative multiplayer + server-side ghost opponent (Phase 5a) with enemy-hunter targeting, own-paint avoidance, and organic zig-zag pathfinding. See `BOTS_PLAN.md` for the ghost architecture. Repo: `github.com/iillee/labyrinthia` (branch `bots`, pending merge).
 
 **Latest refactor (Aug 2026):** event-driven modular architecture (sky-chaser style). `client.ts` went from 1,191 → 121 lines split across `client/`, `maze/`, `shared/` module trees connected by a typed event bus. See [`../../README.md`](../../README.md) and §12 below.
 
@@ -10,7 +10,7 @@
 
 ## 1. Vision
 
-**Pixelwars** is a team-based tile-coverage game built on top of the procedural maze scene at `labyrinthia.dcl.eth`. Inspired by Splatoon's *Turf War* mode.
+**Pixelwars** is a team-based tile-coverage game built on top of the procedural maze scene at `pixelwars.dcl.eth`. Inspired by Splatoon's *Turf War* mode.
 
 **Core fantasy:** Teams compete to claim the maze's walkable surface — subdivided into 2m grid squares — in their team's color. Walking over a square flips it to your color, overwriting the enemy's if present. At round end (every 5 minutes on the UTC boundary), the team with the highest coverage percentage wins.
 
@@ -358,7 +358,7 @@ Recommended path for the next session:
 
 **scene.json requirements** for the authoritative server to work in Creator Hub / CLI preview:
 - `"authoritativeMultiplayer": true`
-- `"worldConfiguration": { "name": "labyrinthia.dcl.eth" }`
+- `"worldConfiguration": { "name": "pixelwars.dcl.eth" }`
 - `"logsPermissions": ["0x1e93e534c5e26b01ed242410b43ae23dd0faa52b"]` — without this, server `console.log()` output is hidden and the server *appears* broken when it's just silent.
 
 **Local preview issues** and their causes:
@@ -374,7 +374,7 @@ Recommended path for the next session:
 
 ## Appendix B — key constants (as of Aug 2026)
 
-**Scene layout:** 11×11 parcels (176m × 176m). Deployed to `labyrinthia.dcl.eth`.
+**Scene layout:** 11×11 parcels (176m × 176m). Deployed to `pixelwars.dcl.eth`.
 
 **Persistent center cross:** the generator always seeds a single `cross` tile at the exact grid center (cell (2,2), world (88, 88, 0)). It's the mandatory rally point — same world position every round, four symmetric arms fanning N/S/E/W. `rebuildMaze()` preserves the center tile entity across round rebuilds (no tear-down / grow-in on the tile players are standing on); its paint resets in place via `resetPaintForTile()`.
 

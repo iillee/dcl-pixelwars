@@ -1,10 +1,11 @@
 # Bots — Work Plan (Phase 5a)
 
 Status: **MVP + behavioural polish shipped on branch `bots`, deployed to
-`labyrinthia.dcl.eth`.** All steps 1–7 complete; step 8 (tuning pass) is
+`pixelwars.dcl.eth`.** All steps 1–7 complete; step 8 (tuning pass) is
 an ongoing iterative loop and is currently in a good state (see "Second
 polish pass" below). Not yet merged — next session: bot jump/glide
-mobility (see "Jump/glide feature" below) + optional codebase cleanup.
+mobility (see "Deferred / next-session ideas" below) + optional codebase
+cleanup.
 
 ---
 
@@ -20,7 +21,7 @@ mobility (see "Jump/glide feature" below) + optional codebase cleanup.
 | 6. Round-loop wiring | ✅ | Absorbed into step 5; `rebuildBotGraph(seed)` fires on `round:reset` |
 | 7A. Invisible bots (paint-only) | ✅ | Shipped first; feel-check confirmed we needed visible form |
 | 7B. Visible box entities | ✅ | `client/botVisual.ts` — team-coloured emissive box, 2Hz position broadcast |
-| 7C. Ghost model + light | ✅ | Shipped `ghost.glb` + coloured `LightSource` + ambient bob/drift/pulse + dead-reckoning lerp (not Tween). AvatarShape deferred — ghost reads better for a floating opponent and costs ~1/50th. |
+| 7C. Ghost model + light | ✅ | Shipped `assets/models/bots/ghost.glb` + `assets/sounds/ghost.mp3` + coloured `LightSource` + ambient bob/drift/pulse + dead-reckoning lerp (not Tween). See `src/client/botVisual.ts` header for why per-frame lerp beats Tween and why a ghost reads better than AvatarShape. AvatarShape deferred — ~1/50th the entity cost. |
 | 8. Tuning pass | ✅ (ongoing) | Speed, jitter, pauses shipped. Wall-hugging fixed via erosion. Backtracking fixed via own-paint Dijkstra cost. Roomba-look fixed via shuffle + zig-zag bias. Enemy-hunter tier added for offensive play. |
 
 ### Fixes shipped after initial MVP
