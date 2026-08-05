@@ -48,6 +48,15 @@ export function drainDelta(): Array<{ id: string; team: number }> {
   return out
 }
 
+/**
+ * Point lookup by cellId. Used by bot smart-targeting (samples ~48
+ * cells per target selection); would be O(N) if we scanned getFullState.
+ * Returns 0 when unpainted so callers can treat "team 0 = neutral".
+ */
+export function teamOfCell(id: string): number {
+  return cellTeam.get(id) ?? 0
+}
+
 /** Live coverage counters. Called by the 5s log tick. */
 export function coverage(): { red: number; blue: number; total: number } {
   let red = 0, blue = 0
@@ -66,6 +75,33 @@ export function coverage(): { red: number; blue: number; total: number } {
 export function getFullState(): Array<{ id: string; team: number }> {
   const out: Array<{ id: string; team: number }> = []
   for (const [id, team] of cellTeam) out.push({ id, team })
+  return out
+}
+
+/**
+ * Reservoir-sample up to `k` cellIds currently painted by any team
+ * OTHER than `myTeam` (i.e. enemy cells; neutral/unpainted cells are
+ * excluded). Used by the bot's smart-target picker to bias movement
+ * toward contested territory instead of blank floor.
+ *
+ * Reservoir sampling (Algorithm R): single O(N) pass with no
+ * intermediate array of enemy ids, so it scales cleanly even when the
+ * map is mostly enemy paint. Empty result = no enemy paint exists;
+ * caller falls back to the neutral-cell strategy.
+ */
+export function sampleEnemyCells(myTeam: number, k: number): string[] {
+  const out: string[] = []
+  let seen = 0
+  for (const [id, t] of cellTeam) {
+    if (t === 0 || t === myTeam) continue
+    if (out.length < k) {
+      out.push(id)
+    } else {
+      const j = Math.floor(Math.random() * (seen + 1))
+      if (j < k) out[j] = id
+    }
+    seen++
+  }
   return out
 }
 

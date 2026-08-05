@@ -14,8 +14,10 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam } from './roster'
-import { applyPaint, coverage, drainDelta, getFullState, clearAll as clearPaintState } from './paintState'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam } from './roster'
+import { onLeaveScene } from '@dcl/sdk/players'
+import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
   saveToStorage as saveLeaderboard,
@@ -56,6 +58,46 @@ export async function setupServer(): Promise<void> {
   bindNameResolver(leaderboardGetName)
   await initDiscord()
 
+  // Bot subsystem — Phase 5a. Server-side virtual painters that keep the
+  // scene alive when human count < TARGET_ACTIVE. Retire gracefully as
+  // humans join; never appear on the leaderboard.
+  //
+  initBots({
+    applyPaint,
+    paint: {
+      teamOf: teamOfCell,
+      // Enables the bot's enemy-hunter target tier (bot.ts ENEMY_BIAS).
+      // Without this the ghost only chases neutral cells and plays
+      // pure defense — easy to counter by camping its trail.
+      sampleEnemy: sampleEnemyCells,
+    },
+    // "Active" = has painted (or joined) within the last 60s. Filters out
+    // invisible scraper accounts that connect but never touch the ground.
+    humanCount: activeHumanCount,
+    soloHumanTeam: activeSoloHumanTeam,
+  })
+  rebuildBotGraph(currentRoundIndex())
+
+  // Snapshot rate-limit map, hoisted so onLeaveScene can clear a user's
+  // entry on disconnect. Without this, a rejoin within SNAPSHOT_COOLDOWN_MS
+  // gets its requestSnapshot silently dropped and the client stays blank
+  // (no paint history). The cooldown still protects against in-session
+  // snapshot floods from a single connected client.
+  const SNAPSHOT_COOLDOWN_MS = 5000
+  const lastSnapshotAt = new Map<string, number>()
+
+  // Detect real disconnects so the bot respawns immediately when a
+  // second player leaves (instead of waiting up to 60s for the activity
+  // window to expire). markInactive() keeps the roster slot for rejoin
+  // stability — only the activity timestamp is cleared.
+  onLeaveScene((userId: string) => {
+    markInactive(userId)
+    // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
+    // instead of being rate-limited into a blank map.
+    lastSnapshotAt.delete(userId)
+    console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
+  })
+
   // Roster handler — assign or look up a player's team.
   // Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
   // Idempotent: repeated calls for the same userId return the same team.
@@ -74,7 +116,8 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] joinRoster payload/from mismatch (payload=${userId}, from=${from}) — using from`)
     }
     const team = assignTeam(from)
-    console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()})`)
+    markActive(from) // count them as present immediately; paint activity will refresh it
+    console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     // Queue a Discord join notification (debounced 5s to let updateName
     // arrive so we send the real display name, not the wallet hash).
@@ -101,6 +144,10 @@ export async function setupServer(): Promise<void> {
     for (const id of ids) {
       if (applyPaint(id, team)) gained++
     }
+    // Even if nothing changed team (walking on own paint), the paintTick
+    // itself is proof the player is real — mark them active so scraper
+    // bots that never send paintTick are filtered out.
+    markActive(from)
     if (gained > 0) leaderboardIncrement(from, gained)
   })
 
@@ -132,11 +179,41 @@ export async function setupServer(): Promise<void> {
   engine.addSystem((dt: number) => {
     broadcastClock += dt
     if (broadcastClock < BROADCAST_INTERVAL) return
+    // Tick bots BEFORE draining, so any paint they generate this frame
+    // rides out on the same broadcast — no extra latency and no wasted
+    // "skip empty" checks.
+    tickBots(broadcastClock)
     broadcastClock = 0
     const changes = drainDelta()
     if (changes.length === 0) return
     const c = coverage()
     room.send('paintDelta', { changes, red: c.red, blue: c.blue, total: c.total })
+  })
+
+  // Bot position broadcast (10 Hz). Payload trivial — 3 bots × ≈20 bytes
+  // = ~600 bytes/sec. Clients Tween between updates (100ms per segment)
+  // for continuous walking motion.
+  //
+  // Rate history: 2Hz teleport-hop -> 4Hz Tweened (visible aliasing between
+  // bot step cadence and broadcast cadence, uneven segment lengths) -> 10Hz
+  // Tweened. Higher than 10Hz adds no value: bots only step 4x/sec, so any
+  // faster broadcast just re-sends the same position (Tween no-ops).
+  const BOT_POS_HZ = 10
+  const BOT_POS_INTERVAL = 1 / BOT_POS_HZ
+  let botPosClock = 0
+  // Track prev count so we can emit ONE final empty payload on the
+  // n→0 transition. Without this, clients never learn a bot retired
+  // (their reap loop only fires when a botPositions message arrives),
+  // so the ghost freezes in place after a 2nd human joins.
+  let lastBotCount = 0
+  engine.addSystem((dt: number) => {
+    botPosClock += dt
+    if (botPosClock < BOT_POS_INTERVAL) return
+    botPosClock = 0
+    const positions = getBotPositions()
+    if (positions.length === 0 && lastBotCount === 0) return
+    lastBotCount = positions.length
+    room.send('botPositions', { bots: positions })
   })
 
   // Coverage log tick (5s). Kept as a low-frequency health signal;
@@ -148,7 +225,7 @@ export async function setupServer(): Promise<void> {
     coverageClock = 0
     const c = coverage()
     if (c.total > 0) {
-      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total}`)
+      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total} bots=${botCount()}`)
     }
   })
 
@@ -156,8 +233,6 @@ export async function setupServer(): Promise<void> {
   // after teamAssigned; we reply with the full paint map addressed to
   // just them. Rate limit: 1 per 5s per sender — a rapid reconnect loop
   // (or a bad actor) can't flood us with big payloads.
-  const SNAPSHOT_COOLDOWN_MS = 5000
-  const lastSnapshotAt = new Map<string, number>()
   room.onMessage('requestSnapshot', (_data, context) => {
     const from = context?.from
     if (!from) return
@@ -189,6 +264,7 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
+    rebuildBotGraph(idx)
     // Round boundary is our persistence + publish cadence for the
     // leaderboard: 5 min is frequent enough that a server crash loses at
     // most one round of paint credit, infrequent enough that Storage

@@ -96,6 +96,20 @@ export const Messages = {
   // Fires when the player opens the popup mid-round so they see current
   // standings without waiting for the next round boundary broadcast.
   requestLeaderboard: Schemas.Map({}),
+
+  // Server → Clients: broadcast bot positions at 2 Hz so clients can
+  // render one box per bot. Cheap: 3 bots × ≈20 bytes each. Bots are
+  // server-owned virtual painters (see server/bots/manager.ts); this is
+  // purely visual — all authoritative paint still flows via paintDelta.
+  botPositions: Schemas.Map({
+    bots: Schemas.Array(Schemas.Map({
+      id: Schemas.Int,       // stable per-bot id (survives round reset if bot survives)
+      team: Schemas.Int,     // 1 = Red, 2 = Blue
+      x: Schemas.Number,
+      y: Schemas.Number,
+      z: Schemas.Number,
+    })),
+  }),
 }
 
 export const room = registerMessages(Messages)
