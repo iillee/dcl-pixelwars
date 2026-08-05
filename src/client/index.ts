@@ -35,6 +35,7 @@ import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
+import { events } from '../shared/events'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -53,25 +54,40 @@ engine.addSystem(() => {
   }
 })
 
-// ─── First-joiner initialization ────────────────────────────────────
+// ─── First-joiner initialization ────────────────────────
 // If we've been in-scene for a grace period and the synced seed is still 0,
 // nobody has ever set it — we're the first player. Roll a seed from the
 // UTC round index so the scene isn't empty forever. Subsequent joiners
 // will receive the current seed via CRDT sync before their grace elapses
 // and skip this path.
+//
+// Rejoin race guard: if we've already received a snapshot or paintDelta,
+// the server is demonstrably alive and has an authoritative seed — we
+// MUST NOT roll our own, because it can diverge from the server's and
+// trigger a second rebuildMaze() once CRDT catches up. That teardown
+// wipes cellTeam (via removePaintForTile) and the snapshot paint is lost,
+// leaving a blank maze with a correct coverage %. Wait for CRDT instead.
 let initTimer = 0
 let initDone = false
+let serverConfirmedAlive = false
 const INIT_GRACE = 1.5 // seconds
+events.on('paint:snapshot', () => { serverConfirmedAlive = true })
+events.on('paint:delta',    () => { serverConfirmedAlive = true })
 engine.addSystem((dt: number) => {
   if (initDone) return
   initTimer += dt
   if (initTimer < INIT_GRACE) return
   initDone = true
-  if (SeedHolder.get(seedHolder).seed === 0) {
-    const s = getRoundIndex() || 1
-    console.log(`No existing maze seed after ${INIT_GRACE}s — initializing with round index ${s}`)
-    SeedHolder.createOrReplace(seedHolder, { seed: s })
+  if (SeedHolder.get(seedHolder).seed !== 0) return
+  if (serverConfirmedAlive) {
+    // A server exists and will hand us its seed via CRDT any moment.
+    // Rolling our own would race and wipe the snapshot paint.
+    console.log(`Server alive but seed CRDT not yet delivered — waiting instead of rolling local seed`)
+    return
   }
+  const s = getRoundIndex() || 1
+  console.log(`No existing maze seed after ${INIT_GRACE}s and no server signal — initializing with round index ${s}`)
+  SeedHolder.createOrReplace(seedHolder, { seed: s })
 })
 
 // ─── setupClient — boot sequence ────────────────────────────────────
