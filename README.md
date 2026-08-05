@@ -132,6 +132,22 @@ maze/
 
 ---
 
+## AI agents and skills
+
+This project is set up for AI coding agents (Cursor, Claude, Codex, and similar tools). When writing or editing code here, agents should follow the project conventions in [`AGENTS.md`](AGENTS.md) — indentation, annotations, imports, logging, file layout, and related style rules.
+
+Task-specific guidance for Decentraland SDK7 work lives under [`.agents/skills/`](.agents/skills/). Those skill files (from [`decentraland/sdk-skills`](https://github.com/decentraland/sdk-skills)) cover topics such as scene authoring, UI, multiplayer, audio, and deployment. Agents should read and follow the relevant skill before making changes in that area.
+
+If skills are missing locally, install them with:
+
+```bash
+npx skills add decentraland/sdk-skills
+```
+
+Claude-oriented entry context is also noted in [`CLAUDE.md`](CLAUDE.md).
+
+---
+
 ## License
 
 MIT — do whatever you like, credit appreciated but not required. Have fun remixing.
