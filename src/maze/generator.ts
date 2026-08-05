@@ -14,37 +14,37 @@
  */
 
 import {
-  ALL_DIRS, DX, DZ, Dir, OPP,
-  TILES, TileType,
-  GROWTH_PRIMARY, GROWTH_FALLBACK,
-  openingsAt, highDirAt,
-} from './tiles'
+	MAZE_GRID_HEIGHT,
+	MAZE_GRID_WIDTH,
+	MAZE_MAX_STACK_Y_METERS,
+	MAZE_ORIGIN_OFFSET_METERS,
+	MAZE_RAMP_STEP_METERS,
+	MAZE_TILE_GLTF_SCALE,
+	MAZE_TILE_WORLD_METERS,
+	SCENE_WORLD_SIZE_METERS,
+} from 'src/shared/settings'
+
 import { rand, setSeed } from './rng'
+import {
+	ALL_DIRS, DX, DZ, Dir, OPP,
+	TILES, TileType,
+	GROWTH_PRIMARY, GROWTH_FALLBACK,
+	openingsAt, highDirAt,
+} from './tiles'
 
-// ─── World-scale constants ──────────────────────────────────────────
-// All exported so rebuild.ts can position entities and paint.ts can size
-// its per-tile cell grids consistently.
-export const TILE_SCALE = 2                                          // uniform GLB scale
-export const CELL = 16 * TILE_SCALE                                  // one grid cell = 32 m
-// Scene is 11×11 parcels = 176×176 m. 176/32 = 5.5, so we use a 5×5
-// maze grid (160 m) centered inside the scene with an 8 m border on all
-// sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
-// so cell (2,2) — the true center — lands exactly at world (88, 88).
-export const SCENE_SIZE = 176
-export const GRID_W = Math.floor(SCENE_SIZE / CELL)
-export const GRID_H = Math.floor(SCENE_SIZE / CELL)
-export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 8 m border
-export const STEP = 5.3835 * TILE_SCALE                              // ramp Y increment
-                                                                     // (5.3835 m = walkable floor-to-floor in the new tile GLBs)
-export const MAX_Y = 40                                              // stack cap — 4 levels max
-                                                                     // (Y = 0, 10.77, 21.53, 32.30).
-                                                                     // STEP is 10.767 so 40 blocks
-                                                                     // level 4 (43.07) while allowing
-                                                                     // level 3. Keeps play flat → more
-                                                                     // player collisions → more
-                                                                     // contested paint.
+// MARK: World-scale aliases
+// Masters live in src/shared/settings.ts (SCENE_ / MAZE_ / PAINT_ names).
+// Short aliases kept for maze-local readability; prefer settings names
+// at mixed call sites.
+export const TILE_SCALE  = MAZE_TILE_GLTF_SCALE
+export const CELL        = MAZE_TILE_WORLD_METERS
+export const SCENE_SIZE  = SCENE_WORLD_SIZE_METERS
+export const GRID_W      = MAZE_GRID_WIDTH
+export const GRID_H      = MAZE_GRID_HEIGHT
+export const MAZE_ORIGIN = MAZE_ORIGIN_OFFSET_METERS
+export const STEP        = MAZE_RAMP_STEP_METERS
+export const MAX_Y       = MAZE_MAX_STACK_Y_METERS
 
-// ─── Tile record type ───────────────────────────────────────────────
 export interface Placed {
   type: TileType
   r: number
@@ -55,7 +55,7 @@ export interface Placed {
   order: number
 }
 
-// ─── Private grid state ─────────────────────────────────────────────
+// MARK: Grid state
 // Kept module-private; callers touch the grid only via the exported
 // helpers below (`resetGrid`, `getPlacedTilesInOrder`, `lookupTile`,
 // `hasPlacementAt`). Prevents accidental mutation from the render side.
@@ -70,7 +70,6 @@ const key = (x: number, z: number, y: number) =>
 const inBounds = (x: number, z: number) =>
   x >= 0 && x < GRID_W && z >= 0 && z < GRID_H
 
-// ─── Public grid accessors ──────────────────────────────────────────
 export function resetGrid(): void {
   grid.clear()
   placeCounter = 0
@@ -102,7 +101,7 @@ export function lookupTile(
   return best ? { type: best.type, r: best.r, y: best.y } : null
 }
 
-// ─── Rotation offset lookup ─────────────────────────────────────────
+// MARK: Rotation offsets
 // GLB pivot is at the tile's SW corner (geometry extends +X/+Z), so
 // rotating swings geometry into other cells. This offset compensates
 // so the rotated tile still fills its intended parcel.
@@ -113,7 +112,7 @@ export const ROT_OFFSET: Array<[number, number]> = [
   [CELL, 0],        // r=3: 270° CW
 ]
 
-// ─── Placement rule check ───────────────────────────────────────────
+// MARK: Placement rules
 // Returns true iff the tile can legally occupy (x, z, y) at rotation r
 // given the current grid contents. Encodes: vertical stacking rules,
 // cross-level parallel-ramp rules, ramp-handshake rules, preemptive

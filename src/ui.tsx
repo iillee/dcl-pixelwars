@@ -5,6 +5,8 @@ import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
+import { TEAM_COLORS } from "./shared/palette"
+import { Team } from "./shared/team"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -34,8 +36,8 @@ export function setupUi() {
 }
 
 const PILL_BG      = Color4.create(0, 0, 0, 0.5)
-const RED_COLOR    = Color4.create(255/255, 117/255, 119/255, 1) // pallet.jpeg #FF7577
-const BLUE_COLOR   = Color4.create(106/255, 153/255, 252/255, 1) // pallet.jpeg #6A99FC
+const RED_COLOR    = TEAM_COLORS[Team.Red]
+const BLUE_COLOR   = TEAM_COLORS[Team.Blue]
 const COUNTDOWN_BG = Color4.create(0.1, 0.1, 0.1, 0.92)
 const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 

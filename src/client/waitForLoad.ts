@@ -1,11 +1,9 @@
 /**
  * waitForLoad.ts — startup gate.
  *
- * SDK7 boots the scene before the player entity, camera, and network
- * state are actually usable. Running gameplay code too early causes
- * intermittent bugs: missing Transform on PlayerEntity, empty
- * PlayerIdentityData, first paintTick landing before the server has
- * assigned our team.
+ * SDK7 boots the scene before the player entity and camera are usable.
+ * Running gameplay code too early causes intermittent bugs: missing
+ * Transform on PlayerEntity / CameraEntity.
  *
  * This module registers a system that polls each precondition every
  * frame; when they're all true it removes itself and calls `onReady()`.
@@ -14,26 +12,32 @@
  * Preconditions checked:
  *   - PlayerEntity has a Transform (player has spawned into the scene)
  *   - CameraEntity has a Transform (renderer is up)
- *   - PlayerIdentityData exists with an address (wallet or guest id populated)
  *
- * We don't gate on isStateSyncronized() because Squareoff's authoritative
- * server is the source of truth — a joining client either gets a snapshot
- * from the server after teamAssigned, or is the first-joiner (whose seed
- * watcher rolls a fresh maze).
+ * Deliberately does NOT wait for PlayerIdentityData.address — local
+ * preview guests often never get a wallet, and joinRoster already uses
+ * an immediate guest-id fallback (see clientHandler). Gating here on
+ * identity would stall boot forever in that case.
+ *
+ * We don't gate on isStateSyncronized() here either; clientHandler waits
+ * for sync before sending room messages.
  */
 
-import { engine, PlayerIdentityData, Transform } from '@dcl/sdk/ecs'
+import { engine, Transform } from '@dcl/sdk/ecs'
 
+
+// MARK: waitForLoad
+
+/**
+ * Invoke onReady once the local player and camera transforms exist.
+ */
 export function waitForLoad(onReady: () => void): void {
-  const sys = () => {
-    if (!Transform.getOrNull(engine.PlayerEntity)) return
-    if (!Transform.getOrNull(engine.CameraEntity)) return
-    const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
-    if (!pid || !pid.address) return
+	const sys = () => {
+		if (!Transform.getOrNull(engine.PlayerEntity)) return
+		if (!Transform.getOrNull(engine.CameraEntity)) return
 
-    engine.removeSystem(sys)
-    console.log('[Client] waitForLoad: ready')
-    onReady()
-  }
-  engine.addSystem(sys)
+		engine.removeSystem(sys)
+		console.log('[Client] waitForLoad: ready')
+		onReady()
+	}
+	engine.addSystem(sys)
 }

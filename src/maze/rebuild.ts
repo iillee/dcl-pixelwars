@@ -13,7 +13,7 @@
  * NOTE: we intentionally do NOT clear paint state here. That call lives
  * in the round:reset subscriber so genuine round transitions get a clean
  * slate, while a mid-round rebuild (e.g. late-join snapshot arrival)
- * preserves cellTeam and lets the spawn code adopt pre-existing colors.
+ * preserves cellPaintIndex and lets the spawn code adopt pre-existing colors.
  */
 
 import {

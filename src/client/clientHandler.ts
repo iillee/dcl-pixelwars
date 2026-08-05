@@ -7,149 +7,145 @@
  * never touch the wire schema — the day the wire changes, only this file
  * does.
  *
- * Outbound: also owns the once-only `joinRoster` send (fires as soon as
- * PlayerIdentityData is populated) and the 10 Hz paint-outbox flusher.
+ * Outbound: once-only `joinRoster` and the 10 Hz paint-outbox flusher.
+ * Local paint is provisional-Red immediately so walking always shows color
+ * even when the auth server is down or teamAssigned is delayed; the server
+ * assignment overwrites via setLocalTeam + CRDT.
  *
- * The one non-emit subscriber that stays here is `team:assigned` — its
- * "reply" is another WS send (requestSnapshot), which is network-shaped
- * work that belongs on the network boundary.
+ * Paint *state* arrives via CRDT (PaintCell / PaletteEntry / PaintCoverage),
+ * not room messages — this file only forwards teamAssigned and roundReset.
  *
  * Pattern borrowed from stom66/dcl-sky-chaser (clientHandler.ts + eventBus).
  */
 
 import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
-import { room } from '../shared/messages'
-import { events } from '../shared/events'
-import { Team } from '../shared/team'
-import { drainPaintOutbox, setLocalTeam } from '../paint'
+import { isStateSyncronized } from '@dcl/sdk/network'
 
-// Locally-tracked team for this session. Written on team:assigned; used
-// only to log the human-readable team name. paint.ts owns the "does this
-// client's paint go anywhere" logic via setLocalTeam.
+import { events } from 'src/shared/events'
+import { room } from 'src/shared/messages'
+import { PAINT_TICK_HZ } from 'src/shared/settings'
+import { Team } from 'src/shared/team'
+
+import { drainPaintOutbox, setLocalTeam } from 'src/paint'
+
+// Wire team once teamAssigned arrives. Until then we still paint locally
+// with provisional Red (see initClientHandler).
 let myTeam: Team = Team.None
+
+/** Give up waiting for CRDT sync and send joinRoster anyway. */
+const SYNC_WAIT_MAX_MS = 5000
+
+
+// MARK: sendDisplayName
 
 /**
  * Send our display name to the server once for the leaderboard directory.
- * Uses PlayerIdentityData.name when available, falls back to a short form
- * of the address (or guest id) so guests still show a readable label.
+ * Uses AvatarBase.name when available, falls back to a short form of the
+ * address (or guest id) so guests still show a readable label.
  */
 function sendDisplayName(address: string): void {
-  const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
-  // AvatarBase.name is the primary avatar name (works for both wallet users
-  // and named guests). PlayerIdentityData doesn't carry the name field.
-  const av = AvatarBase.getOrNull(engine.PlayerEntity)
-  const name = av?.name || `Guest ${address.slice(-4)}`
-  console.log(`[Client] → updateName "${name}"`)
-  room.send('updateName', { name })
-  void pid  // eslint: keep the reference explicit for future name sources
+	const av   = AvatarBase.getOrNull(engine.PlayerEntity)
+	const name = av?.name || `Guest ${address.slice(-4)}`
+	console.log(`[Client] → updateName "${name}"`)
+	room.send('updateName', { name })
 }
+
+
+// MARK: resolveJoinUserId
+
+/**
+ * Prefer PlayerIdentityData.address; otherwise a synthetic guest id.
+ * Server team assignment uses context.from — this payload is diagnostic
+ * only. Do NOT stall waiting for identity in local preview.
+ */
+function resolveJoinUserId(): string {
+	const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+	if (pid?.address) return pid.address
+	return 'guest-' + Math.floor(Math.random() * 1e9).toString(16)
+}
+
+
+// MARK: initClientHandler
 
 export function initClientHandler(): void {
-  wireInbound()
-  wireTeamAssigned()
-  wireOutbound()
+	// Provisional team so optimistic local paint works immediately. First
+	// roster slot is Red anyway; if we are Blue, teamAssigned + CRDT correct
+	// the color within a network hop.
+	setLocalTeam(Team.Red)
+	wireInbound()
+	wireTeamAssigned()
+	wireOutbound()
 }
 
-// ─── Inbound: room.onMessage → events.emit ────────────────────────────
-// Handlers do the minimum needed to translate wire types to event payloads.
-// `team as Team` casts are safe: server enforces wire values 0/1/2 (see
-// shared/team.ts and server/roster.ts).
+
+// MARK: wireInbound
+
 function wireInbound(): void {
-  room.onMessage('teamAssigned', ({ team }) => {
-    events.emit('team:assigned', { team: team as Team })
-  })
+	room.onMessage('teamAssigned', ({ team }) => {
+		events.emit('team:assigned', { team: team as Team })
+	})
 
-  room.onMessage('paintDelta', ({ changes, red, blue, total }) => {
-    events.emit('paint:delta', {
-      changes: changes.map(c => ({ id: c.id, team: c.team as Team })),
-      red, blue, total,
-    })
-  })
-
-  room.onMessage('snapshot', ({ entries, red, blue, total }) => {
-    console.log(`[Client] snapshot received: ${entries.length} cells`)
-    events.emit('paint:snapshot', {
-      entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
-      red, blue, total,
-    })
-  })
-
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
-    events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
-  })
+	room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
+		events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
+	})
 }
 
-// ─── Team assignment reply ────────────────────────────────────────────
-// team:assigned is a server→client message whose "handler" ends with
-// another WS send (requestSnapshot). Kept here because the reply is
-// network-shaped work; paint side effects flow via setLocalTeam.
+
+// MARK: wireTeamAssigned
+
 function wireTeamAssigned(): void {
-  events.on('team:assigned', ({ team }) => {
-    myTeam = team
-    setLocalTeam(myTeam)
-    console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
-    // Ask for the current authoritative paint state. Fires exactly once
-    // per teamAssigned; server has a 5s cooldown against abuse. Fixes:
-    // reloading during a round used to wipe our view of already-painted
-    // cells — snapshot restores them.
-    console.log('[Client] → requestSnapshot')
-    room.send('requestSnapshot', {})
-  })
+	events.on('team:assigned', ({ team }) => {
+		myTeam = team
+		setLocalTeam(myTeam)
+		console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
+	})
 }
 
-// ─── Outbound: room.send from local systems ───────────────────────────
+
+// MARK: wireOutbound
+
 function wireOutbound(): void {
-  // joinRoster one-shot. Waits for PlayerIdentityData to populate (avatar
-  // wallet address). If the address never appears within FALLBACK_MS (as
-  // happens with anonymous local-preview guests) we synthesize a stable
-  // guest id so the pipeline still works end-to-end for local dev.
-  let joinSent = false
-  let joinClock = 0
-  const FALLBACK_MS = 3000
-  let lastDiagLog = 0
-  engine.addSystem((dt: number) => {
-    if (joinSent) return
-    joinClock += dt * 1000
-    const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+	let joinSent        = false
+	let paintFlushClock = 0
+	const paintInterval = 1 / PAINT_TICK_HZ
+	let lastSyncLog     = 0
+	let syncWaitMs      = 0
 
-    // Every 1s until we join: dump what we're seeing so local-preview
-    // stalls are debuggable without adding print-statements ad-hoc.
-    if (joinClock - lastDiagLog > 1000) {
-      lastDiagLog = joinClock
-      console.log(`[Client] joinRoster wait (${(joinClock/1000).toFixed(1)}s): pid=${pid ? 'present' : 'null'}, address="${pid?.address ?? ''}", isGuest=${pid?.isGuest}`)
-    }
+	engine.addSystem((dt: number) => {
+		const synced = isStateSyncronized()
+		if (!synced && syncWaitMs < SYNC_WAIT_MAX_MS) {
+			syncWaitMs += dt * 1000
+			if (syncWaitMs - lastSyncLog > 1000) {
+				lastSyncLog = syncWaitMs
+				console.log(`[Client] waiting for isStateSyncronized… (${(syncWaitMs / 1000).toFixed(1)}s)`)
+			}
+			return
+		}
+		if (!synced && !joinSent) {
+			console.log(`[Client] isStateSyncronized still false after ${SYNC_WAIT_MAX_MS}ms — joining anyway`)
+		}
 
-    if (pid?.address) {
-      joinSent = true
-      console.log(`[Client] → joinRoster ${pid.address}`)
-      room.send('joinRoster', { userId: pid.address })
-      sendDisplayName(pid.address)
-      return
-    }
-    // Fallback: after FALLBACK_MS without a wallet address, use a synthetic
-    // guest id so local single-player preview can paint. The server uses
-    // context.from (authoritative) for team assignment, so this payload id
-    // is really only for our own logging.
-    if (joinClock >= FALLBACK_MS) {
-      joinSent = true
-      const guestId = 'guest-' + Math.floor(Math.random() * 1e9).toString(16)
-      console.log(`[Client] → joinRoster (fallback guest ${guestId}) after ${(joinClock/1000).toFixed(1)}s with no PlayerIdentityData.address`)
-      room.send('joinRoster', { userId: guestId })
-      sendDisplayName(guestId)
-    }
-  })
+		if (!joinSent) {
+			joinSent = true
+			const userId = resolveJoinUserId()
+			const pid    = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+			console.log(
+				`[Client] → joinRoster ${userId}` +
+				` (pid=${pid ? 'present' : 'null'}, address="${pid?.address ?? ''}", isGuest=${pid?.isGuest})`
+			)
+			room.send('joinRoster', { userId })
+			sendDisplayName(userId)
+		}
 
-  // Paint outbox flusher: 10 Hz. Drain locally-painted cell ids and send
-  // to the server; the server attributes to sender's team, applies to its
-  // authoritative map, and broadcasts back via paintDelta so all clients
-  // (including us) converge on the same picture.
-  let paintFlushClock = 0
-  engine.addSystem((dt: number) => {
-    paintFlushClock += dt
-    if (paintFlushClock < 0.1) return
-    paintFlushClock = 0
-    const ids = drainPaintOutbox()
-    if (ids.length === 0) return
-    room.send('paintTick', { ids })
-  })
+		// Hold the outbox until the server has rostered us. Local paint still
+		// runs via provisional/assigned team; this only gates the wire flush.
+		if (myTeam === Team.None) return
+
+		paintFlushClock += dt
+		if (paintFlushClock < paintInterval) return
+		paintFlushClock = 0
+		const ids = drainPaintOutbox()
+		if (ids.length === 0) return
+		room.send('paintTick', { ids })
+	})
 }

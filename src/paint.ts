@@ -1,69 +1,112 @@
-// ─── Squareoff paint grid ────────────────────────────────────────────
-// Phase 1 scaffolding. Single-player, single-team for now.
-//
+// Squareoff paint grid. Phase 1 scaffolding — single-player, single-team for now.
 // Design doc: assets/docs/SQUAREOFF-DESIGN.md
-// Depends on constants exposed from index.ts (CELL, STEP, TILE_SCALE) and the
-// tile grid Map — passed in via init() to keep this module standalone.
+// Constants from settings / maze; tile grid Map passed in via init().
 
-import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
+import { engine, Transform, MeshRenderer, Material, Entity, NetworkEntity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
-import { playClaimSfx } from './client/audio'
-import { MAZE_ORIGIN } from './maze/generator'
 
-// ─── Teams ───────────────────────────────────────────────────────────
-// Team enum lives in shared/ so the server can reference it symbolically.
-// Re-exported here so existing `import { Team } from './paint'` call sites
-// keep working during the refactor.
-export { Team } from './shared/team'
-import { Team } from './shared/team'
-import { events } from './shared/events'
+import { PaintCell, PaletteEntry, PaintCoverage, paintCoverageEntity } from 'src/shared/components'
+import { events } from 'src/shared/events'
+import { cellKeyFromNetworkId, cellKeyToCellId } from 'src/shared/paintGrid'
+import { TEAM_COLORS, teamPaletteIndex, PALETTE_NONE, PALETTE_RED, PALETTE_BLUE } from 'src/shared/palette'
+import {
+	MAZE_ORIGIN_OFFSET_METERS,
+	MAZE_TILE_GLTF_SCALE,
+	PAINT_BRUSH_SIZE_CELLS,
+	PAINT_CELLS_PER_TILE_AXIS,
+} from 'src/shared/settings'
+import { Team } from 'src/shared/team'
+
+import { playClaimSfx } from 'src/client/audio'
+
+// Team enum lives in shared/; re-exported for existing `import { Team } from './paint'` call sites.
+export { Team } from 'src/shared/team'
+
+// Local mirror of the CRDT palette. Seeded with team colors so optimistic
+// paint and early chunk updates resolve before PaletteEntry CRDT arrives.
+const paletteByIndex = new Map<number, Color4>([
+	[PALETTE_NONE, TEAM_COLORS[Team.None]],
+	[PALETTE_RED,  TEAM_COLORS[Team.Red]],
+	[PALETTE_BLUE, TEAM_COLORS[Team.Blue]],
+])
+
+// Last-applied PaintCell index per packed key (skip no-op CRDT echoes).
+const cellApplied = new Map<number, number>()
+
+// Cells we painted locally and are still waiting for PaintCell CRDT to
+// confirm. Sparse per-cell components mostly eliminate sibling wipes; this
+// still covers round-reset zeros and any stale NONE echo.
+const optimisticPending = new Set<string>()
+
+
+// MARK: initPaintNet
 
 /**
- * initPaintNet — wire this module's server-event subscribers.
+ * Wire CRDT observers + round-reset clearing.
  *
- * Publishers (clientHandler.ts) don't know we exist. We subscribe here
- * to keep all paint-related side effects in the paint module. Call once
- * from setupClient() after paint state is initialized.
+ * Paint state arrives via PaintCell / PaletteEntry / PaintCoverage CRDT
+ * components (not room messages). Call once from setupClient() after
+ * initPaintSync() has registered matching networkIds.
  */
 export function initPaintNet(): void {
-  // Server broadcasts every 200ms with all changes since the last tick
-  // + current coverage. This is the ONLY path that colors cells now —
-  // both our own paint (echoed back) and other players' paint arrive
-  // through here uniformly.
-  events.on('paint:delta', ({ changes, red, blue, total }) => {
-    for (const { id, team } of changes) applyRemotePaint(id, team)
-    setServerCoverage({ red, blue, total })
-  })
+	events.on('round:reset', () => {
+		clearAllPaintState()
+	})
 
-  // Snapshot arrives once per teamAssigned (or on manual requestSnapshot).
-  // Same processing path as paint:delta — material updates and cellTeam
-  // bookkeeping stay consistent whether the client's tile entities have
-  // finished spawning yet or not (spawnOne adopts pre-existing paint).
-  events.on('paint:snapshot', ({ entries, red, blue, total }) => {
-    for (const { id, team } of entries) applyRemotePaint(id, team)
-    setServerCoverage({ red, blue, total })
-  })
-
-  // Round boundary: clear the paint map BEFORE the seed watcher sees
-  // the new seed and rebuilds. Two reasons:
-  // 1) rebuildMaze does NOT clear (so mid-round snapshots survive reload).
-  //    Real round transitions still need a clean slate here to avoid
-  //    ghost paint from cellId collisions between old/new mazes.
-  // 2) Zero the coverage HUD immediately — next paintDelta will refill it.
-  events.on('round:reset', () => {
-    clearAllPaintState()
-    setServerCoverage({ red: 0, blue: 0, total: 0 })
-  })
+	engine.addSystem(() => {
+		syncPaletteFromCrdt()
+		syncCellsFromCrdt()
+	})
 }
 
-const TEAM_COLORS: Record<Team, Color4> = {
-  [Team.None]: Color4.create(1, 1, 1, 1),
-  [Team.Red]:  Color4.create(255/255, 117/255, 119/255, 1), // pallet.jpeg #FF7577
-  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC (queued for Phase 3)
+
+// MARK: syncPaletteFromCrdt
+
+function syncPaletteFromCrdt(): void {
+	for (const [_entity, entry] of engine.getEntitiesWith(PaletteEntry)) {
+		// Pre-bound unused slots ship with a=0; ignore until the server
+		// interns a real color into that index.
+		if (entry.index > PALETTE_BLUE && entry.color.a === 0) continue
+		const prev = paletteByIndex.get(entry.index)
+		if (prev &&
+			prev.r === entry.color.r && prev.g === entry.color.g &&
+			prev.b === entry.color.b && prev.a === entry.color.a) {
+			continue
+		}
+		paletteByIndex.set(entry.index, Color4.create(
+			entry.color.r, entry.color.g, entry.color.b, entry.color.a,
+		))
+		// Newly resolved color: re-apply any cells waiting on this index.
+		for (const [id, idx] of cellPaintIndex) {
+			if (idx === entry.index) applyPaintIndex(id, idx, true)
+		}
+	}
 }
 
-// ─── Mask format ─────────────────────────────────────────────────────
-// One char per 1m cell. Canonical (unrotated) orientation.
+
+// MARK: syncCellsFromCrdt
+
+function syncCellsFromCrdt(): void {
+	for (const [entity, cell] of engine.getEntitiesWith(PaintCell)) {
+		const net = NetworkEntity.getOrNull(entity)
+		if (!net) continue
+		// syncEntity(enumId) stores identity as NetworkEntity.entityId
+		// (networkId is 0 for fixed enum ids) — not in the PaintCell payload.
+		const key = cellKeyFromNetworkId(net.entityId)
+		if (key === null) continue
+		if (cellApplied.get(key) === cell.index) continue
+		cellApplied.set(key, cell.index)
+		const id    = cellKeyToCellId(key)
+		const index = cell.index
+		if (index === PALETTE_NONE && cellPaintIndex.get(id) === undefined) continue
+		if (index === PALETTE_NONE && optimisticPending.has(id)) continue
+		if (index !== PALETTE_NONE) optimisticPending.delete(id)
+		applyPaintIndex(id, index, false)
+	}
+}
+
+// MARK: Masks
+// One char per paint cell. Canonical (unrotated) orientation.
 //   '.' = wall / void          (no cell entity spawned)
 //   'F' = flat floor cell      (Y = tile base + FLAT_OFFSET)
 //   '0'..'9' = ramp cell       (Y = tile base + (digit / 9) * STEP)
@@ -77,8 +120,7 @@ export type Mask = string[]
 
 // GLB floor is 0.25 local (0.5m world) above the tile origin. Sit paint cells
 // 0.26 local (0.52m world) above origin → 0.02m world above the walkable surface.
-// TILE_SCALE from index.ts is 2; hard-coded here to keep this module standalone.
-export const FLAT_OFFSET = 0.275 * 2 // 0.55m world above tile origin — clears the 0.5m floor + tilted-cell edge sag on inclines.
+export const FLAT_OFFSET = 0.275 * MAZE_TILE_GLTF_SCALE // clears floor + tilted-cell edge sag
 
 // Placeholder masks — designer is re-exporting. Cross is going first so we'll
 // author its real mask against the new GLB once it lands. Everything else stays
@@ -96,23 +138,13 @@ const plusRow = (size: number, arm: number, mid: string, edge: string = '.') => 
 // 6–25) and 6-cell voids at the walls. Canonical (unrotated) orientations per
 // TILES in src/index.ts. Row 0 = south, col 0 = west (subject to visual
 // verification).
-// Cell resolution: SIZE cells across a tile (tile world width = CELL = 32m).
-// SIZE=16 → 2m cells (~256 max cells/tile); SIZE=32 → 1m cells (~1024/tile).
-// Dropped from 32 to 16 to relieve entity/draw-call load. All other mask
-// constants are ratios of SIZE so shapes stay the same.
-// NOTE: Attempted SIZE=32 (1m cells, ~15k entities) but the WebGL client
-// couldn't handle that many individual paint planes — each cell carries
-// its own PBR material instance (no batching), so draw-call / material
-// overhead tanked framerate and the whole paint pipeline lagged 3-4s
-// behind player movement. Back to SIZE=16 (2m cells, ~3.8k entities).
-// To increase resolution safely we'd need to either: (a) share materials
-// across cells with the same team, or (b) use fewer, larger planes with
-// dynamic textures instead of per-cell entities.
-const SIZE = 16
-const ARM = SIZE * 20 / 32      // 10 — corridor width in cells (was 20 at SIZE=32)
-const LO = (SIZE - ARM) / 2     // 3
-const HI = (SIZE + ARM) / 2     // 13
-const END_CLOSED_VOID = SIZE * 6 / 32  // 3 — rows of void on the closed side of `end`
+// Cell resolution from settings.PAINT_CELLS_PER_TILE_AXIS.
+// Mask constants are ratios of SIZE so corridor shapes stay the same.
+const SIZE = PAINT_CELLS_PER_TILE_AXIS
+const ARM = SIZE * 20 / 32      // corridor width in cells
+const LO = (SIZE - ARM) / 2
+const HI = (SIZE + ARM) / 2
+const END_CLOSED_VOID = SIZE * 6 / 32  // rows of void on the closed side of `end`
 const inCorridor = (i: number) => i >= LO && i < HI
 
 // Build a mask row-by-row from a predicate.
@@ -159,39 +191,51 @@ const FORK_MASK: Mask = buildMask((r, c) => {
 // from the cell's canonical-row position along the slope axis (rampHighDir=N),
 // so rotation via the tile's `r` naturally rotates the slope direction too.
 const RAMP_MASK: Mask = STRAIGHT_MASK
-const RAMP_FLAT_END = 1 // cells of flat landing at each end of the ramp
+
+/**
+ * Flat landing length at each end of a ramp, in world meters.
+ * Must match tile-ramp.glb (1.0 local × MAZE_TILE_GLTF_SCALE). Do NOT derive
+ * this from paint cell size — when SIZE went 16→32, a 1-cell landing shrank
+ * from 2m to 1m and the incline math buried the upper half of the slope.
+ */
+const RAMP_FLAT_END_METERS = 1.0 * MAZE_TILE_GLTF_SCALE
 
 // Ramp geometry derived from CELL and STEP. Same math used by spawn and lookup
 // so cellIds agree.
 function rampGeometry(CELL: number, STEP: number) {
-  const cellSize = CELL / SIZE
-  const flatLen = RAMP_FLAT_END * cellSize
-  const inclineStart = flatLen
-  const inclineEnd = CELL - flatLen
-  const inclineLen = inclineEnd - inclineStart
-  const slopeLen = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
-  const nIncline = Math.round(slopeLen / cellSize)
-  const slopeCellSize = slopeLen / nIncline
-  const cosA = inclineLen / slopeLen
-  const sinA = STEP / slopeLen
-  return { cellSize, flatLen, inclineStart, inclineEnd, inclineLen, slopeLen, nIncline, slopeCellSize, cosA, sinA }
+	const cellSize     = CELL / SIZE
+	const flatLen      = RAMP_FLAT_END_METERS
+	const nFlat        = Math.max(1, Math.round(flatLen / cellSize))
+	const inclineStart = flatLen
+	const inclineEnd   = CELL - flatLen
+	const inclineLen   = inclineEnd - inclineStart
+	const slopeLen     = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
+	const nIncline     = Math.round(slopeLen / cellSize)
+	const slopeCellSize = slopeLen / nIncline
+	const cosA         = inclineLen / slopeLen
+	const sinA         = STEP / slopeLen
+	return {
+		cellSize, flatLen, nFlat,
+		inclineStart, inclineEnd, inclineLen,
+		slopeLen, nIncline, slopeCellSize, cosA, sinA,
+	}
 }
 
 // Given canonical (lx, lz) on a ramp, return the cell (col, row) used in
 // cellId. Returns null if outside the walkable corridor.
 function rampCellIdxFromCanonical(lx: number, lz: number, geom: ReturnType<typeof rampGeometry>): { col: number; row: number } | null {
-  const col = Math.floor(lx / geom.cellSize)
-  if (col < LO || col >= HI) return null
-  let row: number
-  if (lz < geom.inclineStart) {
-    row = Math.floor(lz / geom.cellSize)                    // bottom landing (0..RAMP_FLAT_END-1)
-  } else if (lz >= geom.inclineEnd) {
-    row = RAMP_FLAT_END + geom.nIncline + Math.floor((lz - geom.inclineEnd) / geom.cellSize)
-  } else {
-    const slopeDist = (lz - geom.inclineStart) / geom.cosA
-    row = RAMP_FLAT_END + Math.floor(slopeDist / geom.slopeCellSize)
-  }
-  return { col, row }
+	const col = Math.floor(lx / geom.cellSize)
+	if (col < LO || col >= HI) return null
+	let row: number
+	if (lz < geom.inclineStart) {
+		row = Math.floor(lz / geom.cellSize)
+	} else if (lz >= geom.inclineEnd) {
+		row = geom.nFlat + geom.nIncline + Math.floor((lz - geom.inclineEnd) / geom.cellSize)
+	} else {
+		const slopeDist = (lz - geom.inclineStart) / geom.cosA
+		row = geom.nFlat + Math.floor(slopeDist / geom.slopeCellSize)
+	}
+	return { col, row }
 }
 
 // Enable masks one at a time as we visually verify each tile type.
@@ -204,10 +248,9 @@ export const MASKS: Partial<Record<string, Mask>> = {
   ramp: RAMP_MASK,
 }
 
-// ─── Rotate a mask 90°×r CW (to match tile rotation) ─────────────────
-// If tile at rotation r renders with Y-rotation of r*90° CW, the mask must
-// be rotated the same amount so that mask[row][col] indexes the same world
-// point regardless of r. Sign to be verified against a visible marker cell.
+// Rotate a mask 90°×r CW (to match tile rotation). If tile at rotation r
+// renders with Y-rotation of r*90° CW, the mask must be rotated the same
+// amount so that mask[row][col] indexes the same world point regardless of r.
 export function rotateMask(m: Mask, r: number): Mask {
   r = ((r % 4) + 4) % 4
   let out = m
@@ -228,10 +271,10 @@ function rot90cw(m: Mask): Mask {
   return rows
 }
 
-// ─── Cell store ──────────────────────────────────────────────────────
-// Stable cell IDs (deterministic from tile pos + local cell) → team.
+// MARK: Cell store
+// Stable cell IDs (deterministic from tile pos + local cell) → palette index.
 // Format: `${tileX},${tileZ},${tileY}:${cellCol},${cellRow}` (post-rotation local).
-const cellTeam = new Map<string, Team>()
+const cellPaintIndex = new Map<string, number>()
 const cellEntity = new Map<string, Entity>()
 // Reverse index: tile entity → all paint cell entities spawned for it, plus
 // their cell ids. Used by removePaintForTile() so tile teardown can strip its
@@ -240,22 +283,28 @@ const cellEntity = new Map<string, Entity>()
 const paintByTile = new Map<Entity, { entities: Entity[]; ids: string[] }>()
 
 export function cellId(tx: number, tz: number, ty: number, col: number, row: number): string {
-  return `${tx},${tz},${ty}:${col},${row}`
+	return `${tx},${tz},${ty}:${col},${row}`
 }
 
-// ─── Public: paint a cell (idempotent for same team) ─────────────────
-// Matte PBR material spec for a team. Roughness=1 + metallic=0 + no specular
-// kills the shine so paint reads as flat pigment, not plastic.
-function cellMaterial(team: Team) {
-  return {
-    albedoColor: TEAM_COLORS[team],
-    roughness: 1.0,
-    metallic: 0.0,
-    specularIntensity: 0.0,
-  }
+// Matte PBR material. Roughness=1 + metallic=0 + no specular kills the shine
+// so paint reads as flat pigment, not plastic. Shared by palette index once
+// the Color4 is known.
+function cellMaterialFromColor(color: Color4) {
+	return {
+		albedoColor:       color,
+		roughness:         1.0,
+		metallic:          0.0,
+		specularIntensity: 0.0,
+	}
 }
 
-// ─── Deferred-spawn queue ──────────────────────────────────
+function cellMaterialForIndex(index: number): ReturnType<typeof cellMaterialFromColor> | null {
+	const color = paletteByIndex.get(index)
+	if (!color) return null
+	return cellMaterialFromColor(color)
+}
+
+// MARK: Deferred spawn
 // Paint cells are held back until the tile's grow-in tween finishes so the
 // GLB is fully visible before its grid appears. All entries use the same
 // delay, so the queue naturally stays FIFO-ordered by dueMs.
@@ -271,75 +320,62 @@ engine.addSystem((dt: number) => {
 
 // Wipe scoring state immediately (so coverage % snaps to 0) without touching
 // entities. Actual paint entity removal is driven per-tile by
-// removePaintForTile() during the chunked tile teardown in index.ts — that
-// way paint disappears in the same frame as its tile, avoiding ghost cells,
-// while the total ~30k removeEntity() cost is spread across several frames.
+// removePaintForTile() during the chunked tile teardown — that way paint
+// disappears in the same frame as its tile, avoiding ghost cells, while
+// the total ~30k removeEntity() cost is spread across several frames.
 export function clearAllPaintState() {
-  cellTeam.clear()
-  serverCoverage = null
-  paintOutbox.clear()
-  // cellEntity is left in place; entries are pruned as tiles are torn down.
-}
-
-// ─── Server-authoritative coverage mirror (Phase 4 Step 4) ─────────────────
-// Each paintDelta includes the current coverage totals. Storing them here
-// means the HUD (which reads coverage() below) shows GLOBAL truth — all
-// players' paint — not just cells visible to the local client. Before the
-// first delta arrives, coverage() falls back to a local scan (returns
-// zeros on fresh join, which is fine — Step 5's snapshot fills the gap).
-let serverCoverage: { red: number; blue: number; total: number } | null = null
-export function setServerCoverage(c: { red: number; blue: number; total: number }): void {
-  serverCoverage = c
+	cellPaintIndex.clear()
+	cellApplied.clear()
+	paintOutbox.clear()
+	optimisticPending.clear()
+	// cellEntity is left in place; entries are pruned as tiles are torn down.
 }
 
 export function removePaintForTile(tileEntity: Entity) {
-  const rec = paintByTile.get(tileEntity)
-  if (!rec) return
-  for (const e of rec.entities) engine.removeEntity(e)
-  for (const id of rec.ids) {
-    cellEntity.delete(id)
-    // Also drop the team association — the cell no longer exists, so any
-    // stale entry would "poison" a future tile that happens to spawn at
-    // the same (tx, tz, ty) with the same cellId. Race repro: a
-    // paintDelta arriving between clearAllPaintState() and tile teardown
-    // re-populates cellTeam for a cell that's about to be destroyed; if
-    // we didn't clear it here, the next round's tile in that slot would
-    // adopt the ghost color via spawnOne()'s `preexisting` lookup.
-    cellTeam.delete(id)
-  }
-  paintByTile.delete(tileEntity)
+	const rec = paintByTile.get(tileEntity)
+	if (!rec) return
+	for (const e of rec.entities) engine.removeEntity(e)
+	for (const id of rec.ids) {
+		cellEntity.delete(id)
+		// Drop the index association — the cell no longer exists, so any
+		// stale entry would "poison" a future tile that happens to spawn at
+		// the same (tx, tz, ty) with the same cellId.
+		cellPaintIndex.delete(id)
+		optimisticPending.delete(id)
+	}
+	paintByTile.delete(tileEntity)
 }
 
 /**
  * Reset paint on a tile without destroying its entities. Used for the
  * persistent center-cross tile at round boundaries: the tile geometry
  * stays in place (so players standing on it aren't shoved by grow-in),
- * but its paint cells snap back to Team.None so the new round starts
+ * but its paint cells snap back to unpainted so the new round starts
  * with a clean slate underfoot.
  */
 export function resetPaintForTile(tileEntity: Entity) {
-  const rec = paintByTile.get(tileEntity)
-  if (!rec) return
-  const noneMat = cellMaterial(Team.None)
-  for (let i = 0; i < rec.entities.length; i++) {
-    Material.setPbrMaterial(rec.entities[i], noneMat)
-    cellTeam.set(rec.ids[i], Team.None)
-  }
+	const rec = paintByTile.get(tileEntity)
+	if (!rec) return
+	const noneMat = cellMaterialForIndex(PALETTE_NONE)!
+	for (let i = 0; i < rec.entities.length; i++) {
+		Material.setPbrMaterial(rec.entities[i], noneMat)
+		cellPaintIndex.set(rec.ids[i], PALETTE_NONE)
+		optimisticPending.delete(rec.ids[i])
+	}
 }
 
-// ─── Network outbox (Phase 4 Step 3) ────────────────────────────────
-// Cell ids the local player has walked onto since the last flush. Client.ts
-// drains this at 10Hz and sends paintTick { ids } to the server. Server
-// attributes to the sender's team and broadcasts paintDelta — which is
-// how OUR paint eventually becomes visible on our own screen too.
-// (We do NOT paint locally anymore — pure server-authoritative.)
+// MARK: Network outbox
+// Cell ids the local player has walked onto since the last flush. Client
+// drains this at PAINT_TICK_HZ (after teamAssigned) and sends paintTick
+// { ids } to the server. Server writes palette indexes into per-cell
+// PaintCell CRDT — which is how OUR paint and peers' paint converge.
 const paintOutbox = new Set<string>()
 export function drainPaintOutbox(): string[] {
-  if (paintOutbox.size === 0) return []
-  const out: string[] = []
-  for (const id of paintOutbox) out.push(id)
-  paintOutbox.clear()
-  return out
+	if (paintOutbox.size === 0) return []
+	const out: string[] = []
+	for (const id of paintOutbox) out.push(id)
+	paintOutbox.clear()
+	return out
 }
 
 /**
@@ -347,52 +383,51 @@ export function drainPaintOutbox(): string[] {
  * the next server flush AND applies optimistic local paint so our own
  * cells color instantly (no server roundtrip delay behind the avatar).
  *
- * Reconciliation is safe by construction:
- *  - Server echoes our paint back in the next delta — applyRemotePaint's
- *    idempotent guard (`if (cellTeam.get(id) === team) return`) no-ops it.
- *  - If an opponent stole the cell in the intervening ~200ms, their color
- *    arrives in the same delta and overwrites ours. Brief wrong-color
- *    flash, then correct. Much better than persistent lag.
- *
- * If localTeam is None (pre-teamAssigned race), we skip the local paint
- * and just enqueue — server will drop it anyway (pre-roster), no harm.
+ * Marks the cell optimisticPending so syncCellsFromCrdt will not apply a
+ * stale PALETTE_NONE before paintTick lands. Authority clears the pending
+ * flag when it writes any non-zero index.
  */
 export function noteLocalPaintCandidate(id: string): void {
-  paintOutbox.add(id)
-  if (localTeam !== Team.None) {
-    // Detect a real new claim (cell not already ours) BEFORE applying,
-    // so the SFX only fires when the tile actually flips to our team.
-    const wasOurs = cellTeam.get(id) === localTeam
-    applyRemotePaint(id, localTeam)
-    if (!wasOurs) playClaimSfx()
-  }
+	paintOutbox.add(id)
+	optimisticPending.add(id)
+	const team    = localTeam !== Team.None ? localTeam : Team.Red
+	const index   = teamPaletteIndex(team)
+	const wasOurs = cellPaintIndex.get(id) === index
+	applyPaintIndex(id, index, false)
+	if (!wasOurs) playClaimSfx()
 }
 
-// Set from client.ts when teamAssigned arrives. Read by noteLocalPaintCandidate
-// for optimistic local paint. Stays None on guest / pre-roster clients.
+// Set from clientHandler (provisional Red on boot, then teamAssigned).
 let localTeam: Team = Team.None
 export function setLocalTeam(team: Team): void {
-  localTeam = team
+	localTeam = team
 }
 
 /**
- * Apply a paint change received from the server (paintDelta). Updates
- * both the local team-map (so coverage() reads consistently) and the
- * visible material. Does NOT add to the outbox — would infinite-loop.
+ * Apply a palette index to a cell. If the palette entry is not yet known,
+ * records the index but skips the material update (defer until PaletteEntry
+ * CRDT arrives). force=true re-applies material even when index unchanged
+ * (used when a previously-missing palette color becomes resolvable).
  */
-export function applyRemotePaint(id: string, team: Team): void {
-  if (cellTeam.get(id) === team) return
-  cellTeam.set(id, team)
-  const e = cellEntity.get(id)
-  if (e !== undefined) {
-    Material.setPbrMaterial(e, cellMaterial(team))
-  }
-  // Note: if the cell entity hasn't spawned yet (grow-in delay window),
-  // cellTeam still records the color — spawnOne() adopts it when the
-  // entity is created, preserving paint through the 500ms teardown gap.
+export function applyPaintIndex(id: string, index: number, force: boolean): void {
+	if (!force && cellPaintIndex.get(id) === index) {
+		// Still try material if entity spawned after index was recorded.
+		const e = cellEntity.get(id)
+		if (e === undefined) return
+		const mat = cellMaterialForIndex(index)
+		if (mat) Material.setPbrMaterial(e, mat)
+		return
+	}
+	cellPaintIndex.set(id, index)
+	const mat = cellMaterialForIndex(index)
+	if (!mat) return // unresolved palette — wait for PaletteEntry
+	const e = cellEntity.get(id)
+	if (e !== undefined) {
+		Material.setPbrMaterial(e, mat)
+	}
 }
 
-// ─── Public: spawn cells for a tile ──────────────────────────────────
+// MARK: Spawn cells
 // Called from index.ts after a tile is placed. `tileType` selects the mask,
 // `r` rotates it, and (tx, tz, ty) locate the tile in the maze grid.
 export function spawnCellsForTile(
@@ -426,8 +461,8 @@ function spawnCellsForTileImmediate(
   // fills CELL x CELL world meters, so w should equal CELL.
   const cellSize = CELL / w
 
-  const tileWorldX = tx * CELL + MAZE_ORIGIN
-  const tileWorldZ = tz * CELL + MAZE_ORIGIN
+  const tileWorldX = tx * CELL + MAZE_ORIGIN_OFFSET_METERS
+  const tileWorldZ = tz * CELL + MAZE_ORIGIN_OFFSET_METERS
 
   // Ramp height helper: canonical ramp rises +Z (N high). After tile rotation
   // r, the slope axis rotates too. Given a world (wx, wz) on the tile, we
@@ -467,38 +502,31 @@ function spawnCellsForTileImmediate(
     paintByTile.set(tileEntity, tileRec)
   }
 
-  const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
-    const id = cellId(tx, tz, ty, col, row)
-    // Adopt any paint that landed on this id BEFORE the entity existed.
-    // Repro: round rebuild queues a 500ms grow-in delay; a fast-moving
-    // player paints cells during that window — paintCell() sets cellTeam
-    // but there's no entity to color yet. Without this check we'd
-    // overwrite the team back to None and the cell would render white
-    // forever despite having been "painted". Preserves the pre-Phase-4
-    // invariant that walk-over-cell = colored-cell.
-    const preexisting = cellTeam.get(id) ?? Team.None
-    const e = engine.addEntity()
-    Transform.create(e, {
-      position: Vector3.create(wx, wy, wz),
-      rotation: rot,
-      scale: Vector3.create(cellSize, scaleY, 1),
-    })
-    MeshRenderer.setPlane(e)
-    Material.setPbrMaterial(e, cellMaterial(preexisting))
-    cellEntity.set(id, e)
-    cellTeam.set(id, preexisting)
-    tileRec!.entities.push(e)
-    tileRec!.ids.push(id)
-  }
+	const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
+		const id = cellId(tx, tz, ty, col, row)
+		// Adopt any paint that landed on this id BEFORE the entity existed
+		// (PaintCell CRDT or optimistic local paint during grow-in delay).
+		const preexisting = cellPaintIndex.get(id) ?? PALETTE_NONE
+		const e = engine.addEntity()
+		Transform.create(e, {
+			position: Vector3.create(wx, wy, wz),
+			rotation: rot,
+			scale: Vector3.create(cellSize, scaleY, 1),
+		})
+		MeshRenderer.setPlane(e)
+		const mat = cellMaterialForIndex(preexisting) ?? cellMaterialForIndex(PALETTE_NONE)!
+		Material.setPbrMaterial(e, mat)
+		cellEntity.set(id, e)
+		cellPaintIndex.set(id, preexisting)
+		tileRec!.entities.push(e)
+		tileRec!.ids.push(id)
+	}
 
-  // ─── Ramp: dedicated path ───────────────────────────────────────
-  // Space incline cells at cellSize intervals along the SLOPE (not horizontal)
-  // so they tile flush along the tilted surface without needing size scaling.
-  // (col, row) always come from rampCellIdxFromCanonical() so the ids agree
-  // with worldToCellId's lookup on the same tile.
+  // Ramp: space incline cells along the SLOPE so they tile flush.
+  // (col, row) from rampCellIdxFromCanonical() agree with worldToCellId.
   if (isRamp) {
     // Bottom landing
-    for (let i = 0; i < RAMP_FLAT_END; i++) {
+    for (let i = 0; i < geom.nFlat; i++) {
       const lz = (i + 0.5) * geom.cellSize
       for (let col = LO; col < HI; col++) {
         const lx = (col + 0.5) * geom.cellSize
@@ -507,7 +535,7 @@ function spawnCellsForTileImmediate(
         spawnOne(wx, ty + FLAT_OFFSET, wz, flatRot, idx.col, idx.row)
       }
     }
-    // Incline
+    // Incline — spaced along the slope so cells tile flush on the GLB surface.
     for (let i = 0; i < geom.nIncline; i++) {
       const slopeDist = (i + 0.5) * geom.slopeCellSize
       const lz = geom.inclineStart + slopeDist * geom.cosA
@@ -520,7 +548,7 @@ function spawnCellsForTileImmediate(
       }
     }
     // Top landing
-    for (let i = 0; i < RAMP_FLAT_END; i++) {
+    for (let i = 0; i < geom.nFlat; i++) {
       const lz = geom.inclineEnd + (i + 0.5) * geom.cellSize
       for (let col = LO; col < HI; col++) {
         const lx = (col + 0.5) * geom.cellSize
@@ -532,7 +560,7 @@ function spawnCellsForTileImmediate(
     return
   }
 
-  // ─── Non-ramp tiles: mask iteration ──────────────────────────────
+  // Non-ramp: iterate mask cells.
   const flatRotDefault = Quaternion.fromEulerDegrees(-90, 0, 0)
   for (let row = 0; row < h; row++) {
     for (let col = 0; col < w; col++) {
@@ -555,30 +583,24 @@ function spawnCellsForTileImmediate(
   }
 }
 
-// ─── Public: coverage counter ────────────────────────────────────────
-// red / blue = absolute painted-cell counts (server-authoritative when
-// paintDelta has arrived, otherwise a local fallback).
-// total = WALKABLE CELLS IN THE MAZE, not "cells that have been touched."
-// Previously used cellTeam.size, which is only cells with a recorded team
-// — that made red=5, total=5, red% = 100% even with a huge unpainted maze.
-// cellEntity.size is authoritative for "how many paint targets exist"
-// because we spawn one entity per walkable mask cell. During round
-// teardown it briefly drops toward 0 as tiles are removed and climbs back
-// as new tiles spawn; % briefly overshoots then settles, which is fine.
+// red / blue = absolute painted-cell counts from PaintCoverage CRDT when
+// available; otherwise a local scan of cellPaintIndex.
+// total = WALKABLE CELLS IN THE MAZE (cellEntity.size), not "cells touched."
 export function coverage(): { red: number; blue: number; total: number } {
-  const total = cellEntity.size
-  if (serverCoverage !== null) {
-    return { red: serverCoverage.red, blue: serverCoverage.blue, total }
-  }
-  let red = 0, blue = 0
-  for (const t of cellTeam.values()) {
-    if (t === Team.Red) red++
-    else if (t === Team.Blue) blue++
-  }
-  return { red, blue, total }
+	const total = cellEntity.size
+	const crdt = PaintCoverage.getOrNull(paintCoverageEntity)
+	if (crdt) {
+		return { red: crdt.red, blue: crdt.blue, total }
+	}
+	let red = 0, blue = 0
+	for (const idx of cellPaintIndex.values()) {
+		if (idx === PALETTE_RED)       red++
+		else if (idx === PALETTE_BLUE) blue++
+	}
+	return { red, blue, total }
 }
 
-// ─── Coord math: world pos → cell ID ─────────────────────────────────
+// MARK: World to cell
 // Reverses spawnCellsForTile. Requires a tile lookup callback so we don't
 // need to import the maze grid directly.
 // Returns null if the player isn't standing on a known walkable cell.
@@ -589,18 +611,18 @@ export function worldToCellId(
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null
 ): { id: string; groundY: number } | null {
-  const tx = Math.floor((px - MAZE_ORIGIN) / CELL)
-  const tz = Math.floor((pz - MAZE_ORIGIN) / CELL)
+  const tx = Math.floor((px - MAZE_ORIGIN_OFFSET_METERS) / CELL)
+  const tz = Math.floor((pz - MAZE_ORIGIN_OFFSET_METERS) / CELL)
   const tile = lookupTile(tx, tz, py)
   if (!tile) return null
 
   const raw = MASKS[tile.type]
   if (!raw) return null
 
-  const tileWorldX = tx * CELL + MAZE_ORIGIN
-  const tileWorldZ = tz * CELL + MAZE_ORIGIN
+  const tileWorldX = tx * CELL + MAZE_ORIGIN_OFFSET_METERS
+  const tileWorldZ = tz * CELL + MAZE_ORIGIN_OFFSET_METERS
 
-  // ─── Ramp branch: use shared canonical-frame helper ───────────────
+  // Ramp: shared canonical-frame helper.
   if (tile.type === 'ramp') {
     const geom = rampGeometry(CELL, STEP)
     const rad = tile.r * Math.PI / 2
@@ -641,27 +663,26 @@ export function worldToCellId(
 // the avatar is grounded on a flat tile at tile.y = 0.
 const WALKABLE_TOP = 0.5
 
-// ─── Painting system (per-frame, single-player for now) ──────────────
+// MARK: Painting system
 // Reads player position, resolves current cell, paints it.
-// Team is hard-coded to Red for Phase 1 solo testing.
 export function initPaintingSystem(
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null,
 ) {
   const GROUND_TOLERANCE = 0.4
-  // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
-  // in world meters; one cell is CELL / SIZE = 2m.
+  // Brush footprint from settings.PAINT_BRUSH_SIZE_CELLS (odd NxN).
+  // Offsets in world meters; one cell is CELL / SIZE.
   const step = CELL / SIZE
-  const OFFSETS: Array<[number, number]> = [
-    [-step, -step], [0, -step], [step, -step],
-    [-step,     0], [0,     0], [step,     0],
-    [-step,  step], [0,  step], [step,  step],
-  ]
-  // Phase 4 Step 4: this system no longer touches cellTeam or materials.
-  // It just enqueues candidate cell ids into the outbox; the server owns
-  // team attribution and echoes back paintDelta, which is what actually
-  // colors cells (via applyRemotePaint in the client's delta handler).
-  engine.addSystem(() => {
+  const half = Math.floor(PAINT_BRUSH_SIZE_CELLS / 2)
+  const OFFSETS: Array<[number, number]> = []
+  for (let dz = -half; dz <= half; dz++) {
+    for (let dx = -half; dx <= half; dx++) {
+      OFFSETS.push([dx * step, dz * step])
+    }
+  }
+	// Enqueue candidate cell ids; optimistic local paint + server CRDT
+	// chunk writes converge the visible colors.
+	engine.addSystem(() => {
     const t = Transform.getOrNull(engine.PlayerEntity)
     if (!t) return
     const { x, y, z } = t.position

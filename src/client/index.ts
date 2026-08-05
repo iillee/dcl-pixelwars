@@ -24,16 +24,24 @@
 
 import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
-import { SeedHolder, seedHolder, LeaderboardState, leaderboardStateEntity } from '../shared/components'
-import { setupUi } from '../ui'
-import { runStress } from '../stress'
-import { initPaintingSystem, initPaintNet } from '../paint'
-import { getRoundIndex, initRoundNet } from '../round'
-import { initClientHandler } from './clientHandler'
-import { initAudio } from './audio'
-import { initPlayerNet } from './player'
-import { CELL, STEP, lookupTile } from '../maze/generator'
-import { rebuildMaze, initMazeNet } from '../maze/rebuild'
+
+import {
+	LeaderboardState,
+	leaderboardStateEntity,
+	SeedHolder,
+	seedHolder,
+} from 'src/shared/components'
+import { initPaintSync } from 'src/shared/paintSync'
+
+import { initAudio } from 'src/client/audio'
+import { initClientHandler } from 'src/client/clientHandler'
+import { initPlayerNet } from 'src/client/player'
+import { CELL, STEP, lookupTile } from 'src/maze/generator'
+import { rebuildMaze, initMazeNet } from 'src/maze/rebuild'
+import { initPaintingSystem, initPaintNet } from 'src/paint'
+import { getRoundIndex, initRoundNet } from 'src/round'
+import { runStress } from 'src/stress'
+import { setupUi } from 'src/ui'
 
 // ─── Stress-test toggle (Squareoff design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -94,31 +102,33 @@ export async function setupClient(): Promise<void> {
     }
   })
 
-  // Painting system needs a callback to resolve player world position →
-  // the tile they're standing on. lookupTile lives in the generator
-  // module (private grid access).
-  initPaintingSystem(CELL, STEP, lookupTile)
+	// Painting system needs a callback to resolve player world position →
+	// the tile they're standing on. lookupTile lives in the generator
+	// module (private grid access).
+	initPaintingSystem(CELL, STEP, lookupTile)
 
-  // Wire event subscribers. Each module owns its own reaction to
-  // server events (paint changes, round boundaries, etc.) so adding a
-  // new consumer is a one-file change here + a one-file subscriber.
-  initPaintNet()
-  initMazeNet()
-  initRoundNet()
-  initPlayerNet()
+	// Register paint CRDT entities (chunks / palette / coverage) with the
+	// same networkIds as the server before observers start reading them.
+	initPaintSync()
 
-  // Register the network boundary LAST so `room.onMessage` subscribers
-  // above are all in place before the first message can arrive.
-  initClientHandler()
+	// Wire event subscribers + CRDT paint observers.
+	initPaintNet()
+	initMazeNet()
+	initRoundNet()
+	initPlayerNet()
 
-  // Register the SeedHolder for cross-client sync. Doing this inside
-  // setupClient() (not at module top) ensures the networking layer is
-  // ready. Fixed networkId (3000) so every client's SeedHolder maps to
-  // the same synced entity.
-  syncEntity(seedHolder, [SeedHolder.componentId], 3000)
-  // Same pattern for the LeaderboardState: fixed networkId (3001) so the
-  // server's publish() lands on this exact entity on every client.
-  syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
-  // Maze construction is fully event-driven from here: the seed watcher
-  // above builds the maze the moment a non-zero seed arrives.
+	// Register the network boundary LAST so `room.onMessage` subscribers
+	// above are all in place before the first message can arrive.
+	initClientHandler()
+
+	// Register the SeedHolder for cross-client sync. Doing this inside
+	// setupClient() (not at module top) ensures the networking layer is
+	// ready. Fixed networkId (3000) so every client's SeedHolder maps to
+	// the same synced entity.
+	syncEntity(seedHolder, [SeedHolder.componentId], 3000)
+	// Same pattern for the LeaderboardState: fixed networkId (3001) so the
+	// server's publish() lands on this exact entity on every client.
+	syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
+	// Maze construction is fully event-driven from here: the seed watcher
+	// above builds the maze the moment a non-zero seed arrives.
 }
