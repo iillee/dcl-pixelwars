@@ -8,7 +8,7 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
-**Live:** [labyrinthia.dcl.eth](https://play.decentraland.org/?realm=labyrinthia.dcl.eth)
+**Live:** [pixelwars.dcl.eth](https://play.decentraland.org/?realm=pixelwars.dcl.eth)
 
 The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`assets/docs/PIXELWARS-DESIGN.md`](assets/docs/PIXELWARS-DESIGN.md) for the game design doc.
 
@@ -91,7 +91,7 @@ Preview opens in your browser via the Decentraland SDK dev server.
 
 ## Deploy
 
-Scene is configured as a Decentraland World in [`scene.json`](scene.json) (`worldConfiguration.name: "labyrinthia.dcl.eth"`).
+Scene is configured as a Decentraland World in [`scene.json`](scene.json) (`worldConfiguration.name: "pixelwars.dcl.eth"`).
 
 ```bash
 npm run deploy -- --target-content https://worlds-content-server.decentraland.org

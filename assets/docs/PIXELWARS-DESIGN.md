@@ -174,11 +174,11 @@ Any new synced component **must** be registered on both server and client via `s
 
 ## 9. Repo state
 
-**Branch:** `pixelwars` (tracks `pixelwars` remote at `github.com/iillee/pixelwars`, private).
-**Base:** `main` branch of `labyrinthia` repo (public, not modified by pixelwars work).
+**Active branch:** `squareoff` on the `squareoff` remote (`github.com/iillee/squareoff`, private). Effectively the project's `main`; GitHub-side rename to `pixelwars` is pending. `bots` merged into it Aug 2026.
+**Legacy remote:** `origin` still points at `github.com/iillee/labyrinthia` (public) with unrelated history — not modified by pixelwars work; kept for reference only.
 **Reference branch:** `drip` (local only) — contains the rejected trail-approach prototype.
 
-**History note:** The pixelwars remote had its history rewritten with `git filter-branch` to purge `HomeAgain_Loop.wav` (52MB) from all reachable commits. Clone size is ~3MB.
+**History note:** The active remote had its history rewritten with `git filter-branch` to purge `HomeAgain_Loop.wav` (52MB) from all reachable commits. Clone size is ~3MB.
 
 **Files of interest** (post-refactor — see §12 for the full module tree):
 - [`src/paint.ts`](../../src/paint.ts) — masks, `rampGeometry`, `spawnCellsForTile`, `worldToCellId`, coverage, painting system with grounded gating + 3×3 footprint, event subscribers (`initPaintNet`).

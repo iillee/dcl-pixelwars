@@ -156,7 +156,7 @@ graph module was in place.
 
 ## Why bots are the highest-leverage D7 lever
 
-Squareoff's biggest churn risk mirrors flagtag's: a solo arrival lands in an
+Pixelwars' biggest churn risk mirrors flagtag's: a solo arrival lands in an
 empty scene, sees no opponent, and leaves in <30s. Foundation currently
 measures success by day-7 retention, so **making the game playable-and-fun
 with 1 human is the single largest retention move we can make in one grant
