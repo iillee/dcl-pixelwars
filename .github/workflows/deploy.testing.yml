@@ -15,10 +15,6 @@ jobs:
   deploy:
     name: Deploy to Test Server
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: dcl
         
     steps:
     - uses: actions/checkout@v6
