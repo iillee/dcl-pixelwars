@@ -8,6 +8,14 @@
  * Safe for client and server — pure constants, no engine imports.
  */
 
+// MARK: Debug vars
+// Bundler inlines process.env.NODE_ENV when present; guard for runtimes
+// (e.g. headless server) where `process` is undefined.
+declare var process: { env: { NODE_ENV?: string } } | undefined
+
+export const IS_DEV =
+	typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'
+
 
 // MARK: Scene
 
@@ -73,3 +81,23 @@ export const PAINT_BRUSH_SIZE_CELLS = 3
  * peer (~300/s); this stays well under that. Not tied to scene population.
  */
 export const PAINT_TICK_HZ = 10
+
+/**
+ * Max cell ids per paintTick message. One brush footprint plus headroom.
+ * Client chunks the outbox to this size; server drops oversized ticks.
+ */
+export const PAINT_TICK_MAX_IDS = PAINT_BRUSH_SIZE_CELLS * PAINT_BRUSH_SIZE_CELLS + 16
+
+
+// MARK: Server publish rates
+// In-memory game state may change every paintTick; CRDT component writes
+// are coalesced to these rates so the sync bus is not saturated.
+
+/**
+ * How often the server writes PaintCoverage to the CRDT (Hz).
+ * Only publishes when coverage is dirty.
+ */
+export const PAINT_COVERAGE_PUBLISH_HZ = 5
+
+/** How often the server writes ServerStats to the CRDT (Hz). */
+export const SERVER_STATS_PUBLISH_HZ = 1

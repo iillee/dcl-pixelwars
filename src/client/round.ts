@@ -15,9 +15,9 @@ export {
   ROUND_INTERVAL_MS,
   getRoundIndex,
   getRoundEndMs,
-} from './shared/roundTiming'
+} from 'src/shared/roundTiming'
 
-import { getRoundEndMs } from './shared/roundTiming'
+import { getRoundEndMs } from 'src/shared/roundTiming'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -71,9 +71,9 @@ export function getBanner(): BannerState {
   return banner
 }
 
-// ─── Server event subscriber ────────────────────────────────────
-import { events } from './shared/events'
-import { coverage } from './paint'
+// ─── Round-reset subscriber ─────────────────────────────────────
+import { eventBus, ClientEvents } from 'src/shared/utils/eventBus'
+import { coverage } from 'src/client/paint'
 
 /**
  * initRoundNet — shows the end-of-round banner when the server declares
@@ -82,7 +82,7 @@ import { coverage } from './paint'
  * otherwise a round where only one team painted would show 100%.
  */
 export function initRoundNet(): void {
-  events.on('round:reset', ({ seed, finalRed, finalBlue, finalTotal }) => {
+  eventBus.on(ClientEvents.RoundReset, ({ seed, finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
     console.log(
       `[Client] roundReset seed=${seed} final red=${finalRed} blue=${finalBlue} ` +

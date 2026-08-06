@@ -2,8 +2,6 @@
  * palette.ts — team Color4 constants + Color4 canonicalization.
  *
  * Single source of truth for the colors interned into the server palette.
- * Clients use the same constants for optimistic local paint before CRDT
- * palette entries arrive.
  */
 
 import { Color4 } from '@dcl/sdk/math'

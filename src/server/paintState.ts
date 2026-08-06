@@ -13,7 +13,6 @@ import {
 	PaintCell,
 	PaletteEntry,
 	PaintCoverage,
-	paintCoverageEntity,
 } from 'src/shared/components'
 import { cellIdToKey } from 'src/shared/paintGrid'
 import {
@@ -30,8 +29,11 @@ import {
 	ensurePaintCellEntity,
 	ensurePaletteEntity,
 	eachPaintCellEntity,
+	getPaintCoverageEntity,
 } from 'src/shared/paintSync'
 import { Team } from 'src/shared/team'
+
+import { noteComponentChange } from 'src/server/serverStats'
 
 // colorKey → palette index
 const colorToIndex = new Map<string, number>()
@@ -118,13 +120,14 @@ export function applyPaint(id: string, team: number): boolean {
 function writeCellIndex(id: string, index: number): boolean {
 	const key = cellIdToKey(id)
 	if (key === null) {
-		console.log(`[PaintState] writeCellIndex: bad cell id "${id}"`)
+		// Invalid brush edge / ramp index — drop quietly (client also filters).
 		return false
 	}
 	const entity = ensurePaintCellEntity(key)
 	const cur    = PaintCell.getOrNull(entity)
 	if (cur?.index === index) return true
 	PaintCell.createOrReplace(entity, { index })
+	noteComponentChange(1)
 	return true
 }
 
@@ -154,8 +157,13 @@ export function coverage(): { red: number; blue: number; total: number } {
 
 /** Write PaintCoverage CRDT and clear the dirty flag. */
 export function publishCoverage(): void {
+	const entity = getPaintCoverageEntity()
+	if (entity === null) {
+		console.error('[PaintState] publishCoverage: PaintCoverage entity not initialized')
+		return
+	}
 	const c = coverage()
-	PaintCoverage.createOrReplace(paintCoverageEntity, {
+	PaintCoverage.createOrReplace(entity, {
 		red:   c.red,
 		blue:  c.blue,
 		total: c.total,
@@ -172,9 +180,12 @@ export function publishCoverage(): void {
  */
 export function clearAll(): void {
 	cellIndex.clear()
+	let cleared = 0
 	for (const [, entity] of eachPaintCellEntity()) {
 		PaintCell.createOrReplace(entity, { index: PALETTE_NONE })
+		cleared++
 	}
+	if (cleared > 0) noteComponentChange(cleared)
 	coverageDirty = true
 	publishCoverage()
 }

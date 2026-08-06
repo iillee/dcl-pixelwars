@@ -13,7 +13,7 @@
  * NOTE: we intentionally do NOT clear paint state here. That call lives
  * in the round:reset subscriber so genuine round transitions get a clean
  * slate, while a mid-round rebuild (e.g. late-join snapshot arrival)
- * preserves cellPaintIndex and lets the spawn code adopt pre-existing colors.
+ * lets spawn adopt PaintCell CRDT colors that arrived during grow-in.
  */
 
 import {
@@ -22,16 +22,17 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 
+import { SeedHolder, seedHolder } from 'src/shared/components'
+import { eventBus, ClientEvents } from 'src/shared/utils/eventBus'
+
 import {
   Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
   GRID_W, GRID_H,
   generateWithRetry, getPlacedTilesInOrder, gridSize,
-} from './generator'
-import { TILES } from './tiles'
-import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
-import { spawnTeleportOrbsForMaze } from '../teleportOrbs'
-import { events } from '../shared/events'
-import { SeedHolder, seedHolder } from '../shared/components'
+} from 'src/client/maze/generator'
+import { TILES } from 'src/client/maze/tiles'
+import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from 'src/client/paint'
+import { spawnTeleportOrbsForMaze } from 'src/client/teleportOrbs'
 
 // Suppress unused-import complaint from the linter — MeshRenderer/Material
 // are only kept in the import list for future tile decoration; harmless.
@@ -121,7 +122,7 @@ export function getCurrentSeed(): number {
  * through the exact same path as an authoritative roundReset.
  */
 export function initMazeNet(): void {
-  events.on('round:reset', ({ seed }) => {
+  eventBus.on(ClientEvents.RoundReset, ({ seed }) => {
     SeedHolder.createOrReplace(seedHolder, { seed })
   })
 }

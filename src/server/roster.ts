@@ -26,7 +26,7 @@ export function assignTeam(userId: string): number {
     roster.push(userId)
     idx = roster.length - 1
   }
-  // idx even = Red (1), odd = Blue (2). Matches Team enum in src/paint.ts.
+  // idx even = Red (1), odd = Blue (2). Matches Team enum in src/shared/team.ts.
   return (idx % 2 === 0) ? 1 : 2
 }
 

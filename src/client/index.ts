@@ -6,12 +6,11 @@
  * that don't belong to any single feature module.
  *
  * All heavy lifting lives in its natural home:
- *   - maze/tiles, rng, generator     — pure maze data & generation
- *   - maze/rebuild                   — visual spawn/teardown pipeline
- *   - paint                          — grid painting + coverage
+ *   - client/maze/*                  — maze data, generation, visuals
+ *   - client/paint                   — grid painting + coverage
  *   - client/clientHandler           — network boundary (room.on/send)
  *   - client/audio                   — music + UI SFX
- *   - ui.tsx                         — HUD (React-ECS)
+ *   - client/ui/*                    — HUD layers + theme (React-ECS)
  *
  * Kept in this file (for now):
  *   - Composite lever-entity scrubber (removes a decorative composite entity)
@@ -26,22 +25,20 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 
 import {
-	LeaderboardState,
-	leaderboardStateEntity,
 	SeedHolder,
 	seedHolder,
 } from 'src/shared/components'
-import { initPaintSync } from 'src/shared/paintSync'
+import { SEED_NETWORK_ID } from 'src/shared/paintGrid'
 
 import { initAudio } from 'src/client/audio'
 import { initClientHandler } from 'src/client/clientHandler'
+import { CELL, STEP, lookupTile } from 'src/client/maze/generator'
+import { initMazeNet, rebuildMaze } from 'src/client/maze/rebuild'
+import { initPaintNet, initPaintingSystem } from 'src/client/paint'
 import { initPlayerNet } from 'src/client/player'
-import { CELL, STEP, lookupTile } from 'src/maze/generator'
-import { rebuildMaze, initMazeNet } from 'src/maze/rebuild'
-import { initPaintingSystem, initPaintNet } from 'src/paint'
-import { getRoundIndex, initRoundNet } from 'src/round'
-import { runStress } from 'src/stress'
-import { setupUi } from 'src/ui'
+import { getRoundIndex, initRoundNet } from 'src/client/round'
+import { runStress } from 'src/client/stress'
+import { setupUi } from 'src/client/ui'
 
 // ─── Stress-test toggle (Squareoff design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -83,35 +80,32 @@ engine.addSystem((dt: number) => {
 
 // ─── setupClient — boot sequence ────────────────────────────────────
 export async function setupClient(): Promise<void> {
-  setupUi()
-  if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
-  initAudio()
+	if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
+	initAudio()
 
-  // Composite-lever scrubber. The scene's main.composite still contains a
-  // decorative lever entity from an earlier iteration where pulling it
-  // regenerated the maze. UTC-boundary rounds + server roundReset replaced
-  // that flow entirely, but removing the entity from the composite would
-  // disturb interdependent asset-packs data — so we remove it at runtime.
-  // Every entity carrying an asset-packs::States component (only the lever,
-  // in practice) is deleted on boot along with its descendants.
-  engine.addSystem(() => {
-    const statesComp = engine.getComponentOrNull('asset-packs::States')
-    if (!statesComp) return
-    for (const [entity] of engine.getEntitiesWith(statesComp)) {
-      engine.removeEntity(entity)
-    }
-  })
+	// Composite-lever scrubber. The scene's main.composite still contains a
+	// decorative lever entity from an earlier iteration where pulling it
+	// regenerated the maze. UTC-boundary rounds + server roundReset replaced
+	// that flow entirely, but removing the entity from the composite would
+	// disturb interdependent asset-packs data — so we remove it at runtime.
+	// Every entity carrying an asset-packs::States component (only the lever,
+	// in practice) is deleted on boot along with its descendants.
+	engine.addSystem(() => {
+	const statesComp = engine.getComponentOrNull('asset-packs::States')
+	if (!statesComp) return
+		for (const [entity] of engine.getEntitiesWith(statesComp)) {
+			engine.removeEntity(entity)
+		}
+	})
 
 	// Painting system needs a callback to resolve player world position →
 	// the tile they're standing on. lookupTile lives in the generator
 	// module (private grid access).
 	initPaintingSystem(CELL, STEP, lookupTile)
 
-	// Register paint CRDT entities (chunks / palette / coverage) with the
-	// same networkIds as the server before observers start reading them.
-	initPaintSync()
-
-	// Wire event subscribers + CRDT paint observers.
+	// Wire event subscribers + CRDT paint observers. PaintCoverage /
+	// PaletteEntry / PaintCell / LeaderboardState are server-owned
+	// (syncEntity only on the server); clients observe replicas.
 	initPaintNet()
 	initMazeNet()
 	initRoundNet()
@@ -121,14 +115,13 @@ export async function setupClient(): Promise<void> {
 	// above are all in place before the first message can arrive.
 	initClientHandler()
 
-	// Register the SeedHolder for cross-client sync. Doing this inside
-	// setupClient() (not at module top) ensures the networking layer is
-	// ready. Fixed networkId (3000) so every client's SeedHolder maps to
-	// the same synced entity.
-	syncEntity(seedHolder, [SeedHolder.componentId], 3000)
-	// Same pattern for the LeaderboardState: fixed networkId (3001) so the
-	// server's publish() lands on this exact entity on every client.
-	syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
+	// TRANSITIONAL (Phase 4 Step 6): SeedHolder is still client-authored.
+	// Auth-server skill wants server-only syncEntity for singletons — move
+	// seed ownership to the server, then remove this client syncEntity.
+	syncEntity(seedHolder, [SeedHolder.componentId], SEED_NETWORK_ID)
 	// Maze construction is fully event-driven from here: the seed watcher
 	// above builds the maze the moment a non-zero seed arrives.
+
+	// Finally, setup the UI
+	setupUi()
 }

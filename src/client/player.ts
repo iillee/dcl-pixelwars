@@ -11,7 +11,7 @@
 
 import { engine } from '@dcl/sdk/ecs'
 import { movePlayerTo } from '~system/RestrictedActions'
-import { events } from '../shared/events'
+import { eventBus, ClientEvents } from 'src/shared/utils/eventBus'
 
 // Center cross tile world position. See generator.ts: cell (2,2) with
 // MAZE_ORIGIN=8 and CELL=32 puts the tile's SW corner at (72, 72) and its
@@ -30,7 +30,7 @@ function teleportHome(): void {
 
 export function initPlayerNet(): void {
   // Round boundary: everyone snaps back to the cross for a clean start.
-  events.on('round:reset', teleportHome)
+  eventBus.on(ClientEvents.RoundReset, teleportHome)
   // Initial spawn-in: give the maze ~2s to grow in, then plant the player
   // on the center cross. Without this, players land wherever scene.json's
   // spawn range dropped them, which may or may not be on solid ground

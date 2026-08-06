@@ -11,7 +11,7 @@
  * playing:false → true transition, so we must seek BEFORE flipping playing.
  *
  * Future SFX (paint hits, round-end fanfare) will register subscribers on
- * `shared/events` from this module — keeping all audio config in one place.
+ * `eventBus` / `ClientEvents` from this module — keeping all audio config in one place.
  */
 
 import { AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
@@ -65,7 +65,7 @@ export function playUiClick(): void {
 /**
  * Play the tile-claim SFX for the local player only (camera-parented,
  * global=true so no 3D falloff). Fires once per new claim — caller
- * (noteLocalPaintCandidate) already guards against re-walking own tiles,
+ * (paint CRDT apply) already guards against re-walking own tiles,
  * so no additional throttle needed. Low volume so continuous painting
  * reads as a soft rhythmic sparkle, not a machine gun.
  */

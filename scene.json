@@ -187,5 +187,6 @@
   ],
   "worldConfiguration": {
     "name": "stom.dcl.eth"
-  }
+  },
+  "landscapeTerrain": true
 }

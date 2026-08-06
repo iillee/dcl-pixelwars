@@ -4,7 +4,7 @@
  * Safe for client and server. Cell IDs stay
  * `${tx},${tz},${ty}:${col},${row}`. Each painted cell is its own
  * PaintCell CRDT component (sparse — created on first paint) so a write
- * never fans out sibling cells and cannot clobber optimistic local paint.
+ * never fans out sibling cells on a single write.
  *
  * Resolution / maze extent knobs live in src/shared/settings.ts.
  */
@@ -29,14 +29,19 @@ export const PAINT_GRID_H    = MAZE_GRID_HEIGHT
 // Ranges must not overlap — syncEntity rejects duplicate ids.
 // Smart Items auto-claim 8001+ for composite items; paint cells use a high
 // sparse-friendly band so we never pre-bind 100k entities below 8001.
-//   3000       SeedHolder
+// Fixed singleton ids for server-owned syncEntity (except SeedHolder).
+//   3000       SeedHolder (transitional client sync)
 //   3001       LeaderboardState
 //   3100       PaintCoverage
+//   3101       ServerStats
 //   6000-6255  PaletteEntry
-//   100000+    PaintCell (dense ordinal per possible cell; created on paint)
-export const PALETTE_NETWORK_BASE = 6000
-export const COVERAGE_NETWORK_ID  = 3100
-export const CELL_NETWORK_BASE    = 100000
+//   100000+    PaintCell (created on first paint)
+export const SEED_NETWORK_ID        = 3000
+export const LEADERBOARD_NETWORK_ID = 3001
+export const PALETTE_NETWORK_BASE   = 6000
+export const COVERAGE_NETWORK_ID    = 3100
+export const STATS_NETWORK_ID       = 3101
+export const CELL_NETWORK_BASE      = 100000
 
 
 export type CellCoord = {

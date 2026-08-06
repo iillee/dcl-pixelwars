@@ -6,7 +6,7 @@
  * server (headless hammurabi-server).
  *
  * This is the single source of truth for round cadence. Previously the
- * constant was duplicated in src/round.ts (client) and src/server/server.ts
+ * constant was duplicated in src/client/round.ts and src/server/server.ts
  * (server), which silently drifted if only one side was edited.
  *
  * Chosen cadence: 5 minutes. Long enough to explore the 176m maze with

@@ -24,13 +24,13 @@ import {
 	SCENE_WORLD_SIZE_METERS,
 } from 'src/shared/settings'
 
-import { rand, setSeed } from './rng'
+import { rand, setSeed } from 'src/client/maze/rng'
 import {
 	ALL_DIRS, DX, DZ, Dir, OPP,
 	TILES, TileType,
 	GROWTH_PRIMARY, GROWTH_FALLBACK,
 	openingsAt, highDirAt,
-} from './tiles'
+} from 'src/client/maze/tiles'
 
 // MARK: World-scale aliases
 // Masters live in src/shared/settings.ts (SCENE_ / MAZE_ / PAINT_ names).

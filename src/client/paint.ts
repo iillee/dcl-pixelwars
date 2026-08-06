@@ -5,10 +5,15 @@
 import { engine, Transform, MeshRenderer, Material, Entity, NetworkEntity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 
-import { PaintCell, PaletteEntry, PaintCoverage, paintCoverageEntity } from 'src/shared/components'
-import { events } from 'src/shared/events'
-import { cellKeyFromNetworkId, cellKeyToCellId } from 'src/shared/paintGrid'
-import { TEAM_COLORS, teamPaletteIndex, PALETTE_NONE, PALETTE_RED, PALETTE_BLUE } from 'src/shared/palette'
+import { PaintCell, PaletteEntry, PaintCoverage } from 'src/shared/components'
+import { cellIdToKey, cellKeyFromNetworkId, cellKeyToCellId } from 'src/shared/paintGrid'
+import {
+	TEAM_COLORS,
+	PALETTE_NONE,
+	PALETTE_RED,
+	PALETTE_BLUE,
+	teamPaletteIndex,
+} from 'src/shared/palette'
 import {
 	MAZE_ORIGIN_OFFSET_METERS,
 	MAZE_TILE_GLTF_SCALE,
@@ -16,40 +21,42 @@ import {
 	PAINT_CELLS_PER_TILE_AXIS,
 } from 'src/shared/settings'
 import { Team } from 'src/shared/team'
+import { eventBus, ClientEvents } from 'src/shared/utils/eventBus'
 
 import { playClaimSfx } from 'src/client/audio'
 
-// Team enum lives in shared/; re-exported for existing `import { Team } from './paint'` call sites.
+// Team enum lives in shared/; re-exported for existing `import { Team } from 'src/client/paint'` call sites.
 export { Team } from 'src/shared/team'
 
-// Local mirror of the CRDT palette. Seeded with team colors so optimistic
-// paint and early chunk updates resolve before PaletteEntry CRDT arrives.
+// Palette colors from PaletteEntry CRDT. Seeded with the same team colors
+// the server writes so materials resolve as soon as PaintCell indexes land.
 const paletteByIndex = new Map<number, Color4>([
 	[PALETTE_NONE, TEAM_COLORS[Team.None]],
 	[PALETTE_RED,  TEAM_COLORS[Team.Red]],
 	[PALETTE_BLUE, TEAM_COLORS[Team.Blue]],
 ])
 
-// Last-applied PaintCell index per packed key (skip no-op CRDT echoes).
+// Last PaintCell index seen from CRDT (authoritative reconcile).
 const cellApplied = new Map<number, number>()
+// cellId → last rendered palette index (optimistic local and/or CRDT).
+const renderedIndex = new Map<string, number>()
 
-// Cells we painted locally and are still waiting for PaintCell CRDT to
-// confirm. Sparse per-cell components mostly eliminate sibling wipes; this
-// still covers round-reset zeros and any stale NONE echo.
-const optimisticPending = new Set<string>()
+// Set on teamAssigned. Optimistic paint is skipped until then.
+let localTeam: Team = Team.None
 
 
 // MARK: initPaintNet
 
 /**
- * Wire CRDT observers + round-reset clearing.
- *
- * Paint state arrives via PaintCell / PaletteEntry / PaintCoverage CRDT
- * components (not room messages). Call once from setupClient() after
- * initPaintSync() has registered matching networkIds.
+ * Observe PaintCell / PaletteEntry CRDT. Local brush also paints
+ * optimistically; CRDT reconcile uses cellApplied so stale replicas do
+ * not flash over our pending colour until the server index changes.
  */
 export function initPaintNet(): void {
-	events.on('round:reset', () => {
+	eventBus.on(ClientEvents.TeamAssigned, ({ team }) => {
+		localTeam = team
+	})
+	eventBus.on(ClientEvents.RoundReset, () => {
 		clearAllPaintState()
 	})
 
@@ -64,8 +71,6 @@ export function initPaintNet(): void {
 
 function syncPaletteFromCrdt(): void {
 	for (const [_entity, entry] of engine.getEntitiesWith(PaletteEntry)) {
-		// Pre-bound unused slots ship with a=0; ignore until the server
-		// interns a real color into that index.
 		if (entry.index > PALETTE_BLUE && entry.color.a === 0) continue
 		const prev = paletteByIndex.get(entry.index)
 		if (prev &&
@@ -76,8 +81,7 @@ function syncPaletteFromCrdt(): void {
 		paletteByIndex.set(entry.index, Color4.create(
 			entry.color.r, entry.color.g, entry.color.b, entry.color.a,
 		))
-		// Newly resolved color: re-apply any cells waiting on this index.
-		for (const [id, idx] of cellPaintIndex) {
+		for (const [id, idx] of renderedIndex) {
 			if (idx === entry.index) applyPaintIndex(id, idx, true)
 		}
 	}
@@ -90,18 +94,11 @@ function syncCellsFromCrdt(): void {
 	for (const [entity, cell] of engine.getEntitiesWith(PaintCell)) {
 		const net = NetworkEntity.getOrNull(entity)
 		if (!net) continue
-		// syncEntity(enumId) stores identity as NetworkEntity.entityId
-		// (networkId is 0 for fixed enum ids) — not in the PaintCell payload.
-		const key = cellKeyFromNetworkId(net.entityId)
+		const key = cellKeyFromNetworkId(Number(net.entityId))
 		if (key === null) continue
 		if (cellApplied.get(key) === cell.index) continue
 		cellApplied.set(key, cell.index)
-		const id    = cellKeyToCellId(key)
-		const index = cell.index
-		if (index === PALETTE_NONE && cellPaintIndex.get(id) === undefined) continue
-		if (index === PALETTE_NONE && optimisticPending.has(id)) continue
-		if (index !== PALETTE_NONE) optimisticPending.delete(id)
-		applyPaintIndex(id, index, false)
+		applyPaintIndex(cellKeyToCellId(key), cell.index, false)
 	}
 }
 
@@ -272,14 +269,8 @@ function rot90cw(m: Mask): Mask {
 }
 
 // MARK: Cell store
-// Stable cell IDs (deterministic from tile pos + local cell) → palette index.
-// Format: `${tileX},${tileZ},${tileY}:${cellCol},${cellRow}` (post-rotation local).
-const cellPaintIndex = new Map<string, number>()
+// Mesh entities for walkable cells. Paint color comes only from PaintCell CRDT.
 const cellEntity = new Map<string, Entity>()
-// Reverse index: tile entity → all paint cell entities spawned for it, plus
-// their cell ids. Used by removePaintForTile() so tile teardown can strip its
-// paint in the same chunked pass — no ghost cells linger after the tile is
-// gone, and coverage state stays consistent.
 const paintByTile = new Map<Entity, { entities: Entity[]; ids: string[] }>()
 
 export function cellId(tx: number, tz: number, ty: number, col: number, row: number): string {
@@ -324,11 +315,9 @@ engine.addSystem((dt: number) => {
 // disappears in the same frame as its tile, avoiding ghost cells, while
 // the total ~30k removeEntity() cost is spread across several frames.
 export function clearAllPaintState() {
-	cellPaintIndex.clear()
 	cellApplied.clear()
+	renderedIndex.clear()
 	paintOutbox.clear()
-	optimisticPending.clear()
-	// cellEntity is left in place; entries are pruned as tiles are torn down.
 }
 
 export function removePaintForTile(tileEntity: Entity) {
@@ -337,21 +326,16 @@ export function removePaintForTile(tileEntity: Entity) {
 	for (const e of rec.entities) engine.removeEntity(e)
 	for (const id of rec.ids) {
 		cellEntity.delete(id)
-		// Drop the index association — the cell no longer exists, so any
-		// stale entry would "poison" a future tile that happens to spawn at
-		// the same (tx, tz, ty) with the same cellId.
-		cellPaintIndex.delete(id)
-		optimisticPending.delete(id)
+		renderedIndex.delete(id)
+		const key = cellIdToKey(id)
+		if (key !== null) cellApplied.delete(key)
 	}
 	paintByTile.delete(tileEntity)
 }
 
 /**
- * Reset paint on a tile without destroying its entities. Used for the
- * persistent center-cross tile at round boundaries: the tile geometry
- * stays in place (so players standing on it aren't shoved by grow-in),
- * but its paint cells snap back to unpainted so the new round starts
- * with a clean slate underfoot.
+ * Reset paint visuals on a tile without destroying meshes (center cross
+ * at round boundary). Authoritative clear comes from server PaintCell writes.
  */
 export function resetPaintForTile(tileEntity: Entity) {
 	const rec = paintByTile.get(tileEntity)
@@ -359,72 +343,64 @@ export function resetPaintForTile(tileEntity: Entity) {
 	const noneMat = cellMaterialForIndex(PALETTE_NONE)!
 	for (let i = 0; i < rec.entities.length; i++) {
 		Material.setPbrMaterial(rec.entities[i], noneMat)
-		cellPaintIndex.set(rec.ids[i], PALETTE_NONE)
-		optimisticPending.delete(rec.ids[i])
+		renderedIndex.set(rec.ids[i], PALETTE_NONE)
+		const key = cellIdToKey(rec.ids[i])
+		if (key !== null) cellApplied.set(key, PALETTE_NONE)
 	}
 }
 
 // MARK: Network outbox
-// Cell ids the local player has walked onto since the last flush. Client
-// drains this at PAINT_TICK_HZ (after teamAssigned) and sends paintTick
-// { ids } to the server. Server writes palette indexes into per-cell
-// PaintCell CRDT — which is how OUR paint and peers' paint converge.
+// Cell ids to send as paintTick commands. Not paint state — just the
+// client→server request queue, drained at PAINT_TICK_HZ after roster join.
 const paintOutbox = new Set<string>()
-export function drainPaintOutbox(): string[] {
+
+
+// MARK: drainPaintOutbox
+
+/** Drain up to `max` pending cell ids for one paintTick. */
+export function drainPaintOutbox(max: number): string[] {
 	if (paintOutbox.size === 0) return []
 	const out: string[] = []
-	for (const id of paintOutbox) out.push(id)
-	paintOutbox.clear()
+	for (const id of paintOutbox) {
+		out.push(id)
+		if (out.length >= max) break
+	}
+	for (const id of out) paintOutbox.delete(id)
 	return out
 }
 
+
+// MARK: enqueuePaintCandidate
+
 /**
- * Register a cell the local player has stepped on. Adds to the outbox for
- * the next server flush AND applies optimistic local paint so our own
- * cells color instantly (no server roundtrip delay behind the avatar).
- *
- * Marks the cell optimisticPending so syncCellsFromCrdt will not apply a
- * stale PALETTE_NONE before paintTick lands. Authority clears the pending
- * flag when it writes any non-zero index.
+ * Queue a cell id for paintTick and, once rostered, paint the mesh
+ * immediately so the brush stays under the avatar.
  */
-export function noteLocalPaintCandidate(id: string): void {
+export function enqueuePaintCandidate(id: string): void {
+	// Drop ids the server cannot pack (e.g. ramp rows outside 0..SIZE-1).
+	if (cellIdToKey(id) === null) return
 	paintOutbox.add(id)
-	optimisticPending.add(id)
-	const team    = localTeam !== Team.None ? localTeam : Team.Red
-	const index   = teamPaletteIndex(team)
-	const wasOurs = cellPaintIndex.get(id) === index
+	if (localTeam === Team.None) return
+	const index = teamPaletteIndex(localTeam)
+	if (renderedIndex.get(id) === index) return
 	applyPaintIndex(id, index, false)
-	if (!wasOurs) playClaimSfx()
+	playClaimSfx()
 }
 
-// Set from clientHandler (provisional Red on boot, then teamAssigned).
-let localTeam: Team = Team.None
-export function setLocalTeam(team: Team): void {
-	localTeam = team
-}
+
+// MARK: applyPaintIndex
 
 /**
- * Apply a palette index to a cell. If the palette entry is not yet known,
- * records the index but skips the material update (defer until PaletteEntry
- * CRDT arrives). force=true re-applies material even when index unchanged
- * (used when a previously-missing palette color becomes resolvable).
+ * Apply a palette index to a cell mesh (optimistic local or CRDT → view).
+ * Same-index calls are a no-op unless `force` (palette colour changed).
  */
 export function applyPaintIndex(id: string, index: number, force: boolean): void {
-	if (!force && cellPaintIndex.get(id) === index) {
-		// Still try material if entity spawned after index was recorded.
-		const e = cellEntity.get(id)
-		if (e === undefined) return
-		const mat = cellMaterialForIndex(index)
-		if (mat) Material.setPbrMaterial(e, mat)
-		return
-	}
-	cellPaintIndex.set(id, index)
+	if (!force && renderedIndex.get(id) === index) return
+	renderedIndex.set(id, index)
 	const mat = cellMaterialForIndex(index)
-	if (!mat) return // unresolved palette — wait for PaletteEntry
+	if (!mat) return
 	const e = cellEntity.get(id)
-	if (e !== undefined) {
-		Material.setPbrMaterial(e, mat)
-	}
+	if (e !== undefined) Material.setPbrMaterial(e, mat)
 }
 
 // MARK: Spawn cells
@@ -503,10 +479,12 @@ function spawnCellsForTileImmediate(
   }
 
 	const spawnOne = (wx: number, wy: number, wz: number, rot: any, col: number, row: number, scaleY: number = cellSize) => {
-		const id = cellId(tx, tz, ty, col, row)
-		// Adopt any paint that landed on this id BEFORE the entity existed
-		// (PaintCell CRDT or optimistic local paint during grow-in delay).
-		const preexisting = cellPaintIndex.get(id) ?? PALETTE_NONE
+		const id  = cellId(tx, tz, ty, col, row)
+		const key = cellIdToKey(id)
+		// If PaintCell CRDT already arrived during grow-in delay, adopt it.
+		const preexisting = (key !== null ? cellApplied.get(key) : undefined)
+			?? renderedIndex.get(id)
+			?? PALETTE_NONE
 		const e = engine.addEntity()
 		Transform.create(e, {
 			position: Vector3.create(wx, wy, wz),
@@ -517,7 +495,7 @@ function spawnCellsForTileImmediate(
 		const mat = cellMaterialForIndex(preexisting) ?? cellMaterialForIndex(PALETTE_NONE)!
 		Material.setPbrMaterial(e, mat)
 		cellEntity.set(id, e)
-		cellPaintIndex.set(id, preexisting)
+		renderedIndex.set(id, preexisting)
 		tileRec!.entities.push(e)
 		tileRec!.ids.push(id)
 	}
@@ -583,21 +561,15 @@ function spawnCellsForTileImmediate(
   }
 }
 
-// red / blue = absolute painted-cell counts from PaintCoverage CRDT when
-// available; otherwise a local scan of cellPaintIndex.
-// total = WALKABLE CELLS IN THE MAZE (cellEntity.size), not "cells touched."
+// MARK: coverage
+
+/** red/blue from PaintCoverage CRDT; total = local walkable mesh count. */
 export function coverage(): { red: number; blue: number; total: number } {
 	const total = cellEntity.size
-	const crdt = PaintCoverage.getOrNull(paintCoverageEntity)
-	if (crdt) {
+	for (const [, crdt] of engine.getEntitiesWith(PaintCoverage)) {
 		return { red: crdt.red, blue: crdt.blue, total }
 	}
-	let red = 0, blue = 0
-	for (const idx of cellPaintIndex.values()) {
-		if (idx === PALETTE_RED)       red++
-		else if (idx === PALETTE_BLUE) blue++
-	}
-	return { red, blue, total }
+	return { red: 0, blue: 0, total }
 }
 
 // MARK: World to cell
@@ -680,19 +652,18 @@ export function initPaintingSystem(
       OFFSETS.push([dx * step, dz * step])
     }
   }
-	// Enqueue candidate cell ids; optimistic local paint + server CRDT
-	// chunk writes converge the visible colors.
+	// Queue paintTick ids + optimistic local colour; CRDT reconciles.
 	engine.addSystem(() => {
-    const t = Transform.getOrNull(engine.PlayerEntity)
-    if (!t) return
-    const { x, y, z } = t.position
-    const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
-    if (!center || y - center.groundY > GROUND_TOLERANCE) return
-    for (const [dx, dz] of OFFSETS) {
-      const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
-      if (!hit) continue
-      if (Math.abs(y - hit.groundY) > 1.5) continue
-      noteLocalPaintCandidate(hit.id)
-    }
-  })
+		const t = Transform.getOrNull(engine.PlayerEntity)
+		if (!t) return
+		const { x, y, z } = t.position
+		const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
+		if (!center || y - center.groundY > GROUND_TOLERANCE) return
+		for (const [dx, dz] of OFFSETS) {
+			const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
+			if (!hit) continue
+			if (Math.abs(y - hit.groundY) > 1.5) continue
+			enqueuePaintCandidate(hit.id)
+		}
+	})
 }

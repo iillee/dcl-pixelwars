@@ -12,14 +12,16 @@
  */
 
 import { engine } from '@dcl/sdk/ecs'
-import { syncEntity } from '@dcl/sdk/network'
+import { myProfile } from '@dcl/sdk/network'
 
-import { LeaderboardState, leaderboardStateEntity } from 'src/shared/components'
 import { room } from 'src/shared/messages'
 import { paintGridCapacity } from 'src/shared/paintGrid'
-import { initPaintSync } from 'src/shared/paintSync'
+import { initPaintSync, paintCellEntityCount, relinkPaintSync } from 'src/shared/paintSync'
 import { getRoundIndex as currentRoundIndex } from 'src/shared/roundTiming'
-import { PAINT_BRUSH_SIZE_CELLS } from 'src/shared/settings'
+import {
+	PAINT_COVERAGE_PUBLISH_HZ,
+	PAINT_TICK_MAX_IDS,
+} from 'src/shared/settings'
 
 import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } from 'src/server/discord'
 import {
@@ -39,31 +41,20 @@ import {
 	publishCoverage,
 } from 'src/server/paintState'
 import { assignTeam, rosterSize, getTeam } from 'src/server/roster'
+import { initServerStats, startServerStatsTick } from 'src/server/serverStats'
 
-// Ingest rate limit: one brush footprint per paintTick, plus headroom.
-// Anything beyond is either a bug or a cheater — drop the whole message.
-const MAX_IDS_PER_TICK = PAINT_BRUSH_SIZE_CELLS * PAINT_BRUSH_SIZE_CELLS + 16
+const HEARTBEAT_INTERVAL_S     = 5
+const PAINT_SUMMARY_INTERVAL_S = 5
 
+
+// MARK: setupServer
+
+/** Boot roster, paint CRDT, stats, and room handlers for the auth server. */
 export async function setupServer(): Promise<void> {
 	console.log('[Server] Starting Squareoff server...')
 
-	// Load leaderboard from Storage before any paintTicks land, so we don't
-	// clobber persisted state with a fresh empty board. loadFromStorage()
-	// also publishes to the CRDT-synced LeaderboardState so late-joining
-	// clients see it immediately without waiting for a round boundary.
 	await loadLeaderboard()
 
-	// Register the LeaderboardState entity on the CRDT sync mesh with a
-	// fixed networkId (3001) matching the client. Server mutations to this
-	// component now propagate to every connected client.
-	try {
-		syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
-	} catch (err) {
-		console.error('[Server] syncEntity LeaderboardState@3001 failed:', err)
-	}
-
-	// Paint CRDT: sparse PaintCell + palette + coverage. Seed team colors
-	// so indexes 0/1/2 are deterministic before any paintTick arrives.
 	const paintCap = paintGridCapacity()
 	console.log(
 		`[Server] paint grid: ${paintCap.cellCapacity} cell slots ` +
@@ -74,11 +65,19 @@ export async function setupServer(): Promise<void> {
 	initPaintSync()
 	seedTeamPalette()
 
-	// Discord webhook + realm/preview detection. Wire the name resolver so
-	// the notifier can pull display names captured via updateName. Silent
-	// no-op if DISCORD_PLAYER_JOIN_WEBHOOK isn't set or we're in preview.
+	initServerStats()
+	startServerStatsTick(() => coverage().total)
+
 	bindNameResolver(leaderboardGetName)
 	await initDiscord()
+
+	// PaintTick summary accumulators (coalesced log every few seconds).
+	let paintTicks       = 0
+	let paintIdsIn       = 0
+	let paintApplied     = 0
+	let paintDroppedCap  = 0
+	let paintDroppedTeam = 0
+	let paintSummaryClock = 0
 
 	// Roster handler — assign or look up a player's team.
 	// Client sends joinRoster once on boot; we reply teamAssigned to that sender only.
@@ -112,9 +111,13 @@ export async function setupServer(): Promise<void> {
 		const from = context?.from
 		if (!from) return
 		const team = getTeam(from)
-		if (team === null) return  // pre-roster paint, retry on next tick
-		if (ids.length > MAX_IDS_PER_TICK) {
-			console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${MAX_IDS_PER_TICK}`)
+		if (team === null) {
+			paintDroppedTeam++
+			return
+		}
+		if (ids.length > PAINT_TICK_MAX_IDS) {
+			paintDroppedCap++
+			console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${PAINT_TICK_MAX_IDS}`)
 			return
 		}
 		// Count only cells that actually changed — a player standing still
@@ -124,6 +127,9 @@ export async function setupServer(): Promise<void> {
 		for (const id of ids) {
 			if (applyPaint(id, team)) gained++
 		}
+		paintTicks++
+		paintIdsIn   += ids.length
+		paintApplied += gained
 		if (gained > 0) leaderboardIncrement(from, gained)
 	})
 
@@ -144,29 +150,51 @@ export async function setupServer(): Promise<void> {
 		publishLeaderboard()
 	})
 
-	// Coverage publish tick (5 Hz). Coalesces cell mutations into a single
+	// Coverage publish tick. Coalesces cell mutations into a single
 	// PaintCoverage CRDT write — not a room broadcast.
-	const COVERAGE_HZ = 5
-	const COVERAGE_INTERVAL = 1 / COVERAGE_HZ
+	const COVERAGE_INTERVAL = 1 / PAINT_COVERAGE_PUBLISH_HZ
 	let coverageClock = 0
 	engine.addSystem((dt: number) => {
 		coverageClock += dt
 		if (coverageClock < COVERAGE_INTERVAL) return
 		coverageClock = 0
+		relinkPaintSync()
 		if (!isCoverageDirty()) return
 		publishCoverage()
 	})
 
-	// Coverage log tick (5s). Kept as a low-frequency health signal.
-	let coverageLogClock = 0
+	// Heartbeat + paintTick summary. Always logs so a live idle server is
+	// obvious; silence means the process died.
+	let heartbeatClock = 0
 	engine.addSystem((dt: number) => {
-		coverageLogClock += dt
-		if (coverageLogClock < 5) return
-		coverageLogClock = 0
-		const c = coverage()
-		if (c.total > 0) {
-			console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total}`)
+		heartbeatClock += dt
+		paintSummaryClock += dt
+
+		if (paintSummaryClock >= PAINT_SUMMARY_INTERVAL_S) {
+			paintSummaryClock = 0
+			if (paintTicks > 0 || paintDroppedCap > 0 || paintDroppedTeam > 0) {
+				console.log(
+					`[Server] paintTick ${PAINT_SUMMARY_INTERVAL_S}s: ` +
+					`ticks=${paintTicks} ids=${paintIdsIn} applied=${paintApplied} ` +
+					`droppedCap=${paintDroppedCap} droppedTeam=${paintDroppedTeam} ` +
+					`paintCells=${paintCellEntityCount()}`
+				)
+				paintTicks       = 0
+				paintIdsIn       = 0
+				paintApplied     = 0
+				paintDroppedCap  = 0
+				paintDroppedTeam = 0
+			}
 		}
+
+		if (heartbeatClock < HEARTBEAT_INTERVAL_S) return
+		heartbeatClock = 0
+		const c = coverage()
+		console.log(
+			`[Server] alive roster=${rosterSize()} cells=${paintCellEntityCount()} ` +
+			`coverage=red=${c.red}/blue=${c.blue}/total=${c.total} ` +
+			`profileReady=${!!myProfile?.networkId}`
+		)
 	})
 
 	// Round loop. Server owns the boundary. On crossing:
@@ -197,5 +225,9 @@ export async function setupServer(): Promise<void> {
 		flushPendingJoins()
 	})
 
-	console.log('[Server] ✅ Ready — listening for joinRoster, paintTick; paint state via sparse PaintCell CRDT; roundReset on UTC boundaries.')
+	console.log(
+		'[Server] Ready — listening for joinRoster, paintTick; ' +
+		'paint state via sparse PaintCell CRDT; roundReset on UTC boundaries. ' +
+		`heartbeat every ${HEARTBEAT_INTERVAL_S}s.`
+	)
 }
