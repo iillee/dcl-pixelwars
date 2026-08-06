@@ -33,18 +33,18 @@ export const IS_DEV =
  * Cell world size = maze tile world meters / this value.
  *
  * Examples (with current 32 m maze tiles):
- *   16 → 2 m cells   (lighter load)
- *   32 → 1 m cells   (default)
- *   64 → 0.5 m cells (heavier load)
+ *   16 → 2 m cells   (squareoff baseline / comparison default)
+ *   32 → 1 m cells   (heavier)
+ *   64 → 0.5 m cells (heaviest)
  */
-export const PAINT_CELLS_PER_TILE_AXIS = 32
+export const PAINT_CELLS_PER_TILE_AXIS = 16
 
 /**
  * Target brush diameter in world meters. Converted to an odd cell count
  * from the paint cell size so players cover a similar area at any
- * resolution (e.g. 3 m ≈ 3×3 at 1 m cells, ≈ 7×7 at 0.5 m cells).
+ * resolution. Baseline matches squareoff's 3×3 at 2 m cells (= 6 m).
  */
-export const PAINT_BRUSH_SIZE_METERS = 3
+export const PAINT_BRUSH_SIZE_METERS = 6
 
 
 // MARK: Scene
