@@ -642,7 +642,7 @@ export function initPaintingSystem(
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null,
 ) {
   const GROUND_TOLERANCE = 0.4
-  // Brush footprint from settings.PAINT_BRUSH_SIZE_CELLS (odd NxN).
+  // Brush footprint from settings (PAINT_BRUSH_SIZE_METERS → odd cell count).
   // Offsets in world meters; one cell is CELL / SIZE.
   const step = CELL / SIZE
   const half = Math.floor(PAINT_BRUSH_SIZE_CELLS / 2)

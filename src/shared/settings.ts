@@ -1,9 +1,12 @@
 /**
  * settings.ts — single source of truth for world / maze / paint knobs.
  *
- * Edit this file to change scene extent, maze tile GLB scale, or paint
- * resolution. Names are prefixed (SCENE_ / MAZE_ / PAINT_) so they stay
- * unambiguous when mixed with domain-local aliases (CELL, STEP, etc.).
+ * PERFORMANCE TUNING: change only the two constants under
+ * "Performance tuning" below. Maze / scene geometry rarely moves; paint
+ * resolution is what you dial when measuring CRDT / component load.
+ *
+ * Names are prefixed (SCENE_ / MAZE_ / PAINT_) so they stay unambiguous
+ * when mixed with domain-local aliases (CELL, STEP, etc.).
  *
  * Safe for client and server — pure constants, no engine imports.
  */
@@ -15,6 +18,33 @@ declare var process: { env: { NODE_ENV?: string } } | undefined
 
 export const IS_DEV =
 	typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'
+
+
+// =============================================================================
+// MARK: Performance tuning
+// Edit THESE when measuring paint / CRDT load.
+// Higher PAINT_CELLS_PER_TILE_AXIS → smaller cells → more component updates.
+// Brush is in world meters so the painted footprint stays roughly constant
+// when you change resolution (cells are derived further down).
+// =============================================================================
+
+/**
+ * Paint cells along one edge of a maze tile.
+ * Cell world size = maze tile world meters / this value.
+ *
+ * Examples (with current 32 m maze tiles):
+ *   16 → 2 m cells   (lighter load)
+ *   32 → 1 m cells   (default)
+ *   64 → 0.5 m cells (heavier load)
+ */
+export const PAINT_CELLS_PER_TILE_AXIS = 32
+
+/**
+ * Target brush diameter in world meters. Converted to an odd cell count
+ * from the paint cell size so players cover a similar area at any
+ * resolution (e.g. 3 m ≈ 3×3 at 1 m cells, ≈ 7×7 at 0.5 m cells).
+ */
+export const PAINT_BRUSH_SIZE_METERS = 3
 
 
 // MARK: Scene
@@ -60,21 +90,35 @@ export const MAZE_ORIGIN_OFFSET_METERS =
 	(SCENE_WORLD_SIZE_METERS - MAZE_GRID_WIDTH * MAZE_TILE_WORLD_METERS) / 2
 
 
-// MARK: Paint
+// MARK: Paint (derived from performance knobs + maze tile size)
+
+/** World-space edge length of one paint cell (meters). */
+export const PAINT_CELL_SIZE_METERS =
+	MAZE_TILE_WORLD_METERS / PAINT_CELLS_PER_TILE_AXIS
+
+
+// MARK: oddBrushCells
 
 /**
- * Paint cells along one edge of a maze tile.
- * Cell world size = MAZE_TILE_WORLD_METERS / PAINT_CELLS_PER_TILE_AXIS.
- * 16 → 2 m cells; 32 → 1 m cells.
+ * Round a meter brush span to an odd cell count (≥ 1) so the footprint
+ * stays centered on the player.
  */
-export const PAINT_CELLS_PER_TILE_AXIS = 32
+function oddBrushCells(
+	brushMeters: number,
+	cellMeters:  number,
+): number {
+	const raw = Math.max(1, Math.round(brushMeters / cellMeters))
+	return raw % 2 === 0 ? raw + 1 : raw
+}
 
 /**
  * Default player brush footprint as an odd square of paint cells
- * (e.g. 3 → 3×3 centered on the player). Must be odd so there is a
- * center cell. World span ≈ size × (MAZE_TILE_WORLD_METERS / PAINT_CELLS_PER_TILE_AXIS).
+ * (e.g. 3 → 3×3). Derived from PAINT_BRUSH_SIZE_METERS.
  */
-export const PAINT_BRUSH_SIZE_CELLS = 3
+export const PAINT_BRUSH_SIZE_CELLS = oddBrushCells(
+	PAINT_BRUSH_SIZE_METERS,
+	PAINT_CELL_SIZE_METERS,
+)
 
 /**
  * Client → server paintTick flush rate. Inbound room traffic is capped per
