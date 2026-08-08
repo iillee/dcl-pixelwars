@@ -143,6 +143,43 @@ export function isCoverageDirty(): boolean {
 // MARK: coverage
 
 /** Live coverage counters from the authoritative cell map. */
+/**
+ * Team currently painted on a cell, or 0 (PALETTE_NONE) if unpainted.
+ * Used by bot smart-targeting to skip own-team cells + prioritise enemy.
+ */
+export function teamOfCell(id: string): number {
+	return cellIndex.get(id) ?? PALETTE_NONE
+}
+
+
+// MARK: sampleEnemyCells
+
+/**
+ * Reservoir-sample up to `k` random cellIds currently held by the team
+ * OPPOSITE `myTeam`. Used by bot enemy-hunter target tier so the ghost
+ * plays offense instead of only painting blank floor. O(N) over the
+ * painted cell map (bounded by cellIndex.size).
+ */
+export function sampleEnemyCells(myTeam: number, k: number): string[] {
+	const enemyTeam = myTeam === PALETTE_RED ? PALETTE_BLUE : PALETTE_RED
+	const out: string[] = []
+	let seen = 0
+	for (const [id, idx] of cellIndex) {
+		if (idx !== enemyTeam) continue
+		seen++
+		if (out.length < k) {
+			out.push(id)
+		} else {
+			const j = Math.floor(Math.random() * seen)
+			if (j < k) out[j] = id
+		}
+	}
+	return out
+}
+
+
+// MARK: coverage
+
 export function coverage(): { red: number; blue: number; total: number } {
 	let red = 0, blue = 0
 	for (const idx of cellIndex.values()) {

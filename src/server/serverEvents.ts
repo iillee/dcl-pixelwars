@@ -8,5 +8,6 @@
  */
 
 export enum ServerEvents {
-	// Add server-local event names as they appear.
+	/** Emitted after the round boundary crossed. Payload: { seed: number } */
+	RoundReset = 'server:roundReset',
 }

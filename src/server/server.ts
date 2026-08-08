@@ -22,7 +22,14 @@ import {
 	PAINT_COVERAGE_PUBLISH_HZ,
 	PAINT_TICK_MAX_IDS,
 } from 'src/shared/settings'
+import { eventBus, ServerEvents } from 'src/shared/utils/eventBus'
 
+import {
+	botCount,
+	initBots,
+	rebuildBotGraph,
+	tickBots,
+} from 'src/server/bots/manager'
 import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } from 'src/server/discord'
 import {
 	loadFromStorage as loadLeaderboard,
@@ -39,8 +46,17 @@ import {
 	seedTeamPalette,
 	isCoverageDirty,
 	publishCoverage,
+	sampleEnemyCells,
+	teamOfCell,
 } from 'src/server/paintState'
-import { assignTeam, rosterSize, getTeam } from 'src/server/roster'
+import {
+	activeHumanCount,
+	activeSoloHumanTeam,
+	assignTeam,
+	getTeam,
+	markActive,
+	rosterSize,
+} from 'src/server/roster'
 import { initServerStats, startServerStatsTick } from 'src/server/serverStats'
 
 const HEARTBEAT_INTERVAL_S     = 5
@@ -71,6 +87,22 @@ export async function setupServer(): Promise<void> {
 	bindNameResolver(leaderboardGetName)
 	await initDiscord()
 
+	// Bots: wire injectable deps + build the graph for the initial seed.
+	// Population is 0 until an active human joins.
+	initBots({
+		applyPaint,
+		paint: {
+			teamOf:      teamOfCell,
+			sampleEnemy: sampleEnemyCells,
+		},
+		humanCount:    activeHumanCount,
+		soloHumanTeam: activeSoloHumanTeam,
+	})
+	rebuildBotGraph(currentRoundIndex())
+	eventBus.on(ServerEvents.RoundReset, ({ seed }: { seed: number }) => {
+		rebuildBotGraph(seed)
+	})
+
 	// PaintTick summary accumulators (coalesced log every few seconds).
 	let paintTicks       = 0
 	let paintIdsIn       = 0
@@ -97,7 +129,8 @@ export async function setupServer(): Promise<void> {
 			console.log(`[Server] joinRoster payload/from mismatch (payload=${userId}, from=${from}) — using from`)
 		}
 		const team = assignTeam(from)
-		console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()})`)
+		markActive(from)
+		console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()} active ${activeHumanCount()})`)
 		room.send('teamAssigned', { team }, { to: [from] })
 		// Queue a Discord join notification (debounced 5s to let updateName
 		// arrive so we send the real display name, not the wallet hash).
@@ -115,6 +148,7 @@ export async function setupServer(): Promise<void> {
 			paintDroppedTeam++
 			return
 		}
+		markActive(from)
 		if (ids.length > PAINT_TICK_MAX_IDS) {
 			paintDroppedCap++
 			console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${PAINT_TICK_MAX_IDS}`)
@@ -191,7 +225,7 @@ export async function setupServer(): Promise<void> {
 		heartbeatClock = 0
 		const c = coverage()
 		console.log(
-			`[Server] alive roster=${rosterSize()} cells=${paintCellEntityCount()} ` +
+			`[Server] alive roster=${rosterSize()} activeHumans=${activeHumanCount()} bots=${botCount()} cells=${paintCellEntityCount()} ` +
 			`coverage=red=${c.red}/blue=${c.blue}/total=${c.total} ` +
 			`profileReady=${!!myProfile?.networkId}`
 		)
@@ -212,7 +246,16 @@ export async function setupServer(): Promise<void> {
 		clearPaintState()
 		void saveLeaderboard()
 		publishLeaderboard()
+		eventBus.emit(ServerEvents.RoundReset, { seed: idx })
 		lastRoundIndex = idx
+	})
+
+	// Bot tick. Manager handles spawn/despawn based on active humans and
+	// applies 3x3 paint stamps per stepped cell via the injected
+	// applyPaint. Runs on the same engine cadence as other systems; the
+	// bot state machine is dt-based so cadence doesn't matter.
+	engine.addSystem((dt: number) => {
+		tickBots(dt)
 	})
 
 	// Discord flush tick — low frequency; the delay is 5s so 1Hz polling
