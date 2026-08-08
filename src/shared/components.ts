@@ -39,6 +39,16 @@ export const PaintCoverage = engine.defineComponent('paint::coverage', {
 	total: Schemas.Int,
 })
 
+// MARK: BotState
+// Per-bot metadata sync. Position lives on the entity's Transform.
+// Created server-side per active bot; despawned on retire. Clients
+// observe via getEntitiesWith(BotState) to spawn/despawn ghost visuals.
+export const BotState = engine.defineComponent('bot::state', {
+	botId: Schemas.Int,
+	team:  Schemas.Byte,
+})
+
+
 // MARK: ServerStats
 // Rate-limited debug snapshot. Server writes at SERVER_STATS_PUBLISH_HZ;
 // clients only read. Not used for gameplay.

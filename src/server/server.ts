@@ -13,6 +13,7 @@
 
 import { engine } from '@dcl/sdk/ecs'
 import { myProfile } from '@dcl/sdk/network'
+import { onLeaveScene } from '@dcl/sdk/players'
 
 import { room } from 'src/shared/messages'
 import { paintGridCapacity } from 'src/shared/paintGrid'
@@ -55,6 +56,7 @@ import {
 	assignTeam,
 	getTeam,
 	markActive,
+	markInactive,
 	rosterSize,
 } from 'src/server/roster'
 import { initServerStats, startServerStatsTick } from 'src/server/serverStats'
@@ -101,6 +103,15 @@ export async function setupServer(): Promise<void> {
 	rebuildBotGraph(currentRoundIndex())
 	eventBus.on(ServerEvents.RoundReset, ({ seed }: { seed: number }) => {
 		rebuildBotGraph(seed)
+	})
+
+	// Clear the leaver's activity slot immediately so the bot manager
+	// reacts on the next tick (~engine frame) instead of waiting up to
+	// 60s for the activity window to expire. Roster slot is preserved
+	// for team-stability on rejoin.
+	onLeaveScene((userId: string) => {
+		markInactive(userId)
+		console.log(`[Server] onLeaveScene ${userId} (active humans now ${activeHumanCount()})`)
 	})
 
 	// PaintTick summary accumulators (coalesced log every few seconds).

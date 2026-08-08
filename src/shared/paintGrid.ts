@@ -34,6 +34,7 @@ export const PAINT_GRID_H    = MAZE_GRID_HEIGHT
 //   3001       LeaderboardState
 //   3100       PaintCoverage
 //   3101       ServerStats
+//   4000-4063  BotState (per-bot; up to 64 concurrent bots)
 //   6000-6255  PaletteEntry
 //   100000+    PaintCell (created on first paint)
 export const SEED_NETWORK_ID        = 3000
@@ -41,6 +42,8 @@ export const LEADERBOARD_NETWORK_ID = 3001
 export const PALETTE_NETWORK_BASE   = 6000
 export const COVERAGE_NETWORK_ID    = 3100
 export const STATS_NETWORK_ID       = 3101
+export const BOT_NETWORK_BASE       = 4000
+export const BOT_NETWORK_MAX        = 64
 export const CELL_NETWORK_BASE      = 100000
 
 

@@ -15,6 +15,11 @@
  *   - no leaderboard credit (bot userIds never appear in top-painters)
  */
 
+import { engine, Entity, NetworkEntity, Transform } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
+import { myProfile, syncEntity } from '@dcl/sdk/network'
+
+import { BotState } from 'src/shared/components'
 import {
 	generateWithRetry,
 	getPlacedTilesInOrder,
@@ -23,6 +28,10 @@ import {
 	buildWalkableGraph,
 	WalkableGraph,
 } from 'src/shared/maze/graph'
+import {
+	BOT_NETWORK_BASE,
+	BOT_NETWORK_MAX,
+} from 'src/shared/paintGrid'
 
 import {
 	Bot,
@@ -50,10 +59,51 @@ export interface ManagerDeps {
 }
 
 
+interface ManagedBot {
+	bot:     Bot
+	botId:   number
+	/** Network id slot in [BOT_NETWORK_BASE, BOT_NETWORK_BASE+BOT_NETWORK_MAX). */
+	netSlot: number
+	entity:  Entity
+}
+
 let deps:  ManagerDeps  | null = null
 let graph: WalkableGraph | null = null
-let bots:  Array<Bot & { botId: number }> = []
+let bots:  ManagedBot[] = []
 let botIdCounter = 0
+// Track which BOT_NETWORK_BASE slots are in use so we can reuse ids on
+// respawn (main hit this - stale client ghost when a new bot took the
+// same slot).
+const usedNetSlots = new Set<number>()
+
+
+// MARK: allocNetSlot
+
+/** Pick the lowest free slot in [0, BOT_NETWORK_MAX). Returns -1 if
+ *  saturated (would only happen far outside solo-mode). */
+function allocNetSlot(): number {
+	for (let i = 0; i < BOT_NETWORK_MAX; i++) {
+		if (!usedNetSlots.has(i)) {
+			usedNetSlots.add(i)
+			return i
+		}
+	}
+	return -1
+}
+
+
+// MARK: trySyncBot
+
+/** Attach NetworkEntity when profile is ready. No-ops if already linked. */
+function trySyncBot(entity: Entity, netSlot: number): void {
+	if (NetworkEntity.getOrNull(entity) !== null) return
+	if (!myProfile?.networkId) return
+	try {
+		syncEntity(entity, [BotState.componentId, Transform.componentId], BOT_NETWORK_BASE + netSlot)
+	} catch (err) {
+		console.error(`[Bots] trySyncBot: syncEntity@${BOT_NETWORK_BASE + netSlot} failed:`, err)
+	}
+}
 
 
 // MARK: initBots
@@ -86,9 +136,9 @@ export function rebuildBotGraph(seed: number): void {
 
 	const seatSet  = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
 	const nodesArr = [...seatSet]
-	for (const b of bots) {
-		b.currentCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
-		b.clearPath()
+	for (const mb of bots) {
+		mb.bot.currentCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
+		mb.bot.clearPath()
 	}
 }
 
@@ -107,20 +157,38 @@ function pickTeamForNewBot(): number {
 
 function spawnBot(): void {
 	if (!graph || !deps) return
-	const spawnSet = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
-	const nodesArr = [...spawnSet]
+	const netSlot = allocNetSlot()
+	if (netSlot === -1) {
+		console.error('[Bots] spawnBot: no free network slot (BOT_NETWORK_MAX exhausted)')
+		return
+	}
+	const spawnSet  = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
+	const nodesArr  = [...spawnSet]
 	const startCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
-	const team = pickTeamForNewBot()
-	const bot  = new Bot({
+	const team      = pickTeamForNewBot()
+	const bot       = new Bot({
 		team,
 		startCell,
 		pickTarget: makeSmartTarget(deps.paint, team),
 		paint:      deps.paint,
-	}) as Bot & { botId: number }
+	})
 	botIdCounter++
-	bot.botId = botIdCounter
-	bots.push(bot)
-	console.log(`[Bots] spawnBot #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
+
+	// Synced entity: Transform position + BotState (botId, team). Position
+	// initialised to current cell centre so the client visual spawns in
+	// the right place instead of jumping from world origin.
+	const entity  = engine.addEntity()
+	const startPos = graph.worldPos.get(startCell)
+	Transform.create(entity, {
+		position: startPos
+			? Vector3.create(startPos[0], startPos[1], startPos[2])
+			: Vector3.create(0, 0, 0),
+	})
+	BotState.create(entity, { botId: botIdCounter, team })
+	trySyncBot(entity, netSlot)
+
+	bots.push({ bot, botId: botIdCounter, netSlot, entity })
+	console.log(`[Bots] spawnBot #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} netSlot=${netSlot} at ${startCell} (pop ${bots.length})`)
 }
 
 
@@ -129,7 +197,9 @@ function spawnBot(): void {
 function retireBot(): void {
 	const removed = bots.pop()
 	if (!removed) return
-	console.log(`[Bots] retireBot: team ${removed.team === 1 ? 'RED' : 'BLUE'} (pop ${bots.length})`)
+	engine.removeEntity(removed.entity)
+	usedNetSlots.delete(removed.netSlot)
+	console.log(`[Bots] retireBot #${removed.botId}: team ${removed.bot.team === 1 ? 'RED' : 'BLUE'} netSlot=${removed.netSlot} (pop ${bots.length})`)
 }
 
 
@@ -152,10 +222,12 @@ export function tickBots(dtSec: number): void {
 	while (bots.length < desired) spawnBot()
 	while (bots.length > desired) retireBot()
 
-	// 2. Tick each bot + apply 3x3 paint stamp per step.
+	// 2. Tick each bot + apply 3x3 paint stamp per step + push interpolated
+	//    position to the synced Transform for the client visual.
 	const dtMs = dtSec * 1000
-	for (const b of bots) {
-		for (const stepId of b.tick(dtMs, graph)) {
+	for (const mb of bots) {
+		const { bot, entity, netSlot } = mb
+		for (const stepId of bot.tick(dtMs, graph)) {
 			const colonIdx = stepId.indexOf(':')
 			if (colonIdx < 0) continue
 			const prefix = stepId.slice(0, colonIdx + 1)
@@ -165,10 +237,21 @@ export function tickBots(dtSec: number): void {
 			for (let dc = -1; dc <= 1; dc++) {
 				for (let dr = -1; dr <= 1; dr++) {
 					const nid = `${prefix}${col + dc},${row + dr}`
-					if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team)
+					if (graph.nodes.has(nid)) deps.applyPaint(nid, bot.team)
 				}
 			}
 		}
+
+		// Push interpolated world position for the client visual. The bot's
+		// visualPosition lerps currentCell -> path[0] using the step
+		// accumulator, giving continuous motion for the client to smooth.
+		const pos = bot.visualPosition(graph)
+		if (pos) {
+			const t = Transform.getMutableOrNull(entity)
+			if (t) t.position = Vector3.create(pos[0], pos[1], pos[2])
+		}
+		// Retry sync in case profile wasn't ready at spawn.
+		trySyncBot(entity, netSlot)
 	}
 }
 
@@ -181,19 +264,4 @@ export function botCount(): number {
 }
 
 
-// MARK: getBotPositions
 
-/**
- * Snapshot of every bot's interpolated world position + id + team. Used
- * by Phase 3 client visual. Empty array when no bots.
- */
-export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number }> {
-	if (!graph) return []
-	const out: Array<{ id: number; team: number; x: number; y: number; z: number }> = []
-	for (const b of bots) {
-		const pos = b.visualPosition(graph)
-		if (!pos) continue
-		out.push({ id: b.botId, team: b.team, x: pos[0], y: pos[1], z: pos[2] })
-	}
-	return out
-}
