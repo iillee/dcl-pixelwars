@@ -207,7 +207,12 @@ function rampGeometry(CELL: number, STEP: number) {
 	const inclineEnd   = CELL - flatLen
 	const inclineLen   = inclineEnd - inclineStart
 	const slopeLen     = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
-	const nIncline     = Math.round(slopeLen / cellSize)
+	// Cap incline row count so total rows (nFlat + nIncline + nFlat) fits within
+	// SIZE. Otherwise the top landing row's cellId row-index >= SIZE, which
+	// cellIdToKey() rejects — the mesh spawns but never receives paint.
+	const nInclineIdeal = Math.round(slopeLen / cellSize)
+	const nInclineMax   = SIZE - 2 * nFlat
+	const nIncline      = Math.min(nInclineIdeal, nInclineMax)
 	const slopeCellSize = slopeLen / nIncline
 	const cosA         = inclineLen / slopeLen
 	const sinA         = STEP / slopeLen

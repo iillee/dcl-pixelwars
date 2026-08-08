@@ -81,7 +81,7 @@ export function flushPendingJoins(): void {
 // MARK: sendDiscord
 
 async function sendDiscord(name: string, address: string): Promise<void> {
-	const content = `**${name}** joined Labyrinthia (\`${shortAddress(address)}\`)`
+	const content = `**${name}** joined PixelWars (\`${shortAddress(address)}\`)`
 	try {
 		await fetch(webhookUrl, {
 			method:  'POST',
