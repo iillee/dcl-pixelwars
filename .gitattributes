@@ -1,0 +1,18 @@
+# Normalize all text files to LF in the repo, regardless of OS.
+# Git will still check them out with native line endings if core.autocrlf is set.
+* text=auto eol=lf
+
+# Binary files — never touch line endings.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.glb    binary
+*.gltf   binary
+*.wav    binary
+*.mp3    binary
+*.ogg    binary
+*.mp4    binary
+*.zip    binary
+*.crdt   binary
