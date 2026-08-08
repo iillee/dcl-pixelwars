@@ -29,8 +29,8 @@ import {
   Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
   GRID_W, GRID_H,
   generateWithRetry, getPlacedTilesInOrder, gridSize,
-} from 'src/client/maze/generator'
-import { TILES } from 'src/client/maze/tiles'
+} from 'src/shared/maze/generator'
+import { TILES } from 'src/shared/maze/tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from 'src/client/paint'
 import { spawnTeleportOrbsForMaze } from 'src/client/teleportOrbs'
 

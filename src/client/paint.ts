@@ -6,6 +6,16 @@ import { engine, Transform, MeshRenderer, Material, Entity, NetworkEntity } from
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 
 import { PaintCell, PaletteEntry, PaintCoverage } from 'src/shared/components'
+import {
+	HI,
+	LO,
+	MASKS,
+	Mask,
+	SIZE,
+	cellId as sharedCellId,
+	rotateMask as sharedRotateMask,
+} from 'src/shared/maze/graph'
+import { TileType } from 'src/shared/maze/tiles'
 import { cellIdToKey, cellKeyFromNetworkId, cellKeyToCellId } from 'src/shared/paintGrid'
 import {
 	TEAM_COLORS,
@@ -18,10 +28,13 @@ import {
 	MAZE_ORIGIN_OFFSET_METERS,
 	MAZE_TILE_GLTF_SCALE,
 	PAINT_BRUSH_SIZE_CELLS,
-	PAINT_CELLS_PER_TILE_AXIS,
 } from 'src/shared/settings'
 import { Team } from 'src/shared/team'
 import { eventBus, ClientEvents } from 'src/shared/utils/eventBus'
+
+// Re-export shared symbols so existing paint consumers don't need to
+// change their import paths.
+export { MASKS, type Mask }
 
 import { playClaimSfx } from 'src/client/audio'
 
@@ -102,92 +115,16 @@ function syncCellsFromCrdt(): void {
 	}
 }
 
-// MARK: Masks
-// One char per paint cell. Canonical (unrotated) orientation.
-//   '.' = wall / void          (no cell entity spawned)
-//   'F' = flat floor cell      (Y = tile base + FLAT_OFFSET)
-//   '0'..'9' = ramp cell       (Y = tile base + (digit / 9) * STEP)
+// MARK: mask & tile-topology imports
 //
-// Convention (subject to visual verification):
-//   Row 0    = south edge (-Z)
-//   Row last = north edge (+Z)
-//   Col 0    = west  edge (-X)
-//   Col last = east  edge (+X)
-export type Mask = string[]
+// Masks, SIZE/LO/HI, cellId, and rotateMask now live in shared/maze/graph
+// (single source of truth used by paint spawning AND bot pathfinding).
+// Only paint-specific derivations — mesh spawn helpers, ramp geometry
+// with cosA/sinA needed by tile transforms — remain here.
 
 // GLB floor is 0.25 local (0.5m world) above the tile origin. Sit paint cells
 // 0.26 local (0.52m world) above origin → 0.02m world above the walkable surface.
 export const FLAT_OFFSET = 0.275 * MAZE_TILE_GLTF_SCALE // clears floor + tilted-cell edge sag
-
-// Placeholder masks — designer is re-exporting. Cross is going first so we'll
-// author its real mask against the new GLB once it lands. Everything else stays
-// empty (no paint cells spawned) until their GLBs are updated too.
-//
-// Helpers to build masks compactly.
-const repeat = (ch: string, n: number) => ch.repeat(n)
-// Plus-sign row: `pad` void + `arm` floor + `pad` void, where 2*pad + arm = size.
-const plusRow = (size: number, arm: number, mid: string, edge: string = '.') => {
-  const pad = (size - arm) / 2
-  return repeat(edge, pad) + repeat(mid, arm) + repeat(edge, pad)
-}
-
-// All tile masks are 32x32 with a 20-cell-wide corridor (middle band cols/rows
-// 6–25) and 6-cell voids at the walls. Canonical (unrotated) orientations per
-// TILES in src/index.ts. Row 0 = south, col 0 = west (subject to visual
-// verification).
-// Cell resolution from settings.PAINT_CELLS_PER_TILE_AXIS.
-// Mask constants are ratios of SIZE so corridor shapes stay the same.
-const SIZE = PAINT_CELLS_PER_TILE_AXIS
-const ARM = SIZE * 20 / 32      // corridor width in cells
-const LO = (SIZE - ARM) / 2
-const HI = (SIZE + ARM) / 2
-const END_CLOSED_VOID = SIZE * 6 / 32  // rows of void on the closed side of `end`
-const inCorridor = (i: number) => i >= LO && i < HI
-
-// Build a mask row-by-row from a predicate.
-const buildMask = (cellChar: (row: number, col: number) => string): Mask => {
-  const rows: string[] = []
-  for (let r = 0; r < SIZE; r++) {
-    let s = ''
-    for (let c = 0; c < SIZE; c++) s += cellChar(r, c)
-    rows.push(s)
-  }
-  return rows
-}
-
-// Cross: opens N, E, S, W. Walkable = corridor rows OR corridor cols.
-const CROSS_MASK: Mask = buildMask((r, c) =>
-  (inCorridor(r) || inCorridor(c)) ? 'F' : '.'
-)
-
-// Straight: opens N, S. Corridor is the middle 20 columns, full length.
-const STRAIGHT_MASK: Mask = buildMask((r, c) => inCorridor(c) ? 'F' : '.')
-
-// End: opens N only. 16-cell-long chamber flush against the open (N/+Z) edge.
-// Row convention (confirmed via end tile): row 0 = south, row 31 = north.
-const END_MASK: Mask = buildMask((r, c) => (inCorridor(c) && r >= END_CLOSED_VOID) ? 'F' : '.')
-
-// Turn: opens N and E. L-shape — N-going corridor (middle cols, all rows)
-// clipped to rows LO..SIZE (removes the south leg), plus E-going corridor
-// (middle rows, cols LO..SIZE) removes the west leg. Equivalent: walkable if
-// (in corridor cols AND row >= LO) OR (in corridor rows AND col >= LO).
-const TURN_MASK: Mask = buildMask((r, c) => {
-  const nLeg = inCorridor(c) && r >= LO   // N opening → arm extends south from N edge, stops at center
-  const eLeg = inCorridor(r) && c >= LO   // E opening → arm extends west from E edge, stops at center
-  return (nLeg || eLeg) ? 'F' : '.'
-})
-
-// Fork: opens N, S, W. T-shape — full N-S corridor + W arm.
-const FORK_MASK: Mask = buildMask((r, c) => {
-  const nsLeg = inCorridor(c)                // full-length N-S corridor
-  const wLeg  = inCorridor(r) && c < HI     // W arm from west edge to center
-  return (nsLeg || wLeg) ? 'F' : '.'
-})
-
-// Ramp: opens N, S. Same 2D footprint as straight; Y is computed at spawn time
-// from the cell's canonical-row position along the slope axis (rampHighDir=N),
-// so rotation via the tile's `r` naturally rotates the slope direction too.
-const RAMP_MASK: Mask = STRAIGHT_MASK
 
 /**
  * Flat landing length at each end of a ramp, in world meters.
@@ -240,47 +177,15 @@ function rampCellIdxFromCanonical(lx: number, lz: number, geom: ReturnType<typeo
 	return { col, row }
 }
 
-// Enable masks one at a time as we visually verify each tile type.
-export const MASKS: Partial<Record<string, Mask>> = {
-  cross: CROSS_MASK,
-  end: END_MASK,
-  straight: STRAIGHT_MASK,
-  turn: TURN_MASK,
-  fork: FORK_MASK,
-  ramp: RAMP_MASK,
-}
-
-// Rotate a mask 90°×r CW (to match tile rotation). If tile at rotation r
-// renders with Y-rotation of r*90° CW, the mask must be rotated the same
-// amount so that mask[row][col] indexes the same world point regardless of r.
-export function rotateMask(m: Mask, r: number): Mask {
-  r = ((r % 4) + 4) % 4
-  let out = m
-  for (let i = 0; i < r; i++) out = rot90cw(out)
-  return out
-}
-function rot90cw(m: Mask): Mask {
-  // 90° CW rotation: new[r][c] = old[c][N-1-r]. Matches the tile GLB rotation
-  // (Quaternion.fromEulerDegrees(0, r*90, 0) rotates local +Z → world +X, i.e.
-  // N → E for r=1, which is CW viewed from above).
-  const h = m.length, w = m[0].length
-  const rows: string[] = []
-  for (let r = 0; r < h; r++) {
-    let s = ''
-    for (let c = 0; c < w; c++) s += m[c][h - 1 - r]
-    rows.push(s)
-  }
-  return rows
-}
-
 // MARK: Cell store
 // Mesh entities for walkable cells. Paint color comes only from PaintCell CRDT.
 const cellEntity = new Map<string, Entity>()
 const paintByTile = new Map<Entity, { entities: Entity[]; ids: string[] }>()
 
-export function cellId(tx: number, tz: number, ty: number, col: number, row: number): string {
-	return `${tx},${tz},${ty}:${col},${row}`
-}
+// Re-export shared cellId + rotateMask under the original paint.ts names
+// so existing callers keep working during migration.
+export const cellId = sharedCellId
+export const rotateMask = sharedRotateMask
 
 // Matte PBR material. Roughness=1 + metallic=0 + no specular kills the shine
 // so paint reads as flat pigment, not plastic. Shared by palette index once
@@ -418,7 +323,7 @@ export function spawnCellsForTile(
   CELL: number, STEP: number,
   tileEntity: Entity
 ) {
-  const raw = MASKS[tileType]
+  const raw = MASKS[tileType as TileType]
   if (!raw) return // designer hasn't authored this tile's mask yet
   // Defer the actual spawn so cells appear after the GLB's grow-in tween.
   deferredSpawns.push({
@@ -434,7 +339,7 @@ function spawnCellsForTileImmediate(
   CELL: number, STEP: number,
   tileEntity: Entity
 ) {
-  const raw = MASKS[tileType]
+  const raw = MASKS[tileType as TileType]
   if (!raw) return
   const mask = rotateMask(raw, r)
   const h = mask.length, w = mask[0].length
@@ -593,7 +498,7 @@ export function worldToCellId(
   const tile = lookupTile(tx, tz, py)
   if (!tile) return null
 
-  const raw = MASKS[tile.type]
+  const raw = MASKS[tile.type as TileType]
   if (!raw) return null
 
   const tileWorldX = tx * CELL + MAZE_ORIGIN_OFFSET_METERS

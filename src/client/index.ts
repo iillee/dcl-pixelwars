@@ -32,7 +32,7 @@ import { SEED_NETWORK_ID } from 'src/shared/paintGrid'
 
 import { initAudio } from 'src/client/audio'
 import { initClientHandler } from 'src/client/clientHandler'
-import { CELL, STEP, lookupTile } from 'src/client/maze/generator'
+import { CELL, STEP, lookupTile } from 'src/shared/maze/generator'
 import { initMazeNet, rebuildMaze } from 'src/client/maze/rebuild'
 import { initPaintNet, initPaintingSystem } from 'src/client/paint'
 import { initPlayerNet } from 'src/client/player'

@@ -21,8 +21,8 @@ import {
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 
-import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H } from 'src/client/maze/generator'
-import { rand } from 'src/client/maze/rng'
+import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H } from 'src/shared/maze/generator'
+import { rand } from 'src/shared/maze/rng'
 
 // ─── Tuning ─────────────────────────────────────────────────────────
 const ORB_TRIGGER_RADIUS = 1.2   // meters
