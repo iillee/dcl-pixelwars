@@ -15,6 +15,7 @@
   "main": "bin/index.js",
   "tags": [],
   "scene": {
+    "base": "0,0",
     "parcels": [
       "0,10",
       "1,10",
@@ -137,8 +138,7 @@
       "8,0",
       "9,0",
       "10,0"
-    ],
-    "base": "0,0"
+    ]
   },
   "spawnPoints": [
     {
@@ -187,5 +187,6 @@
   ],
   "worldConfiguration": {
     "name": "pixelwars.dcl.eth"
-  }
+  },
+  "landscapeTerrain": true
 }
