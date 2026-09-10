@@ -10,7 +10,44 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Live:** [pixelwars.dcl.eth](https://play.decentraland.org/?realm=pixelwars.dcl.eth)
 
-The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`assets/docs/PIXELWARS-DESIGN.md`](assets/docs/PIXELWARS-DESIGN.md) for the game design doc.
+The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`design/gdd.md`](design/gdd.md) for the full game design doc (or [`design/gdd-summary.md`](design/gdd-summary.md) for a one-page overview).
+
+---
+
+## Status: V0 shipped · V1 in planning
+
+### V0 — vertical slice (live now)
+
+A complete, playable tile-coverage round loop deployed to `pixelwars.dcl.eth`:
+
+- **Procedural maze regen every round** — new seed on each 5-minute UTC boundary; every player sees the same maze at the same instant.
+- **Paint pipeline** — a 3×3 tile footprint flips to your team color as you walk; enemy paint flips back when you cross it.
+- **Authoritative headless server** — owns paint state, round clock, roster; clients stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
+- **Auto team assignment + drop-in / drop-out** — late arrivals get the current maze snapshot and join mid-round.
+- **Ghost bot** — spawns to fill the opposite team during quiet hours so solo play works; retires when a second human joins.
+- **Synced leaderboard + end-of-round banner** — round settles on the UTC mark, banner shows winner + final %, the maze regenerates.
+- **Mobile-first HUD** — three thumb-safe pills (mute, coverage %, round countdown), no aim required for any core verb.
+
+### V1 — planned (4-week scope)
+
+**Pillar: dual bases + light items pass.** Foundation for a V2 alt-weapon-unlock system, no new networking risk.
+
+| Week | Deliverable |
+|---|---|
+| **1** | Generator places two seed tiles at opposite ends of the maze (red base / blue base). Team spawn switches to own base on join. Base tiles visually distinct. |
+| **2** | Bases fully functional as spawn + team identity anchor. **1v1 playtest** — does directional play (front line / home territory) emerge? |
+| **3** | Items pass — **speed boost** + **paint bomb** shipped. Server-timed spawns, round-reset cleanup, mobile proximity pickup. |
+| **4** | 5v5 mobile playtest on Pixel 9a, balancing pass, 3–4 gameplay clips captured, public repo + live in World. |
+
+**Two return hooks** land alongside the pillar:
+1. **Scheduled weekly peak-match slot** (e.g. Friday 20:00 UTC) — announced via DCL Events + Discord, surfaced as an in-scene countdown pill.
+2. **"Recently seen" HUD list** — on entry, see the last ~5 named players and when they were last around.
+
+**Explicitly deferred to V2:** paint weapons/combat (needs higher server tick), hide-in-paint (gated on weapons), 1 m paint grid (WebGL perf).
+
+**Top risk:** dual bases might encourage base-camping and kill the "every step scores" pillar. **Fallback (~4h revert):** demote bases to pure spawn points and reposition teleport orbs to force movement.
+
+See [`design/gdd.md`](design/gdd.md) for the full plan, hypotheses, and cut-list rationale.
 
 ---
 
