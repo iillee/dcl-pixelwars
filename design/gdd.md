@@ -198,7 +198,7 @@ Pixelwars is set in a procedurally-generated multi-level labyrinth that redraws 
 | Week | What is playable / done |
 |---|---|
 | **1 — Prototype definition** | Generator places two seed tiles at opposite ends of the maze (red base / blue base). Team spawn switches to own base on join. Base tiles visually distinct (color-tinted floor decal, base marker). |
-| **2 — Core interaction + first-group test** | Bases fully functional as spawn + team identity anchor. **Mandatory Week 2 playtest** at 2 humans (1v1) — measure: does directional play (front line / home territory) emerge, or is it still free-for-all? |
+| **2 — Core interaction + first-group test** | Bases fully functional as spawn + team identity anchor. **Mandatory Week 2 playtest** at 2 humans (1v1) — measure: does directional play (front line / home territory) emerge, or is it still free-for-all? **Block remodeling + skin experimentation pass** — iterate on tile-block geometry and trial 2–3 candidate skins for the 6-skin rotation (§9 post-launch variety). Visual polish is a marketing dependency: Discover thumbnails, trailer clips, and social shares all rely on the maze reading as beautiful at a glance. Capture reference stills at the end of the week. |
 | **3 — Core systems refinement** | Items pass — **speed boost** and **paint bomb** shipped. Server-side spawn timing, round-reset cleanup, mobile proximity pickup (no aim required). |
 | **4 — Playable prototype, final design direction** | Mobile playtest on a named device at 5v5. Balancing pass on base spacing and item spawn rates. Capture 3–4 gameplay clips for Discover card / trailer / social. Public repo + live in World. |
 
