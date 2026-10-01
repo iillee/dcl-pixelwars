@@ -1,10 +1,12 @@
 # Pixelwars — Design Document
 
-**Status:** Phases 1–5a shipped. Live at `pixelwars.dcl.eth` (previously `labyrinthia.dcl.eth` — world moved with the rebrand). Server-authoritative multiplayer + server-side ghost opponent (Phase 5a) with enemy-hunter targeting, own-paint avoidance, organic zig-zag pathfinding, and clean spawn/despawn on human count transitions (see `BOTS_PLAN.md`). `bots` merged to `main` Aug 2026.
+**Status:** **V0 shipped** (Phases 1–5a). Live at `pixelwars.dcl.eth` (previously `labyrinthia.dcl.eth` — world moved with the rebrand). Server-authoritative multiplayer + server-side ghost opponent (Phase 5a) with enemy-hunter targeting, own-paint avoidance, organic zig-zag pathfinding, and clean spawn/despawn on human count transitions (historical plan: [`archive/BOTS_PLAN.md`](archive/BOTS_PLAN.md)).
+
+**Product roadmap source of truth:** [`../../design/gdd.md`](../../design/gdd.md) — **V1 = Strategic Territory & Player Competition**, not combat. This file keeps V0 technical decisions and architecture; §2 / §13 below are aligned to that GDD.
 
 **Latest refactor (Aug 2026):** event-driven modular architecture (sky-chaser style). `client.ts` went from 1,191 → 121 lines split across `client/`, `maze/`, `shared/` module trees connected by a typed event bus. See [`../../README.md`](../../README.md) and §12 below.
 
-**Session handoff:** Read §1–2 for context, jump to §11 (Phase 4 recap) and §12 (architecture) for the current state, then §13 (Next Steps) for what's live.
+**Session handoff:** Read §1–2 for context, jump to §11 (Phase 4 recap) and §12 (architecture) for the current state, then §13 (Next Steps) for V1 technical follow-through.
 
 ---
 
@@ -24,13 +26,15 @@
 
 | Phase | Feature | Status |
 |---|---|---|
-| **1** | Grid-based tile-flip mechanic: player walks over walkable cells, cells adopt their team color. | ✅ Shipped |
-| **2** | Round timer, coverage % counter per team, win banner, reset. | ✅ Shipped |
-| **3** | Two teams. Team assignment (button or auto). Player color identifier. | ✅ Shipped |
-| **4** | Multiplayer sync of paint state (authoritative server). Late joiners get snapshot. | ✅ Shipped |
-| **5** | Combat: ink projectile weapon that paints a small radius on impact and damages enemies. | ⏳ Planned |
-| **6** | Damage in enemy paint (Splatoon mechanic). Respawn at team base. | ⏳ Planned |
-| **7** | Squid-swim mobility on own team's paint (fast travel through own color). Special weapons. | ⏳ Planned |
+| **1** | Grid-based tile-flip mechanic: player walks over walkable cells, cells adopt their team color. | ✅ Shipped (V0) |
+| **2** | Round timer, coverage % counter per team, win banner, reset. | ✅ Shipped (V0) |
+| **3** | Two teams. Team assignment (button or auto). Player color identifier. | ✅ Shipped (V0) |
+| **4** | Multiplayer sync of paint state (authoritative server). Late joiners get snapshot. | ✅ Shipped (V0) |
+| **5a** | Ghost bot solo opponent (server-side). | ✅ Shipped (V0) |
+| **V1** | **Strategic Territory & Player Competition** — denser level scale, team name tags + balancing, friendly-paint movement, contribution tracking, Paint Bomb + one paint item, block-skin experiments, optional corruption/wildfire solo. See [`design/gdd.md`](../../design/gdd.md) §9. | ⏳ Planned |
+| **V2+** | Combat / projectile weapons, hide-in-paint, damage-in-enemy-paint, 1 m grid, appointment retention UI, mechanical progression. | 🔮 Deferred (future exploration) |
+
+*Historical note: an older arc listed combat as Phase 5 and squid-swim as Phase 7. That combat-next path is superseded. Friendly-paint movement in V1 is a territory traversal benefit, not the full Splatoon squid-swim combat mobility package.*
 
 ---
 
@@ -79,7 +83,7 @@ Two approaches prototyped on a scratch `drip` branch (kept locally for reference
 - Paint cells: ~150 avg walkable per tile × 25 tiles ≈ **~3,800**
 - Teleport orbs: 2 bodies + 2 wireframes + 2 lights + 2 sound emitters = **8**
 - Overhead (UI, audio, players): ~50
-- **Measured use: ~3,900 (~16% budget)** — huge headroom for combat/items (Phases 5+).
+- **Measured use: ~3,900 (~16% budget)** — headroom for V1 items / denser paint layouts; combat remains deferred.
 
 **Note:** we experimented with 1m paint cells (`SIZE = 32`, ~15k entities) for higher-res paint but the WebGL client couldn't sustain that many individual PBR-material planes; the paint pipeline lagged 3–4s behind player movement. Reverted to 2m cells.
 
@@ -138,7 +142,7 @@ Coverage counters are updated by the server on every 5 Hz `paintDelta` broadcast
 
 ## 7. Multiplayer (Phase 4 — shipped)
 
-**Architecture:** authoritative headless server (hammurabi-server) owns paint state and round clock. See [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) for the design rationale and [`src/shared/messages.ts`](../../src/shared/messages.ts) for the wire schema.
+**Architecture:** authoritative headless server (hammurabi-server) owns paint state and round clock. See [`archive/PHASE_4_PLAN.md`](archive/PHASE_4_PLAN.md) for the historical design rationale and [`src/shared/messages.ts`](../../src/shared/messages.ts) for the wire schema.
 
 **Message set:**
 - Client → Server: `joinRoster`, `paintTick` (10 Hz), `requestSnapshot`, `updateName` (once on join), `requestLeaderboard` (on popup open)
@@ -150,7 +154,7 @@ Coverage counters are updated by the server on every 5 Hz `paintDelta` broadcast
 
 Any new synced component **must** be registered on both server and client via `syncEntity(entity, [Component.componentId], <networkId>)` with matching IDs. Without the server-side call, mutations never leave the server process — root cause of the leaderboard-popup-was-empty bug fixed Aug 2026.
 
-**Saturation discipline (see §2 of PHASE_4_PLAN):**
+**Saturation discipline (see §2 of [`archive/PHASE_4_PLAN.md`](archive/PHASE_4_PLAN.md)):**
 - Server broadcast: 5 Hz max
 - Client position ingest: 10 Hz max
 - Delta batch cap: 200 cell changes per broadcast (dropped in the ingest layer if a client exceeds ~100 ids/tick)
@@ -336,21 +340,23 @@ Toggled by a star button in the timer panel (mirror position to the mute button)
 
 ## 13. Next Steps
 
-Recommended path for the next session:
+Product scope for the next four weeks is owned by [`design/gdd.md`](../../design/gdd.md) §9. Technical follow-through (order mirrors V1 weeks):
 
-1. **Playtest with multiple accounts.** Now that authoritative sync is live, get 3+ concurrent players to catch remaining desync / edge-case bugs. Watch for: snapshot arriving before local tiles finish spawning; roster.indexOf race on simultaneous joins; paintDelta bursts saturating the WS on a full lobby.
-2. **Wire `client/waitForLoad.ts`.** The gate is available but not called; useful once we add a loading screen or anything that hard-requires PlayerEntity to have a Transform.
-3. **Phase 5 — combat.** Ink projectile weapon. Painting on impact (small radius). Damage to enemies. Design decisions ahead: recharge model? ammo? weapon variants? Splatoon's "roller/blaster/charger" archetypes are worth studying.
-4. **Phase 6 — respawn + damage-in-enemy-paint.** Requires a per-player HP component (synced) and a "team base" concept (spawn point per team). Once shipped, the game becomes properly zone-controlled.
-5. **Phase 7 — squid-swim mobility.** High complexity — requires per-frame player-to-paint proximity checks and locomotion modification. Only after Phases 5–6 are solid.
+1. **Level density / scale.** Tune generator constants (`GRID_*`, `MAX_Y`, seed count, growth weights) so fewer players still meet. Re-test paint entity budget after tighter layouts.
+2. **Team readability.** SDK name-tag coloring for red/blue; improve roster balancing. Fix known mobile/sloped-tile paint visibility bugs.
+3. **Friendly-paint movement.** Server-authoritative (or validated) speed modifier while standing on own-team cells — start mild; watch snowball win rates.
+4. **Contribution tracking.** Per-player paint tallies in round results / end banner (beyond all-time leaderboard).
+5. **Items.** Paint Bomb + one paint-focused power-up — server-timed spawns, round cleanup, proximity pickup (mobile-safe).
+6. **Solo experiment.** Optional corruption/wildfire prototype; compare retention/fun vs existing ghost bot before replacing it.
+7. **Visual pass.** Remodel/skin modular blocks; verify paint readability on new geometry; ship successful variants only.
 
 **Also worth doing when convenient:**
+- Multi-account playtests for remaining desync / snapshot races.
+- Wire `client/waitForLoad.ts` when a loading screen is needed.
 - Investigate the composite / production-build issue properly (see §10).
-- Consider a subtler foot color indicator (retired in Phase 3 for feeling intrusive).
-- Split `paint.ts` (636 lines) into `paint/masks.ts`, `paint/spawn.ts`, `paint/system.ts` if it grows further.
-- Add a `client/hud/` subfolder if `ui.tsx` grows past ~300 lines.
+- Split `paint.ts` further if items + contribution tracking grow it.
 
-**Do NOT** attempt Phases 6–7 until Phase 5 combat is solid.
+**Do NOT** start combat / projectile weapons, hide-in-paint, or combat bot AI during V1 — those remain V2+ future exploration.
 
 ---
 

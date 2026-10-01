@@ -1,6 +1,6 @@
 # Pixelwars — GDD Summary
 
-**Studio:** ile · **Target:** World `pixelwars.dcl.eth` · **Status:** V0 vertical slice live and tested
+**Studio:** ile · **Target:** World `pixelwars.dcl.eth` · **Status:** **V0 live** · **V1 planned** (Strategic Territory & Player Competition)
 
 ## The Pitch
 Two teams spread paint across the floor of a shifting, multi-level maze. Whoever covers more ground when the 5-minute timer hits wins — then the maze regenerates from a new seed and the next round starts. Think **Splatoon Turf War** meets a **map that refuses to sit still**, tuned for Decentraland's walk-in, mobile-first, 5-minute-session reality.
@@ -9,52 +9,51 @@ Two teams spread paint across the floor of a shifting, multi-level maze. Whoever
 1. **Walk** → your footsteps paint a 3×3 tile patch in your color.
 2. **Contest** → walking over enemy paint flips it back to yours.
 3. **Reposition** → teleport orbs (linked pairs) drop you into fresh territory.
-4. **Score** → round ends, banner shows winner + final coverage %.
+4. **Score** → round ends, banner shows winner + final coverage % (V1: + personal contribution).
 5. **Regenerate** → new maze seed, new layout, next round.
 
-Every step is instant visible progress on the coverage pill. No aim, no combat in V1 — pure territorial pressure.
+Every step is instant visible progress on the coverage pill. No aim, no combat in V1 — pure territorial pressure. Walk-to-paint core stays intact.
 
 ## Three Pillars
 - **Coverage is king** — painting is the whole game.
 - **Fresh maze every round** — no memorization possible.
 - **Any minute is a whole game** — drop-in/out never breaks the loop.
 
+**V1 design test:** every feature strengthens *where, when, and how* players paint territory.
+
 ## Why Players Come Back
-Progression is **social, not mechanical** — no XP, no unlocks. You become a recognized name in the community. Two return hooks:
-1. **Weekly peak-match slot** (e.g. Friday 20:00 UTC) announced via DCL Events + Discord, surfaced in-scene as a countdown pill.
-2. **"Recently seen" HUD list** — on entry you see the last ~5 named players and when they were last around, so you learn roughly when to log in to catch specific opponents.
+Progression is **social/reputational, not mechanical** — no XP unlocks that grant power. V1 leans on denser competition, clearer teams, and personal contribution feedback. Scheduled peak-match UI and “recently seen” lists are **future ideas**, not V1 commitments.
 
 ## Social Design
-- **Auto team assignment** on arrival; team color is visible on every tile.
-- **Ghost bot** fills the opposite team during quiet hours so solo play works.
-- **Social threshold:** 2 humans (1v1). **Ideal:** 4–6 (2v3–3v3). **Tested max:** 10 (5v5).
-- **Bystander test passes:** two colors visibly spreading and shrinking reads instantly.
+- **Auto team assignment** on arrival; team color visible on every tile.
+- **Ghost bot** fills the opposite team during quiet hours (V0). V1 prototypes corruption/wildfire solo and compares.
+- **Social threshold:** 2 humans. **Ideal:** 4–6. **Tested max:** 10 (5v5).
+- **V1:** SDK name tags for red/blue ID + better team balancing.
 
 ## Mobile-First
-All core verbs work on touch (walk = paint, walk = contest, walk into orb = reposition, scoring is passive). HUD is three thumb-safe pills (mute, coverage %, timer). Perf target: 60fps desktop / 30fps on Pixel 9a at 5v5.
+All core verbs work on touch (walk = paint; proximity = items/orbs). HUD stays thumb-safe. Perf target: 60fps desktop / 30fps on Pixel 9a at 5v5. Week 1 includes known mobile/sloped-tile paint visibility fixes.
 
 ## Look & World
-Procedurally-generated multi-level labyrinth. Matte red (`#FF7577`) and blue (`#6A99FC`) paint on grey slabs, readable from anywhere thanks to open sightlines and stacked ramps. Zero lore by design.
+Procedurally-generated multi-level labyrinth. Matte red (`#FF7577`) and blue (`#6A99FC`) paint. V1 experiments with remodeling/skinning the six modular blocks — ship a visual pass from successful experiments, not six guaranteed finished themes.
 
 ## Audience
 Fans of short competitive team games (Splatoon, Fall Guys, Rocket League), arriving alone or with a friend from Discover or Events. **Not for:** long-progression, lore-heavy, or high-precision-shooter players.
 
 ## V1 Scope (4 Weeks)
-**Chosen pillar: dual bases + light items pass** (foundation for V2's alt-weapon unlocks).
-- **W1:** Two seed tiles at opposite maze ends; team spawns at own base; visual base markers.
-- **W2:** Bases as spawn + identity anchors. Mandatory 1v1 playtest — does directional play emerge?
-- **W3:** Items ship — **speed boost** + **paint bomb**, server-timed, mobile proximity pickup.
-- **W4:** 5v5 mobile playtest, balancing pass, capture 3–4 gameplay clips, public repo, live.
 
-**Top risk:** dual bases might encourage base-camping and kill the "every step scores" pillar. **Fallback:** demote bases to pure spawn points and reposition teleport orbs to force movement (~4h revert).
+**North star: Strategic Territory & Player Competition** (supersedes dual bases + light items).
 
-**Explicitly deferred to V2:** paint weapons/combat (needs higher server tick), hide-in-paint (gated on weapons landing), 1m paint grid (WebGL perf).
+| Week | Focus |
+|---|---|
+| **1** | Level density/scale · team balancing · SDK name tags · mobile/slope paint fixes · start block remodel/skin experiments |
+| **2** | Friendly-paint movement speed · individual contribution + end-round breakdown · continue block skins vs paint readability |
+| **3** | Paint Bomb + one paint-focused power-up · corruption/wildfire solo prototype vs ghost bot |
+| **4** | MP + mobile playtests · balance · final visual pass · polish · deploy stable V1 (experiments only if validated) |
 
-## Post-Launch Freshness (Cheap)
-- Rotate 6 tile-block skins seasonally.
-- Shuffle item spawn locations daily.
-- Procedural regen keeps variance high even if no updates ship.
+**Top risks:** density still feels sparse; friendly-paint speed snowballs. **Fallback:** loosen scale, tone speed, keep Paint Bomb as primary swing, keep ghost bot if PvE solo underperforms.
+
+**Explicitly deferred:** combat/weapons, hide-in-paint, 1 m grid as a promise, dual-bases-as-pillar, recently-seen / weekly peak UI, clans, persistent mechanical progression, large item catalogues.
 
 ---
 
-**Bottom line:** A shipped V0 foundation (generator, paint pipeline, authoritative server, ghost bot, synced leaderboard) with a focused 4-week V1 that adds team identity via bases and two items — while deliberately deferring the risky weapons/combat pillar to V2.
+**Bottom line:** Shipped V0 foundation (generator, paint, authoritative server, ghost bot, leaderboard) plus a focused V1 that makes territory strategically meaningful, denser, and more readable — without replacing the simple walk-to-paint core.
