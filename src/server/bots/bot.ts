@@ -57,7 +57,7 @@ export const randomTarget: PickTarget = (self, graph) => {
 }
 
 // ─── smartTarget ──────────────────────────────────────────────────────────────────
-// Behavioral mix from BOTS_PLAN.md §5.4:
+// Behavioral mix from assets/docs/archive/BOTS_PLAN.md §5.4:
 //   60% neutral bias  (paint an unpainted cell)
 //   30% enemy bias    (overpaint an enemy-owned cell — territorial pressure)
 //   10% center bias   (stay visible near the middle tile)

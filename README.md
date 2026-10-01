@@ -30,24 +30,20 @@ A complete, playable tile-coverage round loop deployed to `pixelwars.dcl.eth`:
 
 ### V1 — planned (4-week scope)
 
-**Pillar: dual bases + light items pass.** Foundation for a V2 alt-weapon-unlock system, no new networking risk.
+**North star: Strategic Territory & Player Competition.** Make owned territory useful mid-round, raise player density/interaction, improve team/solo readability, and strengthen maze visual identity — without replacing the walk-to-paint core. *(Supersedes the older “dual bases + light items” plan.)*
 
 | Week | Deliverable |
 |---|---|
-| **1** | Generator places two seed tiles at opposite ends of the maze (red base / blue base). Team spawn switches to own base on join. Base tiles visually distinct. |
-| **2** | Bases fully functional as spawn + team identity anchor. **1v1 playtest** — does directional play (front line / home territory) emerge? |
-| **3** | Items pass — **speed boost** + **paint bomb** shipped. Server-timed spawns, round-reset cleanup, mobile proximity pickup. |
-| **4** | 5v5 mobile playtest on Pixel 9a, balancing pass, 3–4 gameplay clips captured, public repo + live in World. |
+| **1** | Level density/scale tuning · team balancing · red/blue SDK name tags · mobile/sloped-tile paint fixes · start modular block remodel/skin experiments |
+| **2** | Friendly-paint movement speed · individual contribution tracking + end-of-round breakdown · continue block skins vs paint readability |
+| **3** | Paint Bomb + one paint-focused power-up · corruption/wildfire solo prototype vs existing ghost bot |
+| **4** | MP + mobile playtests · balance · final visual pass from successful skins · polish · deploy stable V1 (experiments only if validated) |
 
-**Two return hooks** land alongside the pillar:
-1. **Scheduled weekly peak-match slot** (e.g. Friday 20:00 UTC) — announced via DCL Events + Discord, surfaced as an in-scene countdown pill.
-2. **"Recently seen" HUD list** — on entry, see the last ~5 named players and when they were last around.
+**Explicitly deferred:** paint weapons/combat, hide-in-paint, 1 m paint grid as a promise, dual-bases-as-pillar, recently-seen / weekly peak UI, clans, persistent mechanical progression, large item catalogues.
 
-**Explicitly deferred to V2:** paint weapons/combat (needs higher server tick), hide-in-paint (gated on weapons), 1 m paint grid (WebGL perf).
+**Top risks:** denser layout still feels sparse; friendly-paint speed snowballs. **Fallback:** loosen scale, tone speed bonus, keep Paint Bomb as primary swing, retain ghost bot if solo PvE underperforms.
 
-**Top risk:** dual bases might encourage base-camping and kill the "every step scores" pillar. **Fallback (~4h revert):** demote bases to pure spawn points and reposition teleport orbs to force movement.
-
-See [`design/gdd.md`](design/gdd.md) for the full plan, hypotheses, and cut-list rationale.
+See [`design/gdd.md`](design/gdd.md) for the full plan, committed vs experimental table, and cut-list rationale.
 
 ---
 
