@@ -4,13 +4,13 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Pixelwars** — two teams (Red and Blue) run around a fresh maze every round, painting the walkable surface in their color just by walking on it. Highest coverage at the round timer wins. Inspired by Splatoon's *Turf War*.
 
-**Pixelwars** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 10×10 parcel labyrinth (160m × 160m). Seed is derived from a UTC round boundary so every player sees the same maze at the same instant with zero sync overhead.
+**Pixelwars** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 5×5 tile labyrinth inside an 11×11 parcel world (176m × 176m). The round seed is shared so every player sees the same maze.
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
 **Live:** [pixelwars.dcl.eth](https://play.decentraland.org/?realm=pixelwars.dcl.eth)
 
-The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`design/gdd.md`](design/gdd.md) for the full game design doc (or [`design/gdd-summary.md`](design/gdd-summary.md) for a one-page overview).
+The scene is intended to be **downloaded, remixed, and shared**. All source assets (Blender, SketchUp) are included alongside the exported `.glb` tiles so you can swap in your own geometry and generate entirely new worlds from the same rule set. See [`design/gdd.md`](design/gdd.md) for the game design doc (or [`design/gdd-summary.md`](design/gdd-summary.md) for a one-page overview). Older plans live in [`archive/`](archive/README.md).
 
 ---
 
@@ -30,24 +30,20 @@ A complete, playable tile-coverage round loop deployed to `pixelwars.dcl.eth`:
 
 ### V1 — planned (4-week scope)
 
-**Pillar: dual bases + light items pass.** Foundation for a V2 alt-weapon-unlock system, no new networking risk.
+**Theme: Strategic Territory & Player Competition.** Revised after the 2026-09-29 playtest. The old “dual bases + light items” plan is archived.
 
 | Week | Deliverable |
 |---|---|
-| **1** | Generator places two seed tiles at opposite ends of the maze (red base / blue base). Team spawn switches to own base on join. Base tiles visually distinct. |
-| **2** | Bases fully functional as spawn + team identity anchor. **1v1 playtest** — does directional play (front line / home territory) emerge? |
-| **3** | Items pass — **speed boost** + **paint bomb** shipped. Server-timed spawns, round-reset cleanup, mobile proximity pickup. |
-| **4** | 5v5 mobile playtest on Pixel 9a, balancing pass, 3–4 gameplay clips captured, public repo + live in World. |
+| **1** | Tighter maze for more encounters. Team balance pass. Red/blue SDK name tags. Fix slope paint on mobile. Start block remodel / skin experiments. |
+| **2** | Faster movement on your own paint. Personal contribution on the end-of-round breakdown. Keep testing skins against paint readability. |
+| **3** | Paint Bomb, plus one other paint-focused power-up if a trial earns it. Prototype spreading corruption/wildfire and compare it to the ghost bot. |
+| **4** | Multiplayer and mobile playtests, balance pass, final visuals from the experiments that worked, deploy. Experiments ship only if tests support them. |
 
-**Two return hooks** land alongside the pillar:
-1. **Scheduled weekly peak-match slot** (e.g. Friday 20:00 UTC) — announced via DCL Events + Discord, surfaced as an in-scene countdown pill.
-2. **"Recently seen" HUD list** — on entry, see the last ~5 named players and when they were last around.
+**Not in V1:** combat, hide-in-paint, a promised 1 m grid, clans, dailies, recently-seen list, weekly in-scene countdown, and dual bases as the pillar.
 
-**Explicitly deferred to V2:** paint weapons/combat (needs higher server tick), hide-in-paint (gated on weapons), 1 m paint grid (WebGL perf).
+**Top risk:** a tighter maze feels cramped, or speed-on-own-paint snowballs. **Fallback:** relax the layout toward the current maze and turn the speed bonus down or off.
 
-**Top risk:** dual bases might encourage base-camping and kill the "every step scores" pillar. **Fallback (~4h revert):** demote bases to pure spawn points and reposition teleport orbs to force movement.
-
-See [`design/gdd.md`](design/gdd.md) for the full plan, hypotheses, and cut-list rationale.
+See [`design/gdd.md`](design/gdd.md) for the full plan.
 
 ---
 
@@ -86,7 +82,7 @@ Maze growth is a frontier‑based flood‑fill with vertical stacking:
 1. **Seed** — about 1 seed per 25 parcels are dropped as `end` tiles at random cells on the ground level.
 2. **Grow** — the open edges of placed tiles feed a frontier queue. Cells are consumed lowest‑Y first (so each floor fills horizontally before ramps climb).
 3. **Pick a tile** — a weighted pool favours branching/ramp tiles (`ramp ×3, cross ×2, fork ×2, turn, straight`), falling back to `end` only when nothing else fits.
-4. **Validate placement** — each candidate must pass strict connectivity checks: openings can't face off‑grid or into a wall, ramps can't collide vertically, and multi‑level ramp interactions must "handshake" correctly (see `canPlace()` in [`src/client.ts`](src/client.ts) for the full ruleset).
+4. **Validate placement** — each candidate must pass strict connectivity checks: openings can't face off‑grid or into a wall, ramps can't collide vertically, and multi‑level ramp interactions must "handshake" correctly (see `canPlace()` in [`src/maze/generator.ts`](src/maze/generator.ts)).
 5. **Validate result** — after growth, every opening on every placed tile must connect to a matching neighbour. If any dangle, discard and retry with a new seed (up to 500 attempts).
 
 Ramps are the tricky part. Because a ramp's high side lands one level up in an adjacent cell, they interact with neighbours on multiple Y levels simultaneously. The generator enforces several rules to keep stairs walkable:
@@ -101,7 +97,7 @@ Generation is deterministic given a seed: the RNG is a small mulberry32, and the
 
 ## Remix guide
 
-The maze generator lives in [`src/client.ts`](src/client.ts) (it runs on the client since it's purely visual — the server only tracks paint state). Common tweaks:
+The maze generator lives in [`src/maze/generator.ts`](src/maze/generator.ts) (pure, no engine imports). The server rebuilds the same generator for bot pathing. Common tweaks:
 
 | Want to… | Change |
 |---|---|
@@ -110,10 +106,10 @@ The maze generator lives in [`src/client.ts`](src/client.ts) (it runs on the cli
 | Bias the tile mix | `GROWTH_PRIMARY` weighted array |
 | More/fewer seed points | `SEED_COUNT` formula in `generate()` |
 | Cap tower height | `MAX_Y` |
-| Lock a specific maze | Hard‑code a seed instead of deriving from `getRoundIndex()` in `client.ts` |
+| Lock a specific maze | Hard‑code a seed instead of the UTC round index from [`src/shared/roundTiming.ts`](src/shared/roundTiming.ts) |
 | Swap the geometry | Replace files in `assets/models/` (keep the same names & pivot at SW corner) |
 
-Tile pivots are at the south‑west corner with geometry extending `+X` / `+Z`. If you author replacements with a centred pivot you'll need to adjust `ROT_OFFSET` in `src/client.ts`.
+Tile pivots are at the south‑west corner with geometry extending `+X` / `+Z`. If you author replacements with a centred pivot you'll need to adjust `ROT_OFFSET` in `src/maze/generator.ts`.
 
 ---
 
@@ -142,6 +138,8 @@ To deploy to your own World, change `worldConfiguration.name` to a DCL NAME or E
 
 ```
 maze/
+├── archive/                # Superseded plans (not current design)
+├── design/                 # gdd.md (current) + one-page summary
 ├── assets/
 │   ├── blender/            # Blender source (.blend)
 │   ├── sketchup/           # SketchUp source (.skp)
@@ -150,19 +148,14 @@ maze/
 │   └── scene/              # Creator Hub composite
 ├── src/
 │   ├── index.ts            # Entry router — branches on isServer()
-│   ├── client.ts           # Maze rendering, painting, input, audio (client runtime)
 │   ├── paint.ts            # Grid + paint mechanic
 │   ├── round.ts            # Client round timer + end-of-round banner
 │   ├── ui.tsx              # HUD (React-ECS)
-│   ├── stress.ts           # Load-test harness
-│   ├── server/             # Headless authoritative server
-│   │   ├── server.ts       # Orchestrator, round loop, message handlers
-│   │   ├── roster.ts       # Team assignment
-│   │   └── paintState.ts   # Authoritative paint map
-│   └── shared/             # Imported by both client and server
-│       ├── messages.ts     # WS message schema
-│       ├── components.ts   # Shared ECS components
-│       └── roundTiming.ts  # Round cadence + UTC helpers
+│   ├── teleportOrbs.ts     # Linked teleport pair
+│   ├── client/             # Client boot, networking, audio, bots, player
+│   ├── maze/               # Pure generator + visual rebuild
+│   ├── server/             # Headless authoritative server + ghost bot
+│   └── shared/             # Messages, events, round timing, maze graph
 ├── scene.json              # Parcels, spawn points, world config
 └── package.json
 ```

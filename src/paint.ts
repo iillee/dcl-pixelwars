@@ -1,7 +1,8 @@
 // ─── Pixelwars paint grid ────────────────────────────────────────────
 // Phase 1 scaffolding. Single-player, single-team for now.
 //
-// Design doc: assets/docs/PIXELWARS-DESIGN.md
+// Historical technical notes: archive/docs/PIXELWARS-DESIGN.md
+// Current design: design/gdd.md
 // Depends on constants exposed from index.ts (CELL, STEP, TILE_SCALE) and the
 // tile grid Map — passed in via init() to keep this module standalone.
 

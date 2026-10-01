@@ -1,60 +1,48 @@
 # Pixelwars — GDD Summary
 
-**Studio:** ile · **Target:** World `pixelwars.dcl.eth` · **Status:** V0 vertical slice live and tested
+**Studio:** ile · **Target:** World `pixelwars.dcl.eth` · **Status:** V0 live · **V1 revised 2026-10-01**
+
+Full doc: [`gdd.md`](gdd.md). The 2026-09-09 submission (dual bases + light items) is archived at [`../archive/design/gdd-submit-2026-09-09.md`](../archive/design/gdd-submit-2026-09-09.md).
 
 ## The Pitch
-Two teams spread paint across the floor of a shifting, multi-level maze. Whoever covers more ground when the 5-minute timer hits wins — then the maze regenerates from a new seed and the next round starts. Think **Splatoon Turf War** meets a **map that refuses to sit still**, tuned for Decentraland's walk-in, mobile-first, 5-minute-session reality.
 
-## Core Loop (5 min per round, UTC-aligned)
-1. **Walk** → your footsteps paint a 3×3 tile patch in your color.
-2. **Contest** → walking over enemy paint flips it back to yours.
-3. **Reposition** → teleport orbs (linked pairs) drop you into fresh territory.
-4. **Score** → round ends, banner shows winner + final coverage %.
-5. **Regenerate** → new maze seed, new layout, next round.
+Two teams paint the floor of a shifting, multi-level maze. Whoever covers more ground when the 5-minute timer hits wins, then the maze regenerates. Splatoon-style turf on a map that does not sit still, built for a walk-in five-minute visit.
 
-Every step is instant visible progress on the coverage pill. No aim, no combat in V1 — pure territorial pressure.
+**V1 theme: Strategic Territory & Player Competition.** Do not replace walk-to-paint. Make territory denser, easier to read, and useful during the round.
 
-## Three Pillars
-- **Coverage is king** — painting is the whole game.
-- **Fresh maze every round** — no memorization possible.
-- **Any minute is a whole game** — drop-in/out never breaks the loop.
+## Core Loop
 
-## Why Players Come Back
-Progression is **social, not mechanical** — no XP, no unlocks. You become a recognized name in the community. Two return hooks:
-1. **Weekly peak-match slot** (e.g. Friday 20:00 UTC) announced via DCL Events + Discord, surfaced in-scene as a countdown pill.
-2. **"Recently seen" HUD list** — on entry you see the last ~5 named players and when they were last around, so you learn roughly when to log in to catch specific opponents.
+1. **Walk** → footsteps paint a patch in your color.
+2. **Contest** → walking on enemy paint flips it.
+3. **Hold** *(V1)* → your own paint makes you move faster.
+4. **Swing** *(V1)* → a Paint Bomb (and at most one other paint power-up) flips a chunk of floor. No aim.
+5. **Reposition** → linked teleport orbs.
+6. **Score** → round ends; banner shows winner, team %, and your contribution; maze regenerates.
 
-## Social Design
-- **Auto team assignment** on arrival; team color is visible on every tile.
-- **Ghost bot** fills the opposite team during quiet hours so solo play works.
-- **Social threshold:** 2 humans (1v1). **Ideal:** 4–6 (2v3–3v3). **Tested max:** 10 (5v5).
-- **Bystander test passes:** two colors visibly spreading and shrinking reads instantly.
+## Pillars
 
-## Mobile-First
-All core verbs work on touch (walk = paint, walk = contest, walk into orb = reposition, scoring is passive). HUD is three thumb-safe pills (mute, coverage %, timer). Perf target: 60fps desktop / 30fps on Pixel 9a at 5v5.
-
-## Look & World
-Procedurally-generated multi-level labyrinth. Matte red (`#FF7577`) and blue (`#6A99FC`) paint on grey slabs, readable from anywhere thanks to open sightlines and stacked ramps. Zero lore by design.
-
-## Audience
-Fans of short competitive team games (Splatoon, Fall Guys, Rocket League), arriving alone or with a friend from Discover or Events. **Not for:** long-progression, lore-heavy, or high-precision-shooter players.
+- Coverage is king.
+- Fresh maze every round.
+- Any minute is a whole game.
+- Territory is a tool during the round, not only the final score.
 
 ## V1 Scope (4 Weeks)
-**Chosen pillar: dual bases + light items pass** (foundation for V2's alt-weapon unlocks).
-- **W1:** Two seed tiles at opposite maze ends; team spawns at own base; visual base markers.
-- **W2:** Bases as spawn + identity anchors. Mandatory 1v1 playtest — does directional play emerge?
-- **W3:** Items ship — **speed boost** + **paint bomb**, server-timed, mobile proximity pickup.
-- **W4:** 5v5 mobile playtest, balancing pass, capture 3–4 gameplay clips, public repo, live.
 
-**Top risk:** dual bases might encourage base-camping and kill the "every step scores" pillar. **Fallback:** demote bases to pure spawn points and reposition teleport orbs to force movement (~4h revert).
+- **Week 1 — Level, teams & visuals.** Tighter maze for more encounters. Better team balance (no mid-round color swaps). Red/blue SDK name tags. Fix slope paint on mobile. Start block remodel / skin experiments.
+- **Week 2 — Strategic territory.** Tune speed on friendly paint. Per-player contribution on the end-of-round breakdown. Keep testing skins against paint readability.
+- **Week 3 — Items & solo experiment.** Paint Bomb, plus one paint-focused power-up if a trial earns it. Prototype spreading corruption/wildfire and compare it to the existing ghost bot.
+- **Week 4 — Playtest, balance, release.** Multiple player counts, phone and desktop. Balance scale, movement, items, scoring, teams. Ship the skins that worked. Experimental systems ship only if tests support them.
 
-**Explicitly deferred to V2:** paint weapons/combat (needs higher server tick), hide-in-paint (gated on weapons landing), 1m paint grid (WebGL perf).
+**Top risk:** a tighter maze feels cramped, or friendly-paint speed snowballs. **Fallback:** relax layout toward today’s 5×5 / 2 m maze and turn the speed bonus down or off.
 
-## Post-Launch Freshness (Cheap)
-- Rotate 6 tile-block skins seasonally.
-- Shuffle item spawn locations daily.
-- Procedural regen keeps variance high even if no updates ship.
+## Explicitly not V1
 
----
+Combat and projectiles, hide-in-paint, a promised 1 m grid, clans, daily challenges, recently-seen list, weekly in-scene countdown, persistent power, and a large item or bot catalogue. Dual bases are not the pillar. The old “bases unlock V2 weapons” line is retired.
 
-**Bottom line:** A shipped V0 foundation (generator, paint pipeline, authoritative server, ghost bot, synced leaderboard) with a focused 4-week V1 that adds team identity via bases and two items — while deliberately deferring the risky weapons/combat pillar to V2.
+## What V0 already is
+
+11×11 world (176 m). Procedural maze, authoritative paint, 5-minute UTC rounds, teleport orbs, ghost bot for solo play, thumb-safe HUD, all-time painter leaderboard. Spawn is the shared center cross. Teams alternate by join order and can drift when people leave — that is the balance bug V1 fixes. Phones already run the scene; slope paint not drawing is the known mobile hole.
+
+## Why come back (honest)
+
+Short rounds, a new maze every time, and a banner that shows your share of the result. No new retention system in V1. The 29 Sep 2026 playtest set this direction. It did not prove the new mechanics yet.

@@ -1,5 +1,7 @@
 # Pixelwars
 
+> **Archived 2026-10-01.** Superseded by [`design/gdd.md`](../../design/gdd.md). This file is the 2026-09-09 submission (dual bases + light items). Do not treat it as the current plan.
+
 | | |
 |---|---|
 | Public experience title | Pixelwars — IP & Content Policy self-check: **clear** |

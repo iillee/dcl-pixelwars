@@ -1,5 +1,7 @@
 # Phase 4 — Authoritative Server & Synced Paint
 
+> **Archived.** Historical build plan. Current design is [`design/gdd.md`](../../design/gdd.md). Phase 4 itself shipped.
+
 Status: **Step 1 shipped** (scaffolding + hello-world roundtrip). Steps 2–7 pending.
 
 ## Why an authoritative server (not pure CRDT)

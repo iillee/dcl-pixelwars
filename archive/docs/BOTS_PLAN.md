@@ -1,5 +1,7 @@
 # Bots — Work Plan (Phase 5a)
 
+> **Archived.** The ghost bot shipped. V1 solo work is an environmental experiment compared against this bot, not a further AI upgrade. Current design: [`design/gdd.md`](../../design/gdd.md).
+
 Status: **MVP + behavioural polish shipped on branch `bots`, deployed to
 `pixelwars.dcl.eth`.** All steps 1–7 complete; step 8 (tuning pass) is
 an ongoing iterative loop and is currently in a good state (see "Second

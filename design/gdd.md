@@ -1,14 +1,13 @@
 # Pixelwars
 
-*Work in progress · grown from `gdd-template.md`*
-*Doc: ▓▓▓▓▓▓▓▓▓▓ · full doc content complete · next: phase-3 audit + deletion walk-through*
+*Revised 2026-10-01 after the 2026-09-29 Creator Success playtest. Supersedes the 2026-09-09 “dual bases + light items” V1 plan (`archive/design/gdd-submit-2026-09-09.md`).*
 
 | | |
 |---|---|
 | Public experience title | Pixelwars — IP & Content Policy self-check: **clear** |
 | Deployment target | World: `pixelwars.dcl.eth` |
 | Studio / team name | **ile** |
-| Date | 2026-09-09 |
+| Date | 2026-10-01 |
 | Contact (Discord + email) | Discord: **ile9466** · email: **lukeeescobar@gmail.com** |
 
 ---
@@ -17,48 +16,50 @@
 
 | | |
 |---|---|
-| **Player promise** | You are one of two color teams in a shifting maze. You paint the floor to outclaim the enemy, while the maze itself resets every five minutes. `[agent-decided · accepted]` |
+| **Player promise** | You are one of two teams in a shifting maze. You paint the floor to outclaim the enemy, while the maze resets every five minutes. |
 | **Primary player** | Players who already enjoy short competitive team games (Splatoon, Fall Guys, Rocket League), arriving alone or with a friend from Discover or an Event, looking for a five-minute match they can drop in and out of. |
-| **Current status** | **Vertical slice in a World — live and tested.** Play now: [pixelwars.dcl.eth](https://decentraland.org/jump?realm=pixelwars.dcl.eth&position=5,5) · Gameplay video: [youtu.be/Mocy6Xly7D4](https://youtu.be/Mocy6Xly7D4) |
-| **Requested round** | v1 (4-week scope) — with retroactive credit sought for the shipped V0 vertical slice |
-| **Live at end of the round** | Walk into `pixelwars.dcl.eth` alone or with a friend, get auto-assigned to a team, spawn at your team's base, and play a full 5-minute round of tile-coverage warfare against humans (or a ghost bot if you're solo) on a procedurally-generated maze that regenerates every round — with two power-up items in play and a recently-seen HUD list showing who else has been on today. `[agent-decided · accepted]` |
+| **Current status** | **V0 vertical slice — live.** Play now: [pixelwars.dcl.eth](https://decentraland.org/jump?realm=pixelwars.dcl.eth&position=5,5) · Gameplay video: [youtu.be/Mocy6Xly7D4](https://youtu.be/Mocy6Xly7D4) |
+| **Requested round** | V1 (4-week scope) — Strategic Territory & Player Competition, with credit for the shipped V0 slice |
+| **Live at end of the round** | Walk into `pixelwars.dcl.eth`, get a balanced red or blue team with that color on your name tag, and play a tighter 5-minute coverage round. Painting is still how you score. Holding your own paint helps you move. A Paint Bomb (and one other paint-focused power-up, if the trial picks one) can swing territory. When the clock hits zero you see who won and what you personally painted. Solo play still works — the ghost bot remains unless a corruption/wildfire experiment proves better. The maze still regenerates, and the blocks wear the visual direction that read clearly with the paint. |
+
+**V1 theme.** Make the walk-to-paint contest denser, more legible, and more consequential. Every V1 feature should change where, when, or how players paint.
+
+The 29 Sep 2026 session produced this direction. It did not validate the new mechanics. Those are what the four weeks test.
 
 ---
 
 ## 1. Player Promise
 
-**One-line promise** *— maximum 25 words.*
+**One-line promise**
 
-> You are one of two teams in a shifting maze. You paint the floor to outclaim the enemy, while the maze resets every five minutes. *(25 words)*
+> You are one of two teams in a shifting maze. You paint the floor to outclaim the enemy, while the maze resets every five minutes.
 
-**One familiar comparison.** *(optional.)*
+**Why this game**
 
-`[OPEN: decided at Step D once comparables are signed off]`
-
-**Why this game** *— 2–3 sentences.*
-
-V0 is already deployed, tested, and fun — and the shipped generator, paint pipeline, and authoritative-server stack give a rare foundation to build depth on rather than reinvent. Pixelwars is my chance to answer the question every Splatoon fan asks — *what if the map itself refused to sit still?* — inside Decentraland, where a five-minute round is exactly the shape of a walk-in social game. `[agent-decided · accepted]`
+V0 is already deployed and playable: procedural maze, paint pipeline, authoritative server, teleport orbs, ghost bot, and a synced leaderboard. Pixelwars asks the Splatoon question Decentraland can actually host — *what if the map itself refused to sit still?* — inside a five-minute walk-in round. V1 does not replace that loop with combat. It makes territory worth holding while the clock is still running.
 
 ---
 
 ## 2. First Minutes & How to Play
 
+V1 intended experience. V0 today still drops everyone on the shared center cross, with no name tags and no movement benefit on owned paint.
+
 | Time | Player experience |
 |---|---|
-| **0–5 seconds after control** | You spawn at your team's base. Half the floor around you is red, half blue; the tile under you flips to your color as you step off. |
-| **5–10 seconds** | Every step paints a 3×3 patch in your color. A pill shows live coverage % for red vs blue. The goal reads immediately: cover more floor than them. |
-| **10–60 seconds** | You push into unpainted corridors, flipping enemy paint back to your color. A round timer counts down from five minutes. Nearby players leave color wakes behind them. |
-| **1–3 minutes** | You find a teleport orb (linked pair, respawns each round) and drop across the maze into fresh territory. |
-| **3–10 minutes** | Round ends on the UTC boundary; a banner shows winner and final %. You respawn at base, the maze regenerates from a new seed, next round begins. |
-| **Natural stopping point** | You leave knowing the next round starts on the next 5-minute UTC mark, on a maze nobody has seen yet. |
+| **0–5 seconds after control** | You are on a team. Your name tag is red or blue, and so are the other players you can see. The floor under you starts taking your color as you step. |
+| **5–10 seconds** | Every step paints a patch in your color. A pill shows live coverage % for red vs blue. The goal reads immediately: cover more floor than them. |
+| **10–60 seconds** | The maze is tight enough that other players are close. Crossing their paint flips it. Crossing your own paint moves you faster — holding ground is how you get around, not only how you score. |
+| **1–3 minutes** | You push a corridor, drop a Paint Bomb into a junction, or take a teleport orb into fresh ground. You can tell allies from enemies by name-tag color without opening a menu. |
+| **3–10 minutes** | The round ends on the UTC boundary. A banner shows the winner, the final %, and what you personally painted. The maze regenerates. The next round starts. |
+| **Natural stopping point** | You leave knowing the next round starts on the next 5-minute UTC mark, on a maze nobody has seen yet, and you know whether you carried your team. |
 
-*The 5/10 rule (80% of playtesters act in 5s / state goal in 10s) is `[HYPOTHESIS]` at this stage — testable with three people and a greybox.*
+**Player-facing How to Play**
 
-**Player-facing How to Play** *— exactly 3 bullets, maximum 8 words each.*
+- Walk to paint the floor your color
+- Highest coverage at five minutes wins
+- Two teams; enemies flip your paint back
 
-- Walk to paint the floor your color `[agent-decided · accepted]`
-- Highest coverage at five minutes wins `[agent-decided · accepted]`
-- Two teams; enemies flip your paint back `[agent-decided · accepted]`
+The speed-on-own-paint rule and the Paint Bomb are learned by doing them, not by a rules panel. Intro copy stays these three lines.
 
 ---
 
@@ -66,55 +67,54 @@ V0 is already deployed, tested, and fun — and the shipped generator, paint pip
 
 | # | Step (verb) | What the player does (input → see/hear → what changes) | Why do it again? |
 |---|---|---|---|
-| 1 | **Walk** | Move (WASD/joystick) → the 3×3 tile footprint under your feet flips to your color; a soft paint sound plays → coverage % ticks up for your team | Every step is instant visible progress |
-| 2 | **Contest** | Cross into enemy paint → tiles you walk over flip back to your color → the enemy's % drops as yours rises | Territory is never permanent while the clock runs |
-| 3 | **Reposition** | Enter a teleport orb → you're dropped at the linked orb across the maze → new unpainted ground | Cheap way to break out of a contested zone into fresh territory |
-| 4 | **Score** | 5-minute UTC round ends → banner shows winner + final % → you respawn at the seed tile | You know exactly when the next round starts |
-| 5 | **Regenerate** | Maze rebuilds from a new seed → new corridor layout, new ramps, new orb pair | The battleground itself is different next round |
+| 1 | **Walk** | Move (joystick / WASD) → the patch under your feet flips to your color; a soft paint sound plays → coverage % ticks up | Every step is visible progress |
+| 2 | **Contest** | Cross enemy paint → those tiles flip back → their % drops as yours rises | Territory is never safe while the clock runs |
+| 3 | **Hold** | Stay on your own paint → you move faster there → a painted route is a path, not just a score | Owning ground changes how you play this round, not only the final % |
+| 4 | **Swing** | Pick up a Paint Bomb (or the second paint power-up) and trigger it with no aim → a chunk of floor flips → the coverage pill jumps | One decision can reopen a stalled map |
+| 5 | **Reposition** | Walk into a teleport orb → you land at the linked orb → new ground to paint | A way out of a dead corridor on a tight map |
+| 6 | **Score** | The 5-minute UTC round ends → banner shows winner, team %, and your contribution → maze regenerates | You see the team result and your part in it |
 
 | | |
 |---|---|
-| **One complete loop takes** | 5 minutes — one UTC-aligned round. Earlier payoff every ~1 second: every step you take flips tiles visible on the coverage pill. `[agent-decided · accepted]` |
-| **Decision, challenge, or expression** | You choose *where* to paint: chase the highest-yield unpainted corridor, defend a chokepoint, or push into enemy paint to flip contested ground. In a bigger group you coordinate roles informally. `[agent-decided · accepted]` |
-| **Shortest satisfying visit / typical session** | **~5 min / ~15 min** (one full round / three rounds). Drop-in works from the first frame so shorter visits still contribute paint; a satisfying visit is at least one full round to see winner + maze regenerate. `[agent-decided · accepted]` |
-| **Why repetition 10 differs from repetition 1** | The maze regenerates from a fresh seed every round: no two rounds share terrain. On top of that, opponents on the current server dictate whether it's a rout, a stalemate, or a comeback. `[HYPOTHESIS — H1-01]` — validated informally in V0 field play, but not measured. |
+| **One complete loop takes** | 5 minutes — one UTC-aligned round. Earlier payoff is every step: tiles flip, and from V1 the ground you hold also changes your movement. |
+| **Decision, challenge, or expression** | Where to paint, whether to defend a route you can sprint, and when to spend a paint item. In a group, roles can fall out of that (push, hold a lane, bomb a junction) without a class system. |
+| **Shortest satisfying visit / typical session** | ~5 min / ~15 min (one round / three rounds). Drop-in still counts. A satisfying visit includes the end banner so you see the result and your contribution. |
+| **Why repetition 10 differs from repetition 1** | The maze regenerates every round, so routes do not carry over. Who else is in the world decides if the round is a rout, a stalemate, or a comeback. V1 adds a second kind of difference: how hard you personally pushed, visible at the banner. |
 
-**Pillars** *— pick 2 or 3.*
+**Pillars**
 
-1. **Coverage is king.** Painting the floor is the whole game; every feature answers to it. `[agent-decided · accepted]`
-2. **Fresh maze every round.** No memorization; every 5 minutes the terrain is new. `[agent-decided · accepted]`
-3. **Any minute is a whole game.** A 5-minute round is a complete satisfying loop; drop-in / drop-out never breaks it. `[agent-decided · accepted]`
+1. **Coverage is king.** Painting the floor is the whole game. Speed, items, and solo threats all answer to paint.
+2. **Fresh maze every round.** No memorized map. Every 5 minutes the terrain is new.
+3. **Any minute is a whole game.** A round is a complete loop. Drop-in and drop-out never break it.
+4. **Territory is a tool, not only a score.** From V1, ground you hold changes movement during the round.
 
 ---
 
 ## 4. Why Players Come Back
 
-### 4.1 The next-day (D1) sentence
+### 4.1 The next-day sentence
 
-> A player who enjoyed their first session returns the next day (D1) because **Hook 2 (recently-seen presence)** shows them the named players they want to play against — and roughly when to be here to catch them. `[agent-decided · accepted]`
+> A player who enjoyed a round comes back because the next maze is new, the matches are five minutes, and the banner told them how much of the result was theirs — so another round is a short, personal rematch, not a grind.
 
-### 4.2 The progression chain
+That is a design intent, not a measured retention result. The 29 Sep session did not validate a return hook.
 
-*Pixelwars V1's progression is **social and reputational, not mechanical**: no unlockable capabilities, no gear, no XP. Your "progress" is becoming a recognised name in this community.* `[agent-decided · accepted]`
+### 4.2 What V1 does and does not add
+
+V1 does not add XP, gear, unlocks, daily challenges, clans, a recently-seen list, or a weekly-event countdown. Those were discussed on 29 Sep and in the older GDD. They are not this round.
+
+What persists in V1:
 
 | Moment | What persists or has been built? | What becomes possible next? | How can another player tell? |
 |---|---|---|---|
-| **End of first session** | Your name in the "recently seen" list; a leaderboard rank if you scored high. | Nothing new mechanically — you can play the next round. | Your name appears in their HUD list on join. |
-| **End of first week** | A recognisable name — regulars start to notice you; leaderboard position if you've been consistent. | Informal rival relationships; showing up at the Friday peak slot is now a thing you do. | Regulars recognise your name; you're on the weekly leaderboard. |
-| **Week 3+** | Established regular; known style of play; the friends and rivals you've made. | You're one of the people others check for when they log in. | Others say hi; you have people to play against without arranging it. |
+| **End of first session** | A round result that includes your own paint, plus the existing all-time painter leaderboard from V0. | You can play the next round immediately. No new power. | They saw your name tag color and, if they stayed for the banner, your contribution. |
+| **End of first week** | Repeated name recognition in a small scene, if the same people overlap. No mechanical advantage. | Informal rivals. Still no unlock. | They recognize the name and the color they fought. |
+| **Week 3+** | Same as week 1, plus whatever solo mode survived the Week 3 comparison. | You can play a full round alone if the scene is quiet. | The floor is being fought over even when the lobby is thin. |
 
-*End-of-first-week scene:* You log in on Sunday, glance at the HUD's recently-seen list, and see two names you played against on Tuesday. The Friday peak-match slot is on the countdown pill — you already know you'll be there. Between now and then you'll drop into a round or two whenever the list shows someone worth catching.
+The V0 leaderboard (cells captured, persisted on the server) stays. V1 does not turn it into a daily, weekly, or farming system. Per-round contribution is a round result, not a new meta-progression track.
 
-*Currency / tradable rewards:* None in V1. The brief's V2 alt-weapon unlock (returning players unlock at their base) is the planned mechanical progression, deliberately deferred. `[agent-decided · accepted]`
+### 4.3 Return hooks that are not V1
 
-### 4.3 Two return hooks
-
-*V0 ships with a synced leaderboard (`LeaderboardState`, persisted through the server's Storage) but no scheduled reset, no daily rhythm, no appointment mechanic. This is the biggest design hole between "shipped V0" and "v1 that returns players", and the section the reviewer will read hardest.*
-
-| Selected hook | Exact trigger or timing | What the player anticipates | Reminder channel + no-reminder fallback |
-|---|---|---|---|
-| **1. Scheduled events** *(weekly / D7)* | Fixed weekly peak-match slot (e.g. Friday 20:00 UTC), plus one-off tournaments announced in Discord. The 5-min UTC round boundary makes this cheap — an "event" is just people co-arriving on the same round mark. `[agent-decided · accepted]` | Knowing named others will be there at the same time — a shared appointment, not a solo grind. | **Reminder:** Decentraland Events listing + Discord announcements. **No-reminder fallback:** an in-scene countdown pill next to the round timer, visible the moment they walk in. |
-| **2. "Who's around" presence** *(D1-capable)* | On scene entry, the HUD surfaces the last ~5 named players and when they were last seen. Passive social presence, not a gamified rivalry prompt. `[agent-decided · accepted]` | The specific person they want to play against — seeing that person was on 2 hours ago tells them roughly when to come back. | **Reminder:** none — the pull is memory, not notification. **No-reminder fallback:** the list surfaces automatically on scene entry. |
+The September draft promised two hooks: a Friday peak-match countdown in the HUD, and a “recently seen” list of the last ~5 names. Neither is in the revised scope. Scheduled play can still happen as a Discord or Decentraland Event organized outside the scene. The scene will not grow an appointment pill or a presence list in V1.
 
 ---
 
@@ -122,15 +122,17 @@ V0 is already deployed, tested, and fun — and the shipped generator, paint pip
 
 | | |
 |---|---|
-| **The repeatable social loop** | `Player A joins a team on arrival (auto-assigned) → Player B on the opposite team paints over A's tiles → the coverage pill shifts live for both of them → the 5-minute round settles who won, and both stick around for the next.` `[agent-decided — this is V0's shipped behaviour]` |
-| **The disappearance test** | With no other humans in the scene, a **ghost bot** spawns to fill the opposite team — the game stays playable solo, with the bot as visible-social evidence. `[agent-decided — shipped in V0 Phase 5a]` |
-| **From strangers to a group** | Auto team assignment on join (roster order, alternating), team color visible on every tile you paint. A newcomer knows within one step which side they're on and which color to hunt. `[agent-decided · accepted]` |
-| **Recognition & continuity** | Player names are shown; the leaderboard and the **recently-seen HUD list** (§4 Hook 2) are the recognition surfaces. Between returning players: name recognition, informal rivalries, and knowing who plays at what hour — the social layer *is* the progression (§4.2). `[agent-decided · accepted]` |
-| **Quiet hours & player counts** | Quiet hours: a ghost bot fills the opposite team so solo play works (shipped V0). Social threshold: **2 humans (1v1)** — the moment a second human replaces the bot, coverage is person-vs-person. Ideal group: **4–6 humans (2v3 to 3v3)** — enough for informal role emergence without saturating the maze. V1 tested maximum: **10 humans (5v5)**, well inside the program's 20-player baseline. Solo-to-social bridge: a joining human replaces the bot on their team side. `[agent-decided · accepted]` |
-| **Drop-in / drop-out** | A late arrival gets the current maze snapshot + paint state and joins mid-round; leaves free up the roster and the next join alternates as normal. `[agent-decided — shipped]` |
-| **Visible play (the bystander test)** | A spectator sees two teams' colors spreading and shrinking on the floor of a maze in real time — the game reads at a glance. `[agent-decided · accepted]` |
-| **Shareable play (the memorable moment)** | A paint bomb detonates in a cross-junction — a screen-filling splash of your team's color, the coverage pill spikes, the map briefly reads as yours from every angle. The clip writes itself. `[agent-decided · accepted]` |
-| **Bring-a-friend** | The more teammates in the scene, the more of the map turns your color per minute — a friend on your team is straightforwardly additive to coverage. Two humans painting in parallel move the coverage pill visibly faster than one. |
+| **The repeatable social loop** | You join and get a team. Someone on the other color paints over you. The coverage pill moves for everyone. The round ends, the banner shows the team and your share, and the next maze starts if you stay. |
+| **The disappearance test** | With one human, V0 spawns a ghost bot on the other team. V1 keeps that path and, in Week 3, prototypes an environmental threat (corruption / wildfire spreading across paint) to compare against the bot. The experiment ships only if it is the better solo round. |
+| **From strangers to a group** | Auto team assignment on join. V1 adds red/blue SDK name tags so team is visible on the avatar, and a balance pass so leaves do not quietly stack one color. A newcomer can see which color to hunt without a menu. |
+| **Recognition & continuity** | Names on name tags, the end-of-round contribution line, and the existing leaderboard. No clan identity and no recently-seen list in V1. |
+| **Quiet hours & player counts** | Quiet hours: ghost bot, unless the solo experiment replaces it. Social threshold: **2 humans**. Ideal: **4–6**. V1 playtest target: up to **10 (5v5)**. A second human still replaces the need for a bot. |
+| **Drop-in / drop-out** | Late arrivals get the current maze and paint and join mid-round. Leaving frees the roster. V1 balance work must not flip someone who is already playing onto the other team mid-round. |
+| **Visible play (the bystander test)** | Two colors spreading and shrinking on the floor, plus matching name tags. A spectator can see the fight without joining it. |
+| **Shareable play (the memorable moment)** | A Paint Bomb flips a junction. The coverage pill spikes. That is the clip, if the item survives playtest. |
+| **Bring-a-friend** | A teammate paints in parallel, so the pill moves faster. The contribution line also makes it obvious who pushed and who did not. |
+
+**Team balance, as it works in V0.** Teams alternate by join order and stay put on rejoin, including a one-time coin flip for which color is first. That alternation drifts when people leave: the next joiner fills the next slot, not the smaller team. Players in the 29 Sep session could not tell who was on which side. V1 fixes identity with name tags and fixes the drift with a balance pass. It does not add a separate “players per team” panel unless that falls out of the name-tag work for free.
 
 ---
 
@@ -140,98 +142,136 @@ V0 is already deployed, tested, and fun — and the shipped generator, paint pip
 
 | Core-loop verb | How it works with touch controls |
 |---|---|
-| **Walk** | Left joystick — standard DCL mobile locomotion. Painting is passive on step, no aim required. `[agent-decided · accepted]` |
-| **Contest** | Same as walk — no separate input needed. `[agent-decided · accepted]` |
-| **Reposition** | Walk into the teleport orb — proximity-triggered, no button press. `[agent-decided · accepted]` |
-| **Score** | Passive — the round ends on the UTC boundary. `[agent-decided · accepted]` |
+| **Walk** | Left joystick. Painting is passive. No aim. |
+| **Contest** | Same as walk. |
+| **Hold** | Same as walk. Speed on your own paint is automatic. No button. |
+| **Swing** | Paint Bomb and the second power-up are proximity or place-and-trigger. No projectile aim. |
+| **Reposition** | Walk into a teleport orb. |
+| **Score** | Passive. The round ends on the UTC boundary. |
 
-**UI plan.** V0's HUD is three compact pills in the top corners (mute, coverage %, round countdown) plus a full-screen end-of-round banner — designed thumb-safe and readable at phone width. `[agent-decided · accepted]`
+**UI plan.** Keep the V0 thumb-safe pills (mute, coverage %, countdown) and the end-of-round banner. V1 adds contribution to that banner. Name tags are world-space, not another HUD panel. Do not pin new UI to the top-left (minimap and chat live there) or over the mobile action buttons.
 
-**Performance.** Targets: 60fps on recommended desktop / 30fps on **Google Pixel 9a** (Decentraland mobile client), both at the v1 tested maximum of **10 humans (5v5)** from §5. V0 already runs smoothly on the desktop client, mobile client, and three.js client per the brief; the formal fps measurement on Pixel 9a lands in the Week 2 playtest.
+**Known V0 mobile bug.** On 29 Sep, play on a phone was described as smooth except that paint on sloped tiles did not appear. Fixing slope paint is Week 1 work, not a new feature.
 
-**Desktop-only dependencies.** None known — V0 uses only walk-based input, and painting is proximity, not pointer. If V1 adds a weapon system (see §9), aim-on-touch design becomes the top mobile risk — see §9 top risk.
+**Performance.** V0 target remains a playable phone and desktop client at the densities we already ship (2 m paint cells). Formal FPS checks at the V1 player cap happen in Week 4, on a phone, after the density pass. Shrinking the maze is allowed. Moving the paint grid to 1 m is not a V1 promise: an earlier 1 m stress test (~15k cell entities) lagged the WebGL client by several seconds.
+
+**Desktop-only dependencies.** None. V1 does not add aim.
 
 ---
 
 ## 7. World, Look & Story
 
-**Story / world** *— maximum 2 sentences.*
+**Story / world.** Pixelwars is a procedurally generated multi-level labyrinth that redraws itself every five minutes. Two teams claim its floor in paint. There is no lore.
 
-Pixelwars is set in a procedurally-generated multi-level labyrinth that redraws itself every five minutes; two teams claim its floor in paint. `[agent-decided — one sentence is enough; the game refuses lore on purpose]`
+**Visual direction.** The signature is paint spreading in real time: matte red (`#FF7577`) and blue (`#6A99FC`) on grey slab floors. Team color has to read across a corridor and on a name tag. UI stays out of the world.
 
-**Visual direction.** The signature is *paint spreading across a maze in real time*: matte red and blue on grey slab floors, seen from anywhere on the level thanks to open sightlines and stacked ramps. Team color reads at a glance from across the maze; UI stays out of the world. `[agent-decided · accepted]`
+**V1 visual work.** The six modular blocks (end, straight, turn, fork, cross, ramp) get a remodeling and skin experiment. The goal is one stronger identity that still lets paint read, not a catalogue of six finished themes. Week 4 ships the variants that survived that test. Seasonal skin rotation is a later content idea, not a V1 deliverable.
 
-*Visual reference: `assets/images/subdivisions.jpg` (grid layout), team palette `assets/images/pallet.jpeg` (red `#FF7577`, blue `#6A99FC`).*
+**Layout today.** 11×11 parcels (176 m × 176 m). The generator builds a 5×5 maze of 32 m tiles inside that, with an 8 m border. Paint cells are 2 m. Everyone respawns on the center cross. V1’s density pass may shrink this. It does not add team bases as the point of the round.
 
 ---
 
 ## 8. Audience & Comparables
 
-**Primary player + arrival context** *— maximum 1 sentence.*
+**Primary player + arrival context.**
 
-> For players who already enjoy short competitive team games (Splatoon, Fall Guys, Rocket League), arriving alone or with a friend from Discover or an Event, looking for a five-minute match they can drop in and out of. `[agent-decided · accepted]`
+> For players who already enjoy short competitive team games (Splatoon, Fall Guys, Rocket League), arriving alone or with a friend from Discover or an Event, looking for a five-minute match they can drop in and out of.
 
-**How the first group arrives** *— maximum 2 sentences.*
+**How the first group arrives.** Through Discover and through Events promoted on Discord. Two humans is already a game, so the scene does not need a full lobby to function. Quiet hours fall back to the ghost bot or, if it wins the comparison, the solo corruption mode.
 
-> The first group arrives through Decentraland's Discover feed (a game genuinely designed for the platform ranks well) and one-off Events promoted on Discord. Because the round loop is 5 minutes and drop-in works from the first frame, the funnel is tolerant of low overlap — 2 humans is a game, so the social threshold is reachable any time a second person walks in. `[agent-decided · accepted]`
+**Deliberately not for.** Players who want long persistent progression, lore-heavy solo campaigns, or high-precision shooting.
 
-**Deliberately not for** *— one line.*
-
-> Players who want long persistent progression, lore-heavy solo play, or high-precision competitive shooting. `[agent-decided · accepted]`
-
-### Comparables *— exactly two*
+### Comparables
 
 | | Comparable A — outside DCL: **Splatoon (Nintendo)** | Comparable B — inside DCL: **Flagtag (`flagtag.dcl.eth`)** |
 |---|---|---|
-| What we observed works | Turf War's 3-minute rounds and *coverage %* scoreboard make every second feel like scoring; matte paint is instantly readable at a glance. `[agent-decided · accepted]` | Short rounds + auto-teams + drop-in play sustain a live scene in DCL despite low concurrent counts; my own prior scene. `[agent-decided · accepted]` |
-| What does not fit our audience or context | Splatoon's aim-based shooting, twitch reflexes, and Nintendo Online are all off the table for DCL — mobile-first, latency-tolerant, walk-in play is the constraint. `[agent-decided · accepted]` | Flagtag's flag-capture core loop rewards long defensive holds; that pacing conflicts with the paint-every-second feedback Pixelwars wants. `[agent-decided · accepted]` |
-| What we will do differently | No persistent map meta: Splatoon's audience memorizes a fixed map roster, but every Pixelwars round starts on a maze nobody has seen — the round reset and the maze reset are the same event, so learned routes never carry over. `[agent-decided · accepted]` | Coverage is continuous and passive (every step counts) instead of discrete objective-holding; every second is scoring, not waiting. `[agent-decided · accepted]` |
+| What we observed works | Turf War’s short rounds and coverage % make every second feel like scoring. Matte paint reads at a glance. | Short rounds, auto teams, and drop-in play can keep a DCL scene alive at low concurrency. |
+| What does not fit our audience or context | Aim-based shooting, twitch reflexes, and a fixed map roster. DCL rounds have to tolerate latency, phones, and walk-in play. | Flag-capture rewards sitting on an objective. Pixelwars wants every step to score. |
+| What we will do differently | The maze resets with the round, so learned routes do not carry over. V1 borrows Splatoon’s “your ink is also your road” idea as a movement bonus, not as weapons. | Coverage stays continuous. Items swing paint; they do not become a combat kit. |
 
 ---
 
-## 9. 4 Week Plan (v1 scope)
+## 9. 4 Week Plan (V1 scope)
 
-*The brief proposes five V1 feature pillars (level upgrades, weapons/combat, hide-in-paint, items, bot upgrades). All five in four weeks is not a v1 scope — it's a roadmap. Picking one primary pillar for the 4-week ask is the interview.*
+**V1 theme: Strategic Territory & Player Competition.**
 
-**V1 pillar: dual bases + light items pass.** Foundational for the brief's V2 alt-weapon-unlock system; no new networking risk; brief's own difficulty analysis rates this low-to-medium. `[agent-decided · accepted]`
+The old pillar — dual bases plus a speed-boost pickup and a Paint Bomb — is retired. Bases may still appear as plain orientation if the density pass needs spawn landmarks. They are not the feature. The movement idea is “faster on your own paint,” not a generic speed pickup.
 
 | Week | What is playable / done |
 |---|---|
-| **1 — Prototype definition** | Generator places two seed tiles at opposite ends of the maze (red base / blue base). Team spawn switches to own base on join. Base tiles visually distinct (color-tinted floor decal, base marker). |
-| **2 — Core interaction + first-group test** | Bases fully functional as spawn + team identity anchor. **Mandatory Week 2 playtest** at 2 humans (1v1) — measure: does directional play (front line / home territory) emerge, or is it still free-for-all? **Block remodeling + skin experimentation pass** — iterate on tile-block geometry and trial 2–3 candidate skins for the 6-skin rotation (§9 post-launch variety). Visual polish is a marketing dependency: Discover thumbnails, trailer clips, and social shares all rely on the maze reading as beautiful at a glance. Capture reference stills at the end of the week. |
-| **3 — Core systems refinement** | Items pass — **speed boost** and **paint bomb** shipped. Server-side spawn timing, round-reset cleanup, mobile proximity pickup (no aim required). |
-| **4 — Playable prototype, final design direction** | Mobile playtest on a named device at 5v5. Balancing pass on base spacing and item spawn rates. Capture 3–4 gameplay clips for Discover card / trailer / social. Public repo + live in World. |
+| **1 — Level, teams & visual development** | Tighter procedural layout aimed at more encounters. Team balance improved without mid-round color swaps. Red/blue SDK name tags. Slope paint visible on mobile, plus the other known V0 mobile fixes that show up. First block remodel / skin experiments. |
+| **2 — Strategic territory** | Movement bonus on friendly paint, prototyped and tuned. Per-player contribution tracked and shown in the end-of-round breakdown. Skin experiments checked against the paint: if a skin hides team color, it loses. |
+| **3 — Items & solo experiment** | Small item set. Paint Bomb first. One more paint-focused power-up chosen in the build, not from a catalogue. Solo prototype: corruption or wildfire that spreads and must be contained, played against the existing ghost bot. |
+| **4 — Playtest, balance & release** | Multiplayer and mobile sessions at more than one player count. Balance pass on maze scale, paint-speed, items, scoring, and teams. Final block art from the experiments that worked. Bugfix, polish, deploy. Experimental systems ship only if the tests support them. |
 
-**What keeps the experience changing after launch** *— max 4 lines.*
+### Committed vs experimental
 
-- Without building a new level, we can **rotate the 6 tile-block skins** (seasonal / partner themes) and **shuffle item spawn locations** daily. `[agent-decided · accepted]`
-- If an update is skipped, **procedural maze regen every 5 minutes** still creates variation. `[agent-decided · accepted]`
-- Progression is social, not mechanical (§4.2) — a returning or new player can contribute meaningfully within ~0 minutes; no power gap. `[agent-decided · accepted]`
-- One player behaviour that would change what we build next: **whether item pickups create fights** — if yes, that validates combat as the v2 pillar; if no, v2 leans into hide-in-paint instead. `[agent-decided · accepted]`
+| Committed | Experimental — ship only if it holds up |
+|---|---|
+| Level scale / density tuning | Exact friendly-paint speed and whether it stays |
+| Team balancing that does not flip a live player’s color | Which second paint power-up, if any |
+| Red/blue SDK name tags | Corruption / wildfire, and whether it replaces the ghost bot |
+| Slope paint and the other known V0 mobile fixes | Which block skins and geometry actually ship |
+| Personal contribution on the end-of-round breakdown | Extra mechanics that show up in playtests |
+| Block remodel / skin exploration | |
+| A small item system starting with Paint Bomb | |
+| Playtest, balance, polish, deploy of whatever survived | |
 
-**Not building in v1** *— exactly 3.*
+### What keeps the experience changing after launch
 
-1. **Paint weapons / combat.** Pushed to v2. The brief flags the 5 Hz server-tick as too coarse for projectile-vs-player hit registration, which needs its own resolution (raise ticks or add client-side prediction) plus a full combat-tuning cycle. **First back in v2.** `[agent-decided · accepted]`
-2. **Hide-in-paint / quick-move.** Pushed to v2, gated on a timeboxed spike after weapons land — weapons make hiding *matter* by giving something to hide from. `[agent-decided · accepted]`
-3. **1 m paint grid.** Stay at 2 m. Brief notes the WebGL client couldn't sustain 1 m in stress-testing; the resolution bump is a v2+ effort once stom's material optimisation is ported. `[agent-decided · accepted]`
+- The maze still regenerates every 5 minutes even if no update ships.
+- A new or returning player can score on the first step. V1 adds no veteran power gap.
+- After the visual pass, further skins are content, not a second gameplay track.
+- The Week 3 solo comparison decides the next solo investment: environment, ghost bot, or neither upgraded further.
 
-*§1 twist ("the maze itself resets every five minutes") is preserved in all three cuts — the maze regen stays.*
+### Not building in V1
 
-**Top risk + fallback.** The pillar risk is that **dual bases break the "every step scores" pillar** (§3) by encouraging base-camping and defensive stalemates, turning the middle of the maze into a low-coverage dead zone. **Fallback:** if the Week 2 playtest shows base-camping stalling coverage, reduce bases to pure spawn points (no team-identity function, no defensive value) and reposition teleport orbs to force movement into contested territory. Base tiles remain for v2's alt-weapon-unlock system but carry no gameplay weight in V1. Cost: ~4 hours of scope revert. `[agent-decided · accepted]`
+1. **Paint weapons / combat.** Projectiles, damage, aim, hit registration, and combat respawns stay future work. Paint Bomb is an area of paint, not a gun. The flagtag projectile fights are why this stays out.
+2. **Hide-in-paint / squid-swim.** Future, and only interesting if something exists to hide from.
+3. **1 m paint grid** as a promised result. Smaller cells may be tried while tuning density. They ship only if the phone client holds up.
+4. **Persistent power, clans, dailies, recently-seen, weekly in-scene countdown.** Discussed in the playtest and the old GDD. Not this round.
+5. **A large item, trap, or bot-AI catalogue.** One Paint Bomb, at most one more paint power-up, and a single solo experiment beside the bot that already exists.
+
+### Top risk + fallback
+
+The density pass can make the maze feel cramped, or the friendly-paint speed can snowball so the leading team becomes unreachable. Either one fights the “every step still matters” pillar.
+
+**Fallback:** if Week 2 play shows a dead stomp or a map with nowhere to go, relax the layout back toward the current 5×5 / 2 m maze and turn the speed bonus down or off. Items and name tags can stay. The solo experiment is allowed to lose to the ghost bot and be cut. Cost of the revert is a tuning pass, not a new architecture.
+
+### Playtest notes that set this scope (29 Sep 2026)
+
+Pixelwars only. Golf feedback from the same call is ignored.
+
+- Team identity was missing. Name tags with team color were the agreed direction (Vitaly), over shoes or floating markers.
+- Join-order teams drift when people leave (Luke). Balance is in scope. A live headcount was asked (Ludmila) and is not a separate deliverable.
+- Solo play with one ghost is thin (Matt / Big Yellow Fishes, Ludmila). Luke’s counter-proposal — spreading ooze or wildfire, in the vein of Snowdrift — is the Week 3 experiment, not a commitment to replace the bot.
+- Holding paint should matter during the round. Luke’s proposal, backed in the notes: move faster on your own color.
+- The level felt large. Tom asked for a smaller maze and faster territorial turnover. That is the Week 1 density work.
+- Slope paint invisible on mobile (Tom). Week 1 bugfix. The rest of mobile play in that session was described as smooth.
+- End-of-round personal contribution (Tom, repeated in chat). Week 2.
+- Paint Bomb and a larger paint radius were offered as item ideas. Paint Bomb is the starting item. A second paint-focused item is chosen while building. Radius, jump-landing splashes, traps, and repulsors are not in the committed list.
+- Clans, daily challenges, async farming, and persistent progression were suggested (Bay, Vitaly, Pravus) and are explicitly not V1.
 
 ---
 
-## Parked ideas & hypotheses
+## 10. Future exploration (not V1)
 
-*The Hypothesis Log lives in `design/hypothesis-log.md` (generated). Below are the seeds from the harvest that need testing rather than deciding:*
+Kept so the old roadmap is not mistaken for the current plan.
 
-- **H1-01** — *Procedural maze regen every 5 minutes is enough variability to sustain repetition 10.* Cheapest test: 3 playtesters, 10 back-to-back rounds, watch for "same again?" body language. **Untested; informally validated in V0 field play.**
-- **H1-02** — *The 5/10 rule (§2) holds for Pixelwars' current spawn view.* Cheapest test: 3 people, cold, no explanation, stopwatch.
-- **H1-03** — *A bot filling the opposite team is a socially readable substitute for a human opponent during quiet hours.* Currently shipped in V0; cheapest test: 5-minute solo sessions vs. no-bot control, do players play a second round?
-- **H1-04** — *Splatoon-style hide-in-paint is buildable in SDK7 with acceptable feel* — the biggest "if" from the brief. Cheapest test: a timeboxed spike using `AvatarModifierArea` + `MovePlayerTo` + `InputModifier` before committing V1 scope.
-- **H1-05** — *A passive "who was recently on" presence signal is enough to create D1 return for a walk-in social game, without a compulsion loop or scheduled reminder.* This is the load-bearing claim under Hook 2. Cheapest test: ship the HUD list at start of V1 Week 2 playtest, count returning names over 7 days.
-- **H1-06** — *A weekly scheduled peak-match slot draws enough co-arrivals to produce a full lobby (≥ §5 social threshold) without ongoing paid promotion.* Cheapest test: announce one Friday 20:00 UTC session on DCL Events + Discord, measure headcount.
+- Projectile paint weapons, damage-in-enemy-paint, and respawn-at-base combat.
+- Hide-in-paint and fast travel on your own color beyond the simple speed bonus.
+- A 1 m paint grid, if a later client can afford the entities.
+- Team bases as identity landmarks, including any later unlock that lives at a base. Not a V1 foundation and not a weapon-unlock track we are building now.
+- Clans / community colors, in-scene event countdown, recently-seen presence, daily challenges.
+- Personal pixel stamps, pattern bonuses, and jump-landing splashes from the 29 Sep brainstorm.
 
 ---
 
-*Machinery (delete before submitting): status banner, everything in italics, unused placeholders, and the Parked ideas & hypotheses section above. `[agent-decided · accepted]` markers get owner sign-off then bracket comes off; `[HYPOTHESIS]` claims get rewritten in design-intent voice (e.g. "the maze regenerating each round is the intended source of freshness"); `[OPEN]` becomes `TBD:` or the field is deleted. `TBD:` may stay.*
+## 11. V0 facts this plan does not reopen
+
+- Red vs blue. Walk to paint. Enemy paint can be repainted. Highest coverage when the 5-minute UTC round ends wins.
+- The maze is procedural and changes with the round. Seed is shared so everyone sees the same layout.
+- Authoritative server owns paint, teams, and the round clock. Clients render.
+- Linked teleport orbs and a ghost bot already exist.
+- There is already an all-time painter leaderboard. V1 does not rebuild it into a meta-game.
+- The core verb stays walk-to-paint. Phones stay in scope.
