@@ -452,14 +452,17 @@ export function mirrorCell(x: number, z: number): [number, number] {
 
 const BASE_X0 = Math.floor(GRID_W / 2) - Math.floor(SKY_BASE_SIZE / 2)
 
-/** Grid cells of a team's base. Bases-only: RED in the SW corner, BLUE in
- *  the NE corner. Full mode: RED mid-south edge, BLUE mid-north edge. */
+/** Grid cells of a team's base. Bases-only: RED centred on the west edge,
+ *  BLUE centred on the east edge. Full mode: RED mid-south, BLUE mid-north. */
 export function baseCells(team: number): Array<[number, number]> {
   const out: Array<[number, number]> = []
   const x0 = SKY_BASES_ONLY ? SKY_BASE_MARGIN : BASE_X0
   for (let i = 0; i < SKY_BASE_SIZE; i++) {
     for (let j = 0; j < SKY_BASE_SIZE; j++) {
-      const x = x0 + i, z = SKY_BASE_MARGIN + j
+      // Bases-only: RED centred on the WEST edge (rows 3–4 of 8), BLUE its
+      // 180° image centred on the EAST edge — straight across from each other.
+      const z0 = SKY_BASES_ONLY ? Math.floor(GRID_H / 2) - Math.floor(SKY_BASE_SIZE / 2) : SKY_BASE_MARGIN
+      const x = x0 + i, z = z0 + j
       out.push(team === 1 ? [x, z] : mirrorCell(x, z))
     }
   }
@@ -489,12 +492,13 @@ export function baseTeamOfCellId(id: string): number {
  *  centre isn't walkable. */
 export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
   const mid = (GRID_W - 1) / 2
-  let best = baseCells(team)[0]
-  for (const c of baseCells(team)) {
-    if (Math.abs(c[0] - mid) + Math.abs(c[1] - mid) < Math.abs(best[0] - mid) + Math.abs(best[1] - mid)) best = c
-  }
-  const cx = (best[0] + 0.5) * CELL + MAZE_ORIGIN
-  const cz = (best[1] + 0.5) * CELL + MAZE_ORIGIN
+  const dist = (c: [number, number]) => Math.abs(c[0] - mid) + Math.abs(c[1] - mid)
+  const dMin = Math.min(...baseCells(team).map(dist))
+  // Average the nearest tiles: edge-centred bases have two (e.g. RED (1,3)
+  // and (1,4)), and their shared edge sits on the ring walkway.
+  const near = baseCells(team).filter(c => dist(c) === dMin)
+  const cx = near.reduce((a, c) => a + c[0] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
+  const cz = near.reduce((a, c) => a + c[1] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
   const y = BASE_Y + 1.5 // walkable slab top is +0.5
   return { pos: { x: cx, y, z: cz }, look: { x: SCENE_SIZE / 2, y, z: SCENE_SIZE / 2 } }
 }
@@ -592,8 +596,8 @@ function generateSky(): void {
   // whose openings only face each other (SW opens N+E, SE N+W, NE S+W,
   // NW S+E). The 180° image of RED's block is BLUE's block.
   if (SKY_BASES_ONLY) {
+    if (SKY_BASE_LINE && baseLineFits()) { layBaseLine(); return }
     placeRings()
-    if (SKY_BASE_LINE) layBaseLine()
     return
   }
 
@@ -661,67 +665,39 @@ function generateSky(): void {
 }
 
 /**
- * Bases+paths: FOUR seeded paths between the two bases over three levels
- * (L-1 = BASE_Y - STEP, L0 = BASE_Y, L+1 = BASE_Y + STEP). Random per round
- * (uses the round seed via rand()), then validated, with retry and a
- * hand-checked fallback.
+ * Bases + woven network (sky, bases-only, line mode). Seeded per round via
+ * rand(); every client and the server run the same steps.
  *
- * Exits: every base opens all four outward ring edges, RED:
- *   (1,0)→E (2,0)   (1,1)→E (2,1)   (1,1)→N (1,2)   (0,1)→N (0,2)
- * (BLUE = their 180° images), so each base has 4 exits and the ring tiles
- * are the SAME every round (turn / fork / cross / fork) — the persistent
- * base entities in rebuild.ts never change shape. Rings stay closed loops.
+ * Layout: RED 2×2 on the west edge (x 0–1, z 3–4), BLUE its 180° image on
+ * the east edge (x 6–7, z 3–4). Each base opens ALL 6 outward ring edges
+ * (S, N on both columns + E on the inner column), so ring tiles are the same
+ * every round (fork, fork, cross, cross) and rebuild.ts's persistent base
+ * entities never change shape. Ring stays a closed loop.
  *
  * Per attempt:
- *   1. Shuffle the 4 exits into a,b,c,d. Path 1 runs RED exit a → BLUE exit
- *      c', path 2 RED b → BLUE d'. Paths 3/4 are the 180° images of 1/2
- *      (walked RED → BLUE they use RED exits c,d). So every exit is used once
- *      per side and the whole layout is 180° symmetric by construction.
- *   2. Route: randomized depth-first walk from the start cell to the end
- *      cell (never through bases or its own cells), biased toward the goal
- *      with a straight-line preference so there is room for ramps; length
- *      capped at a random 10–18 cells.
- *   3. Levels: walk the route; on a straight run (prev, cell, next in line)
- *      a cell may become a ramp (prob 0.45) that steps ±1 level (clamped to
- *      L-1..L+1). The cells next to a ramp are always flat, the first and
- *      last path cells are L0. Accept only if it ends on L0 with ≥1 up and
- *      ≥1 down.
- *   4. Merge all 4 paths per cell: a shared cell must agree on level and
- *      ramp-ness/direction (so crossings/merges happen at matching heights);
- *      no two ramp cells may be orthogonally adjacent.
- *   5. Tiles: each flat cell gets the junction piece matching the union of
- *      its openings (straight/turn/fork/cross); ramps use the ramp model
- *      with r = high side. Then validate() + allTilesConnected() + mirror
- *      check. Up to SKY_PATH_ATTEMPTS tries, else FALLBACK_PATHS.
- *
- * Entry format: [x, z, level, rampHighDir?] — a ramp's level is its LOW end
- * and it rises toward rampHighDir (N=0 E=1 S=2 W=3).
+ *   1. Height field: every non-base cell starts L0; 2–3 random rectangles
+ *      (2–4 × 2–4) are raised to L+1 and 2–3 sunk to L-1, each with its 180°
+ *      image. Base cells and their 6 exit cells stay L0. L+1 blocks can sit
+ *      right beside L-1 / L0 areas, which gives the layered "over" look.
+ *   2. Ramps: a cell X at level l becomes a ramp rising toward d when the
+ *      neighbour in d is l+1 and the one behind is l. Picked at random in
+ *      180° pairs, never two orthogonally adjacent, up to a random 6–14.
+ *   3. Edges: every adjacent same-level flat pair may link; a ramp links
+ *      only its low and high ends. Base ring + exit edges are fixed.
+ *   4. Prune to the 2-core (no dead ends; a ramp missing an end is dropped)
+ *      and keep the component holding both bases.
+ *   5. Thin: remove random flat-flat edge pairs (edge + its image) while
+ *      every cell keeps ≥2 links and everything stays connected, down to a
+ *      random 0–25% removed — a dense woven net, not lanes.
+ *   6. Tiles from openings (straight/turn/fork/cross), ramps r = high side;
+ *      validate() + allTilesConnected() + symmetry.
+ * NET_CANDIDATES valid attempts are scored (junctions + ramps + coverage)
+ * and the best kept; up to NET_ATTEMPTS tries, else the frozen FALLBACK_NET.
  */
-type LineCell = [number, number, number, Dir?]
-const SKY_PATH_ATTEMPTS = 300
-/** RED exits as [ring cell, first path cell]. */
-const RED_EXITS: Array<[[number, number], [number, number]]> = [
-  [[1, 0], [2, 0]], [[1, 1], [2, 1]], [[1, 1], [1, 2]], [[0, 1], [0, 2]],
-]
-const mirrorLine = (path: LineCell[]): LineCell[] => path.slice().reverse().map(([x, z, l, h]) => {
-  const [mx, mz] = [7 - x, 7 - z]
-  return (h === undefined ? [mx, mz, l] : [mx, mz, l, ((h + 2) % 4) as Dir]) as LineCell
-})
-// Known-good layout (seed-generated, then frozen) used when every attempt fails.
-// (seed 12345 attempt 1; both halves + their 180° images = 4 paths)
-const FALLBACK_HALF: LineCell[][] = [
-  [[0, 1, 0], [0, 2, 0], [0, 3, 0, 0], [0, 4, 1], [0, 5, 1], [0, 6, 1], [1, 6, 1], [2, 6, 0, 3], [3, 6, 0], [4, 6, 0], [5, 6, 0], [6, 6, 0]],
-  [[1, 1, 0], [1, 2, 0], [2, 2, 0], [3, 2, 0], [4, 2, -1, 3], [5, 2, -1], [5, 3, -1, 0], [5, 4, 0], [5, 5, 0], [5, 6, 0], [5, 7, 0], [6, 7, 0]],
-]
-const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
-let currentPaths: LineCell[][] = []
+const NET_ATTEMPTS = 200
+const NET_CANDIDATES = 6
 let usedFallback = false
-
-/** Dir from cell a to orthogonally adjacent cell b. */
-function dirTo(a: LineCell | [number, number], b: LineCell | [number, number]): Dir {
-  for (const d of ALL_DIRS) if (a[0] + DX[d] === b[0] && a[1] + DZ[d] === b[1]) return d
-  throw new Error(`cells not adjacent: ${a} ${b}`)
-}
+const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
 
 /** Flat tile + rotation whose openings are exactly `need`. */
 function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
@@ -734,97 +710,264 @@ function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
   return null
 }
 
-const isBaseXZ = (x: number, z: number) => (x < 2 && z < 2) || (x > 5 && z > 5)
 
-/** Random cell route start → goal (inclusive), or null. */
-function randomRoute(start: [number, number], goal: [number, number]): Array<[number, number]> | null {
-  const maxLen = 10 + Math.floor(rand() * 9)
-  const route: Array<[number, number]> = [start]
-  const used = new Set<string>([`${start[0]},${start[1]}`])
-  let budget = 3000
-  const dfs = (lastDir: Dir | null): boolean => {
-    if (budget-- <= 0) return false
-    const [x, z] = route[route.length - 1]
-    if (x === goal[0] && z === goal[1]) return true
-    const left = maxLen - route.length
-    if (Math.abs(x - goal[0]) + Math.abs(z - goal[1]) > left) return false
-    const opts = ALL_DIRS.map(d => {
+const ck = (x: number, z: number) => `${x},${z}`
+const ek = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
+const mk = (c: string) => { const [x, z] = c.split(',').map(Number); const [mx, mz] = mirrorCell(x, z); return ck(mx, mz) }
+
+/** Ring + exit edges of both bases (always present). */
+function fixedEdges(): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  for (const team of [1, 2]) {
+    const ring = baseCells(team)
+    const inRing = (x: number, z: number) => ring.some(([a, b]) => a === x && b === z)
+    for (const [x, z] of ring) for (const d of ALL_DIRS) {
       const nx = x + DX[d], nz = z + DZ[d]
-      const sc = Math.abs(nx - goal[0]) + Math.abs(nz - goal[1]) + rand() * 3 - (d === lastDir ? 1 : 0)
-      return { d, nx, nz, sc }
-    }).filter(o => inBounds(o.nx, o.nz) && !isBaseXZ(o.nx, o.nz) && !used.has(`${o.nx},${o.nz}`))
-      .sort((a, b) => a.sc - b.sc)
-    for (const o of opts) {
-      route.push([o.nx, o.nz]); used.add(`${o.nx},${o.nz}`)
-      if (dfs(o.d)) return true
-      route.pop(); used.delete(`${o.nx},${o.nz}`)
+      if (!inBounds(nx, nz)) continue
+      if (inRing(nx, nz) && ck(x, z) > ck(nx, nz)) continue
+      out.push([ck(x, z), ck(nx, nz)])
     }
-    return false
   }
-  return dfs(null) ? route : null
+  return out
 }
 
-/** Give a route (base cell .. base cell) levels + ramps, or null. */
-function assignLevels(cells: Array<[number, number]>): LineCell[] | null {
-  const n = cells.length
-  for (let tries = 0; tries < 20; tries++) {
-    const out: LineCell[] = cells.map(([x, z]) => [x, z, 0] as LineCell)
-    let lvl = 0, prevRamp = false, ups = 0, downs = 0
-    for (let i = 2; i <= n - 3; i++) {
-      out[i][2] = lvl
-      const din = dirTo(cells[i - 1], cells[i]), dout = dirTo(cells[i], cells[i + 1])
-      if (!prevRamp && i <= n - 4 && din === dout && rand() < 0.45) {
-        const up = lvl === 1 ? false : lvl === -1 ? true : rand() < 0.5
-        if (up) { out[i] = [cells[i][0], cells[i][1], lvl, dout]; lvl++; ups++ }
-        else { lvl--; out[i] = [cells[i][0], cells[i][1], lvl, OPP[dout]]; downs++ }
-        prevRamp = true
-      } else prevRamp = false
+interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<string> }
+
+function netAttempt(): Net | null {
+  const base = new Set<string>(baseCells(1).concat(baseCells(2)).map(([x, z]) => ck(x, z)))
+  const fixed = fixedEdges()
+  const protectedCells = new Set<string>(base)
+  for (const [a, b] of fixed) { protectedCells.add(a); protectedCells.add(b) }
+  // 1. Height field.
+  const level = new Map<string, number>()
+  for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) level.set(ck(x, z), 0)
+  const blobLevels: number[] = []
+  for (const l of [1, -1]) { const k = 2 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) blobLevels.push(l) }
+  for (const l of shuffle(blobLevels)) {
+    {
+      const w = 2 + Math.floor(rand() * 3), h = 2 + Math.floor(rand() * 3)
+      const x0 = Math.floor(rand() * (GRID_W - w + 1)), z0 = Math.floor(rand() * (GRID_H - h + 1))
+      for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + h; z++) {
+        const c = ck(x, z)
+        if (protectedCells.has(c)) continue
+        level.set(c, l); level.set(mk(c), l)
+      }
     }
-    if (lvl === 0 && ups > 0 && downs > 0) return out
   }
-  return null
-}
-
-function placeRings(): void {
-  const [x0, z0] = baseCells(1)[0]
-  const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
-  for (const [x, z] of baseCells(1)) placeSym('turn', ringRot(Math.min(1, x - x0), Math.min(1, z - z0)), x, z, BASE_Y)
-}
-
-/** Lay paths onto the grid (rings already placed). False on any conflict. */
-function layPaths(paths: LineCell[][]): boolean {
-  const need = new Map<string, { c: LineCell; dirs: Set<Dir> }>()
-  const add = (c: LineCell, d: Dir): boolean => {
-    const k = `${c[0]},${c[1]}`
-    if (!need.has(k)) {
-      const ring = grid.get(key(c[0], c[1], BASE_Y))
-      need.set(k, { c, dirs: new Set(ring ? openingsAt(ring.type, ring.r) : []) })
+  // 2. Ramps.
+  const ramp = new Map<string, Dir>()
+  const maxRamps = 6 + 2 * Math.floor(rand() * 5)
+  const cands: Array<[string, Dir]> = []
+  for (const [c, l] of level) {
+    if (protectedCells.has(c)) continue
+    const [x, z] = c.split(',').map(Number)
+    for (const d of ALL_DIRS) {
+      const hx = x + DX[d], hz = z + DZ[d], lx = x - DX[d], lz = z - DZ[d]
+      if (!inBounds(hx, hz) || !inBounds(lx, lz)) continue
+      if (base.has(ck(hx, hz)) || base.has(ck(lx, lz))) continue
+      if (level.get(ck(hx, hz)) === l + 1 && level.get(ck(lx, lz)) === l && l + 1 <= 1) cands.push([c, d])
     }
-    const e = need.get(k)!
-    if (e.c[2] !== c[2] || e.c[3] !== c[3]) return false
-    e.dirs.add(d)
+  }
+  const adjRamp = (c: string) => {
+    const [x, z] = c.split(',').map(Number)
+    return ALL_DIRS.some(d => ramp.has(ck(x + DX[d], z + DZ[d])))
+  }
+  // Interleave L0→L+1 and L-1→L0 candidates so both extra levels get linked.
+  const hiC = shuffle(cands.filter(([c]) => level.get(c) === 0)), loC = shuffle(cands.filter(([c]) => level.get(c) === -1))
+  const ordered: Array<[string, Dir]> = []
+  for (let i = 0; i < Math.max(hiC.length, loC.length); i++) { if (i < hiC.length) ordered.push(hiC[i]); if (i < loC.length) ordered.push(loC[i]) }
+  for (const [c, d] of ordered) {
+    if (ramp.size >= maxRamps) break
+    const m = mk(c)
+    if (ramp.has(c) || ramp.has(m) || adjRamp(c) || adjRamp(m)) continue
+    // A ramp's ends must stay flat.
+    const [x, z] = c.split(',').map(Number)
+    if (ramp.has(ck(x + DX[d], z + DZ[d])) || ramp.has(ck(x - DX[d], z - DZ[d]))) continue
+    ramp.set(c, d); ramp.set(m, ((d + 2) % 4) as Dir)
+  }
+  // 3. Edges.
+  const edges = new Set<string>()
+  const fixedSet = new Set<string>(fixed.map(([a, b]) => ek(a, b)))
+  for (const e of fixedSet) edges.add(e)
+  for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) {
+    const c = ck(x, z)
+    if (base.has(c)) continue
+    for (const d of [0, 1] as Dir[]) {
+      const nx = x + DX[d], nz = z + DZ[d]
+      if (!inBounds(nx, nz)) continue
+      const n = ck(nx, nz)
+      if (base.has(n)) continue
+      const rc = ramp.get(c), rn = ramp.get(n)
+      if (rc === undefined && rn === undefined) {
+        if (level.get(c) === level.get(n)) edges.add(ek(c, n))
+      } else if (rc !== undefined && rn === undefined) {
+        if (rc % 2 === d % 2) edges.add(ek(c, n)) // along the ramp axis; levels set by construction
+      } else if (rn !== undefined && rc === undefined) {
+        if (rn % 2 === d % 2) edges.add(ek(c, n))
+      }
+    }
+  }
+  // Ramp end levels must match (low end = l, high end = l+1) — re-check.
+  for (const [c, d] of ramp) {
+    const [x, z] = c.split(',').map(Number)
+    const l = level.get(c)!
+    if (level.get(ck(x + DX[d], z + DZ[d])) !== l + 1 || level.get(ck(x - DX[d], z - DZ[d])) !== l) return null
+  }
+  // 4. Prune to 2-core.
+  const active = new Set<string>(level.keys())
+  const nbrs = (c: string) => {
+    const [x, z] = c.split(',').map(Number)
+    const out: string[] = []
+    for (const d of ALL_DIRS) {
+      const n = ck(x + DX[d], z + DZ[d])
+      if (active.has(n) && edges.has(ek(c, n))) out.push(n)
+    }
+    return out
+  }
+  const prune = (): boolean => {
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const c of [...active]) {
+        const deg = nbrs(c).length
+        const bad = ramp.has(c) ? deg < 2 : deg < 2
+        if (bad) {
+          if (protectedCells.has(c)) return false
+          active.delete(c); changed = true
+        }
+      }
+    }
     return true
   }
-  for (const path of paths) {
-    for (let i = 0; i + 1 < path.length; i++) {
-      if (!add(path[i], dirTo(path[i], path[i + 1]))) return false
-      if (!add(path[i + 1], dirTo(path[i + 1], path[i]))) return false
+  if (!prune()) return null
+  const [r0x, r0z] = baseCells(1)[0]
+  const reach = (from: string) => {
+    const seen = new Set<string>([from]); const q = [from]
+    while (q.length) for (const n of nbrs(q.pop()!)) if (!seen.has(n)) { seen.add(n); q.push(n) }
+    return seen
+  }
+  const comp = reach(ck(r0x, r0z))
+  for (const c of [...active]) if (!comp.has(c)) active.delete(c)
+  for (const c of protectedCells) if (!active.has(c)) return null
+  if (!prune()) return null
+  // 5. Thin.
+  const flatEdges = [...edges].filter(e => {
+    if (fixedSet.has(e)) return false
+    const [a, b] = e.split('|')
+    return active.has(a) && active.has(b) && !ramp.has(a) && !ramp.has(b)
+  })
+  const target = Math.floor(flatEdges.length * rand() * 0.25)
+  let removed = 0
+  for (const e of shuffle(flatEdges)) {
+    if (removed >= target) break
+    if (!edges.has(e)) continue
+    const [a, b] = e.split('|')
+    const me = ek(mk(a), mk(b))
+    const ends = [a, b, mk(a), mk(b)]
+    edges.delete(e); edges.delete(me)
+    if (ends.some(c => nbrs(c).length < 2) || reach(ck(r0x, r0z)).size !== active.size) {
+      edges.add(e); edges.add(me); continue
     }
+    removed += 2
   }
-  const ramps = [...need.values()].filter(e => e.c[3] !== undefined)
-  for (const a of ramps) for (const b of ramps) {
-    if (Math.abs(a.c[0] - b.c[0]) + Math.abs(a.c[1] - b.c[1]) === 1) return false
-  }
-  for (const { c: [x, z, level, high], dirs } of need.values()) {
-    grid.delete(key(x, z, BASE_Y))
-    const y = BASE_Y + level * STEP
-    if (high !== undefined) { placeTile('ramp', high, x, z, y); continue }
-    const tile = tileFor(dirs)
-    if (!tile || dirs.size < 2) return false
-    placeTile(tile.t, tile.r, x, z, y)
+  const lv = new Map<string, number>(), rp = new Map<string, Dir>(), es = new Set<string>()
+  for (const c of active) { lv.set(c, level.get(c)!); if (ramp.has(c)) rp.set(c, ramp.get(c)!) }
+  for (const e of edges) { const [a, b] = e.split('|'); if (active.has(a) && active.has(b)) es.add(e) }
+  return { level: lv, ramp: rp, edges: es }
+}
+
+/** Put a network on the grid. False if it fails any check. */
+function layNet(n: Net): boolean {
+  resetGrid()
+  for (const [c, l] of n.level) {
+    const [x, z] = c.split(',').map(Number)
+    const y = BASE_Y + l * STEP
+    const r = n.ramp.get(c)
+    if (r !== undefined) { placeTile('ramp', r, x, z, y); continue }
+    const dirs = new Set<Dir>()
+    for (const d of ALL_DIRS) if (n.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))) dirs.add(d)
+    const t = dirs.size >= 2 ? tileFor(dirs) : null
+    if (!t) return false
+    placeTile(t.t, t.r, x, z, y)
   }
   return validate() && allTilesConnected() && gridIsSymmetric()
 }
+
+function netScore(n: Net): number {
+  let junctions = 0
+  for (const [c] of n.level) {
+    if (n.ramp.has(c)) continue
+    const [x, z] = c.split(',').map(Number)
+    if (baseTeamOfTile(x, z, BASE_Y)) continue
+    const deg = ALL_DIRS.filter(d => n.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))).length
+    if (deg >= 3) junctions++
+  }
+  return junctions + n.ramp.size * 1.5 + n.level.size * 0.3
+}
+
+/** Off-base fork/cross count of a network. */
+function netJunctions(n: Net): number {
+  let j = 0
+  for (const [c] of n.level) {
+    if (n.ramp.has(c)) continue
+    const [x, z] = c.split(',').map(Number)
+    if (baseTeamOfTile(x, z, BASE_Y)) continue
+    if (ALL_DIRS.filter(d => n.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))).length >= 3) j++
+  }
+  return j
+}
+const NET_MIN_JUNCTIONS = 12
+
+function layBaseLine(): void {
+  if (!baseLineFits()) return
+  usedFallback = false
+  let best: Net | null = null, bestScore = -1, found = 0
+  for (let i = 0; i < NET_ATTEMPTS && found < NET_CANDIDATES; i++) {
+    const n = netAttempt()
+    if (!n || !layNet(n)) continue
+    const lv = new Set(n.level.values())
+    if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
+    if (netJunctions(n) < NET_MIN_JUNCTIONS) continue // want a woven net
+    found++
+    const sc = netScore(n)
+    if (sc > bestScore) { best = n; bestScore = sc }
+  }
+  if (best && layNet(best)) return
+  layFallback()
+}
+
+// Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
+// cells and "a|b" edges. Used when no attempt validates.
+const FALLBACK_NET: { cells: string[]; edges: string[] } = {
+  cells: ['0,0,-1', '0,1,-1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '0,6,0', '0,7,0', '1,0,-1,1', '1,2,0', '1,3,0', '1,4,0', '1,5,0', '1,6,0', '1,7,0', '2,0,0', '2,1,0', '2,2,0', '2,3,0', '2,4,0', '2,5,1', '2,6,0,2', '2,7,0', '3,0,0', '3,1,0', '3,2,0', '3,3,0', '3,4,0', '3,5,0,3', '3,6,0', '3,7,0', '4,0,0', '4,1,0', '4,2,0,1', '4,3,0', '4,4,0', '4,5,0', '4,6,0', '4,7,0', '5,0,0', '5,1,0,0', '5,2,1', '5,3,0', '5,4,0', '5,5,0', '5,6,0', '5,7,0', '6,0,0', '6,1,0', '6,2,0', '6,3,0', '6,4,0', '6,5,0', '6,7,-1,3', '7,0,0', '7,1,0', '7,2,0', '7,3,0', '7,4,0', '7,5,0', '7,6,-1,2', '7,7,-1'],
+  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|0,6', '0,5|1,5', '0,6|0,7', '0,6|1,6', '0,7|1,7', '1,0|2,0', '1,2|2,2', '1,2|1,3', '1,3|1,4', '1,3|2,3', '1,4|1,5', '1,4|2,4', '1,5|1,6', '1,6|1,7', '1,7|2,7', '2,0|3,0', '2,0|2,1', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|2,4', '2,3|3,3', '2,4|3,4', '2,5|2,6', '2,5|3,5', '2,6|2,7', '2,7|3,7', '3,0|4,0', '3,0|3,1', '3,1|3,2', '3,1|4,1', '3,2|3,3', '3,2|4,2', '3,3|4,3', '3,4|4,4', '3,5|4,5', '3,6|3,7', '3,6|4,6', '3,7|4,7', '4,0|5,0', '4,0|4,1', '4,2|5,2', '4,3|5,3', '4,4|5,4', '4,4|4,5', '4,5|4,6', '4,5|5,5', '4,6|4,7', '4,6|5,6', '4,7|5,7', '5,0|6,0', '5,0|5,1', '5,1|5,2', '5,3|6,3', '5,3|5,4', '5,4|5,5', '5,4|6,4', '5,5|5,6', '5,5|6,5', '5,6|5,7', '5,7|6,7', '6,0|7,0', '6,0|6,1', '6,1|6,2', '6,1|7,1', '6,2|6,3', '6,2|7,2', '6,3|6,4', '6,3|7,3', '6,4|6,5', '6,4|7,4', '6,5|7,5', '6,7|7,7', '7,0|7,1', '7,1|7,2', '7,2|7,3', '7,3|7,4', '7,4|7,5', '7,5|7,6', '7,6|7,7'],
+}
+
+/** Lay the frozen fallback layout (also called by verify-graph to check it). */
+export function layFallback(): void {
+  usedFallback = true
+  const n: Net = { level: new Map(), ramp: new Map(), edges: new Set(FALLBACK_NET.edges) }
+  for (const s of FALLBACK_NET.cells) {
+    const [x, z, l, r] = s.split(',')
+    n.level.set(ck(+x, +z), +l)
+    if (r !== undefined) n.ramp.set(ck(+x, +z), +r as Dir)
+  }
+  if (!layNet(n)) throw new Error('fallback layout invalid')
+}
+
+/** Serialise the current grid as a FALLBACK_NET literal (dev helper). */
+export function dumpNet(): string {
+  const cells: string[] = [], edges = new Set<string>()
+  for (const p of grid.values()) {
+    const l = Math.round((p.y - BASE_Y) / STEP)
+    cells.push(p.type === 'ramp' ? `${p.x},${p.z},${l},${p.r}` : `${p.x},${p.z},${l}`)
+    for (const d of openingsAt(p.type, p.r)) edges.add(ek(ck(p.x, p.z), ck(p.x + DX[d], p.z + DZ[d])))
+  }
+  return JSON.stringify({ cells, edges: [...edges] })
+}
+
+/** True if the last generate() used the frozen fallback (verify scripts). */
+export function lastLayoutUsedFallback(): boolean { return usedFallback }
 
 function gridIsSymmetric(): boolean {
   for (const p of grid.values()) {
@@ -837,65 +980,8 @@ function gridIsSymmetric(): boolean {
   return true
 }
 
-/** One random 4-path attempt as full paths (base cell .. base cell), or null. */
-function randomPaths(): LineCell[][] | null {
-  const perm = shuffle([0, 1, 2, 3])
-  const half: LineCell[][] = []
-  for (const [a, c] of [[perm[0], perm[2]], [perm[1], perm[3]]]) {
-    const [ring, start] = RED_EXITS[a]
-    const [bRing, bEnd] = RED_EXITS[c].map(([x, z]) => mirrorCell(x, z)) as [[number, number], [number, number]]
-    const route = randomRoute(start, bEnd)
-    if (!route) return null
-    const lv = assignLevels([ring, ...route, bRing])
-    if (!lv) return null
-    half.push(lv)
-  }
-  return [...half, ...half.map(mirrorLine)]
+function placeRings(): void {
+  const [x0, z0] = baseCells(1)[0]
+  const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
+  for (const [x, z] of baseCells(1)) placeSym('turn', ringRot(Math.min(1, x - x0), Math.min(1, z - z0)), x, z, BASE_Y)
 }
-
-function layBaseLine(): void {
-  if (!baseLineFits()) return
-  usedFallback = false
-  for (let i = 0; i < SKY_PATH_ATTEMPTS; i++) {
-    const paths = randomPaths()
-    if (paths && layPaths(paths)) { currentPaths = paths; return }
-    resetGrid(); placeRings()
-  }
-  layFallback()
-}
-
-/** Lay the frozen fallback layout (also called by verify-graph to check it). */
-export function layFallback(): void {
-  usedFallback = true
-  resetGrid(); placeRings()
-  currentPaths = [...FALLBACK_HALF, ...FALLBACK_HALF.map(mirrorLine)]
-  if (!layPaths(currentPaths)) throw new Error('fallback layout invalid')
-}
-
-/** True if the last generate() fell back to FALLBACK_PATHS (verify scripts). */
-export function lastLayoutUsedFallback(): boolean { return usedFallback }
-
-/** Current paths as [x, z, level, rampHighDir?] cells, base tiles excluded (verify scripts). */
-export function baseLinePathCells(): LineCell[][] {
-  if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || !baseLineFits()) return []
-  return currentPaths.map(p => p.slice(1, -1))
-}
-
-/** Grid cells of each path, base tiles excluded (verify scripts). */
-export function baseLinePaths(): Array<Array<[number, number]>> {
-  return baseLinePathCells().map(p => p.map(([x, z]) => [x, z] as [number, number]))
-}
-
-/** Union of the path cells (non-base tiles), for verify scripts. */
-export function baseLineCells(): Array<[number, number]> {
-  const seen = new Set<string>()
-  const out: Array<[number, number]> = []
-  for (const p of baseLinePaths()) for (const c of p) {
-    const k = `${c[0]},${c[1]}`
-    if (!seen.has(k)) { seen.add(k); out.push(c) }
-  }
-  return out
-}
-
-/** Paths incl. base end cells — used to print/freeze a fallback. */
-export function currentFullPaths(): LineCell[][] { return currentPaths.map(p => p.slice()) }
