@@ -57,8 +57,9 @@ export function initPlayerNet(): void {
     if (!IS_SKY || myTeam === Team.None) teleportHome('initial')
   })
 
-  // Sky: fall respawn.
-  if (IS_SKY) {
+  // Sky: fall respawn. Off when the level is on the ground (SKY_ALTITUDE <
+  // FALL_RESPAWN_DROP): there is nothing below to fall to.
+  if (IS_SKY && BASE_Y >= FALL_RESPAWN_DROP) {
     let cooldown = 0
     engine.addSystem((dt: number) => {
       if (cooldown > 0) { cooldown -= dt; return }

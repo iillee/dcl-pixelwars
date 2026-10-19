@@ -23,6 +23,7 @@ import { movePlayerTo } from '~system/RestrictedActions'
 
 import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H, baseTeamOfTile } from './maze/generator'
 import { rand } from './maze/rng'
+import { IS_SKY, SKY_BASES_ONLY } from './maze/level'
 
 // ─── Tuning ─────────────────────────────────────────────────────────
 const ORB_TRIGGER_RADIUS = 1.2   // meters
@@ -64,6 +65,8 @@ export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
     for (const e of currentPair.soundEntities) engine.removeEntity(e)
     currentPair = null
   }
+
+  if (IS_SKY && SKY_BASES_ONLY) return // bases only: no orbs
 
   // Candidates: non-ramp tiles so both endpoints are flat landings, AND
   // outside the 3×3 block around the center cross so players can't

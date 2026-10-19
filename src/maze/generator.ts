@@ -22,7 +22,7 @@ import {
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN,
-  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES,
+  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY,
 } from './level'
 
 // ─── World-scale constants ──────────────────────────────────────────
@@ -417,7 +417,7 @@ export function generateWithRetry(startSeed: number, maxAttempts = 500): number 
     setSeed(trySeed)
     resetGrid()
     generate()
-    if (validate() && (!IS_SKY || allTilesConnected())) return trySeed
+    if (validate() && (!IS_SKY || SKY_BASES_ONLY || allTilesConnected())) return trySeed
   }
   return null
 }
@@ -445,12 +445,14 @@ export function mirrorCell(x: number, z: number): [number, number] {
 
 const BASE_X0 = Math.floor(GRID_W / 2) - Math.floor(SKY_BASE_SIZE / 2)
 
-/** Grid cells of a team's base (1 = RED, south; 2 = BLUE, north). */
+/** Grid cells of a team's base. Bases-only: RED in the SW corner, BLUE in
+ *  the NE corner. Full mode: RED mid-south edge, BLUE mid-north edge. */
 export function baseCells(team: number): Array<[number, number]> {
   const out: Array<[number, number]> = []
+  const x0 = SKY_BASES_ONLY ? SKY_BASE_MARGIN : BASE_X0
   for (let i = 0; i < SKY_BASE_SIZE; i++) {
     for (let j = 0; j < SKY_BASE_SIZE; j++) {
-      const x = BASE_X0 + i, z = SKY_BASE_MARGIN + j
+      const x = x0 + i, z = SKY_BASE_MARGIN + j
       out.push(team === 1 ? [x, z] : mirrorCell(x, z))
     }
   }
@@ -474,13 +476,18 @@ export function baseTeamOfCellId(id: string): number {
   return baseTeamOfTile(+parts[0], +parts[1], +parts[2])
 }
 
-/** World-space spawn (feet) at the centre of a team's base, plus a camera target facing the enemy. */
+/** World-space spawn (feet) on a team's base, plus a camera target at the
+ *  scene centre. Uses the centre of the base TILE nearest the scene centre:
+ *  a ring of turn tiles has a hole in the middle of the block, so the block
+ *  centre isn't walkable. */
 export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
-  const cells = baseCells(team)
-  let sx = 0, sz = 0
-  for (const [x, z] of cells) { sx += x; sz += z }
-  const cx = (sx / cells.length + 0.5) * CELL + MAZE_ORIGIN
-  const cz = (sz / cells.length + 0.5) * CELL + MAZE_ORIGIN
+  const mid = (GRID_W - 1) / 2
+  let best = baseCells(team)[0]
+  for (const c of baseCells(team)) {
+    if (Math.abs(c[0] - mid) + Math.abs(c[1] - mid) < Math.abs(best[0] - mid) + Math.abs(best[1] - mid)) best = c
+  }
+  const cx = (best[0] + 0.5) * CELL + MAZE_ORIGIN
+  const cz = (best[1] + 0.5) * CELL + MAZE_ORIGIN
   const y = BASE_Y + 1.5 // walkable slab top is +0.5
   return { pos: { x: cx, y, z: cz }, look: { x: SCENE_SIZE / 2, y, z: SCENE_SIZE / 2 } }
 }
@@ -572,6 +579,19 @@ function generateSky(): void {
     const [mx, mz] = mirrorCell(x, z)
     const m = grid.get(key(mx, mz, y))
     if (m && m !== p) frontierFrom(m, frontier)
+  }
+
+  // Bases-only: each base is a closed loop — a 2×2 block of `turn` tiles
+  // whose openings only face each other (SW opens N+E, SE N+W, NE S+W,
+  // NW S+E). The 180° image of RED's block is BLUE's block.
+  if (SKY_BASES_ONLY) {
+    const [x0, z0] = baseCells(1)[0]
+    const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
+    for (const [x, z] of baseCells(1)) {
+      const i = Math.min(1, x - x0), j = Math.min(1, z - z0)
+      placeSym('turn', ringRot(i, j), x, z, BASE_Y)
+    }
+    return
   }
 
   // 1. Seeds. RED base crosses (images become the BLUE base), then the hub.

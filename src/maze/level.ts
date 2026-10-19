@@ -18,13 +18,18 @@ export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 
 // ─── Sky tuning ─────────────────────────────────────────────────────
 /** Floor of the lowest level (m). Base tiles sit here; WALKABLE_TOP is +0.5. */
-export const SKY_ALTITUDE = 80
+export const SKY_ALTITUDE = 0 // troubleshooting: bases on the ground (was 80)
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
+/** Bases-only mode: generate ONLY the two corner bases (closed 2×2 rings of
+ *  `turn` tiles) — no main path, branches, hub or teleport orbs. Set false
+ *  to grow the full sky level again (bases then sit mid-edge, see baseCells). */
+export const SKY_BASES_ONLY = true
 /** Base is a SKY_BASE_SIZE × SKY_BASE_SIZE square of cross tiles. */
 export const SKY_BASE_SIZE = 2
-/** Empty grid rows between a base and its scene edge (≥1: a cross can't face off-grid). */
-export const SKY_BASE_MARGIN = 1
+/** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
+ *  corners (the ring has no outward openings). Full mode needs ≥1. */
+export const SKY_BASE_MARGIN = 0
 /** Put a 2×2 cross hub at the grid centre (the main path's meeting point). */
 export const SKY_CENTRE_HUB = true
 /** 0..1. Chance a branch frontier cell keeps branching instead of being
