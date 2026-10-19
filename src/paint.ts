@@ -84,7 +84,7 @@ export const FLAT_OFFSET = 0.275 * 2 // 0.55m world above tile origin — clears
 // normal (not world-up). Phones have less depth precision than desktop;
 // with only the ~5 cm vertical clearance the ramp GLB surface won the
 // depth test and slope paint was invisible on mobile (29 Sep playtest).
-export const INCLINE_NORMAL_OFFSET = 0.12
+export const INCLINE_NORMAL_OFFSET = 0.04 // 4 cm along the normal: enough to beat z-fighting, 0.12 floated visibly (19 Oct)
 
 // Placeholder masks — designer is re-exporting. Cross is going first so we'll
 // author its real mask against the new GLB once it lands. Everything else stays
