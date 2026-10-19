@@ -751,7 +751,27 @@ function netAttempt(): Net | null {
   for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) level.set(ck(x, z), 0)
   const blobLevels: number[] = []
   for (const l of [1, -1]) { const k = 2 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) blobLevels.push(l) }
-  for (const l of shuffle(blobLevels)) {
+  if (!SKY_SYMMETRIC) {
+    // Asymmetric: grow 1–2 raised and 1–2 sunk regions of VERT_REGION_MIN..MAX
+    // cells each by random flood from a free cell, so most of the grid leaves
+    // L0 and only the base aprons + a connective spine stay flat.
+    const free = (c: string) => { const [x, z] = c.split(',').map(Number); return level.get(c) === 0 && !protectedCells.has(c) && !nearBase(x, z) }
+    const regions: number[] = []
+    for (const l of [1, -1]) { const k = 1 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) regions.push(l) }
+    for (const l of shuffle(regions)) {
+      const starts = shuffle([...level.keys()].filter(free))
+      if (!starts.length) break
+      const want = VERT_REGION_MIN + Math.floor(rand() * (VERT_REGION_MAX - VERT_REGION_MIN + 1))
+      const got = [starts[0]]; level.set(starts[0], l)
+      while (got.length < want) {
+        const fr: string[] = []
+        for (const c of got) { const [x, z] = c.split(',').map(Number); for (const d of ALL_DIRS) { const nb = ck(x + DX[d], z + DZ[d]); if (inBounds(x + DX[d], z + DZ[d]) && free(nb)) fr.push(nb) } }
+        if (!fr.length) break
+        const nb = fr[Math.floor(rand() * fr.length)]; level.set(nb, l); got.push(nb)
+      }
+    }
+  }
+  if (SKY_SYMMETRIC) for (const l of shuffle(blobLevels)) {
     {
       const span = Math.max(1, Math.floor(GRID_W / 2) - 1) // 8×8: 2–4, 6×6: 2–3
       // Below 6×6 a 2×2 blob swallows the cells a ramp needs, so allow 1-wide blobs
@@ -768,7 +788,8 @@ function netAttempt(): Net | null {
   }
   // 2. Ramps.
   const ramp = new Map<string, Dir>()
-  const maxRamps = Math.max(4, 2 * Math.round((3 + Math.floor(rand() * 5)) * NET_SCALE)) // 8×8: 6–14, 6×6: 4–8
+  const maxRamps = SKY_SYMMETRIC ? Math.max(4, 2 * Math.round((3 + Math.floor(rand() * 5)) * NET_SCALE)) // 8×8: 6–14, 6×6: 4–8
+    : 5 + Math.floor(rand() * 4) // asymmetric: 5–8 (each level region needs ≥2 to avoid dead ends)
   const cands: Array<[string, Dir]> = []
   for (const [c, l] of level) {
     if (protectedCells.has(c)) continue
@@ -868,9 +889,14 @@ function netAttempt(): Net | null {
     const [a, b] = e.split('|')
     return active.has(a) && active.has(b) && !ramp.has(a) && !ramp.has(b)
   })
-  const target = Math.floor(flatEdges.length * rand() * THIN_MAX)
+  // Asymmetric: L0 links are thinned harder (up to THIN_L0_MAX) so the flat
+  // level reads as paths, not one merged slab; L0 links go first.
+  const isL0 = (e: string) => e.split('|').every(c => level.get(c) === 0)
+  const target = SKY_SYMMETRIC ? Math.floor(flatEdges.length * rand() * THIN_MAX)
+    : Math.floor(flatEdges.filter(isL0).length * (0.15 + rand() * (THIN_L0_MAX - 0.15)) + flatEdges.filter(e => !isL0(e)).length * rand() * THIN_MAX)
   let removed = 0
-  for (const e of shuffle(flatEdges)) {
+  const order = SKY_SYMMETRIC ? shuffle(flatEdges) : shuffle(flatEdges.filter(isL0)).concat(shuffle(flatEdges.filter(e => !isL0(e))))
+  for (const e of order) {
     if (removed >= target) break
     if (!edges.has(e)) continue
     const [a, b] = e.split('|')
@@ -880,7 +906,7 @@ function netAttempt(): Net | null {
     if (ends.some(c => nbrs(c).length < 2) || reach(ck(r0x, r0z)).size !== active.size) {
       edges.add(e); edges.add(me); continue
     }
-    removed += 2
+    removed += e === me ? 1 : 2
   }
   const lv = new Map<string, number>(), rp = new Map<string, Dir>(), es = new Set<string>()
   for (const c of active) { lv.set(c, level.get(c)!); if (ramp.has(c)) rp.set(c, ramp.get(c)!) }
@@ -914,7 +940,34 @@ function netScore(n: Net): number {
     const deg = ALL_DIRS.filter(d => n.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))).length
     if (deg >= 3) junctions++
   }
-  return junctions + n.ramp.size * 1.5 + n.level.size * 0.3
+  const v = verticality(n)
+  return junctions + n.ramp.size * 1.5 + n.level.size * 0.3 + (SKY_SYMMETRIC ? 0 : 12 * v.share)
+}
+
+/** Asymmetric verticality targets (see layBaseLine / verify-graph). */
+export const VERT_MIN_SHARE = 0.45 // non-base tiles that are not flat L0 (L+1, L-1 or ramp)
+export const VERT_MIN_EACH = 3     // flat tiles on L+1 and on L-1, each
+export const VERT_MIN_RAMPS = 4
+const VERT_REGION_MIN = 3, VERT_REGION_MAX = 6
+const THIN_L0_MAX = 0.5
+
+function verticality(n: Net): { share: number; hi: number; lo: number; ramps: number } {
+  let off = 0, tot = 0, hi = 0, lo = 0
+  for (const [c, l] of n.level) {
+    const [x, z] = c.split(',').map(Number)
+    if (baseTeamOfTile(x, z, BASE_Y)) continue
+    tot++
+    const r = n.ramp.has(c)
+    if (r || l !== 0) off++
+    if (!r && l === 1) hi++
+    if (!r && l === -1) lo++
+  }
+  return { share: tot ? off / tot : 0, hi, lo, ramps: n.ramp.size }
+}
+function verticalOk(n: Net): boolean {
+  if (SKY_SYMMETRIC) return true
+  const v = verticality(n)
+  return v.share >= VERT_MIN_SHARE && v.hi >= VERT_MIN_EACH && v.lo >= VERT_MIN_EACH && v.ramps >= VERT_MIN_RAMPS
 }
 
 /** Off-base fork/cross count of a network. */
@@ -940,6 +993,7 @@ function layBaseLine(): void {
     const lv = new Set(n.level.values())
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
     if (netJunctions(n) < NET_MIN_JUNCTIONS) continue // want a woven net
+    if (!verticalOk(n)) { vertMisses++; continue } // asymmetric: real height every round
     if ([...n.level.keys()].length - 2 < NET_MIN_COVERAGE * (GRID_W * GRID_H - 2)) continue // verify's coverage gate
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
     if (!SKY_SYMMETRIC && !fairnessOk()) { fairMisses++; continue } // asymmetric: RED/BLUE must be on equal footing
@@ -954,10 +1008,10 @@ function layBaseLine(): void {
 // Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
 // cells and "a|b" edges. Used when no attempt validates.
 const FALLBACKS: Record<string, { cells: string[]; edges: string[] }> = {
-  // 5×5 asymmetric (SKY_SYMMETRIC=false), seed 7919, passes verify-graph.
+  // 5×5 asymmetric (SKY_SYMMETRIC=false) with the verticality gate, seed 7919, passes verify-graph.
   '5x5': {
-    cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0,0', '0,4,1', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0,3', '2,0,0', '2,1,0', '2,2,0', '2,3,0', '2,4,0', '3,1,-1,3', '3,4,0', '4,1,-1', '4,2,-1,0', '4,3,0', '4,4,0'],
-    edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,4|1,4', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,1|2,1', '1,2|1,3', '1,2|2,2', '1,3|2,3', '1,4|2,4', '2,0|2,1', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,3|2,4', '2,4|3,4', '3,1|4,1', '3,4|4,4', '4,1|4,2', '4,2|4,3', '4,3|4,4'],
+    cells: ['0,0,0', '0,1,0', '0,2,-1,2', '0,3,-1', '0,4,-1', '1,0,0', '1,1,-1,2', '1,2,-1', '1,3,-1', '1,4,-1', '2,0,0,1', '2,3,-1,1', '3,0,1', '3,1,1', '3,2,0,2', '3,3,0', '3,4,0', '4,0,1', '4,1,1', '4,3,0', '4,4,0'],
+    edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,2|0,3', '0,3|0,4', '0,4|1,4', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,2|1,3', '1,3|1,4', '1,3|2,3', '2,0|3,0', '2,3|3,3', '3,0|4,0', '3,0|3,1', '3,1|3,2', '3,1|4,1', '3,2|3,3', '3,3|3,4', '3,3|4,3', '3,4|4,4', '4,0|4,1', '4,3|4,4'],
   },
   // 6×6 symmetric (also valid when asymmetric).
   '6x6': {
@@ -1048,6 +1102,9 @@ export function teleporterMisses(): number { return tpMisses }
 /** Asymmetric fairness tolerance (tiles of walking distance, tile graph). */
 export const FAIR_TOL = 1
 let fairMisses = 0
+let vertMisses = 0
+/** Layouts rejected so far by the verticality gate (verify stats). */
+export function verticalityMisses(): number { return vertMisses }
 /** Layouts rejected so far by the asymmetric fairness check (verify stats). */
 export function fairnessMisses(): number { return fairMisses }
 
