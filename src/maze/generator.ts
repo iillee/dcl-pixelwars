@@ -22,7 +22,7 @@ import {
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN,
-  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY,
+  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_EDGE_INSET,
 } from './level'
 
 // ─── World-scale constants ──────────────────────────────────────────
@@ -34,11 +34,14 @@ export const CELL = 16 * TILE_SCALE                                  // one grid
 // maze grid (160 m) centered inside the scene with an 8 m border on all
 // sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
 // so cell (2,2) — the true center — lands exactly at world (88, 88).
-// Sky mode: 20×20 parcels = 320 m → 10×10 grid, no border (see level.ts).
+// Sky mode: 20×20 parcels = 320 m, inset SKY_EDGE_INSET (16 m = 1 parcel)
+// from every edge → 9×9 grid filling 16–304 m, centred on (160, 160) so the
+// 180° mirror (x → GRID_W-1-x) is also a mirror about the scene centre.
 export const SCENE_SIZE = IS_SKY ? 320 : 176
-export const GRID_W = Math.floor(SCENE_SIZE / CELL)
-export const GRID_H = Math.floor(SCENE_SIZE / CELL)
-export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 8 m border
+const EDGE_INSET = IS_SKY ? SKY_EDGE_INSET : 0
+export const GRID_W = Math.floor((SCENE_SIZE - 2 * EDGE_INSET) / CELL)
+export const GRID_H = Math.floor((SCENE_SIZE - 2 * EDGE_INSET) / CELL)
+export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // classic 8 m border; sky 16 m
 export const STEP = 5.3835 * TILE_SCALE                              // ramp Y increment
                                                                      // (5.3835 m = walkable floor-to-floor in the new tile GLBs)
 /** World Y of the lowest level. 0 in classic; SKY_ALTITUDE in sky. Tiles
