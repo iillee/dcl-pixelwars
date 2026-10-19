@@ -1,122 +1,114 @@
 /**
  * roster.ts — authoritative team assignment.
  *
- * The roster is an ordered list of userIds in join order. A player's team
- * is `roster.indexOf(userId) % 2` (1 = Red, 2 = Blue, matching the client
- * Team enum). Consequences:
+ * V1 balance rules (PO Week 1):
+ *   - A NEW joiner goes to the team with fewer ACTIVE humans (see
+ *     ACTIVE_WINDOW_MS). Ties go to a coin flip.
+ *   - A RETURNING userId keeps the team it already holds this round.
+ *   - A live player's team is never changed mid-round.
+ *   - At a round boundary, players who are no longer active lose their
+ *     assignment (pruneForNewRound) so a later rejoin gets re-balanced.
+ *     Active players keep their colour across rounds.
  *
- *   - Guaranteed alternation. First joiner is Red, second Blue, third Red...
- *     Fixes the Phase-3 client-hash approach that could put 2 blue players
- *     in a row by coincidence.
- *   - Stable across rejoin. A returning userId gets its original team.
- *   - No compaction on leave. If player #3 leaves, the roster keeps their
- *     slot; the next new joiner becomes player #5. Compacting would flip
- *     everyone's team when someone leaves \u2014 disastrous mid-round.
- *
- * The roster lives in RAM. Rounds don't persist it, and a server restart
- * resets it. That's fine for Phase 4; leaderboard persistence lands later.
+ * Lives in RAM; a server restart resets it.
  */
 
-const roster: string[] = []
-
-// Coin-flip chosen ONCE at server startup. 0 = first joiner is Red
-// (roster idx 0 -> team 1), 1 = first joiner is Blue (roster idx 0 ->
-// team 2). Applied identically to every team lookup so alternation and
-// rejoin-stability are preserved — all we're doing is randomising which
-// team lands on the even slots. Kept in RAM: a server restart re-rolls,
-// which is fine (the roster is also RAM-only).
-const teamParityFlip: 0 | 1 = Math.random() < 0.5 ? 0 : 1
-console.log(`[Roster] team parity: first joiner will be ${teamParityFlip === 0 ? 'RED' : 'BLUE'}`)
-
-function teamFromIndex(idx: number): number {
-  return ((idx + teamParityFlip) % 2 === 0) ? 1 : 2
-}
+const teamOf = new Map<string, number>() // userId → 1 (Red) | 2 (Blue)
 
 // Last-activity timestamps per userId. Populated by markActive() from
-// paintTick + joinRoster handlers. Used by activeCount / activeSoloTeam
-// to filter out invisible scraper bots that connect but never paint.
+// paintTick + joinRoster handlers. Used to filter out invisible scraper
+// bots that connect but never paint, and as the balance headcount.
 const lastActiveAt = new Map<string, number>()
 
-/** 60s of no paint activity = considered idle/scraper. Real players
- *  paint constantly while moving; even AFK players usually resume
- *  within a minute. Tuneable if we see too many false-idle boots. */
+/** 60s of no paint activity = considered idle/scraper. */
 const ACTIVE_WINDOW_MS = 60000
+
+function isActive(uid: string, now = Date.now()): boolean {
+  return (lastActiveAt.get(uid) ?? 0) >= now - ACTIVE_WINDOW_MS
+}
+
+/** Active human count per team, optionally excluding one userId. */
+export function activeTeamCounts(exclude?: string): { red: number; blue: number } {
+  const now = Date.now()
+  let red = 0, blue = 0
+  for (const [uid, t] of teamOf) {
+    if (uid === exclude || !isActive(uid, now)) continue
+    if (t === 1) red++
+    else if (t === 2) blue++
+  }
+  return { red, blue }
+}
 
 /** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue). */
 export function assignTeam(userId: string): number {
-  let idx = roster.indexOf(userId)
-  if (idx === -1) {
-    roster.push(userId)
-    idx = roster.length - 1
+  const existing = teamOf.get(userId)
+  if (existing !== undefined) return existing
+  const { red, blue } = activeTeamCounts(userId)
+  const team = red < blue ? 1 : blue < red ? 2 : (Math.random() < 0.5 ? 1 : 2)
+  teamOf.set(userId, team)
+  console.log(`[Roster] new ${userId} → ${team === 1 ? 'RED' : 'BLUE'} (active red=${red} blue=${blue})`)
+  return team
+}
+
+/**
+ * Round boundary: drop assignments of players who are no longer active so
+ * a later rejoin is balanced against the current lobby. Active players
+ * keep their team (no mid-session swaps). Returns how many were pruned.
+ */
+export function pruneForNewRound(): number {
+  const now = Date.now()
+  let n = 0
+  for (const uid of Array.from(teamOf.keys())) {
+    if (!isActive(uid, now)) { teamOf.delete(uid); lastActiveAt.delete(uid); n++ }
   }
-  // Parity + one-time random flip: matches Team enum in src/paint.ts
-  // (1 = Red, 2 = Blue). See teamParityFlip declaration above.
-  return teamFromIndex(idx)
+  return n
 }
 
-/** For diagnostics / future admin tools. */
+/** For diagnostics. */
 export function rosterSize(): number {
-  return roster.length
+  return teamOf.size
 }
 
-/** Mark a userId as having done something "player-like" (painted, joined).
- *  Called from server.ts on paintTick and joinRoster. */
+/** Mark a userId as having done something "player-like" (painted, joined). */
 export function markActive(userId: string): void {
   lastActiveAt.set(userId, Date.now())
 }
 
-/** Mark a userId as gone. Called from server.ts on onLeaveScene so the
- *  active-human count drops immediately instead of waiting for the 60s
- *  activity window to expire. Roster slot is preserved (rejoin stability);
- *  only the activity timestamp is cleared. */
+/** Mark a userId as gone (onLeaveScene). Team kept for this round so a
+ *  quick rejoin returns to the same colour. */
 export function markInactive(userId: string): void {
   lastActiveAt.delete(userId)
 }
 
-/** Count roster members who've been active in the last ACTIVE_WINDOW_MS.
- *  Filters out invisible/scraper accounts that connect but never paint. */
+/** Count roster members active in the last ACTIVE_WINDOW_MS. */
 export function activeHumanCount(): number {
-  const cutoff = Date.now() - ACTIVE_WINDOW_MS
-  let n = 0
-  for (const uid of roster) {
-    const last = lastActiveAt.get(uid) ?? 0
-    if (last >= cutoff) n++
-  }
-  return n
+  const c = activeTeamCounts()
+  return c.red + c.blue
 }
 
 /** Team of the single active human, or null if the active count isn't
  *  exactly 1. Used by the bot manager to pick the opposite colour. */
 export function activeSoloHumanTeam(): number | null {
-  const cutoff = Date.now() - ACTIVE_WINDOW_MS
-  let found: string | null = null
-  for (const uid of roster) {
-    const last = lastActiveAt.get(uid) ?? 0
-    if (last < cutoff) continue
-    if (found !== null) return null // more than one active
-    found = uid
+  const now = Date.now()
+  let found: number | null = null
+  for (const [uid, t] of teamOf) {
+    if (!isActive(uid, now)) continue
+    if (found !== null) return null
+    found = t
   }
-  if (!found) return null
-  return getTeam(found)
+  return found
 }
 
-/**
- * Team of the Nth roster slot (0 = first joiner). Returns null if the
- * roster is shorter than that. Used by the bot manager to pick the
- * opposite colour of the sole human player when spawning a solo-mode bot.
- */
-export function getTeamAt(index: number): number | null {
-  if (index < 0 || index >= roster.length) return null
-  return teamFromIndex(index)
-}
-
-/**
- * Look up a userId's team without side effects. Returns 1 (Red), 2 (Blue),
- * or null if the user has never called joinRoster. Used by the paintTick
- * handler to attribute paint to a team.
- */
+/** Look up a userId's team without side effects (null if never joined). */
 export function getTeam(userId: string): number | null {
-  const idx = roster.indexOf(userId)
-  if (idx === -1) return null
-  return teamFromIndex(idx)
+  return teamOf.get(userId) ?? null
+}
+
+/** Active players and their teams, for the teamRoster broadcast. Players
+ *  who left (markInactive) are omitted so their name tag clears. */
+export function rosterEntries(): Array<{ userId: string; team: number }> {
+  const now = Date.now()
+  const out: Array<{ userId: string; team: number }> = []
+  for (const [userId, team] of teamOf) if (isActive(userId, now)) out.push({ userId, team })
+  return out
 }
