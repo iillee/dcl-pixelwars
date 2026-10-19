@@ -275,3 +275,31 @@ Kept so the old roadmap is not mistaken for the current plan.
 - Linked teleport orbs and a ghost bot already exist.
 - There is already an all-time painter leaderboard. V1 does not rebuild it into a meta-game.
 - The core verb stays walk-to-paint. Phones stay in scope.
+
+---
+
+## 12. Build status (2026-10-19)
+
+What exists in code against the §9 plan. **Nothing below on branch `level` has been playtested in-world or deployed**; it has only passed build + the verify scripts. No playtest result is claimed here.
+
+**On `main` (`956f79b`) — Week 1–2 items built:**
+
+- SDK upgraded to the auth-server build (`@dcl/sdk` 7.30.2).
+- Team balancing (join-order drift fixed without mid-round swaps) and red/blue name tags.
+- Faster on your own paint: 1.3× jog/run (`OWN_PAINT_SPEED_MULT`), tuning still open.
+- Personal contribution on the end-of-round banner.
+- Reliability: join retry until a team is assigned; paint delta/snapshot messages chunked to ≤200 changes.
+- Slope paint: offset tweaks were tried and reverted; original code kept.
+
+**On branch `level` — level scale / density experiment (the §9 Week 1 "tighter layout" item, done as a new mode):**
+
+- `LEVEL_MODE = 'sky'`: 20×20-parcel world, a 6×6 grid of 32 m tiles over 64–256 m floating at y 32, three levels (L-1 / L0 / L+1, 10.767 m rise). `classic` mode is still in the code.
+- Team bases as **spawn landmarks only** (consistent with §9: orientation, not a pillar): one team-locked corner tile each, RED (0,0) and BLUE (5,5), spawns (80, 33.5, 80) / (240, 33.5, 240).
+- A seeded **woven network** generator: new layout every round, 180° symmetric, ±1-level ramps, no dead ends, everything reachable, dense junctions.
+- Teleport orbs return as two mirrored pairs on remote tiles.
+- Ghost bot spawns on the base opposite the solo player.
+- Fall respawn to your base.
+- Overview camera (angled whole-map view, ported from dcl-snowdrift). Keep-or-drop undecided.
+
+**Still open from §9:** Paint Bomb and any second power-up, corruption/wildfire solo experiment, block remodel / skins, the Week 4 multiplayer + mobile playtests and balance pass, and deciding whether the sky level replaces the classic maze.
+

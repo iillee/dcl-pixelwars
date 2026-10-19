@@ -46,3 +46,8 @@ Combat and projectiles, hide-in-paint, a promised 1 m grid, clans, daily challen
 ## Why come back (honest)
 
 Short rounds, a new maze every time, and a banner that shows your share of the result. No new retention system in V1. The 29 Sep 2026 playtest set this direction. It did not prove the new mechanics yet.
+
+## Build status (2026-10-19)
+
+`main` (`956f79b`): SDK auth-server upgrade, team balancing + name tags, 1.3× own-paint speed, personal contribution on the banner, join retry, chunked paint messages. Branch `level`: a new **sky** level mode (6×6 tiles at y 32, three levels, 1-tile corner bases as spawns), seeded woven generator, mirrored teleporter pairs, ghost on the opposite base, fall respawn, overview camera (keep-or-drop open). None of `level` is playtested in-world or deployed yet. Details: [`../docs/HANDOFF.md`](../docs/HANDOFF.md).
+

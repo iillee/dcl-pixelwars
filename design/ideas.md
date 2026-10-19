@@ -10,3 +10,6 @@ Sparks from the 2026-09-29 playtest and earlier drafts. They are not scope. The 
 - **Clans / community colors, dailies, async farming, weekly HUD countdown, recently-seen list.** Raised in the playtest or the September GDD. Deferred together so V1 stays a territory pass.
 - **Six finished seasonal skins.** V1 experiments on the six blocks and ships what reads. A rotation catalogue is later content.
 - **Dual bases as a weapon-unlock site.** Cut from the V1 pillar. A later base, if any, is orientation or a future mode, not this round’s foundation.
+- **Sky level art pass.** Pillars / stilts under the floating tiles running down to water, in the spirit of Monument Valley and Little Island. Visual only; would not change the generator.
+- **Overview mode.** Ported from dcl-snowdrift on `level`; keep it, restyle it, or drop it after a playtest.
+

@@ -4,7 +4,10 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Pixelwars** — two teams (Red and Blue) run around a fresh maze every round, painting the walkable surface in their color just by walking on it. Highest coverage at the round timer wins. Inspired by Splatoon's *Turf War*.
 
-**Pixelwars** — the arena underneath. Every round a new maze is grown from a small set of modular tile pieces (corridors, forks, crossings, multi‑level ramps) that stack into a 5×5 tile labyrinth inside an 11×11 parcel world (176m × 176m). The round seed is shared so every player sees the same maze.
+**Pixelwars** — the arena underneath. Every round a new layout is grown from a small set of modular tile pieces (corridors, forks, crossings, ramps). The round seed is shared so every player sees the same layout. Two level modes exist (`LEVEL_MODE` in [`src/maze/level.ts`](src/maze/level.ts)):
+
+- **`classic`** (what `main` / the live world runs): a 5×5 tile maze on an 11×11 parcel world (176 m), centre spawn, ground level.
+- **`sky`** (branch `level`, not yet playtested in-world or deployed): a 6×6 tile woven network floating at y 32 on a 20×20 parcel world (320 m), grid at 64–256 m, three levels, 1-tile team bases in opposite corners. See [Sky mode](#sky-mode-branch-level) below.
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
@@ -14,36 +17,32 @@ The scene is intended to be **downloaded, remixed, and shared**. All source asse
 
 ---
 
-## Status: V0 shipped · V1 in planning
+## Status: V0 live · V1 in progress · sky level on branch `level` (untested in-world)
 
-### V0 — vertical slice (live now)
+### V0 — vertical slice (live, classic mode)
 
-A complete, playable tile-coverage round loop deployed to `pixelwars.dcl.eth`:
+- **Procedural maze regen every round** — new seed on each 5-minute UTC boundary; every player sees the same maze.
+- **Paint pipeline** — a 3×3 footprint flips to your team colour as you walk; enemy paint flips back.
+- **Authoritative server** — owns paint state, round clock, roster; clients send paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
+- **Auto team assignment + drop-in / drop-out**, ghost bot for solo play, synced leaderboard + end-of-round banner, mobile-first HUD.
 
-- **Procedural maze regen every round** — new seed on each 5-minute UTC boundary; every player sees the same maze at the same instant.
-- **Paint pipeline** — a 3×3 tile footprint flips to your team color as you walk; enemy paint flips back when you cross it.
-- **Authoritative headless server** — owns paint state, round clock, roster; clients stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
-- **Auto team assignment + drop-in / drop-out** — late arrivals get the current maze snapshot and join mid-round.
-- **Ghost bot** — spawns to fill the opposite team during quiet hours so solo play works; retires when a second human joins.
-- **Synced leaderboard + end-of-round banner** — round settles on the UTC mark, banner shows winner + final %, the maze regenerates.
-- **Mobile-first HUD** — three thumb-safe pills (mute, coverage %, round countdown), no aim required for any core verb.
+### Since V0 (on `main` at `956f79b`, merged before the `level` branch)
+
+- **SDK upgrade** to the auth-server build (`@dcl/sdk` 7.30.2-…ee06955).
+- **Team balancing + red/blue name tags** (roster broadcast drives client tags).
+- **Faster on own paint** — 1.3× jog/run via `AvatarLocomotionSettings` (`OWN_PAINT_SPEED_MULT`).
+- **Personal round contribution** on the end-of-round banner (`roundResult`).
+- **Join retry** — the client re-sends `joinRoster` every 2 s until `teamAssigned` arrives (first join used to lose its team: no paint, no tag).
+- **Chunked paint messages** — `paintDelta` / snapshot split into ≤200-change messages.
+- Ramp paint offset experiments were tried and reverted; the original ramp paint code is the confirmed-good one.
+
+### Branch `level` (ahead of `main`; not playtested in-world, not deployed)
+
+Sky level mode, seeded woven generator, corner bases, teleporters, ghost-on-opposite-base, overview camera, fall respawn, and 250-seed verify scripts. Details below and in [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ### V1 — planned (4-week scope)
 
-**Theme: Strategic Territory & Player Competition.** Revised after the 2026-09-29 playtest. The old “dual bases + light items” plan is archived.
-
-| Week | Deliverable |
-|---|---|
-| **1** | Tighter maze for more encounters. Team balance pass. Red/blue SDK name tags. Fix slope paint on mobile. Start block remodel / skin experiments. |
-| **2** | Faster movement on your own paint. Personal contribution on the end-of-round breakdown. Keep testing skins against paint readability. |
-| **3** | Paint Bomb, plus one other paint-focused power-up if a trial earns it. Prototype spreading corruption/wildfire and compare it to the ghost bot. |
-| **4** | Multiplayer and mobile playtests, balance pass, final visuals from the experiments that worked, deploy. Experiments ship only if tests support them. |
-
-**Not in V1:** combat, hide-in-paint, a promised 1 m grid, clans, dailies, recently-seen list, weekly in-scene countdown, and dual bases as the pillar.
-
-**Top risk:** a tighter maze feels cramped, or speed-on-own-paint snowballs. **Fallback:** relax the layout toward the current maze and turn the speed bonus down or off.
-
-See [`design/gdd.md`](design/gdd.md) for the full plan.
+See [`design/gdd.md`](design/gdd.md) §9. Week 1–2 items above (balance, name tags, own-paint speed, contribution) are built; Paint Bomb, skins/block remodel and the playtest/balance week are still open.
 
 ---
 
@@ -75,7 +74,7 @@ Source models live in [`assets/models/`](assets/models/) as `.glb` files. Origin
 - [`assets/blender/tiles.blend`](assets/blender/) — Blender source
 - [`assets/sketchup/tiles.skp`](assets/sketchup/) — SketchUp source
 
-### Generation algorithm
+### Generation algorithm (classic mode)
 
 Maze growth is a frontier‑based flood‑fill with vertical stacking:
 
@@ -92,6 +91,45 @@ Ramps are the tricky part. Because a ramp's high side lands one level up in an a
 - When two orthogonally‑adjacent ramps interact, either their rotations match (matched handshake) or they meet edge‑to‑edge at their shared high edges.
 
 Generation is deterministic given a seed: the RNG is a small mulberry32, and the winning seed is logged to the browser console on each generation so any bug can be reproduced exactly.
+
+### Sky mode (branch `level`)
+
+Switch: `LEVEL_MODE = 'sky'` in `src/maze/level.ts` (current on `level`). Key numbers:
+
+| Thing | Value |
+|---|---|
+| World | 20×20 parcels (320 m), `scene.json` |
+| Grid | 6×6 tiles of 32 m over x/z 64–256 m (`SKY_EDGE_INSET = 64`) |
+| Levels | L-1 21.233, L0 32 (`SKY_ALTITUDE`), L+1 42.767 — ramp rise `STEP` 10.767 m |
+| Bases | 1 team-locked `turn` tile each: RED (0,0) opening N+E, BLUE (5,5) opening S+W, same every round |
+| Spawns | RED (80, 33.5, 80), BLUE (240, 33.5, 240), facing the centre (160, 33.5, 160) |
+| Symmetry | 180° rotation (x,z) → (5−x, 5−z): tiles, heights and openings |
+
+**Generator** (`layBaseLine()` / `netAttempt()` in `src/maze/generator.ts`), seeded from the round seed:
+
+1. Height field: L0 everywhere, 2–3 random rectangles raised to L+1 and 2–3 sunk to L-1, each with its 180° image; bases and their exit cells stay L0.
+2. Ramps where the level steps by one along a line (±1 only, never orthogonally adjacent, flat tiles at both ends), placed in mirrored pairs.
+3. Link every same-level flat neighbour pair; ramps link only their two ends; base exits are fixed.
+4. Prune to the 2-core (no dead ends), keep the component holding both bases.
+5. Thin random mirrored link pairs (up to 25%) while staying connected with no dead ends.
+6. Tiles from openings (straight / turn / fork / cross); ramp r = high side. Check with `validate()`, full connectivity and symmetry.
+
+Best of 6 valid candidates (all three levels used, ≥7 junctions on 6×6) by junction / ramp / coverage score with random jitter; up to 600 attempts, else a frozen fallback layout.
+
+**Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): two 180°-mirrored pairs per round on remote flat tiles (off bases, exit cells and ramps, ≥2 tiles from a base); land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
+
+**Ghost bot**: spawns on its own base (opposite the solo human) and respawns opposite if the human switches team; returns to base each round.
+
+**Fall respawn**: below `MIN_Y − FALL_RESPAWN_DROP` (≈ y 9.2) you are sent back to your base.
+
+**Overview mode** (`src/client/overviewCamera.ts`, button on the right edge, key 1 / 4 rotates): angled follow camera ported from dcl-snowdrift. Keep-or-drop is undecided.
+
+### Verify
+
+```bash
+npx tsx scripts/verify-graph.ts   # 250 seeds: all layout rules, teleporters, variety + intertwining stats, ASCII samples
+npx tsx scripts/verify-bot.ts     # bot walk, smart-target mix, ghost spawns opposite
+```
 
 ---
 
@@ -127,7 +165,7 @@ Preview opens in your browser via the Decentraland SDK dev server.
 Scene is configured as a Decentraland World in [`scene.json`](scene.json) (`worldConfiguration.name: "pixelwars.dcl.eth"`).
 
 ```bash
-npm run deploy -- --target-content https://worlds-content-server.decentraland.org
+npm run deploy -- --target-content https://worlds-content-server.decentraland.org/
 ```
 
 To deploy to your own World, change `worldConfiguration.name` to a DCL NAME or ENS you own.
@@ -140,6 +178,8 @@ To deploy to your own World, change `worldConfiguration.name` to a DCL NAME or E
 maze/
 ├── archive/                # Superseded plans (not current design)
 ├── design/                 # gdd.md (current) + one-page summary
+├── docs/                   # HANDOFF.md — current state for the next person
+├── scripts/                # verify-graph.ts / verify-bot.ts
 ├── assets/
 │   ├── blender/            # Blender source (.blend)
 │   ├── sketchup/           # SketchUp source (.skp)
@@ -151,7 +191,7 @@ maze/
 │   ├── paint.ts            # Grid + paint mechanic
 │   ├── round.ts            # Client round timer + end-of-round banner
 │   ├── ui.tsx              # HUD (React-ECS)
-│   ├── teleportOrbs.ts     # Linked teleport pair
+│   ├── teleportOrbs.ts     # Teleport orb pairs
 │   ├── client/             # Client boot, networking, audio, bots, player
 │   ├── maze/               # Pure generator + visual rebuild
 │   ├── server/             # Headless authoritative server + ghost bot
