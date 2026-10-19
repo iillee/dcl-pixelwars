@@ -30,7 +30,7 @@ export const SKY_BASES_ONLY = true
  *  images of each other, crossing at (3,3) and (4,4). false = rings alone. */
 export const SKY_BASE_LINE = true
 /** Base is a SKY_BASE_SIZE × SKY_BASE_SIZE square of cross tiles. */
-export const SKY_BASE_SIZE = 2
+export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /** World-space inset of the sky grid from every scene edge (m). 32 = two
  *  parcels → 8×8 tiles over 32–288 m. Must keep (320 - 2·inset) a multiple
  *  of 32 for the grid to stay centred. */

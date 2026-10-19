@@ -452,16 +452,15 @@ export function mirrorCell(x: number, z: number): [number, number] {
 
 const BASE_X0 = Math.floor(GRID_W / 2) - Math.floor(SKY_BASE_SIZE / 2)
 
-/** Grid cells of a team's base. Bases-only: RED centred on the west edge,
- *  BLUE centred on the east edge. Full mode: RED mid-south, BLUE mid-north. */
+/** Grid cells of a team's base. Bases-only: RED = SW corner tile (0,0),
+ *  BLUE = NE corner tile (7,7). Full mode: RED mid-south, BLUE mid-north. */
 export function baseCells(team: number): Array<[number, number]> {
   const out: Array<[number, number]> = []
   const x0 = SKY_BASES_ONLY ? SKY_BASE_MARGIN : BASE_X0
   for (let i = 0; i < SKY_BASE_SIZE; i++) {
     for (let j = 0; j < SKY_BASE_SIZE; j++) {
-      // Bases-only: RED centred on the WEST edge (rows 3–4 of 8), BLUE its
-      // 180° image centred on the EAST edge — straight across from each other.
-      const z0 = SKY_BASES_ONLY ? Math.floor(GRID_H / 2) - Math.floor(SKY_BASE_SIZE / 2) : SKY_BASE_MARGIN
+      // Bases-only: RED in the SW corner, BLUE its 180° image in the NE corner.
+      const z0 = SKY_BASE_MARGIN
       const x = x0 + i, z = z0 + j
       out.push(team === 1 ? [x, z] : mirrorCell(x, z))
     }
@@ -668,11 +667,9 @@ function generateSky(): void {
  * Bases + woven network (sky, bases-only, line mode). Seeded per round via
  * rand(); every client and the server run the same steps.
  *
- * Layout: RED 2×2 on the west edge (x 0–1, z 3–4), BLUE its 180° image on
- * the east edge (x 6–7, z 3–4). Each base opens ALL 6 outward ring edges
- * (S, N on both columns + E on the inner column), so ring tiles are the same
- * every round (fork, fork, cross, cross) and rebuild.ts's persistent base
- * entities never change shape. Ring stays a closed loop.
+ * Layout: RED = single corner tile (0,0), BLUE = its 180° image (7,7). Each
+ * base always opens both interior sides (RED N+E, BLUE S+W), so it is a turn
+ * tile every round and rebuild.ts's persistent base entity never changes shape.
  *
  * Per attempt:
  *   1. Height field: every non-base cell starts L0; 2–3 random rectangles
@@ -697,7 +694,7 @@ function generateSky(): void {
 const NET_ATTEMPTS = 200
 const NET_CANDIDATES = 6
 let usedFallback = false
-const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
+const baseLineFits = () => SKY_BASE_SIZE === 1 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
 
 /** Flat tile + rotation whose openings are exactly `need`. */
 function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
@@ -939,8 +936,8 @@ function layBaseLine(): void {
 // Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
 // cells and "a|b" edges. Used when no attempt validates.
 const FALLBACK_NET: { cells: string[]; edges: string[] } = {
-  cells: ['0,0,-1', '0,1,-1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '0,6,0', '0,7,0', '1,0,-1,1', '1,2,0', '1,3,0', '1,4,0', '1,5,0', '1,6,0', '1,7,0', '2,0,0', '2,1,0', '2,2,0', '2,3,0', '2,4,0', '2,5,1', '2,6,0,2', '2,7,0', '3,0,0', '3,1,0', '3,2,0', '3,3,0', '3,4,0', '3,5,0,3', '3,6,0', '3,7,0', '4,0,0', '4,1,0', '4,2,0,1', '4,3,0', '4,4,0', '4,5,0', '4,6,0', '4,7,0', '5,0,0', '5,1,0,0', '5,2,1', '5,3,0', '5,4,0', '5,5,0', '5,6,0', '5,7,0', '6,0,0', '6,1,0', '6,2,0', '6,3,0', '6,4,0', '6,5,0', '6,7,-1,3', '7,0,0', '7,1,0', '7,2,0', '7,3,0', '7,4,0', '7,5,0', '7,6,-1,2', '7,7,-1'],
-  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|0,6', '0,5|1,5', '0,6|0,7', '0,6|1,6', '0,7|1,7', '1,0|2,0', '1,2|2,2', '1,2|1,3', '1,3|1,4', '1,3|2,3', '1,4|1,5', '1,4|2,4', '1,5|1,6', '1,6|1,7', '1,7|2,7', '2,0|3,0', '2,0|2,1', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|2,4', '2,3|3,3', '2,4|3,4', '2,5|2,6', '2,5|3,5', '2,6|2,7', '2,7|3,7', '3,0|4,0', '3,0|3,1', '3,1|3,2', '3,1|4,1', '3,2|3,3', '3,2|4,2', '3,3|4,3', '3,4|4,4', '3,5|4,5', '3,6|3,7', '3,6|4,6', '3,7|4,7', '4,0|5,0', '4,0|4,1', '4,2|5,2', '4,3|5,3', '4,4|5,4', '4,4|4,5', '4,5|4,6', '4,5|5,5', '4,6|4,7', '4,6|5,6', '4,7|5,7', '5,0|6,0', '5,0|5,1', '5,1|5,2', '5,3|6,3', '5,3|5,4', '5,4|5,5', '5,4|6,4', '5,5|5,6', '5,5|6,5', '5,6|5,7', '5,7|6,7', '6,0|7,0', '6,0|6,1', '6,1|6,2', '6,1|7,1', '6,2|6,3', '6,2|7,2', '6,3|6,4', '6,3|7,3', '6,4|6,5', '6,4|7,4', '6,5|7,5', '6,7|7,7', '7,0|7,1', '7,1|7,2', '7,2|7,3', '7,3|7,4', '7,4|7,5', '7,5|7,6', '7,6|7,7'],
+  cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,-1,2', '0,4,-1', '0,5,-1', '0,6,-1', '0,7,-1', '1,0,0', '1,1,0', '1,2,0,1', '1,3,-1', '1,4,-1', '1,5,-1', '1,6,-1', '1,7,-1', '2,0,1', '2,1,1', '2,2,1', '2,3,-1', '2,4,-1', '2,5,-1', '2,6,-1', '2,7,-1', '3,0,1', '3,1,1', '3,2,1', '3,3,-1', '3,4,-1', '3,5,-1', '3,6,-1', '3,7,-1', '4,0,-1', '4,1,-1', '4,2,-1', '4,3,-1', '4,4,-1', '4,5,1', '4,6,1', '4,7,1', '5,0,-1', '5,1,-1', '5,2,-1', '5,3,-1', '5,4,-1', '5,5,1', '5,6,1', '5,7,1', '6,0,-1', '6,1,-1', '6,2,-1', '6,3,-1', '6,4,-1', '6,5,0,3', '6,6,0', '6,7,0', '7,0,-1', '7,1,-1', '7,2,-1', '7,3,-1', '7,4,-1,0', '7,5,0', '7,6,0', '7,7,0'],
+  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,4|0,5', '0,4|1,4', '0,5|0,6', '0,5|1,5', '0,6|0,7', '0,6|1,6', '0,7|1,7', '1,0|1,1', '1,2|2,2', '1,3|1,4', '1,3|2,3', '1,4|1,5', '1,4|2,4', '1,5|1,6', '1,5|2,5', '1,6|1,7', '1,6|2,6', '1,7|2,7', '2,0|2,1', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|3,2', '2,3|3,3', '2,3|2,4', '2,4|2,5', '2,4|3,4', '2,5|2,6', '2,5|3,5', '2,6|2,7', '2,6|3,6', '2,7|3,7', '3,0|3,1', '3,1|3,2', '3,3|4,3', '3,3|3,4', '3,4|3,5', '3,4|4,4', '3,5|3,6', '3,6|3,7', '4,0|4,1', '4,0|5,0', '4,1|4,2', '4,1|5,1', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|5,4', '4,5|4,6', '4,5|5,5', '4,6|4,7', '4,6|5,6', '4,7|5,7', '5,0|6,0', '5,0|5,1', '5,1|5,2', '5,1|6,1', '5,2|5,3', '5,2|6,2', '5,3|5,4', '5,3|6,3', '5,4|6,4', '5,5|6,5', '5,5|5,6', '5,6|5,7', '6,0|7,0', '6,0|6,1', '6,1|6,2', '6,1|7,1', '6,2|6,3', '6,2|7,2', '6,3|6,4', '6,3|7,3', '6,5|7,5', '6,6|6,7', '6,6|7,6', '6,7|7,7', '7,0|7,1', '7,1|7,2', '7,2|7,3', '7,3|7,4', '7,4|7,5', '7,5|7,6', '7,6|7,7'],
 }
 
 /** Lay the frozen fallback layout (also called by verify-graph to check it). */
