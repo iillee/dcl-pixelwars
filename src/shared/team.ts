@@ -14,3 +14,10 @@ export enum Team {
   Red  = 1,
   Blue = 2,
 }
+
+/** Team palette as 0..1 RGB (pallet.jpeg: red #FF7577, blue #6A99FC).
+ *  Plain numbers so the server runtime can import this file safely. */
+export const TEAM_RGB: Record<number, { r: number; g: number; b: number }> = {
+  1: { r: 255 / 255, g: 117 / 255, b: 119 / 255 },
+  2: { r: 106 / 255, g: 153 / 255, b: 252 / 255 },
+}

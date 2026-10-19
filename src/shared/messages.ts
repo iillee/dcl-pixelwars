@@ -92,6 +92,13 @@ export const Messages = {
   // leaderboard entries in place.
   updateName: Schemas.Map({ name: Schemas.String }),
 
+  // Server → Clients (broadcast): every active player's team. Sent on
+  // join, leave and round reset. Clients use it to paint red/blue
+  // AvatarNametag plates on each avatar (client/nametags.ts).
+  teamRoster: Schemas.Map({
+    entries: Schemas.Array(Schemas.Map({ userId: Schemas.String, team: Schemas.Int })),
+  }),
+
   // Client → Server: request an immediate fresh copy of the leaderboard.
   // Fires when the player opens the popup mid-round so they see current
   // standings without waiting for the next round boundary broadcast.

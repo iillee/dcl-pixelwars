@@ -74,6 +74,10 @@ function wireInbound(): void {
     })
   })
 
+  room.onMessage('teamRoster', ({ entries }) => {
+    events.emit('team:roster', { entries: entries.map(e => ({ userId: e.userId, team: e.team as Team })) })
+  })
+
   room.onMessage('botPositions', ({ bots }) => {
     events.emit('bots:positions', { bots })
   })

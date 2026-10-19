@@ -32,6 +32,10 @@ export type Events = {
   // Team assignment reply for our joinRoster. Fires exactly once per session.
   'team:assigned': { team: Team }
 
+  // Broadcast on join / leave / round reset: every active player's team.
+  // Subscriber: client/nametags (red/blue plates above avatars).
+  'team:roster': { entries: Array<{ userId: string; team: Team }> }
+
   // 5 Hz broadcast: authoritative paint changes since the last tick, plus
   // the current global coverage counters. Subscribers: paint (apply cells),
   // HUD (update %).

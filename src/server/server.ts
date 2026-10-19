@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions } from './bots/manager'
@@ -83,6 +83,14 @@ export async function setupServer(): Promise<void> {
   // gets its requestSnapshot silently dropped and the client stays blank
   // (no paint history). The cooldown still protects against in-session
   // snapshot floods from a single connected client.
+  // Full team roster broadcast — drives client name tags. Small payload
+  // (≤ ~10 players), sent only on join / leave / round reset.
+  const broadcastRoster = (why: string) => {
+    const entries = rosterEntries()
+    console.log(`[Server] teamRoster (${why}) → ${entries.length} player(s): ${entries.map(e => `${e.userId.slice(0, 8)}=${e.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+    room.send('teamRoster', { entries })
+  }
+
   const SNAPSHOT_COOLDOWN_MS = 5000
   const lastSnapshotAt = new Map<string, number>()
 
@@ -95,6 +103,7 @@ export async function setupServer(): Promise<void> {
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
     // instead of being rate-limited into a blank map.
     lastSnapshotAt.delete(userId)
+    broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
 
@@ -119,6 +128,7 @@ export async function setupServer(): Promise<void> {
     markActive(from) // count them as present immediately; paint activity will refresh it
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
+    broadcastRoster('join')
     // Queue a Discord join notification (debounced 5s to let updateName
     // arrive so we send the real display name, not the wallet hash).
     schedulePlayerJoin(from)
@@ -268,6 +278,7 @@ export async function setupServer(): Promise<void> {
     // balanced against the current lobby. Active players keep their team.
     const pruned = pruneForNewRound()
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round boundary`)
+    broadcastRoster('reset')
     rebuildBotGraph(idx)
     // Round boundary is our persistence + publish cadence for the
     // leaderboard: 5 min is frequent enough that a server crash loses at
