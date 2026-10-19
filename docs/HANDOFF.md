@@ -30,7 +30,8 @@ Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only u
 | `ee9ecee`, `14bce03` | Teleporters for sky mode (two pairs) |
 | `c8502a3`, `e07db2e` | Docs + this handoff |
 | `ca94945`, `036a9d4` | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
-| (latest) | Teleporter dead-end bias: mirrored `end` stub pair holds the teleporter; verify allows only those dead ends |
+| `8d60b8f`, `68aae66` | Teleporter dead-end stubs (reverted next) |
+| (latest) | Stubs reverted, strict no-dead-ends restored; teleporter only on turn/fork/cross, scored by remoteness + tile type |
 
 ---
 
@@ -71,9 +72,9 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ### Sky layout rules (what verify-graph enforces on every seed)
 
-6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends except the teleporter's own mirrored stub pair; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run (with dead-end bias): 250/250 pass, fallback 0×, avg 10.4 junctions (min 8), 97% coverage, 229 distinct layouts, 1 teleporter pair every round, **on dead-end stubs in 227/250 rounds (91%)**, remoteness otherwise (pair level L-1/L0/L+1 = 94/9/147, avg ends 5.8 tiles apart).
+6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run: 250/250 pass, fallback 0×, avg 11.5 junctions, 96% coverage, 187 distinct layouts, 1 teleporter pair every round, always on a turn (250/250), pair level L-1/L0/L+1 = 70/0/180, ends 4–10 tiles apart (avg 7.2), 0 layouts rejected for lack of a valid tile.
 
-**Dead-end bias:** after the net is chosen, `addStubs()` lays one mirrored pair of single-opening flat stubs using the existing `end` tile (`assets/models/tile-end.glb`). It either adds a new tile in an empty cell next to the net, or cuts an existing flat tile down to one link. Neighbours must keep ≥2 links, the net must stay connected and junctions must stay ≥ `NET_MIN_JUNCTIONS`. Stubs are never on a base or exit cell and are ≥2 tiles from a base. The teleporter pair goes on them (stub ↔ mirror(stub)). If no stub pair fits, the round has no dead ends and the pair uses the remoteness score.
+**Teleporter tile rule:** the pair only goes on a turn (corner), fork or cross, never on a straight, ramp or end (and verify still forbids dead ends anywhere). It stays off bases and exit cells, ≥2 tiles from a base, with ends ≥3 tiles apart. Score = remoteness (detour off the shortest RED↔BLUE route + 0.5 × distance to the nearer base + 1 on the grid edge) + tile preference (turn +2, fork +0.5, cross 0). If a layout has no valid tile, `layBaseLine` rejects it and keeps searching. That hasn't happened in 250 seeds. Dead-end stubs were tried and removed: Luke meant a bias in the overall layout, not generated dead ends.
 
 **Teleporter fairness trade-off:** A ↔ mirror(A) is the only single pair that maps onto itself under the 180° symmetry, so each team's distance to "its" end is identical. Its cost is that both ends always share a level. A cross-level single pair can't be symmetric, so one team would get the better end. The earlier two-pair scheme (A ↔ mirror(B), mirror(A) ↔ B) was the fair cross-level option and was replaced at Luke's request.
 
@@ -99,6 +100,7 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 | Seeded 4 separate lanes | "Not intertwined enough" (avg 3.4 junctions) |
 | Facing bases (W/E edge, 2×2) | Luke didn't like it; back to diagonal corners |
 | Woven network on 8×8 | Liked, but too large → 6×6 |
+| Generated dead-end stubs to host the teleporter | Removed: not what Luke meant; strict no-dead-ends restored |
 | 4×4 arena (inset 96, bases (0,0)/(3,3), spawns 112/208) | **Not adopted.** An exhaustive search of every symmetric layout under the rules (1-tile corner bases, flat ramp ends, no dead ends, connected) found **zero** layouts using all 3 levels, even with ramps allowed on exit cells and next to each other. Only 10 two-level layouts exist with flat exits (40 with ramped exits). The live generator fails every attempt there. 5×5 (inset 80) was probed: 69/100 seeds generated (31 fell back), only 12 distinct layouts. Needs Luke's call: stay 6×6, accept 2 levels on 4×4, or relax a rule. |
 
 ---
@@ -112,7 +114,6 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 - **Loosened verify gates** for 6×6: junctions ≥6 (was 10 on 8×8), variety ≥70% (90% on 8×8), smart-bot own-paint gate 0.35 (was 0.5).
 - **Line endings:** `scene.json` and `src/teleportOrbs.ts` were committed with LF (rest CRLF).
 - **Leftovers:** ring-mode wording in the unused bases-only-without-paths branch and its verify branch; `dumpNet()` dev helper still exported from the generator.
-- **Dead-end stubs:** untested in-world. The `end` tile model was built for classic mode, so its look at sky altitude, orb placement on a cap tile, and whether players feel trapped there are all unknown. Rounds that use the fallback layout never get stubs. Cutting existing tiles lowers average junctions (11.5 → 10.4) and loops (7.1 → 5.6).
 - **Nothing on `level` is playtested in-world or deployed.** Spawn floor, base persistence across a round change, teleporter arrival facing, and the overview → teleport sequence have only been checked by code + verify.
 
 ---
