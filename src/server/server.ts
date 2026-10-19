@@ -38,6 +38,10 @@ import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
 // the whole message rather than half-apply.
 const MAX_IDS_PER_TICK = 100
 
+// Cap on cell changes per paintDelta / snapshot message (see the
+// SATURATION DISCIPLINE note in shared/messages.ts).
+const MAX_CHANGES_PER_MSG = 200
+
 export async function setupServer(): Promise<void> {
   console.log('[Server] Starting Pixelwars server...')
 
@@ -204,7 +208,11 @@ export async function setupServer(): Promise<void> {
     const changes = drainDelta()
     if (changes.length === 0) return
     const c = coverage()
-    room.send('paintDelta', { changes, red: c.red, blue: c.blue, total: c.total })
+    // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
+    // message. Every chunk carries the same coverage counters.
+    for (let i = 0; i < changes.length; i += MAX_CHANGES_PER_MSG) {
+      room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total })
+    }
   })
 
   // Bot position broadcast (10 Hz). Payload trivial — 3 bots × ≈20 bytes
@@ -263,7 +271,12 @@ export async function setupServer(): Promise<void> {
     const entries = getFullState()
     const c = coverage()
     console.log(`[Server] snapshot → ${from} (${entries.length} cells, red=${c.red} blue=${c.blue})`)
-    room.send('snapshot', { entries, red: c.red, blue: c.blue, total: c.total }, { to: [from] })
+    // Chunked like paintDelta. The client applies each chunk independently
+    // (same path as paint:delta), so order and count don't matter. An empty
+    // round still sends one empty chunk so the client sees the server alive.
+    for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
+      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total }, { to: [from] })
+    }
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:
