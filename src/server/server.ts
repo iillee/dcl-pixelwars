@@ -132,6 +132,7 @@ export async function setupServer(): Promise<void> {
       // We ignore the payload and use context.from as authoritative.
       console.log(`[Server] joinRoster payload/from mismatch (payload=${userId}, from=${from}) — using from`)
     }
+    const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     const team = assignTeam(from)
     markActive(from) // count them as present immediately; paint activity will refresh it
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
@@ -139,7 +140,8 @@ export async function setupServer(): Promise<void> {
     broadcastRoster('join')
     // Queue a Discord join notification (debounced 5s to let updateName
     // arrive so we send the real display name, not the wallet hash).
-    schedulePlayerJoin(from)
+    // Client retries joinRoster until teamAssigned lands; notify Discord once.
+    if (!isRepeat) schedulePlayerJoin(from)
   })
 
   // Paint ingest — client-authored cell ids, attributed to sender's team.

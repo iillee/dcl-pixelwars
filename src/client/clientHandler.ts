@@ -151,6 +151,27 @@ function wireOutbound(): void {
     }
   })
 
+  // joinRoster retry. On a cold first join the server's addressed
+  // teamAssigned (and the teamRoster broadcast) can be lost while the
+  // auth-server transport is still registering this peer, leaving the
+  // client with Team.None: no paint, no tag. A rejoin worked because the
+  // transport was warm. Resend every JOIN_RETRY_S until teamAssigned
+  // lands; the server handler is idempotent (same team returned).
+  let joinRetryClock = 0
+  let joinAttempts = 1
+  const JOIN_RETRY_S = 2
+  engine.addSystem((dt: number) => {
+    if (!joinSent || myTeam !== Team.None) return
+    joinRetryClock += dt
+    if (joinRetryClock < JOIN_RETRY_S) return
+    joinRetryClock = 0
+    joinAttempts++
+    const pid = PlayerIdentityData.getOrNull(engine.PlayerEntity)
+    const uid = pid?.address || 'guest-retry'
+    console.log(`[Client] no teamAssigned yet (room ready=${room.isReady()}) -> joinRoster retry #${joinAttempts} ${uid}`)
+    room.send('joinRoster', { userId: uid })
+  })
+
   // Paint outbox flusher: 10 Hz. Drain locally-painted cell ids and send
   // to the server; the server attributes to sender's team, applies to its
   // authoritative map, and broadcasts back via paintDelta so all clients
