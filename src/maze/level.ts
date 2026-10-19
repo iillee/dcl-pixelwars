@@ -7,9 +7,10 @@
  *
  *   LEVEL_MODE = 'classic' → the original 5×5 centre-seeded maze (176 m, Y=0).
  *     Also switch scene.json back to the 11×11 parcel list + CenterSpawn.
- *   LEVEL_MODE = 'sky'     → 10×10 grid on 20×20 parcels (320 m), floating
- *     SKY_ALTITUDE m up, two point-symmetric team bases (RED south, BLUE
- *     north) that double as spawns, ≤ SKY_LEVEL_COUNT levels.
+ *   LEVEL_MODE = 'sky'     → 20×20 parcels (320 m). With the flags below
+ *     (bases-only + base line): a 6×6 woven network over 64–256 m at
+ *     SKY_ALTITUDE, three levels, 1-tile team bases in opposite corners
+ *     (RED (0,0), BLUE (5,5)) that double as spawns. See generator.ts.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -21,18 +22,16 @@ export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 export const SKY_ALTITUDE = 32 // raised from 0 (troubleshooting); fall respawn active (>= FALL_RESPAWN_DROP)
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
-/** Bases-only mode: generate ONLY the two corner bases (closed 2×2 rings of
- *  `turn` tiles) — no main path, branches, hub or teleport orbs. Set false
- *  to grow the full sky level again (bases then sit mid-edge, see baseCells). */
+/** Bases-only mode: corner bases (+ the woven network when SKY_BASE_LINE).
+ *  false = the older full sky growth (bases mid-edge, see baseCells). */
 export const SKY_BASES_ONLY = true
-/** Bases-only sub-mode: also lay TWO flat, paintable, 1-tile-wide paths
- *  between the bases' inner ring tiles (RED (1,1), BLUE (6,6)), mirror
- *  images of each other, crossing at (3,3) and (4,4). false = rings alone. */
+/** Bases-only sub-mode: grow the seeded woven network between the bases
+ *  (generator.ts layBaseLine/netAttempt). false = bases alone. */
 export const SKY_BASE_LINE = true
-/** Base is a SKY_BASE_SIZE × SKY_BASE_SIZE square of cross tiles. */
+/** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
-/** World-space inset of the sky grid from every scene edge (m). 32 = two
- *  parcels → 8×8 tiles over 32–288 m. Must keep (320 - 2·inset) a multiple
+/** World-space inset of the sky grid from every scene edge (m). 64 = four
+ *  parcels → 6×6 tiles over 64–256 m (32 → 8×8 over 32–288 m). Must keep (320 - 2·inset) a multiple
  *  of 32 for the grid to stay centred. */
 export const SKY_EDGE_INSET = 64
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
