@@ -1000,17 +1000,23 @@ export interface TeleportEnd { tile: Placed; land: { x: number; y: number; z: nu
  * Teleporter pairs for the current grid — a pure function of the layout,
  * so every client (and verify-graph) gets the same answer per seed.
  *
- * Candidates: flat tiles, not a base, not a base exit cell, ≥2 tiles from
- * both bases. Remoteness score (tile graph BFS): detour off the shortest
- * RED↔BLUE route (dRed + dBlue − D) + 0.5 × distance to the nearer base +
- * 1 for dead-quiet 2-way tiles (straight/turn) − 0.5 per extra opening.
+ * Exactly ONE pair per round: A <-> mirror(A) (180 deg image).
  *
- *   A = best candidate (ties: lowest x, then z).
- *   B = best remaining candidate ≥3 tiles (Manhattan) from A and mirror(A),
- *       preferring a different level from A.
- *   With B: two pairs A ↔ mirror(B) and mirror(A) ↔ B — 180° images of each
- *     other, so fair, and each links opposite halves of the map.
- *   Without B (small/sparse grid): one self-mirrored pair A ↔ mirror(A).
+ * Fairness: the layout is 180 deg symmetric, so mirror(A) is to BLUE exactly
+ * what A is to RED (same BFS distance, same level, same tile shape) - each
+ * team is equally close to "its" end and the pair maps onto itself. The cost:
+ * both ends are always on the SAME level (a symmetric layout puts A and
+ * mirror(A) at the same height). A cross-level single pair A <-> B with
+ * B != mirror(A) cannot be symmetric, so one team would get the better end;
+ * the old two-pair scheme (A <-> mirror(B), mirror(A) <-> B) was the only
+ * way to cross levels fairly.
+ *
+ * Candidates: flat tiles, not a base, not a base exit cell, >=2 tiles from
+ * both bases, whose mirror is also a candidate. Remoteness score (tile graph
+ * BFS): detour off the shortest RED<->BLUE route (dRed + dBlue - D) + 0.5 x
+ * distance to the nearer base + 1 for quiet 2-way tiles (straight/turn) -
+ * 0.5 per extra opening. A = best candidate whose ends are >=3 tiles apart
+ * (Manhattan), else the best of any (ties: lowest x, then z).
  */
 export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
   if (!IS_SKY) return []
@@ -1041,12 +1047,10 @@ export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
   const sorted = cands.slice().sort((a, b) => score(b) - score(a) || a.x - b.x || a.z - b.z)
   const at = (x: number, z: number) => cands.find(p => p.x === x && p.z === z)
   const man = (a: Placed, b: Placed) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z)
-  const A = sorted[0]
+  const paired = sorted.filter(p => at(...mirrorCell(p.x, p.z)))
+  const A = paired.find(p => man(p, at(...mirrorCell(p.x, p.z))!) >= 3) ?? paired[0]
   if (!A) return []
-  const mA = at(...mirrorCell(A.x, A.z))
-  if (!mA) return []
-  const far = sorted.filter(p => p !== A && p !== mA && man(p, A) >= 3 && man(p, mA) >= 3 && at(...mirrorCell(p.x, p.z)))
-  const B = far.find(p => Math.abs(p.y - A.y) > 0.01) ?? far[0]
+  const mA = at(...mirrorCell(A.x, A.z))!
   const end = (p: Placed): TeleportEnd => {
     // Land 4 m out along the opening that points most toward the scene
     // centre (always corridor floor), facing further along it.
@@ -1060,7 +1064,5 @@ export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
     const y = p.y + 1
     return { tile: p, land: { x: cx + DX[best] * 4, y, z: cz + DZ[best] * 4 }, look: { x: cx + DX[best] * 24, y, z: cz + DZ[best] * 24 } }
   }
-  if (!B) return [[end(A), end(mA)]]
-  const mB = at(...mirrorCell(B.x, B.z))!
-  return [[end(A), end(mB)], [end(mA), end(B)]]
+  return [[end(A), end(mA)]]
 }
