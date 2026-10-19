@@ -733,7 +733,7 @@ function fixedEdges(): Array<[string, string]> {
   return out
 }
 
-interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<string> }
+interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<string>; stubs?: Set<string> }
 
 function netAttempt(): Net | null {
   const base = new Set<string>(baseCells(1).concat(baseCells(2)).map(([x, z]) => ck(x, z)))
@@ -893,7 +893,7 @@ function layNet(n: Net): boolean {
     if (r !== undefined) { placeTile('ramp', r, x, z, y); continue }
     const dirs = new Set<Dir>()
     for (const d of ALL_DIRS) if (n.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))) dirs.add(d)
-    const t = dirs.size >= 2 ? tileFor(dirs) : null
+    const t = dirs.size >= 2 || (dirs.size === 1 && n.stubs?.has(c)) ? tileFor(dirs) : null
     if (!t) return false
     placeTile(t.t, t.r, x, z, y)
   }
@@ -928,6 +928,7 @@ const NET_MIN_JUNCTIONS = Math.round(12 * NET_SCALE) // 8×8: 12, 6×6: 7
 function layBaseLine(): void {
   if (!baseLineFits()) return
   usedFallback = false
+  stubTiles = new Set()
   let best: Net | null = null, bestScore = -1, found = 0
   for (let i = 0; i < NET_ATTEMPTS && found < NET_CANDIDATES; i++) {
     const n = netAttempt()
@@ -939,8 +940,78 @@ function layBaseLine(): void {
     const sc = netScore(n) + rand() * NET_SCORE_JITTER
     if (sc > bestScore) { best = n; bestScore = sc }
   }
-  if (best && layNet(best)) return
+  if (best && layNet(best)) {
+    const st = addStubs(best)
+    if (st && layNet(st)) return
+    layNet(best) // no viable stub pair: keep the plain net (teleporter falls back to remoteness)
+    return
+  }
   layFallback()
+}
+
+/** Reset by generate(): number of rounds where a stub pair was laid (verify stats). */
+let stubTiles = new Set<string>()
+/** Cells of the current round's teleporter dead-end stubs ("x,z"), empty if none. */
+export function teleportStubCells(): Set<string> { return stubTiles }
+
+/**
+ * Teleporter dead ends: one mirrored pair of single-opening flat 'end' tiles
+ * (tile-end.glb). Cell must be >=2 from both bases and not a base exit.
+ *   a) an EMPTY cell next to an active flat tile at any level -> new stub
+ *      (the neighbour gains one opening), or
+ *   b) an ACTIVE flat tile cut down to one link, if every neighbour it drops
+ *      is a flat tile that keeps >=2 links and the net stays connected.
+ * Candidates are tried in a seeded order; mirror is applied at once. The
+ * result must still meet NET_MIN_JUNCTIONS (cutting links can lose forks).
+ */
+function addStubs(n: Net): Net | null {
+  stubTiles = new Set()
+  const bases = baseCells(1).concat(baseCells(2))
+  const bd = (x: number, z: number) => Math.min(...bases.map(([a, b]) => Math.abs(a - x) + Math.abs(b - z)))
+  const deg = (m: Net, c: string) => { const [x, z] = c.split(',').map(Number); return ALL_DIRS.filter(d => m.edges.has(ek(c, ck(x + DX[d], z + DZ[d])))).length }
+  const connected = (m: Net) => {
+    const start = ck(...baseCells(1)[0]); const seen = new Set([start]); const q = [start]
+    while (q.length) { const c = q.pop()!; const [x, z] = c.split(',').map(Number)
+      for (const d of ALL_DIRS) { const nb = ck(x + DX[d], z + DZ[d]); if (m.level.has(nb) && m.edges.has(ek(c, nb)) && !seen.has(nb)) { seen.add(nb); q.push(nb) } } }
+    return seen.size === m.level.size
+  }
+  const opts: Array<() => Net | null> = []
+  for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) {
+    const c = ck(x, z), m = mk(c)
+    if (c === m || bd(x, z) < 2) continue
+    if (!n.level.has(c)) {
+      for (const d of ALL_DIRS) {
+        const nb = ck(x + DX[d], z + DZ[d])
+        if (!n.level.has(nb) || n.ramp.has(nb) || bd(x + DX[d], z + DZ[d]) === 0) continue
+        opts.push(() => {
+          const out: Net = { level: new Map(n.level), ramp: new Map(n.ramp), edges: new Set(n.edges), stubs: new Set([c, m]) }
+          out.level.set(c, n.level.get(nb)!); out.level.set(m, n.level.get(nb)!)
+          out.edges.add(ek(c, nb)); out.edges.add(ek(m, mk(nb)))
+          return out
+        })
+      }
+    } else if (!n.ramp.has(c)) {
+      const [cx, cz] = [x, z]
+      const links = ALL_DIRS.filter(d => n.edges.has(ek(c, ck(cx + DX[d], cz + DZ[d]))))
+      for (const keep of links) opts.push(() => {
+        const out: Net = { level: new Map(n.level), ramp: new Map(n.ramp), edges: new Set(n.edges), stubs: new Set([c, m]) }
+        for (const d of links) {
+          if (d === keep) continue
+          const nb = ck(cx + DX[d], cz + DZ[d])
+          if (n.ramp.has(nb) || bd(cx + DX[d], cz + DZ[d]) === 0) return null
+          out.edges.delete(ek(c, nb)); out.edges.delete(ek(m, mk(nb)))
+        }
+        for (const t of out.level.keys()) if (!out.stubs!.has(t) && deg(out, t) < 2) return null
+        return connected(out) ? out : null
+      })
+    }
+  }
+  for (const f of shuffle(opts)) {
+    const out = f()
+    if (out && netJunctions(out) >= NET_MIN_JUNCTIONS && layNet(out)) { stubTiles = out.stubs!; return out }
+  }
+  stubTiles = new Set()
+  return null
 }
 
 // Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
@@ -953,6 +1024,7 @@ const FALLBACK_NET: { cells: string[]; edges: string[] } = {
 /** Lay the frozen fallback layout (also called by verify-graph to check it). */
 export function layFallback(): void {
   usedFallback = true
+  stubTiles = new Set()
   const n: Net = { level: new Map(), ramp: new Map(), edges: new Set(FALLBACK_NET.edges) }
   for (const s of FALLBACK_NET.cells) {
     const [x, z, l, r] = s.split(',')
@@ -1017,6 +1089,8 @@ export interface TeleportEnd { tile: Placed; land: { x: number; y: number; z: nu
  * distance to the nearer base + 1 for quiet 2-way tiles (straight/turn) -
  * 0.5 per extra opening. A = best candidate whose ends are >=3 tiles apart
  * (Manhattan), else the best of any (ties: lowest x, then z).
+ * Dead-end bias: if layBaseLine laid a mirrored pair of 'end' stubs
+ * (addStubs), the pair goes on them instead (stub <-> mirror(stub)).
  */
 export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
   if (!IS_SKY) return []
@@ -1064,5 +1138,8 @@ export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
     const y = p.y + 1
     return { tile: p, land: { x: cx + DX[best] * 4, y, z: cz + DZ[best] * 4 }, look: { x: cx + DX[best] * 24, y, z: cz + DZ[best] * 24 } }
   }
+  // Bias: the round's mirrored dead-end stubs win if both ends are candidates.
+  const stub = paired.find(p => p.type === 'end' && stubTiles.has(ck(p.x, p.z)) && at(...mirrorCell(p.x, p.z))?.type === 'end')
+  if (stub) return [[end(stub), end(at(...mirrorCell(stub.x, stub.z))!)]]
   return [[end(A), end(mA)]]
 }
