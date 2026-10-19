@@ -34,6 +34,7 @@ import { initAudio } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
+import { initSpeedBonus } from './speed'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
@@ -125,6 +126,7 @@ export async function setupClient(): Promise<void> {
   initRoundNet()
   initPlayerNet()
   initNametags()
+  initSpeedBonus()
   initBotVisual()
 
   // Register the network boundary LAST so `room.onMessage` subscribers

@@ -374,6 +374,20 @@ export function noteLocalPaintCandidate(id: string): void {
   }
 }
 
+// ─── Own-paint state (speed bonus, client/speed.ts) ─────────────────
+let onOwnPaint = false
+let lastCenterId: string | null = null
+/** True while the local player stands on a cell that was already their
+ *  team's colour when they stepped onto it. */
+export function isOnOwnPaint(): boolean {
+  return onOwnPaint
+}
+/** Round reset: forget the current cell so the bonus drops immediately. */
+export function resetOwnPaint(): void {
+  onOwnPaint = false
+  lastCenterId = null
+}
+
 // Set from client.ts when teamAssigned arrives. Read by noteLocalPaintCandidate
 // for optimistic local paint. Stays None on guest / pre-roster clients.
 let localTeam: Team = Team.None
@@ -677,7 +691,15 @@ export function initPaintingSystem(
     if (!t) return
     const { x, y, z } = t.position
     const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
-    if (!center || y - center.groundY > GROUND_TOLERANCE) return
+    if (!center) { onOwnPaint = false; lastCenterId = null; return }
+    // Own-paint check happens on ENTERING a cell and BEFORE we paint it,
+    // otherwise optimistic local paint would make every cell 'ours' at once.
+    // Airborne frames keep the previous state (no flicker on jumps).
+    if (center.id !== lastCenterId) {
+      lastCenterId = center.id
+      onOwnPaint = localTeam !== Team.None && cellTeam.get(center.id) === localTeam
+    }
+    if (y - center.groundY > GROUND_TOLERANCE) return
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue
