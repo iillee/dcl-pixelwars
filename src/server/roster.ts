@@ -20,6 +20,11 @@ const teamOf = new Map<string, number>() // userId → 1 (Red) | 2 (Blue)
 // bots that connect but never paint, and as the balance headcount.
 const lastActiveAt = new Map<string, number>()
 
+// Users currently connected (joined and not yet onLeaveScene). Drives the
+// teamRoster broadcast (name tags) and round-boundary pruning, so an idle
+// but connected player keeps both their tag and their team.
+const connected = new Set<string>()
+
 /** 60s of no paint activity = considered idle/scraper. */
 const ACTIVE_WINDOW_MS = 60000
 
@@ -51,15 +56,14 @@ export function assignTeam(userId: string): number {
 }
 
 /**
- * Round boundary: drop assignments of players who are no longer active so
- * a later rejoin is balanced against the current lobby. Active players
- * keep their team (no mid-session swaps). Returns how many were pruned.
+ * Round boundary: drop assignments of players who have disconnected so a
+ * later rejoin is balanced against the current lobby. Connected players
+ * (even idle ones) keep their team. Returns how many were pruned.
  */
 export function pruneForNewRound(): number {
-  const now = Date.now()
   let n = 0
   for (const uid of Array.from(teamOf.keys())) {
-    if (!isActive(uid, now)) { teamOf.delete(uid); lastActiveAt.delete(uid); n++ }
+    if (!connected.has(uid)) { teamOf.delete(uid); lastActiveAt.delete(uid); n++ }
   }
   return n
 }
@@ -72,12 +76,14 @@ export function rosterSize(): number {
 /** Mark a userId as having done something "player-like" (painted, joined). */
 export function markActive(userId: string): void {
   lastActiveAt.set(userId, Date.now())
+  connected.add(userId)
 }
 
 /** Mark a userId as gone (onLeaveScene). Team kept for this round so a
  *  quick rejoin returns to the same colour. */
 export function markInactive(userId: string): void {
   lastActiveAt.delete(userId)
+  connected.delete(userId)
 }
 
 /** Count roster members active in the last ACTIVE_WINDOW_MS. */
@@ -104,11 +110,10 @@ export function getTeam(userId: string): number | null {
   return teamOf.get(userId) ?? null
 }
 
-/** Active players and their teams, for the teamRoster broadcast. Players
- *  who left (markInactive) are omitted so their name tag clears. */
+/** Connected players (idle included) and their teams, for the teamRoster
+ *  broadcast. Players who left (markInactive) are omitted so their tag clears. */
 export function rosterEntries(): Array<{ userId: string; team: number }> {
-  const now = Date.now()
   const out: Array<{ userId: string; team: number }> = []
-  for (const [userId, team] of teamOf) if (isActive(userId, now)) out.push({ userId, team })
+  for (const [userId, team] of teamOf) if (connected.has(userId)) out.push({ userId, team })
   return out
 }
