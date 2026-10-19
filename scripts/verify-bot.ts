@@ -52,12 +52,21 @@ console.log('✓ all steps are walkable and adjacent (no teleports)')
 console.log(`sample trace (first 6): ${steps.slice(0, 6).join(' → ')}`)
 
 // ─── smartTarget mix test ────────────────────────────────────────────────────────
-// Seed a fake paint state: half the graph enemy-owned, quarter friendly.
-// Then run a smart bot for 20s and confirm it prefers neutral cells.
+// Seed a fake paint state spread over the whole map (deterministic hash):
+// ~50% enemy, ~25% friendly, ~25% neutral; bases keep their locked colour.
+// The old test took the graph's insertion order, so "neutral" was one far
+// contiguous block (the last-placed tiles) the bot couldn't reach in 20 s,
+// and painted nothing — a test artefact, not a bot bug.
 const fakePaint = new Map<string, number>()
 const allNodes = [...graph.nodes]
-for (let i = 0; i < allNodes.length / 2; i++) fakePaint.set(allNodes[i], 2) // Blue
-for (let i = allNodes.length / 2; i < allNodes.length * 0.75; i++) fakePaint.set(allNodes[i], 1) // Red
+const h = (s: string) => { let x = 2166136261; for (let i = 0; i < s.length; i++) x = Math.imul(x ^ s.charCodeAt(i), 16777619); return (x >>> 0) / 4294967296 }
+for (const id of allNodes) {
+  const b = baseTeamOfCellId(id)
+  if (b) { fakePaint.set(id, b); continue }
+  // Hash per tile (prefix before ':') so colours come in tile-sized patches.
+  const u = h(id.slice(0, id.indexOf(':')))
+  if (u < 0.5) fakePaint.set(id, 2); else if (u < 0.75) fakePaint.set(id, 1)
+}
 const reader: PaintReader = { teamOf: (id) => fakePaint.get(id) ?? 0 }
 
 const smart = new Bot({
@@ -73,9 +82,12 @@ while (simMs < 20000) {
     if (t === 0) neutralHits++
     else if (t === 2) enemyHits++
     else mineHits++
+    if (!baseTeamOfCellId(s)) fakePaint.set(s, 1) // the bot paints what it walks on
   }
   simMs += TICK_MS
 }
 const total = neutralHits + enemyHits + mineHits
 console.log(`✓ smart bot 20s trace: neutral=${neutralHits} (${(100*neutralHits/total).toFixed(0)}%) enemy=${enemyHits} (${(100*enemyHits/total).toFixed(0)}%) mine=${mineHits} (${(100*mineHits/total).toFixed(0)}%) of ${total} steps`)
-console.log('  (neutral share should dominate; enemy > mine; mine only from path-passthrough)')
+console.log('  (smart target = any non-own deep cell, so neutral+enemy should dominate; mine = own trail / base walk-through)')
+if ((neutralHits + enemyHits) / total < 0.5) { console.error('✗ smart bot spends most steps on its own paint'); process.exit(1) }
+if (neutralHits === 0) { console.error('✗ smart bot never reached a neutral cell'); process.exit(1) }

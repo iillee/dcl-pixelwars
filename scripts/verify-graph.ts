@@ -11,7 +11,7 @@
  */
 
 import {
-  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells, baseLinePathCells, lastLayoutUsedFallback, layFallback, MIN_Y,
+  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, lastLayoutUsedFallback, layFallback, MIN_Y,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
 import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE } from '../src/maze/level'
@@ -42,6 +42,27 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   const opensOf = (p: P) => new Set(OPENS[p.type].map(d => (d + p.r) % 4))
   const isBase = (x: number, z: number) => baseCells(1).concat(baseCells(2)).some(([a, b]) => a === x && b === z)
 
+  let baseSig: string | null = null
+  const MIN_JUNCTIONS = 10   // was avg 3.4 with 4 separate lanes
+  const MIN_COVERAGE = 0.7   // share of the 56 non-base cells holding a tile
+  /** Intertwining: junctions (fork/cross off-base), coverage, cycles (independent loops = E - V + 1), over-ness (L+1 tiles beside L-1/L0 tiles they don't link to). */
+  function weave() {
+    const placed = getPlacedTilesInOrder()
+    const off = placed.filter(p => !isBase(p.x, p.z))
+    const junctions = off.filter(p => p.type === 'fork' || p.type === 'cross').length
+    const coverage = off.length / (GRID_W * GRID_H - 8)
+    let e2 = 0
+    for (const p of placed) e2 += opensOf(p).size
+    const loops = e2 / 2 - placed.length + 1
+    const byXZ = new Map(placed.map(p => [`${p.x},${p.z}`, p]))
+    let over = 0
+    for (const p of placed) {
+      if (lvl(p.y) !== 1 || p.type === 'ramp') continue
+      if ([0, 1, 2, 3].some(d => { const n = byXZ.get(`${p.x + DXZ[d][0]},${p.z + DXZ[d][1]}`); return n && n.type !== 'ramp' && lvl(n.y) < 1 && !opensOf(p).has(d) })) over++
+    }
+    return { junctions, coverage, loops, over }
+  }
+
   /** All rule checks on the current layout; returns an error string or null. */
   function check(): string | null {
     const placed = getPlacedTilesInOrder()
@@ -51,7 +72,6 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       byXZ.set(`${p.x},${p.z}`, p)
     }
     const at = (x: number, z: number) => byXZ.get(`${x},${z}`)
-    if (placed.length !== 8 + baseLineCells().length) return `tile count ${placed.length} != 8 + ${baseLineCells().length}`
     for (const p of placed) {
       const l = lvl(p.y)
       if (l < -1 || l > 1 || Math.abs(p.y - (BASE_Y + l * STEP)) > 0.01) return `tile (${p.x},${p.z}) off-level y=${p.y}`
@@ -98,25 +118,18 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       }
       exits.push(ex)
     }
-    if (exits[0] !== exits[1] || exits[0] < 4) return `exits RED=${exits[0]} BLUE=${exits[1]} (want equal, ≥4)`
-    // 4 paths, each going up and down by single levels.
-    const paths = baseLinePathCells()
-    if (paths.length !== 4) return `expected 4 paths, got ${paths.length}`
-    for (const [i, path] of paths.entries()) {
-      let up = 0, down = 0
-      const ys = [0, ...path.map(c => c[2]), 0]
-      for (let k = 0; k < path.length; k++) {
-        const c = path[k]
-        if (c[3] === undefined) continue
-        const prev = k === 0 ? null : path[k - 1]
-        const goingTo = k + 1 < path.length ? path[k + 1] : null
-        const travel = goingTo ? [0, 1, 2, 3].find(d => c[0] + DXZ[d][0] === goingTo[0] && c[1] + DXZ[d][1] === goingTo[1]) : null
-        if (travel === c[3]) up++; else down++
-        void prev
-      }
-      if (!up || !down) return `path ${i + 1} lacks an up or a down`
-      void ys
-    }
+    if (exits[0] !== exits[1] || exits[0] !== 6) return `exits RED=${exits[0]} BLUE=${exits[1]} (want 6 each)`
+    // Base tiles are identical every round (persistent entities never change shape).
+    const sig = baseCells(1).concat(baseCells(2)).map(([x, z]) => { const p = at(x, z)!; return `${p.type}${p.r}` }).join()
+    if (baseSig === null) baseSig = sig
+    else if (sig !== baseSig) return `base tiles differ between rounds: ${sig} vs ${baseSig}`
+    // Up/down variety: ramps both ways and all three levels in use.
+    const lv = new Set(placed.map(p => lvl(p.y)))
+    if (ramps < 4 || !lv.has(-1) || !lv.has(1)) return `too flat: ${ramps} ramps, levels ${[...lv]}`
+    // Intertwined: enough junctions and coverage.
+    const m = weave()
+    if (m.junctions < MIN_JUNCTIONS) return `only ${m.junctions} junctions (want ≥${MIN_JUNCTIONS})`
+    if (m.coverage < MIN_COVERAGE) return `coverage ${(100 * m.coverage).toFixed(0)}% (want ≥${100 * MIN_COVERAGE}%)`
     // Cell graph: every cell reachable, RED reaches BLUE.
     const g = buildWalkableGraph(placed)
     const red = [...g.nodes].filter(id => baseTeamOfCellId(id) === 1)
@@ -151,7 +164,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   const N = 250
   let pass = 0, fallbacks = 0, attempts = 0
   const shapes = new Set<string>(), cellSets = new Set<string>()
-  let tiles = 0, ramps = 0, junctions = 0, cells = 0, minT = 99, maxT = 0, minR = 99, maxR = 0
+  let tiles = 0, ramps = 0, junctions = 0, cells = 0, cov = 0, loops = 0, over = 0, minJ = 99, minT = 99, maxT = 0, minR = 99, maxR = 0
   const levelUse = [0, 0, 0]
   const tg = Date.now()
   const samples: number[] = [1, 2, 3]
@@ -169,22 +182,24 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     shapes.add(sig); cellSets.add(P.map(p => `${p.x},${p.z}`).sort().join('|'))
     const nr = P.filter(p => p.type === 'ramp').length
     tiles += P.length; ramps += nr; minT = Math.min(minT, P.length); maxT = Math.max(maxT, P.length); minR = Math.min(minR, nr); maxR = Math.max(maxR, nr)
-    junctions += P.filter(p => !isBase(p.x, p.z) && (p.type === 'fork' || p.type === 'cross')).length
+    { const m = weave(); junctions += m.junctions; cov += m.coverage; loops += m.loops; over += m.over; minJ = Math.min(minJ, m.junctions) }
     for (const p of P) levelUse[lvl(p.y) + 1]++
     cells += buildWalkableGraph(P).nodes.size
     if (samples.includes(i)) {
-      console.log(`\nseed ${s0}: ${P.length} tiles, ${nr} ramps  (top = north/+Z; R/B base, -0+ = L-1/L0/L+1, ^>v< ramp rising N/E/S/W + its low level, + cross, T fork)`)
+      console.log(`\nseed ${s0}: ${P.length} tiles, ${nr} ramps  (top = north/+Z; R/B base; 1st char level -=L-1 0=L0 +=L+1, 2nd char + cross T fork; ^>v< = ramp rising N/E/S/W, then its low level)`)
       for (const r of ascii()) console.log('   ' + r)
     }
   }
   const ms = (Date.now() - tg) / N
   console.log('')
   console.log(`seeds: ${pass}/${N} pass all rules (${(100 * pass / N).toFixed(1)}%); fallback used ${fallbacks}×; avg ${(attempts / N).toFixed(2)} outer attempt(s); ${ms.toFixed(1)} ms/round`)
-  console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(junctions / Math.max(1, pass)).toFixed(1)} path junctions (fork/cross), avg ${(cells / Math.max(1, pass)).toFixed(0)} cells`)
+  console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(cells / Math.max(1, pass)).toFixed(0)} paint cells`)
+  const k = Math.max(1, pass)
+  console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}; old 4-lane avg 3.4), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
   if (shapes.size < N * 0.9) fail(`low variety: ${shapes.size}/${N}`)
-  console.log('✓ every seed: 8×8, L0 closed-ring bases with equal exits (4 each), 4 paths each with up+down, ±1 ramps never adjacent and flat at both ends, heights match at every join, 180° symmetric, fully connected')
+  console.log('✓ every seed: 8×8, W/E L0 closed-ring bases with 6 exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, 180° symmetric, fully connected, junction + coverage gates met')
   process.exit(0)
 }
 
