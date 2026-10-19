@@ -120,7 +120,22 @@ Best of 6 valid candidates (all three levels used, junctions ≥ 12 × size scal
 
 **Teleporter (asymmetric):** one pair (A, B) on a turn, fork or cross only (never a straight, ramp or end), off bases and exit cells, ≥2 tiles from a base, ends ≥3 tiles apart. Each base's walk to its nearer end must be within 1 tile of the other base's. Score = remoteness of both ends + tile preference (turn +2, fork +0.5, cross 0), +1.5 if the ends are on **different levels**. Layouts with no valid pair are rejected (0 in 250 seeds).
 
-**Size comparison (250 seeds each, all 3 levels required):**
+**Verticality (asymmetric):** the height field grows 1–2 raised and 1–2 sunk regions of 3–6 cells each by random flood fill. Only the base exit cells (plus whatever connects them) stay flat L0. Ramps: 5–8 per attempt. L0 links are thinned harder (15–50%, before other links) so the flat level reads as paths, not a slab, still with no dead ends and full connectivity. Every round must pass a gate (`VERT_MIN_SHARE` / `VERT_MIN_EACH` / `VERT_MIN_RAMPS` in `generator.ts`): **≥45% of non-base tiles off flat L0** (L+1, L-1 or ramp), **≥3 flat tiles on L+1 and ≥3 on L-1**, **≥4 ramps**. The candidate score adds 12 × off-L0 share.
+
+| 5×5, 250 seeds | Before (flat-prone) | After (verticality gate) |
+|---|---|---|
+| Pass / fallback | 250/250 / 0 | 250/250 / 0 |
+| Distinct layouts (footprints) | 248 (111) | 237 (108) |
+| Non-base tiles: L+1 / L-1 / ramp / flat L0 | 11% / 6% / 20% / 63% | 24% / 21% / 27% / 28% |
+| Avg L+1 / L-1 flat tiles | 2.2 / 1.3 | 4.9 / 4.2 |
+| Off-L0 share avg (min) | 37% (26%) | 72% (48%) |
+| Ramps | 3–6, avg 4.1 | 4–7, avg 5.5 |
+| Junctions avg (min) / loops | 8.8 (4) / 6.0 | 5.4 (4) / 3.9 |
+| Coverage | 91% | 89% |
+| Teleporter ends on different levels | 242/250 | 230/250 |
+| Generation time | ~150 ms/round | ~260 ms/round |
+
+**Size comparison (250 seeds each, all 3 levels required, before the verticality gate):**
 
 | Grid (inset) | Mode | Pass | Fallback | Distinct layouts | Junctions avg (min) | Ramps | Coverage | Notes |
 |---|---|---|---|---|---|---|---|---|
