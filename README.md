@@ -118,6 +118,8 @@ Best of 6 valid candidates (all three levels used, ≥7 junctions on 6×6) by ju
 
 **Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): exactly **one pair** per round, A ↔ mirror(A) (its 180° image), on remote flat tiles (off bases, exit cells and ramps, ≥2 tiles from a base, ends ≥3 tiles apart when possible). The layout is 180° symmetric, so each end is to one team exactly what the other end is to the other team: fair. Trade-off: both ends are always on the same level (a cross-level single pair can't be symmetric). Ends land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
 
+**Dead-end bias:** after the net is chosen, `addStubs()` lays one mirrored pair of single-opening flat stubs using the existing `end` tile (`assets/models/tile-end.glb`). It either adds a new tile in an empty cell next to the net, or cuts an existing flat tile down to one link. Neighbours must keep ≥2 links, the net must stay connected and junctions must stay ≥ `NET_MIN_JUNCTIONS`. Stubs are never on a base or exit cell and are ≥2 tiles from a base. The teleporter pair goes on them (stub ↔ mirror(stub)). If no stub pair fits, the round has no dead ends and the pair uses the remoteness score.
+
 **Ghost bot**: spawns on its own base (opposite the solo human) and respawns opposite if the human switches team; returns to base each round.
 
 **Fall respawn**: below `MIN_Y − FALL_RESPAWN_DROP` (≈ y 9.2) you are sent back to your base.

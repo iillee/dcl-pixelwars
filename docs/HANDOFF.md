@@ -29,7 +29,8 @@ Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only u
 | `154b63a`, `809624e` | Ghost spawns on the opposite base |
 | `ee9ecee`, `14bce03` | Teleporters for sky mode (two pairs) |
 | `c8502a3`, `e07db2e` | Docs + this handoff |
-| (latest) | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
+| `ca94945`, `036a9d4` | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
+| (latest) | Teleporter dead-end bias: mirrored `end` stub pair holds the teleporter; verify allows only those dead ends |
 
 ---
 
@@ -70,7 +71,9 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ### Sky layout rules (what verify-graph enforces on every seed)
 
-6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run: 250/250 pass, fallback 0×, avg 11.5 junctions, 96% coverage, 187 distinct layouts, 1 teleporter pair every round (pair level L-1/L0/L+1 = 73/2/175, avg ends 7.0 tiles apart).
+6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends except the teleporter's own mirrored stub pair; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run (with dead-end bias): 250/250 pass, fallback 0×, avg 10.4 junctions (min 8), 97% coverage, 229 distinct layouts, 1 teleporter pair every round, **on dead-end stubs in 227/250 rounds (91%)**, remoteness otherwise (pair level L-1/L0/L+1 = 94/9/147, avg ends 5.8 tiles apart).
+
+**Dead-end bias:** after the net is chosen, `addStubs()` lays one mirrored pair of single-opening flat stubs using the existing `end` tile (`assets/models/tile-end.glb`). It either adds a new tile in an empty cell next to the net, or cuts an existing flat tile down to one link. Neighbours must keep ≥2 links, the net must stay connected and junctions must stay ≥ `NET_MIN_JUNCTIONS`. Stubs are never on a base or exit cell and are ≥2 tiles from a base. The teleporter pair goes on them (stub ↔ mirror(stub)). If no stub pair fits, the round has no dead ends and the pair uses the remoteness score.
 
 **Teleporter fairness trade-off:** A ↔ mirror(A) is the only single pair that maps onto itself under the 180° symmetry, so each team's distance to "its" end is identical. Its cost is that both ends always share a level. A cross-level single pair can't be symmetric, so one team would get the better end. The earlier two-pair scheme (A ↔ mirror(B), mirror(A) ↔ B) was the fair cross-level option and was replaced at Luke's request.
 
@@ -109,6 +112,7 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 - **Loosened verify gates** for 6×6: junctions ≥6 (was 10 on 8×8), variety ≥70% (90% on 8×8), smart-bot own-paint gate 0.35 (was 0.5).
 - **Line endings:** `scene.json` and `src/teleportOrbs.ts` were committed with LF (rest CRLF).
 - **Leftovers:** ring-mode wording in the unused bases-only-without-paths branch and its verify branch; `dumpNet()` dev helper still exported from the generator.
+- **Dead-end stubs:** untested in-world. The `end` tile model was built for classic mode, so its look at sky altitude, orb placement on a cap tile, and whether players feel trapped there are all unknown. Rounds that use the fallback layout never get stubs. Cutting existing tiles lowers average junctions (11.5 → 10.4) and loops (7.1 → 5.6).
 - **Nothing on `level` is playtested in-world or deployed.** Spawn floor, base persistence across a round change, teleporter arrival facing, and the overview → teleport sequence have only been checked by code + verify.
 
 ---
