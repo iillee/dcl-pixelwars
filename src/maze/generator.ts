@@ -26,18 +26,14 @@ import { rand, setSeed } from './rng'
 // its per-tile cell grids consistently.
 export const TILE_SCALE = 2                                          // uniform GLB scale
 export const CELL = 16 * TILE_SCALE                                  // one grid cell = 32 m
-// Scene is 11×11 parcels = 176×176 m. V1 density pass (PO Week 1): the
-// maze is a MAZE_GRID×MAZE_GRID block of 32 m tiles centered in the scene.
-// 3 → 96 m with a 40 m border; 5 → the V0 160 m maze with an 8 m border.
-// Keep it ODD so the center cell lands exactly at world (88, 88), where
-// scene.json spawns and client/player.ts teleports. Tile scale and paint
-// cell size (2 m) are unchanged. Everything downstream (rebuild, paint,
-// shared/mazeGraph, server bots, teleport orbs) derives from these.
+// Scene is 11×11 parcels = 176×176 m. 176/32 = 5.5, so we use a 5×5
+// maze grid (160 m) centered inside the scene with an 8 m border on all
+// sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
+// so cell (2,2) — the true center — lands exactly at world (88, 88).
 export const SCENE_SIZE = 176
-export const MAZE_GRID = 3
-export const GRID_W = Math.min(MAZE_GRID, Math.floor(SCENE_SIZE / CELL))
-export const GRID_H = GRID_W
-export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 40 m border at grid 3
+export const GRID_W = Math.floor(SCENE_SIZE / CELL)
+export const GRID_H = Math.floor(SCENE_SIZE / CELL)
+export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 8 m border
 export const STEP = 5.3835 * TILE_SCALE                              // ramp Y increment
                                                                      // (5.3835 m = walkable floor-to-floor in the new tile GLBs)
 export const MAX_Y = 40                                              // stack cap — 4 levels max
