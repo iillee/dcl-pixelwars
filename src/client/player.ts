@@ -6,15 +6,15 @@
  *   - classic: everyone goes to the centre cross on join and at each round reset.
  *   - sky:     each player goes to their TEAM BASE once the server has
  *              assigned a team (teamAssigned), at each round reset, and
- *              whenever they fall more than FALL_RESPAWN_DROP m below the
- *              base floor.
+ *              whenever they fall more than FALL_RESPAWN_DROP m below the LOWEST
+ *              tile level (MIN_Y; bases+line mode has a level below the bases).
  */
 
 import { engine, Transform } from '@dcl/sdk/ecs'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
-import { BASE_Y, baseSpawn } from '../maze/generator'
+import { MIN_Y, baseSpawn } from '../maze/generator'
 import { IS_SKY, FALL_RESPAWN_DROP } from '../maze/level'
 
 // Classic centre cross: cell (2,2), MAZE_ORIGIN=8, CELL=32 → centre (88, 88).
@@ -57,14 +57,14 @@ export function initPlayerNet(): void {
     if (!IS_SKY || myTeam === Team.None) teleportHome('initial')
   })
 
-  // Sky: fall respawn. Off when the level is on the ground (SKY_ALTITUDE <
-  // FALL_RESPAWN_DROP): there is nothing below to fall to.
-  if (IS_SKY && BASE_Y >= FALL_RESPAWN_DROP) {
+  // Sky: fall respawn below MIN_Y - FALL_RESPAWN_DROP. Off when the lowest
+  // level is near the ground (MIN_Y < FALL_RESPAWN_DROP): nothing to fall to.
+  if (IS_SKY && MIN_Y >= FALL_RESPAWN_DROP) {
     let cooldown = 0
     engine.addSystem((dt: number) => {
       if (cooldown > 0) { cooldown -= dt; return }
       const t = Transform.getOrNull(engine.PlayerEntity)
-      if (!t || t.position.y >= BASE_Y - FALL_RESPAWN_DROP) return
+      if (!t || t.position.y >= MIN_Y - FALL_RESPAWN_DROP) return
       cooldown = 2
       teleportHome('fell')
     })

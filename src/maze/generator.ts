@@ -47,6 +47,10 @@ export const STEP = 5.3835 * TILE_SCALE                              // ramp Y i
 /** World Y of the lowest level. 0 in classic; SKY_ALTITUDE in sky. Tiles
  *  store absolute world Y, so rebuild / paint / mazeGraph need no offset. */
 export const BASE_Y = IS_SKY ? SKY_ALTITUDE : 0
+/** Lowest tile level. Bases+line mode adds one level BELOW the bases
+ *  (paths ramp down to BASE_Y - STEP); otherwise the bases are the floor. */
+const LINE_MODE = IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE
+export const MIN_Y = LINE_MODE ? BASE_Y - STEP : BASE_Y
 export const MAX_Y = IS_SKY ? BASE_Y + (SKY_LEVEL_COUNT - 1) * STEP + 0.5 : 40                                              // stack cap — 4 levels max
                                                                      // (Y = 0, 10.77, 21.53, 32.30).
                                                                      // STEP is 10.767 so 40 blocks
@@ -226,7 +230,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
       if (nb?.type === 'ramp') return false
       // Also check the ramp-below case: if a lower ramp's high side reaches
       // my opening's level, that's still a ramp-to-ramp connection.
-      if (ny >= BASE_Y + STEP - 0.001) {
+      if (ny >= MIN_Y + STEP - 0.001) {
         const under = grid.get(key(nx, nz, ny - STEP))
         if (under?.type === 'ramp' && highDirAt(under.type, under.r) === OPP[d]) return false
       }
@@ -258,7 +262,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
         // walkway our opening receives — so "open" is still valid. Only reject
         // when neither nb1 nor a matching lower ramp provides the connection.
         if (isOpen) {
-          if (myY < BASE_Y + STEP - 0.001) return false
+          if (myY < MIN_Y + STEP - 0.001) return false
           const under = grid.get(key(nx, nz, myY - STEP))
           if (!under || under.type !== 'ramp' || highDirAt(under.type, under.r) !== back) return false
         }
@@ -281,7 +285,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
     //  - If its high side points at me → my side must be OPEN (connects to ramp's high).
     //  - Otherwise (wall side or low side facing me) → my side must be CLOSED,
     //    since there's nothing valid to connect to at this elevation.
-    if (myY >= BASE_Y + STEP - 0.001) {
+    if (myY >= MIN_Y + STEP - 0.001) {
       const nb2 = grid.get(key(nx, nz, myY - STEP))
       if (nb2?.type === 'ramp') {
         const nb2High = highDirAt(nb2.type, nb2.r)
@@ -321,7 +325,7 @@ export function validate(): boolean {
         const nb1High = highDirAt(nb1.type, nb1.r)
         if (nb1High !== back && nb1Opens.has(back)) connected = true
       }
-      if (!connected && ny >= BASE_Y + STEP - 0.001) {
+      if (!connected && ny >= MIN_Y + STEP - 0.001) {
         const nb2 = grid.get(key(nx, nz, ny - STEP))
         if (nb2 && highDirAt(nb2.type, nb2.r) === back) connected = true
       }
@@ -662,27 +666,45 @@ function generateSky(): void {
 }
 
 /**
- * Bases+line: two flat paths at BASE_Y between the bases' INNER ring tiles
- * (RED (1,1), BLUE (6,6) on the 8×8 grid), zig-zagging through the middle:
+ * Bases+line: two paths between the bases' INNER ring tiles (RED (1,1),
+ * BLUE (6,6) on the 8×8 grid) over three levels: L0 = BASE_Y (bases,
+ * crossings), L-1 = BASE_Y - STEP, L+1 = BASE_Y + STEP. Hand-placed:
  *
- *   A: RED (1,1) →E (2,1) (3,1) ↑ (3,2) (3,3) (3,4) →E (4,4) (5,4) (6,4) ↑ (6,5) → BLUE (6,6) from the south
- *   B: A with x/z swapped — leaves RED going north, enters BLUE from the west.
+ *   A: RED(1,1) L0 → (2,1) ramp ↓ → (3,1) L-1 → (3,2) ramp ↑ → (3,3) ✚ L0 → (3,4) L0
+ *        → (4,4) ✚ L0 → (5,4) ramp ↑ → (6,4) L+1 → (6,5) ramp ↓ → BLUE(6,6) L0
+ *   B: the 180° image of A walked RED → BLUE (same cells as A with x/z
+ *      swapped): up, L+1, down, crossings, down, L-1, up.
  *
- * A and B cross at (3,3) and (4,4) → `cross` tiles there. The inner ring
- * tiles become `cross`es too (ring + two exits). The pair is symmetric under
- * the 180° rotation (A's image is B) and under both diagonal reflections.
- * Tile pieces are chosen from the opening set each cell needs, so any route
- * edit only touches the cell lists. Assumes the 8×8 grid with 2×2 bases;
- * otherwise no line is laid. Checked by validate().
+ * Every ramp sits between two flat tiles (never two ramps in a row) and
+ * rises exactly one STEP. Crossings (3,3)/(4,4) are L0 for both paths.
+ * Entry: [x, z, level, rampHighDir?] — a ramp's level is its LOW end and
+ * its high side faces rampHighDir (N=0 E=1 S=2 W=3). Flat tile pieces are
+ * chosen from the openings each cell needs. Assumes the 8×8 grid with 2×2
+ * corner bases; otherwise no line is laid. Checked by validate().
  */
-const BASE_LINE_A: Array<[number, number]> = [
-  [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4], [4, 4], [5, 4], [6, 4], [6, 5], [6, 6],
+type LineCell = [number, number, number, Dir?]
+const BASE_LINE_A: LineCell[] = [
+  [1, 1, 0],
+  [2, 1, -1, 3],  // ramp, high W (toward RED): going east = down
+  [3, 1, -1],
+  [3, 2, -1, 0],  // ramp, high N: going north = up
+  [3, 3, 0],
+  [3, 4, 0],
+  [4, 4, 0],
+  [5, 4, 0, 1],   // ramp, high E: going east = up
+  [6, 4, 1],
+  [6, 5, 0, 2],   // ramp, high S (toward (6,4)): going north = down
+  [6, 6, 0],
 ]
-const BASE_LINE_B: Array<[number, number]> = BASE_LINE_A.map(([x, z]) => [z, x] as [number, number])
+// 180° image of A, reversed so it also runs RED → BLUE.
+const BASE_LINE_B: LineCell[] = BASE_LINE_A.slice().reverse().map(([x, z, l, h]) => {
+  const [mx, mz] = [7 - x, 7 - z]
+  return (h === undefined ? [mx, mz, l] : [mx, mz, l, ((h + 2) % 4) as Dir]) as LineCell
+})
 const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
 
 /** Dir from cell a to orthogonally adjacent cell b. */
-function dirTo(a: [number, number], b: [number, number]): Dir {
+function dirTo(a: LineCell, b: LineCell): Dir {
   for (const d of ALL_DIRS) if (a[0] + DX[d] === b[0] && a[1] + DZ[d] === b[1]) return d
   throw new Error(`cells not adjacent: ${a} ${b}`)
 }
@@ -700,15 +722,17 @@ function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
 
 function layBaseLine(): void {
   if (!baseLineFits()) return
-  const need = new Map<string, { x: number; z: number; dirs: Set<Dir> }>()
-  const add = (c: [number, number], d: Dir) => {
+  const need = new Map<string, { c: LineCell; dirs: Set<Dir> }>()
+  const add = (c: LineCell, d: Dir) => {
     const k = `${c[0]},${c[1]}`
     if (!need.has(k)) {
       // Start from the ring tile's own openings so rings stay closed loops.
       const ring = grid.get(key(c[0], c[1], BASE_Y))
-      need.set(k, { x: c[0], z: c[1], dirs: new Set(ring ? openingsAt(ring.type, ring.r) : []) })
+      need.set(k, { c, dirs: new Set(ring ? openingsAt(ring.type, ring.r) : []) })
     }
-    need.get(k)!.dirs.add(d)
+    const e = need.get(k)!
+    if (e.c[2] !== c[2] || e.c[3] !== c[3]) throw new Error(`paths disagree at ${k}: ${e.c} vs ${c}`)
+    e.dirs.add(d)
   }
   for (const path of [BASE_LINE_A, BASE_LINE_B]) {
     for (let i = 0; i + 1 < path.length; i++) {
@@ -716,18 +740,25 @@ function layBaseLine(): void {
       add(path[i + 1], dirTo(path[i + 1], path[i]))
     }
   }
-  for (const { x, z, dirs } of need.values()) {
+  for (const { c: [x, z, level, high], dirs } of need.values()) {
+    grid.delete(key(x, z, BASE_Y))
+    const y = BASE_Y + level * STEP
+    if (high !== undefined) { placeTile('ramp', high, x, z, y); continue } // ramp r = high dir
     const tile = tileFor(dirs)
     if (!tile) throw new Error(`no tile for openings ${[...dirs]} at ${x},${z}`)
-    grid.delete(key(x, z, BASE_Y))
-    placeTile(tile.t, tile.r, x, z, BASE_Y)
+    placeTile(tile.t, tile.r, x, z, y)
   }
+}
+
+/** Base-line paths as [x, z, level, rampHighDir?] cells, base tiles excluded (verify scripts). */
+export function baseLinePathCells(): LineCell[][] {
+  if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || !baseLineFits()) return []
+  return [BASE_LINE_A, BASE_LINE_B].map(p => p.slice(1, -1))
 }
 
 /** Grid cells of each base-line path, base tiles excluded (verify scripts). */
 export function baseLinePaths(): Array<Array<[number, number]>> {
-  if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || !baseLineFits()) return []
-  return [BASE_LINE_A, BASE_LINE_B].map(p => p.slice(1, -1))
+  return baseLinePathCells().map(p => p.map(([x, z]) => [x, z] as [number, number]))
 }
 
 /** Union of the base-line path cells (non-base tiles), for verify scripts. */

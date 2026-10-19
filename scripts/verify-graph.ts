@@ -11,7 +11,7 @@
  */
 
 import {
-  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells, baseLinePaths,
+  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells, baseLinePaths, MIN_Y,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
 import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE } from '../src/maze/level'
@@ -36,7 +36,41 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   const fail = (m: string) => { console.error(`✗ ${m}`); process.exit(1) }
   const line = baseLineCells()
   if (placed.length !== 8 + line.length) fail(`expected ${8 + line.length} tiles, got ${placed.length}`)
-  if (placed.some(p => Math.abs(p.y - BASE_Y) > 0.01 || p.type === 'ramp')) fail('path not flat at BASE_Y')
+  // Level bounds: every tile on L-1, L0 or L+1; bases on L0.
+  const lvl = (y: number) => Math.round((y - BASE_Y) / STEP)
+  for (const p of placed) {
+    const l = lvl(p.y)
+    if (l < -1 || l > 1 || Math.abs(p.y - (BASE_Y + l * STEP)) > 0.01) fail(`tile (${p.x},${p.z}) off-level y=${p.y}`)
+    if (baseTeamOfCellId(`${p.x},${p.z},${p.y}:0,0`) === 0 && baseCells(1).concat(baseCells(2)).some(([x, z]) => x === p.x && z === p.z)) fail(`base tile (${p.x},${p.z}) not on L0`)
+  }
+  if (Math.abs(MIN_Y - (BASE_Y - STEP)) > 0.01) fail(`MIN_Y ${MIN_Y} != BASE_Y - STEP`)
+  // Ramp joins: low side meets a flat tile at the ramp's Y, high side a
+  // flat tile at Y + STEP, both opening back toward the ramp; never two ramps in a row.
+  const at = (x: number, z: number) => placed.find(p => p.x === x && p.z === z)
+  const OPENS: Record<string, number[]> = { end: [0], straight: [0, 2], turn: [0, 1], fork: [0, 2, 3], cross: [0, 1, 2, 3], ramp: [0, 2] }
+  const opens = (p: typeof placed[number]) => new Set(OPENS[p.type].map(d => (d + p.r) % 4))
+  const DXZ = [[0, 1], [1, 0], [0, -1], [-1, 0]]
+  let ramps = 0
+  for (const p of placed.filter(q => q.type === 'ramp')) {
+    ramps++
+    const high = p.r % 4, low = (high + 2) % 4
+    for (const [d, wantY] of [[high, p.y + STEP], [low, p.y]] as Array<[number, number]>) {
+      const n = at(p.x + DXZ[d][0], p.z + DXZ[d][1])
+      if (!n) fail(`ramp (${p.x},${p.z}) ${d === high ? 'high' : 'low'} side opens onto nothing`)
+      if (n!.type === 'ramp') fail(`ramp (${p.x},${p.z}) joins ramp (${n!.x},${n!.z})`)
+      if (Math.abs(n!.y - wantY) > 0.01) fail(`ramp (${p.x},${p.z}) ${d === high ? 'high' : 'low'} side: neighbour y=${n!.y}, want ${wantY.toFixed(3)}`)
+      if (!opens(n!).has((d + 2) % 4)) fail(`ramp (${p.x},${p.z}) neighbour (${n!.x},${n!.z}) doesn't open back`)
+    }
+  }
+  // Each path has at least one up and one down, walked RED → BLUE.
+  for (const [i, path] of baseLinePaths().entries()) {
+    const ys = [BASE_Y, ...path.map(([x, z]) => at(x, z)!), BASE_Y].map(v => typeof v === 'number' ? v : (v.type === 'ramp' ? null : v.y))
+      .filter((y): y is number => y !== null)
+    const steps = ys.slice(1).map((y, k) => Math.sign(Math.round((y - ys[k]) / STEP)))
+    if (!steps.includes(1) || !steps.includes(-1)) fail(`path ${'AB'[i]} lacks an up or a down`)
+    if (steps.some((_, k) => Math.abs(Math.round((ys[k + 1] - ys[k]) / STEP)) > 1)) fail(`path ${'AB'[i]} jumps >1 level`)
+  }
+  console.log(`✓ levels: L-1=${(BASE_Y - STEP).toFixed(3)} L0=${BASE_Y} L+1=${(BASE_Y + STEP).toFixed(3)}; ${ramps} ramps, every join flat-to-ramp-to-flat at ±1 STEP; each path goes up and down`)
   const red = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 1)
   const blue = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 2)
   const open = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 0)
@@ -57,6 +91,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     const q = byXZ.get(`${mx},${mz}`)
     if (!q) fail(`no 180° twin for (${p.x},${p.z})`)
     const a = [...opensOf(p)].map(d => (d + 2) % 4).sort().join(), b = [...opensOf(q!)].sort().join()
+    if (q!.type !== p.type || Math.abs(q!.y - p.y) > 0.01) fail(`180° twin of (${p.x},${p.z}) differs in type/height`)
     if (a !== b) fail(`180° openings differ at (${p.x},${p.z}) vs (${mx},${mz})`)
   }
   // Each path, walked tile by tile, is a real connected route between the
@@ -73,8 +108,9 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     if (exits !== 2) fail(`base ${team} has ${exits} exits (want 2)`)
   }
   const crossings = paths[0].filter(([x, z]) => paths[1].some(([a, b]) => a === x && b === z))
-  console.log(`✓ path A ${JSON.stringify(paths[0])}`)
-  console.log(`✓ path B ${JSON.stringify(paths[1])}`)
+  const fmt = (p: Array<[number, number]>) => p.map(([x, z]) => { const t = at(x, z)!; return `(${x},${z})${t.type === 'ramp' ? 'ramp' : ''}L${lvl(t.y)}` }).join(' ')
+  console.log(`✓ path A ${fmt(paths[0])}`)
+  console.log(`✓ path B ${fmt(paths[1])}`)
   console.log(`✓ paths cross at ${JSON.stringify(crossings)} (${crossings.map(([x, z]) => byXZ.get(`${x},${z}`)!.type).join(', ')}); each base has 2 exits`)
   console.log('✓ fair: whole layout is 180° point-symmetric (same rotation as the bases)')
   console.log(`✓ bases ${JSON.stringify(baseCells(1))} ↔ ${JSON.stringify(baseCells(2))} joined by ${line.length} path tiles`)
