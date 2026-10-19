@@ -72,8 +72,12 @@ export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
   // directly above spawn.
   const CX = Math.floor(GRID_W / 2)
   const CZ = Math.floor(GRID_H / 2)
+  // On the V0 5×5 maze this excludes the 3×3 block around the cross; on
+  // the 3×3 density maze that block is the whole map, so only the center
+  // column itself is excluded.
+  const R = GRID_W >= 5 ? 1 : 0
   const nearCenter = (p: Placed) =>
-    Math.abs(p.x - CX) <= 1 && Math.abs(p.z - CZ) <= 1
+    Math.abs(p.x - CX) <= R && Math.abs(p.z - CZ) <= R
   const candidates = tiles.filter(p => p.type !== 'ramp' && !nearCenter(p))
   if (candidates.length < 2) return
 

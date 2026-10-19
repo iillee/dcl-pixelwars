@@ -13,9 +13,9 @@ import { engine } from '@dcl/sdk/ecs'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { events } from '../shared/events'
 
-// Center cross tile world position. See generator.ts: cell (2,2) with
-// MAZE_ORIGIN=8 and CELL=32 puts the tile's SW corner at (72, 72) and its
-// center at (88, 88). Y=2 sits the player on the walkable floor slab.
+// Center cross tile world position. See generator.ts: the center cell
+// (1,1 at MAZE_GRID=3, MAZE_ORIGIN=40, CELL=32) has its SW corner at
+// (72, 72) and its center at (88, 88) for any odd MAZE_GRID. Y=2 sits the player on the walkable floor slab.
 const SPAWN_POSITION = { x: 88, y: 2, z: 88 }
 const SPAWN_CAMERA_TARGET = { x: 88, y: 2, z: 96 }
 
