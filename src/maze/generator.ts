@@ -992,3 +992,75 @@ function placeRings(): void {
   const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
   for (const [x, z] of baseCells(1)) placeSym('turn', ringRot(Math.min(1, x - x0), Math.min(1, z - z0)), x, z, BASE_Y)
 }
+
+// ═══ Teleporter placement (sky) ═════════════════════════════════════
+export interface TeleportEnd { tile: Placed; land: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } }
+
+/**
+ * Teleporter pairs for the current grid — a pure function of the layout,
+ * so every client (and verify-graph) gets the same answer per seed.
+ *
+ * Candidates: flat tiles, not a base, not a base exit cell, ≥2 tiles from
+ * both bases. Remoteness score (tile graph BFS): detour off the shortest
+ * RED↔BLUE route (dRed + dBlue − D) + 0.5 × distance to the nearer base +
+ * 1 for dead-quiet 2-way tiles (straight/turn) − 0.5 per extra opening.
+ *
+ *   A = best candidate (ties: lowest x, then z).
+ *   B = best remaining candidate ≥3 tiles (Manhattan) from A and mirror(A),
+ *       preferring a different level from A.
+ *   With B: two pairs A ↔ mirror(B) and mirror(A) ↔ B — 180° images of each
+ *     other, so fair, and each links opposite halves of the map.
+ *   Without B (small/sparse grid): one self-mirrored pair A ↔ mirror(A).
+ */
+export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
+  if (!IS_SKY) return []
+  const tiles = [...grid.values()]
+  const red = tiles.find(p => baseTeamOfTile(p.x, p.z, p.y) === 1)
+  const blue = tiles.find(p => baseTeamOfTile(p.x, p.z, p.y) === 2)
+  if (!red || !blue) return []
+  const bfs = (s: Placed) => {
+    const d = new Map<Placed, number>([[s, 0]]); const q = [s]
+    for (let i = 0; i < q.length; i++) for (const n of linkedNeighbours(q[i])) if (!d.has(n)) { d.set(n, d.get(q[i])! + 1); q.push(n) }
+    return d
+  }
+  const dR = bfs(red), dB = bfs(blue)
+  const D = dR.get(blue) ?? 0
+  const isBaseOrExit = (p: Placed) => {
+    for (const team of [1, 2]) for (const [bx, bz] of baseCells(team)) {
+      if (Math.abs(bx - p.x) + Math.abs(bz - p.z) <= 1) return true
+    }
+    return false
+  }
+  const baseDist = (p: Placed) => Math.min(...[1, 2].flatMap(t => baseCells(t).map(([bx, bz]) => Math.abs(bx - p.x) + Math.abs(bz - p.z))))
+  const cands = tiles.filter(p => p.type !== 'ramp' && !isBaseOrExit(p) && baseDist(p) >= 2 && dR.has(p) && dB.has(p))
+  const score = (p: Placed) => {
+    const r = dR.get(p)!, b = dB.get(p)!
+    const opens = openingsAt(p.type, p.r).size
+    return (r + b - D) + 0.5 * Math.min(r, b) + (opens === 2 ? 1 : 0) - 0.5 * (opens - 2)
+  }
+  const sorted = cands.slice().sort((a, b) => score(b) - score(a) || a.x - b.x || a.z - b.z)
+  const at = (x: number, z: number) => cands.find(p => p.x === x && p.z === z)
+  const man = (a: Placed, b: Placed) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z)
+  const A = sorted[0]
+  if (!A) return []
+  const mA = at(...mirrorCell(A.x, A.z))
+  if (!mA) return []
+  const far = sorted.filter(p => p !== A && p !== mA && man(p, A) >= 3 && man(p, mA) >= 3 && at(...mirrorCell(p.x, p.z)))
+  const B = far.find(p => Math.abs(p.y - A.y) > 0.01) ?? far[0]
+  const end = (p: Placed): TeleportEnd => {
+    // Land 4 m out along the opening that points most toward the scene
+    // centre (always corridor floor), facing further along it.
+    const cx = (p.x + 0.5) * CELL + MAZE_ORIGIN, cz = (p.z + 0.5) * CELL + MAZE_ORIGIN
+    const mid = SCENE_SIZE / 2
+    let best: Dir = 0, bs = -Infinity
+    for (const d of openingsAt(p.type, p.r)) {
+      const s = DX[d] * (mid - cx) + DZ[d] * (mid - cz)
+      if (s > bs) { bs = s; best = d }
+    }
+    const y = p.y + 1
+    return { tile: p, land: { x: cx + DX[best] * 4, y, z: cz + DZ[best] * 4 }, look: { x: cx + DX[best] * 24, y, z: cz + DZ[best] * 24 } }
+  }
+  if (!B) return [[end(A), end(mA)]]
+  const mB = at(...mirrorCell(B.x, B.z))!
+  return [[end(A), end(mB)], [end(mA), end(B)]]
+}
