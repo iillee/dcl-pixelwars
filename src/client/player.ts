@@ -12,6 +12,7 @@
 
 import { engine, Transform } from '@dcl/sdk/ecs'
 import { movePlayerTo } from '~system/RestrictedActions'
+import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { MIN_Y, baseSpawn } from '../maze/generator'
@@ -31,6 +32,8 @@ function teleportHome(why: string): void {
   }
   console.log(`[Player] teleport (${why}) → ${pos.x.toFixed(0)},${pos.y.toFixed(1)},${pos.z.toFixed(0)}`)
   // Fire-and-forget: movePlayerTo can reject if the player has left the scene.
+  // Leave overview first so the cameraTarget look lands (as in snowdrift).
+  exitOverview()
   movePlayerTo({ newRelativePosition: pos, cameraTarget: look }).catch(() => {})
 }
 

@@ -5,6 +5,7 @@ import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
+import { OverviewUi } from "./client/overviewUi"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -200,6 +201,10 @@ export const uiMenu = () => (
         </UiEntity>
       )
     })()}
+
+    {/* ─── Right edge: overview-mode button (+ zoom/rotate while on).
+        Rendered before the banner so the banner stays on top. */}
+    <OverviewUi />
 
     {/* ─── Round-end banner: centered full-screen overlay ─────────────
         Fills the viewport so headline + subline are visually centered
