@@ -32,6 +32,9 @@ export type Events = {
   // Team assignment reply for our joinRoster. Fires exactly once per session.
   'team:assigned': { team: Team }
 
+  // Addressed, just before round:reset: our personal result for the round.
+  'round:result': { cells: number; teamCells: number; team: Team }
+
   // Broadcast on join / leave / round reset: every active player's team.
   // Subscriber: client/nametags (red/blue plates above avatars).
   'team:roster': { entries: Array<{ userId: string; team: Team }> }

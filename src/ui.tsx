@@ -215,6 +215,9 @@ export const uiMenu = () => (
       >
         <Label value={bannerHeadline()} fontSize={96} color={bannerColor()}    textAlign="middle-center" />
         <Label value={bannerSubline()}  fontSize={32} color={Color4.White()} textAlign="middle-center" />
+        {getBanner().personal !== '' && (
+          <Label value={getBanner().personal} fontSize={26} color={Color4.White()} textAlign="middle-center" uiTransform={{ margin: { top: 12 } }} />
+        )}
       </UiEntity>
     )}
   </UiEntity>

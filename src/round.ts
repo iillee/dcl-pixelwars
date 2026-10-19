@@ -43,6 +43,8 @@ interface BannerState {
   bluePct: number
   winner: 'RED' | 'BLUE' | 'TIE'
   shownAtMs: number
+  /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
+  personal: string
 }
 
 const banner: BannerState = {
@@ -51,6 +53,21 @@ const banner: BannerState = {
   bluePct: 0,
   winner: 'TIE',
   shownAtMs: 0,
+  personal: '',
+}
+
+// Personal result for the round that just ended. Arrives (roundResult)
+// just before roundReset; consumed when the banner opens.
+let pendingPersonal = ''
+let pendingAtMs = 0
+
+export function setRoundResult(cells: number, teamCells: number, team: number): void {
+  const teamName = team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'YOUR TEAM'
+  const share = teamCells > 0 ? Math.round((cells / teamCells) * 100) : 0
+  pendingPersonal = `YOU PAINTED ${cells} CELLS  ·  ${share}% OF ${teamName}`
+  pendingAtMs = Date.now()
+  // If the banner is already up (message order flipped), show it now.
+  if (banner.visible) { banner.personal = pendingPersonal; pendingPersonal = '' }
 }
 
 export function showRoundEndBanner(red: number, blue: number, total: number): void {
@@ -61,6 +78,9 @@ export function showRoundEndBanner(red: number, blue: number, total: number): vo
   banner.bluePct = bluePct
   banner.winner = redPct > bluePct ? 'RED' : bluePct > redPct ? 'BLUE' : 'TIE'
   banner.shownAtMs = Date.now()
+  // Only use a result from this boundary (guards against a stale one).
+  banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
+  pendingPersonal = ''
 }
 
 export function getBanner(): BannerState {
@@ -82,6 +102,7 @@ import { coverage } from './paint'
  * otherwise a round where only one team painted would show 100%.
  */
 export function initRoundNet(): void {
+  events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
   events.on('round:reset', ({ seed, finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
     console.log(

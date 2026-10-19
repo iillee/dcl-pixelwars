@@ -91,6 +91,10 @@ export async function setupServer(): Promise<void> {
     room.send('teamRoster', { entries })
   }
 
+  // Per-player contribution this round (cells flipped to their team).
+  // Same 'gained' count the leaderboard uses. Cleared at each boundary.
+  const roundCells = new Map<string, number>()
+
   const SNAPSHOT_COOLDOWN_MS = 5000
   const lastSnapshotAt = new Map<string, number>()
 
@@ -158,7 +162,10 @@ export async function setupServer(): Promise<void> {
     // itself is proof the player is real — mark them active so scraper
     // bots that never send paintTick are filtered out.
     markActive(from)
-    if (gained > 0) leaderboardIncrement(from, gained)
+    if (gained > 0) {
+      leaderboardIncrement(from, gained)
+      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+    }
   })
 
   // Name capture — client sends once on join with PlayerIdentityData.name.
@@ -272,6 +279,18 @@ export async function setupServer(): Promise<void> {
     if (idx === lastRoundIndex) return
     const c = coverage()
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
+    // Personal results go out BEFORE roundReset so the client already has
+    // its line when the banner opens. teamCells = sum of every teammate's
+    // contribution this round, so shares within a team add up to 100%.
+    const teamCells: Record<number, number> = { 1: 0, 2: 0 }
+    for (const [uid, n] of roundCells) {
+      const t = getTeam(uid)
+      if (t !== null) teamCells[t] = (teamCells[t] ?? 0) + n
+    }
+    for (const { userId, team } of rosterEntries()) {
+      room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
+    }
+    roundCells.clear()
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is

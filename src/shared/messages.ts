@@ -92,6 +92,11 @@ export const Messages = {
   // leaderboard entries in place.
   updateName: Schemas.Map({ name: Schemas.String }),
 
+  // Server → one client (addressed), sent just before roundReset: this
+  // player's contribution in the round that ended. cells = cells they
+  // flipped to their team; teamCells = sum over their teammates.
+  roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
+
   // Server → Clients (broadcast): every active player's team. Sent on
   // join, leave and round reset. Clients use it to paint red/blue
   // AvatarNametag plates on each avatar (client/nametags.ts).
