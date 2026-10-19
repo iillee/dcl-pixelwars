@@ -14,7 +14,7 @@ import {
   generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
-import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT } from '../src/maze/level'
+import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY } from '../src/maze/level'
 import { buildWalkableGraph, reachableCount, findPath } from '../src/shared/mazeGraph'
 
 console.log(`LEVEL_MODE=${LEVEL_MODE} grid=${GRID_W}x${GRID_H} scene=${SCENE_SIZE}m baseY=${BASE_Y} maxY=${MAX_Y.toFixed(2)}`)
@@ -30,6 +30,27 @@ const t0 = Date.now()
 const graph = buildWalkableGraph(placed)
 const t1 = Date.now()
 console.log(`graph built in ${t1 - t0}ms — nodes: ${graph.nodes.size}, edges: ${[...graph.adj.values()].reduce((s, a) => s + a.length, 0)}`)
+
+// ─── Sky bases-only: two closed rings, nothing else ─────────────────
+if (IS_SKY && SKY_BASES_ONLY) {
+  const fail = (m: string) => { console.error(`✗ ${m}`); process.exit(1) }
+  if (placed.length !== 8 || placed.some(p => p.type !== 'turn')) fail(`expected 8 turn tiles, got ${placed.map(p => p.type).join(',')}`)
+  const red = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 1)
+  const blue = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 2)
+  if (red.length + blue.length !== graph.nodes.size) fail('non-base cells in graph')
+  if (red.length !== blue.length) fail(`base sizes differ red=${red.length} blue=${blue.length}`)
+  if (reachableCount(graph, red[0]) !== red.length) fail('RED ring not one closed loop / leaks')
+  if (reachableCount(graph, blue[0]) !== blue.length) fail('BLUE ring not one closed loop / leaks')
+  console.log(`✓ RED base ${JSON.stringify(baseCells(1))} and BLUE base ${JSON.stringify(baseCells(2))}: closed rings of 4 turn tiles, ${red.length} locked cells each, not connected to each other (by design)`)
+  const byKey = new Map(placed.map(p => [`${p.x},${p.z},${p.y.toFixed(3)}`, p]))
+  for (const p of placed) {
+    const [mx, mz] = mirrorCell(p.x, p.z)
+    const m = byKey.get(`${mx},${mz},${p.y.toFixed(3)}`)
+    if (!m || m.r !== (p.r + 2) % 4) fail(`asymmetric tile (${p.x},${p.z})`)
+  }
+  console.log('✓ bases are 180° mirror images; bases-only mode skips path/branch checks')
+  process.exit(0)
+}
 
 // Pick any node
 const start = graph.nodes.values().next().value as string
