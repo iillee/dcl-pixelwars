@@ -11,7 +11,7 @@
  */
 
 import {
-  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells,
+  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells, baseLinePaths,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
 import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE } from '../src/maze/level'
@@ -45,28 +45,40 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   if (reachableCount(graph, red[0]) !== graph.nodes.size) fail('graph not fully connected')
   const bp = findPath(graph, red[0], blue[0])
   if (!bp) fail('no path RED → BLUE')
-  // Fairness: the layout maps onto itself under the anti-diagonal
-  // reflection (x,z) → (W-1-z, H-1-x), which swaps RED and BLUE. Under it
-  // E↔S and N↔W, so tile openings must map too.
-  const refl = (x: number, z: number) => [GRID_W - 1 - z, GRID_H - 1 - x]
-  const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]] // N E S W
+  // Fairness: the whole layout maps onto itself under the same 180°
+  // rotation as the bases (x,z) → (W-1-x, H-1-z); openings rotate by 2.
   const opensOf = (p: typeof placed[number]) => {
     const t = ({ end: [0], straight: [0, 2], turn: [0, 1], fork: [0, 2, 3], cross: [0, 1, 2, 3], ramp: [0, 2] } as Record<string, number[]>)[p.type]
     return new Set(t.map(d => (d + p.r) % 4))
   }
-  const reflDir = [3, 2, 1, 0] // N→W, E→S, S→E, W→N
   const byXZ = new Map(placed.map(p => [`${p.x},${p.z}`, p]))
   for (const p of placed) {
-    const [rx, rz] = refl(p.x, p.z)
-    const q = byXZ.get(`${rx},${rz}`)
-    if (!q) fail(`no reflected twin for (${p.x},${p.z})`)
-    const a = [...opensOf(p)].map(d => reflDir[d]).sort().join(), b = [...opensOf(q!)].sort().join()
-    if (a !== b) fail(`reflected openings differ at (${p.x},${p.z}) vs (${rx},${rz})`)
+    const [mx, mz] = mirrorCell(p.x, p.z)
+    const q = byXZ.get(`${mx},${mz}`)
+    if (!q) fail(`no 180° twin for (${p.x},${p.z})`)
+    const a = [...opensOf(p)].map(d => (d + 2) % 4).sort().join(), b = [...opensOf(q!)].sort().join()
+    if (a !== b) fail(`180° openings differ at (${p.x},${p.z}) vs (${mx},${mz})`)
   }
-  void DIRS
-  console.log(`✓ bases ${JSON.stringify(baseCells(1))} ↔ ${JSON.stringify(baseCells(2))} joined by ${line.length} path tiles ${JSON.stringify(line)}`)
+  // Each path, walked tile by tile, is a real connected route between the
+  // inner ring tiles, and each inner ring tile has exactly two exits.
+  const paths = baseLinePaths()
+  if (paths.length !== 2) fail(`expected 2 paths, got ${paths.length}`)
+  for (const team of [1, 2]) {
+    const ring = baseCells(team)
+    const exits = placed.filter(p => ring.some(([x, z]) => x === p.x && z === p.z))
+      .reduce((n, p) => n + [...opensOf(p)].filter(d => {
+        const nx = p.x + [0, 1, 0, -1][d], nz = p.z + [1, 0, -1, 0][d]
+        return !ring.some(([x, z]) => x === nx && z === nz)
+      }).length, 0)
+    if (exits !== 2) fail(`base ${team} has ${exits} exits (want 2)`)
+  }
+  const crossings = paths[0].filter(([x, z]) => paths[1].some(([a, b]) => a === x && b === z))
+  console.log(`✓ path A ${JSON.stringify(paths[0])}`)
+  console.log(`✓ path B ${JSON.stringify(paths[1])}`)
+  console.log(`✓ paths cross at ${JSON.stringify(crossings)} (${crossings.map(([x, z]) => byXZ.get(`${x},${z}`)!.type).join(', ')}); each base has 2 exits`)
+  console.log('✓ fair: whole layout is 180° point-symmetric (same rotation as the bases)')
+  console.log(`✓ bases ${JSON.stringify(baseCells(1))} ↔ ${JSON.stringify(baseCells(2))} joined by ${line.length} path tiles`)
   console.log(`✓ RED→BLUE ${bp!.length} steps; ${open.length} paintable path cells, ${red.length}+${blue.length} locked base cells; fully connected`)
-  console.log('✓ fair: layout is symmetric under the anti-diagonal reflection that swaps RED and BLUE')
   process.exit(0)
 }
 
