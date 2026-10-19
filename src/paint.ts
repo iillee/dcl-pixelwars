@@ -84,7 +84,7 @@ export const FLAT_OFFSET = 0.275 * 2 // 0.55m world above tile origin — clears
 // normal (not world-up). Phones have less depth precision than desktop;
 // with only the ~5 cm vertical clearance the ramp GLB surface won the
 // depth test and slope paint was invisible on mobile (29 Sep playtest).
-export const INCLINE_NORMAL_OFFSET = 0.02 // 2 cm along the normal, measured from the real ramp surface (WALKABLE_TOP), not FLAT_OFFSET
+export const INCLINE_NORMAL_OFFSET = 0.04 // 4 cm along the normal: enough to beat z-fighting, 0.12 floated visibly (19 Oct)
 
 // Placeholder masks — designer is re-exporting. Cross is going first so we'll
 // author its real mask against the new GLB once it lands. Everything else stays
@@ -166,27 +166,21 @@ const FORK_MASK: Mask = buildMask((r, c) => {
 // so rotation via the tile's `r` naturally rotates the slope direction too.
 const RAMP_MASK: Mask = STRAIGHT_MASK
 const RAMP_FLAT_END = 1 // cells of flat landing at each end of the ramp
-// tile-ramp.glb landing length in model units (incline runs y=-7.046..6.954 of 16).
-// The landing is NOT one paint cell (1.0): using 1.0 shifted the paint slope
-// 9 cm up-ramp of the mesh slope and made 2 m landing cells overlap the incline.
-const RAMP_LANDING_MODEL = 0.954     // bottom landing (y -8 .. -7.046)
-const RAMP_TOP_LANDING_MODEL = 1.046 // top landing (y 6.954 .. 8): the GLB is asymmetric
 
 // Ramp geometry derived from CELL and STEP. Same math used by spawn and lookup
 // so cellIds agree.
 function rampGeometry(CELL: number, STEP: number) {
   const cellSize = CELL / SIZE
-  const flatLen = RAMP_LANDING_MODEL * (CELL / 16)
+  const flatLen = RAMP_FLAT_END * cellSize
   const inclineStart = flatLen
-  const topLen = RAMP_TOP_LANDING_MODEL * (CELL / 16)
-  const inclineEnd = CELL - topLen
+  const inclineEnd = CELL - flatLen
   const inclineLen = inclineEnd - inclineStart
   const slopeLen = Math.sqrt(STEP * STEP + inclineLen * inclineLen)
   const nIncline = Math.round(slopeLen / cellSize)
   const slopeCellSize = slopeLen / nIncline
   const cosA = inclineLen / slopeLen
   const sinA = STEP / slopeLen
-  return { cellSize, flatLen, topLen, inclineStart, inclineEnd, inclineLen, slopeLen, nIncline, slopeCellSize, cosA, sinA }
+  return { cellSize, flatLen, inclineStart, inclineEnd, inclineLen, slopeLen, nIncline, slopeCellSize, cosA, sinA }
 }
 
 // Given canonical (lx, lz) on a ramp, return the cell (col, row) used in
@@ -525,12 +519,12 @@ function spawnCellsForTileImmediate(
   if (isRamp) {
     // Bottom landing
     for (let i = 0; i < RAMP_FLAT_END; i++) {
-      const lz = (i + 0.5) * geom.flatLen
+      const lz = (i + 0.5) * geom.cellSize
       for (let col = LO; col < HI; col++) {
         const lx = (col + 0.5) * geom.cellSize
         const idx = rampCellIdxFromCanonical(lx, lz, geom)!
         const { wx, wz } = localToWorld(lx, lz)
-        spawnOne(wx, ty + FLAT_OFFSET, wz, flatRot, idx.col, idx.row, geom.flatLen)
+        spawnOne(wx, ty + FLAT_OFFSET, wz, flatRot, idx.col, idx.row)
       }
     }
     // Incline
@@ -540,7 +534,7 @@ function spawnCellsForTileImmediate(
       // Surface normal of the canonical incline (rises toward +Z) is
       // (0, cosA, -sinA); it matches inclineRot's plane facing (up-slope
       // normal), so the offset lifts the plane off the ramp, not into it.
-      const y  = ty + WALKABLE_TOP + slopeDist * geom.sinA + INCLINE_NORMAL_OFFSET * geom.cosA
+      const y  = ty + FLAT_OFFSET + slopeDist * geom.sinA + INCLINE_NORMAL_OFFSET * geom.cosA
       const lzRender = lz - INCLINE_NORMAL_OFFSET * geom.sinA
       for (let col = LO; col < HI; col++) {
         const lx = (col + 0.5) * geom.cellSize
@@ -552,12 +546,12 @@ function spawnCellsForTileImmediate(
     }
     // Top landing
     for (let i = 0; i < RAMP_FLAT_END; i++) {
-      const lz = geom.inclineEnd + (i + 0.5) * geom.topLen
+      const lz = geom.inclineEnd + (i + 0.5) * geom.cellSize
       for (let col = LO; col < HI; col++) {
         const lx = (col + 0.5) * geom.cellSize
         const idx = rampCellIdxFromCanonical(lx, lz, geom)!
         const { wx, wz } = localToWorld(lx, lz)
-        spawnOne(wx, ty + STEP + FLAT_OFFSET, wz, flatRot, idx.col, idx.row, geom.topLen)
+        spawnOne(wx, ty + STEP + FLAT_OFFSET, wz, flatRot, idx.col, idx.row)
       }
     }
     return
