@@ -18,7 +18,7 @@ export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 
 // ─── Sky tuning ─────────────────────────────────────────────────────
 /** Floor of the lowest level (m). Base tiles sit here; WALKABLE_TOP is +0.5. */
-export const SKY_ALTITUDE = 0 // troubleshooting: bases on the ground (was 80)
+export const SKY_ALTITUDE = 32 // raised from 0 (troubleshooting); fall respawn active (>= FALL_RESPAWN_DROP)
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
 /** Bases-only mode: generate ONLY the two corner bases (closed 2×2 rings of
