@@ -50,7 +50,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     const placed = getPlacedTilesInOrder()
     const off = placed.filter(p => !isBase(p.x, p.z))
     const junctions = off.filter(p => p.type === 'fork' || p.type === 'cross').length
-    const coverage = off.length / (GRID_W * GRID_H - 8)
+    const coverage = off.length / (GRID_W * GRID_H - 2 * baseCells(1).length)
     let e2 = 0
     for (const p of placed) e2 += opensOf(p).size
     const loops = e2 / 2 - placed.length + 1
@@ -118,7 +118,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       }
       exits.push(ex)
     }
-    if (exits[0] !== exits[1] || exits[0] !== 6) return `exits RED=${exits[0]} BLUE=${exits[1]} (want 6 each)`
+    if (exits[0] !== exits[1] || exits[0] !== 2) return `exits RED=${exits[0]} BLUE=${exits[1]} (want 2 each)`
     // Base tiles are identical every round (persistent entities never change shape).
     const sig = baseCells(1).concat(baseCells(2)).map(([x, z]) => { const p = at(x, z)!; return `${p.type}${p.r}` }).join()
     if (baseSig === null) baseSig = sig
@@ -199,7 +199,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
   if (shapes.size < N * 0.9) fail(`low variety: ${shapes.size}/${N}`)
-  console.log('✓ every seed: 8×8, W/E L0 closed-ring bases with 6 exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, 180° symmetric, fully connected, junction + coverage gates met')
+  console.log('✓ every seed: 8×8, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, 180° symmetric, fully connected, junction + coverage gates met')
   process.exit(0)
 }
 
