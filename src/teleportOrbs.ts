@@ -21,7 +21,7 @@ import {
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 
-import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H } from './maze/generator'
+import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H, baseTeamOfTile } from './maze/generator'
 import { rand } from './maze/rng'
 
 // ─── Tuning ─────────────────────────────────────────────────────────
@@ -74,7 +74,15 @@ export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
   const CZ = Math.floor(GRID_H / 2)
   const nearCenter = (p: Placed) =>
     Math.abs(p.x - CX) <= 1 && Math.abs(p.z - CZ) <= 1
-  const candidates = tiles.filter(p => p.type !== 'ramp' && !nearCenter(p))
+  // Sky mode: also keep orbs off the team bases (and their neighbours),
+  // so nobody teleports straight into or out of a spawn.
+  const nearBase = (p: Placed) => {
+    for (const dx of [-1, 0, 1]) for (const dz of [-1, 0, 1]) {
+      if (baseTeamOfTile(p.x + dx, p.z + dz, p.y) !== 0) return true
+    }
+    return false
+  }
+  const candidates = tiles.filter(p => p.type !== 'ramp' && !nearCenter(p) && !nearBase(p))
   if (candidates.length < 2) return
 
   // Pick two distinct tiles via seeded rand — deterministic per seed so

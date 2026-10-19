@@ -9,7 +9,13 @@
 import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
-import { MAZE_ORIGIN } from './maze/generator'
+import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
+import { BASE_PAINT_LOCK } from './maze/level'
+
+/** Team a cell is locked to (sky-mode bases), or None. */
+function lockedTeam(id: string): Team {
+  return BASE_PAINT_LOCK ? (baseTeamOfCellId(id) as Team) : Team.None
+}
 
 // ─── Teams ───────────────────────────────────────────────────────────
 // Team enum lives in shared/ so the server can reference it symbolically.
@@ -321,10 +327,10 @@ export function removePaintForTile(tileEntity: Entity) {
 export function resetPaintForTile(tileEntity: Entity) {
   const rec = paintByTile.get(tileEntity)
   if (!rec) return
-  const noneMat = cellMaterial(Team.None)
   for (let i = 0; i < rec.entities.length; i++) {
-    Material.setPbrMaterial(rec.entities[i], noneMat)
-    cellTeam.set(rec.ids[i], Team.None)
+    const t = lockedTeam(rec.ids[i])
+    Material.setPbrMaterial(rec.entities[i], cellMaterial(t))
+    cellTeam.set(rec.ids[i], t)
   }
 }
 
@@ -359,6 +365,7 @@ export function drainPaintOutbox(): string[] {
  * and just enqueue — server will drop it anyway (pre-roster), no harm.
  */
 export function noteLocalPaintCandidate(id: string): void {
+  if (lockedTeam(id) !== Team.None) return // locked base: never painted
   paintOutbox.add(id)
   if (localTeam !== Team.None) {
     // Detect a real new claim (cell not already ours) BEFORE applying,
@@ -396,6 +403,7 @@ export function setLocalTeam(team: Team): void {
  * visible material. Does NOT add to the outbox — would infinite-loop.
  */
 export function applyRemotePaint(id: string, team: Team): void {
+  if (lockedTeam(id) !== Team.None) return
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)
   const e = cellEntity.get(id)
@@ -491,7 +499,8 @@ function spawnCellsForTileImmediate(
     // overwrite the team back to None and the cell would render white
     // forever despite having been "painted". Preserves the pre-Phase-4
     // invariant that walk-over-cell = colored-cell.
-    const preexisting = cellTeam.get(id) ?? Team.None
+    const locked = lockedTeam(id)
+    const preexisting = locked !== Team.None ? locked : (cellTeam.get(id) ?? Team.None)
     const e = engine.addEntity()
     Transform.create(e, {
       position: Vector3.create(wx, wy, wz),

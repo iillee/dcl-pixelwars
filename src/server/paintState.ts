@@ -13,6 +13,9 @@
  */
 
 // team values match Team enum in src/paint.ts: 1 = Red, 2 = Blue.
+import { baseTeamOfCellId } from '../maze/generator'
+import { BASE_PAINT_LOCK } from '../maze/level'
+
 const cellTeam = new Map<string, number>()
 
 // Changes accumulated since the last drainDelta(). Map (not array) so
@@ -29,6 +32,8 @@ const dirty = new Map<string, number>()
  * ~90/sec (9-cell footprint × 10 Hz outbox flush).
  */
 export function applyPaint(id: string, team: number): boolean {
+  // Sky-mode bases are locked to their team colour: not paintable, not counted.
+  if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
   const prev = cellTeam.get(id)
   if (prev === team) return false
   cellTeam.set(id, team)

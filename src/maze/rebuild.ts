@@ -24,7 +24,7 @@ import { Vector3, Quaternion } from '@dcl/sdk/math'
 
 import {
   Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
-  GRID_W, GRID_H,
+  isPersistentTile,
   generateWithRetry, getPlacedTilesInOrder, gridSize,
 } from './generator'
 import { TILES } from './tiles'
@@ -45,18 +45,16 @@ let spawnClock = 0
 let currentSeed = 0
 const teardownQueue: Entity[] = []
 
-// ─── Persistent center cross ────────────────────────────────────────
-// The generator always places a `cross` tile at grid center (see
-// generate() in generator.ts). We spawn it once on the first rebuild
-// and keep the same entity forever so players standing on it during a
-// round boundary aren't shoved by the tear-down / grow-in animation.
-// On subsequent rebuilds we skip it in both teardown and spawn queues,
-// and reset its paint via resetPaintForTile() instead.
-let centerTileEntity: Entity | null = null
-const CENTER_X = Math.floor(GRID_W / 2)
-const CENTER_Z = Math.floor(GRID_H / 2)
-const isCenterTile = (p: Placed) =>
-  p.x === CENTER_X && p.z === CENTER_Z && p.y === 0
+// ─── Persistent tiles ───────────────────────────────────────────────
+// Classic: the centre cross. Sky: both team bases. These are at the same
+// place every round (see isPersistentTile in generator.ts), and players
+// are teleported onto them at a round boundary, so we spawn them once and
+// keep the entities forever instead of tearing them down / growing them in.
+// On rebuilds we skip them in both queues and reset their paint in place
+// (resetPaintForTile keeps a locked base's team colour).
+const persistentEntities = new Map<string, Entity>() // "x,z,y" → tile entity
+const tileKey = (p: Placed) => `${p.x},${p.z},${Math.round(p.y * 1000) / 1000}`
+const persistentSet = new Set<Entity>()
 const TILE_TEARDOWN_PER_FRAME = 25
 const STAGGER = 0.03 // seconds between successive tile spawns
 
@@ -68,17 +66,17 @@ export function isRebuilding(): boolean {
 // ─── Rebuild entry point ────────────────────────────────────────────
 export function rebuildMaze(seed: number): void {
   // Push existing tiles into the teardown queue (drained per-frame below).
-  // The center tile is preserved: skip its teardown and reset its paint
+  // Persistent tiles are preserved: skip their teardown and reset paint
   // in place so players standing on it aren't disturbed.
   for (const e of spawnedEntities) {
-    if (e === centerTileEntity) {
+    if (persistentSet.has(e)) {
       resetPaintForTile(e)
     } else {
       teardownQueue.push(e)
     }
   }
   spawnedEntities.length = 0
-  if (centerTileEntity !== null) spawnedEntities.push(centerTileEntity)
+  for (const e of persistentSet) spawnedEntities.push(e)
   spawnQueue = []
   spawnClock = 0
 
@@ -91,12 +89,10 @@ export function rebuildMaze(seed: number): void {
   console.log(`Maze rebuilt from seed ${seed} → winning seed ${winningSeed}, ${gridSize()} tiles`)
 
   const tiles = getPlacedTilesInOrder()
-  // Skip the center tile on rebuilds — it already exists as a persistent
-  // entity. On the very first rebuild (centerTileEntity === null) we spawn
-  // it like any other tile; spawnTileWithGrow() will latch onto it.
-  const skipCenter = centerTileEntity !== null
+  // Skip persistent tiles that already exist. On the very first rebuild
+  // they spawn like any other tile; spawnTileWithGrow() latches onto them.
   spawnQueue = tiles
-    .filter(p => !(skipCenter && isCenterTile(p)))
+    .filter(p => !(isPersistentTile(p) && persistentEntities.has(tileKey(p))))
     .map((p, i) => ({ p, delay: i * STAGGER }))
 
   // Teleport orb pair — deterministic on the current seed: generateWithRetry
@@ -138,11 +134,11 @@ engine.addSystem((dt: number) => {
 function spawnTileWithGrow(p: Placed): void {
   const [dx, dz] = ROT_OFFSET[p.r]
   const e = engine.addEntity()
-  // Latch the center tile's entity on first spawn so all future rebuilds
-  // can preserve it. (Only reached when centerTileEntity is null; the
-  // rebuild filter skips this tile on subsequent rounds.)
-  if (centerTileEntity === null && isCenterTile(p)) {
-    centerTileEntity = e
+  // Latch persistent tiles (centre cross / bases) on first spawn so all
+  // future rebuilds preserve them.
+  if (isPersistentTile(p) && !persistentEntities.has(tileKey(p))) {
+    persistentEntities.set(tileKey(p), e)
+    persistentSet.add(e)
   }
   Transform.create(e, {
     position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, p.y, p.z * CELL + dz + MAZE_ORIGIN),
