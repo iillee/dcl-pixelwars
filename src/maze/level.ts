@@ -8,9 +8,9 @@
  *   LEVEL_MODE = 'classic' → the original 5×5 centre-seeded maze (176 m, Y=0).
  *     Also switch scene.json back to the 11×11 parcel list + CenterSpawn.
  *   LEVEL_MODE = 'sky'     → 20×20 parcels (320 m). With the flags below
- *     (bases-only + base line): a 6×6 woven network over 64–256 m at
+ *     (bases-only + base line): a 5×5 asymmetric-but-fair woven network over 80–240 m at
  *     SKY_ALTITUDE, three levels, 1-tile team bases in opposite corners
- *     (RED (0,0), BLUE (5,5)) that double as spawns. See generator.ts.
+ *     (RED (0,0), BLUE (4,4)) that double as spawns. See generator.ts.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -30,13 +30,19 @@ export const SKY_BASES_ONLY = true
 export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
-/** World-space inset of the sky grid from every scene edge (m). 64 = four
- *  parcels → 6×6 tiles over 64–256 m (32 → 8×8 over 32–288 m). Must keep (320 - 2·inset) a multiple
- *  of 32 for the grid to stay centred. */
-export const SKY_EDGE_INSET = 64
+/** World-space inset of the sky grid from every scene edge (m). 80 = five
+ *  parcels → 5×5 tiles over 80–240 m (64 → 6×6 over 64–256, 96 → 4×4 over
+ *  96–224 but only ~24 distinct 3-level layouts). Keep (320 - 2·inset) a
+ *  multiple of 32 so the grid stays centred, and update scene.json spawns. */
+export const SKY_EDGE_INSET = 80
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0
+/** true = every layout is a 180° image of itself (and the teleporter pair is
+ *  A <-> mirror(A)). false = asymmetric layouts held to a fairness check
+ *  instead (RED/BLUE walking distance to centre, nearest L+1 and nearer
+ *  teleporter end within FAIR_TOL tiles); needed for grids below 6×6. */
+export const SKY_SYMMETRIC = false
 /** Put a 2×2 cross hub at the grid centre (the main path's meeting point). */
 export const SKY_CENTRE_HUB = true
 /** 0..1. Chance a branch frontier cell keeps branching instead of being

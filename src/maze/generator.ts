@@ -22,7 +22,7 @@ import {
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN,
-  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET,
+  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, SKY_SYMMETRIC,
 } from './level'
 
 // ─── World-scale constants ──────────────────────────────────────────
@@ -691,7 +691,8 @@ function generateSky(): void {
  * NET_CANDIDATES valid attempts are scored (junctions + ramps + coverage)
  * and the best kept; up to NET_ATTEMPTS tries, else the frozen FALLBACK_NET.
  */
-const NET_ATTEMPTS = 600 // 6×6: ~6% of rounds hit the fallback at 200
+const NET_ATTEMPTS = 1500 // 6×6: ~6% of rounds hit the fallback at 200; 5×5 asymmetric: ~1% at 600, 0 at 1500
+const NET_MIN_COVERAGE = 0.7 // share of non-base cells holding a tile (same gate as verify-graph)
 /** Size scale vs the 8×8 grid the targets were tuned on (62 non-base cells): 6×6 → 0.55. */
 const NET_SCALE = (GRID_W * GRID_H - 2) / 62
 const NET_CANDIDATES = 6
@@ -715,7 +716,8 @@ function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
 
 const ck = (x: number, z: number) => `${x},${z}`
 const ek = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
-const mk = (c: string) => { const [x, z] = c.split(',').map(Number); const [mx, mz] = mirrorCell(x, z); return ck(mx, mz) }
+/** 180° image of a cell when SKY_SYMMETRIC, else the cell itself (no mirroring). */
+const mk = (c: string) => { if (!SKY_SYMMETRIC) return c; const [x, z] = c.split(',').map(Number); const [mx, mz] = mirrorCell(x, z); return ck(mx, mz) }
 
 /** Ring + exit edges of both bases (always present). */
 function fixedEdges(): Array<[string, string]> {
@@ -752,7 +754,10 @@ function netAttempt(): Net | null {
   for (const l of shuffle(blobLevels)) {
     {
       const span = Math.max(1, Math.floor(GRID_W / 2) - 1) // 8×8: 2–4, 6×6: 2–3
-      const w = 2 + Math.floor(rand() * span), h = 2 + Math.floor(rand() * span)
+      // Below 6×6 a 2×2 blob swallows the cells a ramp needs, so allow 1-wide blobs
+      // (e.g. a single raised corner fed by two ramps).
+      const bMin = GRID_W <= 5 ? 1 : 2, bSpan = GRID_W <= 5 ? span + 1 : span
+      const w = bMin + Math.floor(rand() * bSpan), h = bMin + Math.floor(rand() * bSpan)
       const x0 = Math.floor(rand() * (GRID_W - w + 1)), z0 = Math.floor(rand() * (GRID_H - h + 1))
       for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + h; z++) {
         const c = ck(x, z)
@@ -790,7 +795,7 @@ function netAttempt(): Net | null {
     // A ramp's ends must stay flat.
     const [x, z] = c.split(',').map(Number)
     if (ramp.has(ck(x + DX[d], z + DZ[d])) || ramp.has(ck(x - DX[d], z - DZ[d]))) continue
-    ramp.set(c, d); ramp.set(m, ((d + 2) % 4) as Dir)
+    ramp.set(c, d); if (m !== c) ramp.set(m, ((d + 2) % 4) as Dir)
   }
   // 3. Edges.
   const edges = new Set<string>()
@@ -897,7 +902,7 @@ function layNet(n: Net): boolean {
     if (!t) return false
     placeTile(t.t, t.r, x, z, y)
   }
-  return validate() && allTilesConnected() && gridIsSymmetric()
+  return validate() && allTilesConnected() && (SKY_SYMMETRIC ? gridIsSymmetric() : true)
 }
 
 function netScore(n: Net): number {
@@ -935,7 +940,9 @@ function layBaseLine(): void {
     const lv = new Set(n.level.values())
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
     if (netJunctions(n) < NET_MIN_JUNCTIONS) continue // want a woven net
+    if ([...n.level.keys()].length - 2 < NET_MIN_COVERAGE * (GRID_W * GRID_H - 2)) continue // verify's coverage gate
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
+    if (!SKY_SYMMETRIC && !fairnessOk()) { fairMisses++; continue } // asymmetric: RED/BLUE must be on equal footing
     found++
     const sc = netScore(n) + rand() * NET_SCORE_JITTER
     if (sc > bestScore) { best = n; bestScore = sc }
@@ -946,14 +953,25 @@ function layBaseLine(): void {
 
 // Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
 // cells and "a|b" edges. Used when no attempt validates.
-const FALLBACK_NET: { cells: string[]; edges: string[] } = {
-  cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0', '1,5,0,1', '2,0,0,1', '2,1,-1', '2,2,-1', '2,3,-1', '2,4,-1,3', '2,5,1', '3,0,1', '3,1,-1,1', '3,2,-1', '3,3,-1', '3,4,-1', '3,5,0,3', '4,0,0,3', '4,1,0', '4,2,0', '4,3,0', '4,4,0', '4,5,0', '5,0,0', '5,1,0', '5,2,0', '5,3,0', '5,4,0', '5,5,0'],
-  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|1,5', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,2|1,3', '1,3|1,4', '1,4|2,4', '1,5|2,5', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|3,3', '2,4|3,4', '2,5|3,5', '3,0|4,0', '3,1|4,1', '3,2|3,3', '3,3|3,4', '3,5|4,5', '4,0|5,0', '4,1|5,1', '4,1|4,2', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|4,5', '4,4|5,4', '4,5|5,5', '5,0|5,1', '5,1|5,2', '5,2|5,3', '5,3|5,4', '5,4|5,5'],
+const FALLBACKS: Record<string, { cells: string[]; edges: string[] }> = {
+  // 5×5 asymmetric (SKY_SYMMETRIC=false), seed 7919, passes verify-graph.
+  '5x5': {
+    cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0,0', '0,4,1', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0,3', '2,0,0', '2,1,0', '2,2,0', '2,3,0', '2,4,0', '3,1,-1,3', '3,4,0', '4,1,-1', '4,2,-1,0', '4,3,0', '4,4,0'],
+    edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,4|1,4', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,1|2,1', '1,2|1,3', '1,2|2,2', '1,3|2,3', '1,4|2,4', '2,0|2,1', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,3|2,4', '2,4|3,4', '3,1|4,1', '3,4|4,4', '4,1|4,2', '4,2|4,3', '4,3|4,4'],
+  },
+  // 6×6 symmetric (also valid when asymmetric).
+  '6x6': {
+    cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0', '1,5,0,1', '2,0,0,1', '2,1,-1', '2,2,-1', '2,3,-1', '2,4,-1,3', '2,5,1', '3,0,1', '3,1,-1,1', '3,2,-1', '3,3,-1', '3,4,-1', '3,5,0,3', '4,0,0,3', '4,1,0', '4,2,0', '4,3,0', '4,4,0', '4,5,0', '5,0,0', '5,1,0', '5,2,0', '5,3,0', '5,4,0', '5,5,0'],
+    edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|1,5', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,2|1,3', '1,3|1,4', '1,4|2,4', '1,5|2,5', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|3,3', '2,4|3,4', '2,5|3,5', '3,0|4,0', '3,1|4,1', '3,2|3,3', '3,3|3,4', '3,5|4,5', '4,0|5,0', '4,1|5,1', '4,1|4,2', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|4,5', '4,4|5,4', '4,5|5,5', '5,0|5,1', '5,1|5,2', '5,2|5,3', '5,3|5,4', '5,4|5,5'],
+  },
 }
+/** Frozen fallback for the current grid size (undefined = none frozen yet). */
+export const FALLBACK_NET = FALLBACKS[`${GRID_W}x${GRID_H}`]
 
 /** Lay the frozen fallback layout (also called by verify-graph to check it). */
 export function layFallback(): void {
   usedFallback = true
+  if (!FALLBACK_NET) throw new Error(`no frozen fallback for ${GRID_W}x${GRID_H}`)
   const n: Net = { level: new Map(), ramp: new Map(), edges: new Set(FALLBACK_NET.edges) }
   for (const s of FALLBACK_NET.cells) {
     const [x, z, l, r] = s.split(',')
@@ -1027,6 +1045,48 @@ let tpMisses = 0
 /** Layouts rejected so far because no valid teleporter tile existed (verify stats). */
 export function teleporterMisses(): number { return tpMisses }
 
+/** Asymmetric fairness tolerance (tiles of walking distance, tile graph). */
+export const FAIR_TOL = 1
+let fairMisses = 0
+/** Layouts rejected so far by the asymmetric fairness check (verify stats). */
+export function fairnessMisses(): number { return fairMisses }
+
+/**
+ * Fairness of the current grid: RED vs BLUE tile-graph walking distance to
+ * (a) the grid centre (nearest tile(s) to the middle), (b) the nearest L+1
+ * tile, (c) the nearer teleporter end. Returns |RED - BLUE| per measure.
+ */
+export function fairness(): { centre: number; high: number; tele: number } | null {
+  const tiles = [...grid.values()]
+  const red = tiles.find(p => baseTeamOfTile(p.x, p.z, p.y) === 1)
+  const blue = tiles.find(p => baseTeamOfTile(p.x, p.z, p.y) === 2)
+  if (!red || !blue) return null
+  const bfs = (s: Placed) => {
+    const d = new Map<Placed, number>([[s, 0]]); const q = [s]
+    for (let i = 0; i < q.length; i++) for (const n of linkedNeighbours(q[i])) if (!d.has(n)) { d.set(n, d.get(q[i])! + 1); q.push(n) }
+    return d
+  }
+  const dR = bfs(red), dB = bfs(blue)
+  const minTo = (d: Map<Placed, number>, set: Placed[]) => Math.min(...set.map(p => d.get(p) ?? 99))
+  const mid = (GRID_W - 1) / 2
+  const cd = (p: Placed) => Math.hypot(p.x - mid, p.z - mid)
+  const best = Math.min(...tiles.map(cd))
+  const centre = tiles.filter(p => cd(p) <= best + 0.01)
+  const high = tiles.filter(p => p.y > BASE_Y + 0.01 && p.type !== 'ramp')
+  const tp = teleportPairs()
+  if (!high.length || tp.length !== 1) return null
+  const ends = tp[0].map(e => e.tile)
+  return {
+    centre: Math.abs(minTo(dR, centre) - minTo(dB, centre)),
+    high: Math.abs(minTo(dR, high) - minTo(dB, high)),
+    tele: Math.abs(minTo(dR, ends) - minTo(dB, ends)),
+  }
+}
+function fairnessOk(): boolean {
+  const f = fairness()
+  return !!f && f.centre <= FAIR_TOL && f.high <= FAIR_TOL && f.tele <= FAIR_TOL
+}
+
 export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
   if (!IS_SKY) return []
   const tiles = [...grid.values()]
@@ -1056,10 +1116,25 @@ export function teleportPairs(): Array<[TeleportEnd, TeleportEnd]> {
   const sorted = cands.slice().sort((a, b) => score(b) - score(a) || a.x - b.x || a.z - b.z)
   const at = (x: number, z: number) => cands.find(p => p.x === x && p.z === z)
   const man = (a: Placed, b: Placed) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z)
-  const paired = sorted.filter(p => at(...mirrorCell(p.x, p.z)))
-  const A = paired.find(p => man(p, at(...mirrorCell(p.x, p.z))!) >= 3)
-  if (!A) return []
-  const mA = at(...mirrorCell(A.x, A.z))!
+  let A: Placed | undefined, mA: Placed | undefined
+  if (SKY_SYMMETRIC) {
+    const paired = sorted.filter(p => at(...mirrorCell(p.x, p.z)))
+    A = paired.find(p => man(p, at(...mirrorCell(p.x, p.z))!) >= 3)
+    if (A) mA = at(...mirrorCell(A.x, A.z))!
+  } else {
+    // Asymmetric: best pair (A, B) >=3 apart whose nearer-end walk is within
+    // FAIR_TOL tiles for both bases; +1.5 if the ends are on different levels.
+    let bs = -Infinity
+    for (let i = 0; i < sorted.length; i++) for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i], b = sorted[j]
+      if (man(a, b) < 3) continue
+      const near = (d: Map<Placed, number>) => Math.min(d.get(a)!, d.get(b)!)
+      if (Math.abs(near(dR) - near(dB)) > FAIR_TOL) continue
+      const sc = score(a) + score(b) + (Math.abs(a.y - b.y) > 0.01 ? 1.5 : 0)
+      if (sc > bs) { bs = sc; A = a; mA = b }
+    }
+  }
+  if (!A || !mA) return []
   const end = (p: Placed): TeleportEnd => {
     // Land 4 m out along the opening that points most toward the scene
     // centre (always corridor floor), facing further along it.

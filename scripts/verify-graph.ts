@@ -11,15 +11,16 @@
  */
 
 import {
-  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, lastLayoutUsedFallback, layFallback, teleportPairs, teleporterMisses, MIN_Y,
+  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, lastLayoutUsedFallback, layFallback, teleportPairs, teleporterMisses, fairness, fairnessMisses, FAIR_TOL, FALLBACK_NET, MIN_Y,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
-import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE } from '../src/maze/level'
+import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_SYMMETRIC } from '../src/maze/level'
 import { buildWalkableGraph, reachableCount, findPath } from '../src/shared/mazeGraph'
 
 console.log(`LEVEL_MODE=${LEVEL_MODE} grid=${GRID_W}x${GRID_H} scene=${SCENE_SIZE}m baseY=${BASE_Y} maxY=${MAX_Y.toFixed(2)}`)
 
-const seed = generateWithRetry(1, 50)
+let seed: number | null = null
+for (let s1 = 1; s1 < 50 && seed === null; s1++) { try { seed = generateWithRetry(s1, 50) } catch { /* size without a frozen fallback: try the next seed */ } }
 if (seed === null) {
   console.error('generation failed for seed 1'); process.exit(1)
 }
@@ -98,8 +99,8 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       const hi = at(p.x + DXZ[p.r][0], p.z + DXZ[p.r][1]), lo = at(p.x + DXZ[(p.r + 2) % 4][0], p.z + DXZ[(p.r + 2) % 4][1])
       if (!hi || !lo || Math.abs(hi.y - p.y - STEP) > 0.01 || Math.abs(lo.y - p.y) > 0.01) return `ramp (${p.x},${p.z}) ends don't join flat tiles at ±1 level`
     }
-    // 180° symmetry (type, height, openings).
-    for (const p of placed) {
+    // 180° symmetry (type, height, openings) — symmetric mode only.
+    if (SKY_SYMMETRIC) for (const p of placed) {
       const [mx, mz] = mirrorCell(p.x, p.z)
       const q = at(mx, mz)
       if (!q || q.type !== p.type || Math.abs(q.y - p.y) > 0.01) return `180° twin of (${p.x},${p.z}) differs`
@@ -125,7 +126,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     else if (sig !== baseSig) return `base tiles differ between rounds: ${sig} vs ${baseSig}`
     // Up/down variety: ramps both ways and all three levels in use.
     const lv = new Set(placed.map(p => lvl(p.y)))
-    if (ramps < 4 || !lv.has(-1) || !lv.has(1)) return `too flat: ${ramps} ramps, levels ${[...lv]}`
+    if (ramps < (SKY_SYMMETRIC ? 4 : 2) || !lv.has(-1) || !lv.has(1)) return `too flat: ${ramps} ramps, levels ${[...lv]}`
     // Intertwined: enough junctions and coverage.
     const m = weave()
     if (m.junctions < MIN_JUNCTIONS) return `only ${m.junctions} junctions (want ≥${MIN_JUNCTIONS})`
@@ -158,7 +159,12 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     const pairKey = (a: [number, number], b: [number, number]) => [a.join(','), b.join(',')].sort().join('~')
     const pk = new Set(tp.map(([a, b]) => pairKey([a.tile.x, a.tile.z], [b.tile.x, b.tile.z])))
     if (Math.abs(tp[0][0].tile.x - tp[0][1].tile.x) + Math.abs(tp[0][0].tile.z - tp[0][1].tile.z) < 3) return 'teleporter ends <3 tiles apart'
-    for (const [a, b] of tp) if (!pk.has(pairKey(mirrorCell(a.tile.x, a.tile.z), mirrorCell(b.tile.x, b.tile.z)))) return 'teleporter pairs not 180° symmetric'
+    if (!SKY_SYMMETRIC) {
+      const f = fairness()
+      if (!f) return 'fairness: no L+1 tile or teleporter'
+      if (f.centre > FAIR_TOL || f.high > FAIR_TOL || f.tele > FAIR_TOL) return `unfair: |RED-BLUE| centre ${f.centre}, L+1 ${f.high}, teleporter ${f.tele} (tol ${FAIR_TOL})`
+    }
+    if (SKY_SYMMETRIC) for (const [a, b] of tp) if (!pk.has(pairKey(mirrorCell(a.tile.x, a.tile.z), mirrorCell(b.tile.x, b.tile.z)))) return 'teleporter pairs not 180° symmetric'
     // Cell graph: every cell reachable, RED reaches BLUE.
     const g = buildWalkableGraph(placed)
     const red = [...g.nodes].filter(id => baseTeamOfCellId(id) === 1)
@@ -191,9 +197,11 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     return rows
   }
 
-  layFallback()
-  { const e = check(); if (e) fail(`fallback layout: ${e}`) }
-  console.log('✓ fallback layout passes all rules')
+  if (FALLBACK_NET) {
+    layFallback()
+    { const e = check(); if (e) fail(`fallback layout: ${e}`) }
+    console.log('✓ fallback layout passes all rules')
+  } else console.log(`(no frozen fallback for ${GRID_W}×${GRID_H})`)
   const N = 250
   let pass = 0, fallbacks = 0, attempts = 0
   const shapes = new Set<string>(), cellSets = new Set<string>()
@@ -202,12 +210,14 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   let tpPairs = 0, tpCross = 0, tpDist = 0, tpOne = 0
   const tpLv = [0, 0, 0]
   const tpTypes: Record<string, number> = {}
+  let fc = 0, fh = 0, ft = 0
   let tpDmin = 99, tpDmax = 0
   const tg = Date.now()
   const samples: number[] = [1, 2, 3]
   for (let i = 1; i <= N; i++) {
     const s0 = i * 7919
-    const w = generateWithRetry(s0, 20)
+    let w: number | null = null
+    try { w = generateWithRetry(s0, 20) } catch (e) { console.error(`✗ seed ${s0}: ${(e as Error).message}`); fallbacks++; continue }
     if (w === null) { console.error(`✗ seed ${s0}: no layout`); continue }
     attempts += w - s0 + 1
     if (lastLayoutUsedFallback()) fallbacks++
@@ -221,9 +231,10 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     tiles += P.length; ramps += nr; minT = Math.min(minT, P.length); maxT = Math.max(maxT, P.length); minR = Math.min(minR, nr); maxR = Math.max(maxR, nr)
     { const m = weave(); junctions += m.junctions; cov += m.coverage; loops += m.loops; over += m.over; minJ = Math.min(minJ, m.junctions) }
     for (const p of P) levelUse[lvl(p.y) + 1]++
-    { const tp = teleportPairs(); tpPairs += tp.length; if (tp.length === 1) { tpTypes[tp[0][0].tile.type] = (tpTypes[tp[0][0].tile.type] ?? 0) + 1; const dd = Math.abs(tp[0][0].tile.x - tp[0][1].tile.x) + Math.abs(tp[0][0].tile.z - tp[0][1].tile.z); tpDmin = Math.min(tpDmin, dd); tpDmax = Math.max(tpDmax, dd) }
+    { const tp = teleportPairs(); tpPairs += tp.length; if (tp.length === 1) { for (const e of tp[0]) tpTypes[e.tile.type] = (tpTypes[e.tile.type] ?? 0) + 1; const dd = Math.abs(tp[0][0].tile.x - tp[0][1].tile.x) + Math.abs(tp[0][0].tile.z - tp[0][1].tile.z); tpDmin = Math.min(tpDmin, dd); tpDmax = Math.max(tpDmax, dd) }
     if (tp.length === 1) { tpOne++; tpLv[lvl(tp[0][0].tile.y) + 1]++ } for (const [a, b] of tp) { if (Math.abs(a.tile.y - b.tile.y) > 0.01) tpCross++; tpDist += Math.abs(a.tile.x - b.tile.x) + Math.abs(a.tile.z - b.tile.z) } }
     cells += buildWalkableGraph(P).nodes.size
+    if (!SKY_SYMMETRIC) { const f = fairness()!; fc += f.centre; fh += f.high; ft += f.tele }
     if (samples.includes(i)) {
       console.log(`\nseed ${s0}: ${P.length} tiles, ${nr} ramps  (top = north/+Z; R/B base; 1st char level -=L-1 0=L0 +=L+1, 2nd char + cross T fork; ^>v< = ramp rising N/E/S/W, then its low level; a/b = teleporter pair + its level)`)
       for (const r of ascii()) console.log('   ' + r)
@@ -235,13 +246,14 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(cells / Math.max(1, pass)).toFixed(0)} paint cells`)
   const k = Math.max(1, pass)
   console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
-  console.log(`teleporters: ${tpOne}/${pass} rounds with exactly 1 pair (A ↔ mirror(A)), ${tpCross}/${tpPairs} pairs cross levels (0 expected: mirror ends share a level), avg end-to-end ${(tpDist / Math.max(1, tpPairs)).toFixed(1)} tiles, level of pair L-1/L0/L+1 ${tpLv.join('/')}, distance ${tpDmin}–${tpDmax}, tile types ${JSON.stringify(tpTypes)}; layouts rejected for no valid teleporter tile: ${teleporterMisses()}`)
+  console.log(`teleporters: ${tpOne}/${pass} rounds with exactly 1 pair, ${tpCross}/${tpPairs} pairs on different levels, avg end-to-end ${(tpDist / Math.max(1, tpPairs)).toFixed(1)} tiles, level of pair L-1/L0/L+1 ${tpLv.join('/')}, distance ${tpDmin}–${tpDmax}, tile types ${JSON.stringify(tpTypes)}; layouts rejected for no valid teleporter tile: ${teleporterMisses()}`)
+  if (!SKY_SYMMETRIC) console.log(`fairness (avg |RED-BLUE| tiles, tol ${FAIR_TOL}): centre ${(fc / k).toFixed(2)}, nearest L+1 ${(fh / k).toFixed(2)}, nearer teleporter end ${(ft / k).toFixed(2)}; layouts rejected as unfair: ${fairnessMisses()}`)
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
   // 6×6 leaves ~17 free mirrored cell pairs, so exact repeats are likelier than on 8×8.
   const MIN_VARIETY = GRID_W >= 8 ? 0.9 : 0.7
   if (shapes.size < N * MIN_VARIETY) fail(`low variety: ${shapes.size}/${N} (want ≥${100 * MIN_VARIETY}%)`)
-  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, 180° symmetric, fully connected, junction + coverage gates met; exactly 1 self-mirrored teleporter pair (A ↔ mirror(A)) on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
+  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
   process.exit(0)
 }
 
