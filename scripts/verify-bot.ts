@@ -15,7 +15,11 @@ import { Bot, makeSmartTarget, PaintReader } from '../src/server/bots/bot'
 const seed = generateWithRetry(42, 50)
 if (seed === null) { console.error('gen failed'); process.exit(1) }
 const graph = buildWalkableGraph(getPlacedTilesInOrder())
-const start = [...graph.nodes][0]
+// Sky mode: start on the RED base like a real spawn; classic: any node.
+import { baseTeamOfCellId } from '../src/maze/generator'
+import { IS_SKY, LEVEL_MODE } from '../src/maze/level'
+const start = (IS_SKY ? [...graph.nodes].find(id => baseTeamOfCellId(id) === 1) : undefined) ?? [...graph.nodes][0]
+console.log(`LEVEL_MODE=${LEVEL_MODE}`)
 
 const bot = new Bot({ team: 1, startCell: start })
 console.log(`bot starting at ${start}, graph has ${graph.nodes.size} cells`)
