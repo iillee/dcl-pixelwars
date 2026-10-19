@@ -11,10 +11,10 @@
  */
 
 import {
-  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell,
+  generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, baseLineCells,
   BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
 } from '../src/maze/generator'
-import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY } from '../src/maze/level'
+import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE } from '../src/maze/level'
 import { buildWalkableGraph, reachableCount, findPath } from '../src/shared/mazeGraph'
 
 console.log(`LEVEL_MODE=${LEVEL_MODE} grid=${GRID_W}x${GRID_H} scene=${SCENE_SIZE}m baseY=${BASE_Y} maxY=${MAX_Y.toFixed(2)}`)
@@ -30,6 +30,45 @@ const t0 = Date.now()
 const graph = buildWalkableGraph(placed)
 const t1 = Date.now()
 console.log(`graph built in ${t1 - t0}ms — nodes: ${graph.nodes.size}, edges: ${[...graph.adj.values()].reduce((s, a) => s + a.length, 0)}`)
+
+// ─── Sky bases + line: rings joined by one paintable L path ────────
+if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
+  const fail = (m: string) => { console.error(`✗ ${m}`); process.exit(1) }
+  const line = baseLineCells()
+  if (placed.length !== 8 + line.length) fail(`expected ${8 + line.length} tiles, got ${placed.length}`)
+  if (placed.some(p => Math.abs(p.y - BASE_Y) > 0.01 || p.type === 'ramp')) fail('path not flat at BASE_Y')
+  const red = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 1)
+  const blue = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 2)
+  const open = [...graph.nodes].filter(id => baseTeamOfCellId(id) === 0)
+  if (red.length !== blue.length) fail(`base sizes differ red=${red.length} blue=${blue.length}`)
+  if (!open.length) fail('no paintable path cells')
+  if (reachableCount(graph, red[0]) !== graph.nodes.size) fail('graph not fully connected')
+  const bp = findPath(graph, red[0], blue[0])
+  if (!bp) fail('no path RED → BLUE')
+  // Fairness: the layout maps onto itself under the anti-diagonal
+  // reflection (x,z) → (W-1-z, H-1-x), which swaps RED and BLUE. Under it
+  // E↔S and N↔W, so tile openings must map too.
+  const refl = (x: number, z: number) => [GRID_W - 1 - z, GRID_H - 1 - x]
+  const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]] // N E S W
+  const opensOf = (p: typeof placed[number]) => {
+    const t = ({ end: [0], straight: [0, 2], turn: [0, 1], fork: [0, 2, 3], cross: [0, 1, 2, 3], ramp: [0, 2] } as Record<string, number[]>)[p.type]
+    return new Set(t.map(d => (d + p.r) % 4))
+  }
+  const reflDir = [3, 2, 1, 0] // N→W, E→S, S→E, W→N
+  const byXZ = new Map(placed.map(p => [`${p.x},${p.z}`, p]))
+  for (const p of placed) {
+    const [rx, rz] = refl(p.x, p.z)
+    const q = byXZ.get(`${rx},${rz}`)
+    if (!q) fail(`no reflected twin for (${p.x},${p.z})`)
+    const a = [...opensOf(p)].map(d => reflDir[d]).sort().join(), b = [...opensOf(q!)].sort().join()
+    if (a !== b) fail(`reflected openings differ at (${p.x},${p.z}) vs (${rx},${rz})`)
+  }
+  void DIRS
+  console.log(`✓ bases ${JSON.stringify(baseCells(1))} ↔ ${JSON.stringify(baseCells(2))} joined by ${line.length} path tiles ${JSON.stringify(line)}`)
+  console.log(`✓ RED→BLUE ${bp!.length} steps; ${open.length} paintable path cells, ${red.length}+${blue.length} locked base cells; fully connected`)
+  console.log('✓ fair: layout is symmetric under the anti-diagonal reflection that swaps RED and BLUE')
+  process.exit(0)
+}
 
 // ─── Sky bases-only: two closed rings, nothing else ─────────────────
 if (IS_SKY && SKY_BASES_ONLY) {

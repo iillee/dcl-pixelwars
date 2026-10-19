@@ -25,6 +25,10 @@ export const SKY_LEVEL_COUNT = 3
  *  `turn` tiles) — no main path, branches, hub or teleport orbs. Set false
  *  to grow the full sky level again (bases then sit mid-edge, see baseCells). */
 export const SKY_BASES_ONLY = true
+/** Bases-only sub-mode: also lay ONE flat, paintable, 1-tile-wide L path
+ *  joining the rings (RED → east along the south row → north up the east
+ *  column → BLUE). false = the two rings alone. */
+export const SKY_BASE_LINE = true
 /** Base is a SKY_BASE_SIZE × SKY_BASE_SIZE square of cross tiles. */
 export const SKY_BASE_SIZE = 2
 /** World-space inset of the sky grid from every scene edge (m). 32 = two
