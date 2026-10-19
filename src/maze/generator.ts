@@ -662,37 +662,51 @@ function generateSky(): void {
 }
 
 /**
- * Bases+line: one flat L path at BASE_Y from RED's SE ring tile east along
- * the south row to the SE grid corner, then north up the east column into
- * BLUE's SE ring tile. The two attach tiles become `fork`s (ring + exit).
- * The L is symmetric under the anti-diagonal reflection (x, z) →
- * (W-1-z, H-1-x), which swaps the bases, so both teams are equally far
- * from the corner. (A single path can't be 180°-symmetric: a cell and its
- * 180° image are never adjacent.) Placed directly, then checked by validate().
+ * Bases+line: one flat path at BASE_Y from RED's INNER ring tile (the one
+ * facing the scene centre) to BLUE's inner ring tile, zig-zagging through
+ * the middle (8×8 grid, inset 32 m):
+ *
+ *   RED (1,1) →E (2,1) → (3,1) ↑ (3,2) (3,3) → (3,4) →E (4,4) (5,4) → (6,4) ↑ (6,5) → BLUE (6,6)
+ *
+ * The two inner ring tiles become `fork`s (ring + exit). A single path
+ * can't be 180°-symmetric (a cell and its 180° image are never adjacent),
+ * so the route is symmetric under the anti-diagonal reflection
+ * (x, z) → (W-1-z, H-1-x), which swaps the bases; (3,4) is its fixed cell.
+ * Offsets are relative to RED's inner tile, so this assumes the 8×8 grid
+ * with SKY_BASE_SIZE 2; otherwise no line is laid. Checked by validate().
  */
+// [dx, dz, type, r] relative to RED's inner tile (1,1).
+const BASE_LINE: Array<[number, number, TileType, number]> = [
+  [1, 0, 'straight', 1],  // (2,1) E-W
+  [2, 0, 'turn', 3],      // (3,1) W+N
+  [2, 1, 'straight', 0],  // (3,2) N-S
+  [2, 2, 'straight', 0],  // (3,3) N-S
+  [2, 3, 'turn', 1],      // (3,4) S+E
+  [3, 3, 'straight', 1],  // (4,4) E-W
+  [4, 3, 'straight', 1],  // (5,4) E-W
+  [5, 3, 'turn', 3],      // (6,4) W+N
+  [5, 4, 'straight', 0],  // (6,5) N-S
+]
+const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8
+
 function layBaseLine(): void {
-  if (SKY_BASE_SIZE !== 2) return
-  const [x0, z0] = baseCells(1)[0]          // RED SW ring tile
-  const ex = GRID_W - 1, nz = GRID_H - 2     // east column; BLUE SE ring tile z
+  if (!baseLineFits()) return
+  const [x0, z0] = baseCells(1)[0]
+  const ix = x0 + 1, iz = z0 + 1            // RED inner tile
   const set = (t: TileType, r: number, x: number, z: number) => {
     grid.delete(key(x, z, BASE_Y))
     placeTile(t, r, x, z, BASE_Y)
   }
-  // Attach points: ring turn → fork. fork canonical N,S,W.
-  set('fork', 1, x0 + 1, z0)                 // RED SE: N,W (ring) + E (exit)  → r1 = N,E,W
-  set('fork', 0, ex, nz)                     // BLUE SE: N,W (ring) + S (exit) → r0 = N,S,W
-  for (let x = x0 + 2; x < ex; x++) set('straight', 1, x, z0)   // E-W
-  set('turn', 3, ex, z0)                     // W + N
-  for (let z = z0 + 1; z < nz; z++) set('straight', 0, ex, z)   // N-S
+  // Inner ring tiles → fork (fork canonical N,S,W).
+  set('fork', 3, ix, iz)                     // RED (1,1): S,W ring + E exit  → r3 = W,E,S
+  const [bx, bz] = mirrorCell(ix, iz)
+  set('fork', 2, bx, bz)                     // BLUE (6,6): N,E ring + S exit → r2 = S,N,E
+  for (const [dx, dz, t, r] of BASE_LINE) set(t, r, ix + dx, iz + dz)
 }
 
 /** Cells of the bases+line path (non-base tiles), for verify scripts. */
 export function baseLineCells(): Array<[number, number]> {
-  const out: Array<[number, number]> = []
-  if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || SKY_BASE_SIZE !== 2) return out
+  if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || !baseLineFits()) return []
   const [x0, z0] = baseCells(1)[0]
-  const ex = GRID_W - 1, nz = GRID_H - 2
-  for (let x = x0 + 2; x <= ex; x++) out.push([x, z0])
-  for (let z = z0 + 1; z < nz; z++) out.push([ex, z])
-  return out
+  return BASE_LINE.map(([dx, dz]) => [x0 + 1 + dx, z0 + 1 + dz] as [number, number])
 }
