@@ -34,7 +34,7 @@ export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /** World-space inset of the sky grid from every scene edge (m). 32 = two
  *  parcels → 8×8 tiles over 32–288 m. Must keep (320 - 2·inset) a multiple
  *  of 32 for the grid to stay centred. */
-export const SKY_EDGE_INSET = 32
+export const SKY_EDGE_INSET = 64
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0

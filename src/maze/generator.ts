@@ -691,10 +691,15 @@ function generateSky(): void {
  * NET_CANDIDATES valid attempts are scored (junctions + ramps + coverage)
  * and the best kept; up to NET_ATTEMPTS tries, else the frozen FALLBACK_NET.
  */
-const NET_ATTEMPTS = 200
+const NET_ATTEMPTS = 600 // 6×6: ~6% of rounds hit the fallback at 200
+/** Size scale vs the 8×8 grid the targets were tuned on (62 non-base cells): 6×6 → 0.55. */
+const NET_SCALE = (GRID_W * GRID_H - 2) / 62
 const NET_CANDIDATES = 6
+const THIN_MAX = 0.25
+const NET_SCORE_JITTER = 10 // random tie-break so best-of-N does not converge on one layout
+const NET_APRON = 1
 let usedFallback = false
-const baseLineFits = () => SKY_BASE_SIZE === 1 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
+const baseLineFits = () => SKY_BASE_SIZE === 1 && GRID_W === GRID_H && GRID_W >= 4 && SKY_BASE_MARGIN === 0
 
 /** Flat tile + rotation whose openings are exactly `need`. */
 function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
@@ -735,6 +740,10 @@ function netAttempt(): Net | null {
   const fixed = fixedEdges()
   const protectedCells = new Set<string>(base)
   for (const [a, b] of fixed) { protectedCells.add(a); protectedCells.add(b) }
+  // Flat L0 apron: cells within NET_APRON steps of a base never rise or sink
+  // (1 = the base's exit cells). 2 was tried on 6×6: fewer failed attempts but
+  // fewer distinct layouts (183 vs 195 of 250).
+  const nearBase = (x: number, z: number) => baseCells(1).concat(baseCells(2)).some(([a, b]) => Math.abs(a - x) + Math.abs(b - z) <= NET_APRON)
   // 1. Height field.
   const level = new Map<string, number>()
   for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) level.set(ck(x, z), 0)
@@ -742,18 +751,19 @@ function netAttempt(): Net | null {
   for (const l of [1, -1]) { const k = 2 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) blobLevels.push(l) }
   for (const l of shuffle(blobLevels)) {
     {
-      const w = 2 + Math.floor(rand() * 3), h = 2 + Math.floor(rand() * 3)
+      const span = Math.max(1, Math.floor(GRID_W / 2) - 1) // 8×8: 2–4, 6×6: 2–3
+      const w = 2 + Math.floor(rand() * span), h = 2 + Math.floor(rand() * span)
       const x0 = Math.floor(rand() * (GRID_W - w + 1)), z0 = Math.floor(rand() * (GRID_H - h + 1))
       for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + h; z++) {
         const c = ck(x, z)
-        if (protectedCells.has(c)) continue
+        if (protectedCells.has(c) || nearBase(x, z)) continue
         level.set(c, l); level.set(mk(c), l)
       }
     }
   }
   // 2. Ramps.
   const ramp = new Map<string, Dir>()
-  const maxRamps = 6 + 2 * Math.floor(rand() * 5)
+  const maxRamps = Math.max(4, 2 * Math.round((3 + Math.floor(rand() * 5)) * NET_SCALE)) // 8×8: 6–14, 6×6: 4–8
   const cands: Array<[string, Dir]> = []
   for (const [c, l] of level) {
     if (protectedCells.has(c)) continue
@@ -853,7 +863,7 @@ function netAttempt(): Net | null {
     const [a, b] = e.split('|')
     return active.has(a) && active.has(b) && !ramp.has(a) && !ramp.has(b)
   })
-  const target = Math.floor(flatEdges.length * rand() * 0.25)
+  const target = Math.floor(flatEdges.length * rand() * THIN_MAX)
   let removed = 0
   for (const e of shuffle(flatEdges)) {
     if (removed >= target) break
@@ -913,7 +923,7 @@ function netJunctions(n: Net): number {
   }
   return j
 }
-const NET_MIN_JUNCTIONS = 12
+const NET_MIN_JUNCTIONS = Math.round(12 * NET_SCALE) // 8×8: 12, 6×6: 7
 
 function layBaseLine(): void {
   if (!baseLineFits()) return
@@ -926,7 +936,7 @@ function layBaseLine(): void {
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
     if (netJunctions(n) < NET_MIN_JUNCTIONS) continue // want a woven net
     found++
-    const sc = netScore(n)
+    const sc = netScore(n) + rand() * NET_SCORE_JITTER
     if (sc > bestScore) { best = n; bestScore = sc }
   }
   if (best && layNet(best)) return
@@ -936,8 +946,8 @@ function layBaseLine(): void {
 // Frozen known-good network (generated once, then pasted): "x,z,level[,rampHigh]"
 // cells and "a|b" edges. Used when no attempt validates.
 const FALLBACK_NET: { cells: string[]; edges: string[] } = {
-  cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,-1,2', '0,4,-1', '0,5,-1', '0,6,-1', '0,7,-1', '1,0,0', '1,1,0', '1,2,0,1', '1,3,-1', '1,4,-1', '1,5,-1', '1,6,-1', '1,7,-1', '2,0,1', '2,1,1', '2,2,1', '2,3,-1', '2,4,-1', '2,5,-1', '2,6,-1', '2,7,-1', '3,0,1', '3,1,1', '3,2,1', '3,3,-1', '3,4,-1', '3,5,-1', '3,6,-1', '3,7,-1', '4,0,-1', '4,1,-1', '4,2,-1', '4,3,-1', '4,4,-1', '4,5,1', '4,6,1', '4,7,1', '5,0,-1', '5,1,-1', '5,2,-1', '5,3,-1', '5,4,-1', '5,5,1', '5,6,1', '5,7,1', '6,0,-1', '6,1,-1', '6,2,-1', '6,3,-1', '6,4,-1', '6,5,0,3', '6,6,0', '6,7,0', '7,0,-1', '7,1,-1', '7,2,-1', '7,3,-1', '7,4,-1,0', '7,5,0', '7,6,0', '7,7,0'],
-  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,4|0,5', '0,4|1,4', '0,5|0,6', '0,5|1,5', '0,6|0,7', '0,6|1,6', '0,7|1,7', '1,0|1,1', '1,2|2,2', '1,3|1,4', '1,3|2,3', '1,4|1,5', '1,4|2,4', '1,5|1,6', '1,5|2,5', '1,6|1,7', '1,6|2,6', '1,7|2,7', '2,0|2,1', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|3,2', '2,3|3,3', '2,3|2,4', '2,4|2,5', '2,4|3,4', '2,5|2,6', '2,5|3,5', '2,6|2,7', '2,6|3,6', '2,7|3,7', '3,0|3,1', '3,1|3,2', '3,3|4,3', '3,3|3,4', '3,4|3,5', '3,4|4,4', '3,5|3,6', '3,6|3,7', '4,0|4,1', '4,0|5,0', '4,1|4,2', '4,1|5,1', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|5,4', '4,5|4,6', '4,5|5,5', '4,6|4,7', '4,6|5,6', '4,7|5,7', '5,0|6,0', '5,0|5,1', '5,1|5,2', '5,1|6,1', '5,2|5,3', '5,2|6,2', '5,3|5,4', '5,3|6,3', '5,4|6,4', '5,5|6,5', '5,5|5,6', '5,6|5,7', '6,0|7,0', '6,0|6,1', '6,1|6,2', '6,1|7,1', '6,2|6,3', '6,2|7,2', '6,3|6,4', '6,3|7,3', '6,5|7,5', '6,6|6,7', '6,6|7,6', '6,7|7,7', '7,0|7,1', '7,1|7,2', '7,2|7,3', '7,3|7,4', '7,4|7,5', '7,5|7,6', '7,6|7,7'],
+  cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0', '1,5,0,1', '2,0,0,1', '2,1,-1', '2,2,-1', '2,3,-1', '2,4,-1,3', '2,5,1', '3,0,1', '3,1,-1,1', '3,2,-1', '3,3,-1', '3,4,-1', '3,5,0,3', '4,0,0,3', '4,1,0', '4,2,0', '4,3,0', '4,4,0', '4,5,0', '5,0,0', '5,1,0', '5,2,0', '5,3,0', '5,4,0', '5,5,0'],
+  edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|1,5', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,2|1,3', '1,3|1,4', '1,4|2,4', '1,5|2,5', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|3,3', '2,4|3,4', '2,5|3,5', '3,0|4,0', '3,1|4,1', '3,2|3,3', '3,3|3,4', '3,5|4,5', '4,0|5,0', '4,1|5,1', '4,1|4,2', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|4,5', '4,4|5,4', '4,5|5,5', '5,0|5,1', '5,1|5,2', '5,2|5,3', '5,3|5,4', '5,4|5,5'],
 }
 
 /** Lay the frozen fallback layout (also called by verify-graph to check it). */
