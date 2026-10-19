@@ -27,8 +27,9 @@ Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only u
 | `f09c9f1`, `f7cf571` | 1-tile corner bases on 8×8 |
 | `5df209b`, `e3edcf8` | 6×6 grid (inset 64), scaled targets |
 | `154b63a`, `809624e` | Ghost spawns on the opposite base |
-| `ee9ecee`, `14bce03` | Teleporters for sky mode |
-| (this commit) | Docs + this handoff |
+| `ee9ecee`, `14bce03` | Teleporters for sky mode (two pairs) |
+| `c8502a3`, `e07db2e` | Docs + this handoff |
+| (latest) | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
 
 ---
 
@@ -69,7 +70,9 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ### Sky layout rules (what verify-graph enforces on every seed)
 
-6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); 1–2 symmetric teleporter pairs off bases / exits / ramps, landing on floor outside the trigger. Last run: 250/250 pass, fallback 0×, avg 11.5 junctions, 96% coverage, 187 distinct layouts, 2 teleporter pairs every round.
+6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run: 250/250 pass, fallback 0×, avg 11.5 junctions, 96% coverage, 187 distinct layouts, 1 teleporter pair every round (pair level L-1/L0/L+1 = 73/2/175, avg ends 7.0 tiles apart).
+
+**Teleporter fairness trade-off:** A ↔ mirror(A) is the only single pair that maps onto itself under the 180° symmetry, so each team's distance to "its" end is identical. Its cost is that both ends always share a level. A cross-level single pair can't be symmetric, so one team would get the better end. The earlier two-pair scheme (A ↔ mirror(B), mirror(A) ↔ B) was the fair cross-level option and was replaced at Luke's request.
 
 ### Switching back to classic
 
@@ -93,6 +96,7 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 | Seeded 4 separate lanes | "Not intertwined enough" (avg 3.4 junctions) |
 | Facing bases (W/E edge, 2×2) | Luke didn't like it; back to diagonal corners |
 | Woven network on 8×8 | Liked, but too large → 6×6 |
+| 4×4 arena (inset 96, bases (0,0)/(3,3), spawns 112/208) | **Not adopted.** An exhaustive search of every symmetric layout under the rules (1-tile corner bases, flat ramp ends, no dead ends, connected) found **zero** layouts using all 3 levels, even with ramps allowed on exit cells and next to each other. Only 10 two-level layouts exist with flat exits (40 with ramped exits). The live generator fails every attempt there. 5×5 (inset 80) was probed: 69/100 seeds generated (31 fell back), only 12 distinct layouts. Needs Luke's call: stay 6×6, accept 2 levels on 4×4, or relax a rule. |
 
 ---
 

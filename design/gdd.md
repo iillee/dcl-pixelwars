@@ -296,7 +296,7 @@ What exists in code against the §9 plan. **Nothing below on branch `level` has 
 - `LEVEL_MODE = 'sky'`: 20×20-parcel world, a 6×6 grid of 32 m tiles over 64–256 m floating at y 32, three levels (L-1 / L0 / L+1, 10.767 m rise). `classic` mode is still in the code.
 - Team bases as **spawn landmarks only** (consistent with §9: orientation, not a pillar): one team-locked corner tile each, RED (0,0) and BLUE (5,5), spawns (80, 33.5, 80) / (240, 33.5, 240).
 - A seeded **woven network** generator: new layout every round, 180° symmetric, ±1-level ramps, no dead ends, everything reachable, dense junctions.
-- Teleport orbs return as two mirrored pairs on remote tiles.
+- Teleport orbs return as one self-mirrored pair (A ↔ its 180° image) on remote tiles: fair to both teams, but both ends share a level.
 - Ghost bot spawns on the base opposite the solo player.
 - Fall respawn to your base.
 - Overview camera (angled whole-map view, ported from dcl-snowdrift). Keep-or-drop undecided.

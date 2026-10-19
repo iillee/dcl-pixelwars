@@ -116,7 +116,7 @@ Switch: `LEVEL_MODE = 'sky'` in `src/maze/level.ts` (current on `level`). Key nu
 
 Best of 6 valid candidates (all three levels used, ≥7 junctions on 6×6) by junction / ramp / coverage score with random jitter; up to 600 attempts, else a frozen fallback layout.
 
-**Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): two 180°-mirrored pairs per round on remote flat tiles (off bases, exit cells and ramps, ≥2 tiles from a base); land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
+**Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): exactly **one pair** per round, A ↔ mirror(A) (its 180° image), on remote flat tiles (off bases, exit cells and ramps, ≥2 tiles from a base, ends ≥3 tiles apart when possible). The layout is 180° symmetric, so each end is to one team exactly what the other end is to the other team: fair. Trade-off: both ends are always on the same level (a cross-level single pair can't be symmetric). Ends land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
 
 **Ghost bot**: spawns on its own base (opposite the solo human) and respawns opposite if the human switches team; returns to base each round.
 
