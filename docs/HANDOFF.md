@@ -9,7 +9,7 @@ For a teammate (e.g. stom) or a future session picking this up cold. Facts only.
 | Where | What |
 |---|---|
 | `main` @ `956f79b` | Live-equivalent code, **classic** mode (5×5 maze, 11×11 parcels). SDK auth-server upgrade, team balancing + red/blue name tags, 1.3× own-paint speed, personal round contribution, join retry, chunked paint messages. Ramp paint offset experiments reverted. |
-| `level` (ahead of `main`, ~30 commits) | **Sky** mode experiment: 20×20 parcels, 6×6 woven network at y 32, 3 levels, 1-tile corner bases, teleporters, ghost on opposite base, fall respawn, overview camera, 250-seed verify. |
+| `level` (ahead of `main`, ~30 commits) | **Sky** mode experiment: 20×20 parcels, 5×5 asymmetric-but-fair woven network at y 32 (80–240 m), 3 levels, 1-tile corner bases, teleporters, ghost on opposite base, fall respawn, overview camera, 250-seed verify. |
 | Live world | `pixelwars.dcl.eth`. Nothing from `level` has been deployed. |
 
 Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only until it is playtested and Luke decides to merge.
@@ -29,9 +29,10 @@ Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only u
 | `154b63a`, `809624e` | Ghost spawns on the opposite base |
 | `ee9ecee`, `14bce03` | Teleporters for sky mode (two pairs) |
 | `c8502a3`, `e07db2e` | Docs + this handoff |
+| `a5dba33`, `0541689` | Stubs removed; teleporter only on turn/fork/cross |
+| (latest) | `SKY_SYMMETRIC=false` + fairness check; 5×5 default (inset 80), 5×5 fallback, coverage gate in generator |
 | `ca94945`, `036a9d4` | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
 | `8d60b8f`, `68aae66` | Teleporter dead-end stubs (reverted next) |
-| (latest) | Stubs reverted, strict no-dead-ends restored; teleporter only on turn/fork/cross, scored by remoteness + tile type |
 
 ---
 
@@ -56,8 +57,8 @@ Notes:
 
 | File | Role |
 |---|---|
-| `src/maze/level.ts` | Mode switch + sky knobs: `LEVEL_MODE`, `SKY_ALTITUDE=32`, `SKY_LEVEL_COUNT=3`, `SKY_BASES_ONLY=true`, `SKY_BASE_LINE=true`, `SKY_BASE_SIZE=1`, `SKY_EDGE_INSET=64`, `SKY_BASE_MARGIN=0`, `BASE_PAINT_LOCK=true`, `FALL_RESPAWN_DROP=12` |
-| `src/maze/generator.ts` | Shared generator (client, server bot graph, verify). `CELL=32`, `STEP=10.767`, `MIN_Y`, `baseCells` / `baseSpawn` / `baseTeamOfTile`, `mirrorCell`, sky net: `layBaseLine` → `netAttempt` / `layNet` / `netScore`, `FALLBACK_NET`, `NET_ATTEMPTS=600`, `NET_CANDIDATES=6`, `NET_MIN_JUNCTIONS`, `NET_APRON=1`, `THIN_MAX=0.25`, `NET_SCORE_JITTER=10`; `teleportPairs()` |
+| `src/maze/level.ts` | Mode switch + sky knobs: `LEVEL_MODE`, `SKY_ALTITUDE=32`, `SKY_LEVEL_COUNT=3`, `SKY_BASES_ONLY=true`, `SKY_BASE_LINE=true`, `SKY_BASE_SIZE=1`, `SKY_EDGE_INSET=80`, `SKY_SYMMETRIC=false`, `SKY_BASE_MARGIN=0`, `BASE_PAINT_LOCK=true`, `FALL_RESPAWN_DROP=12` |
+| `src/maze/generator.ts` | Shared generator (client, server bot graph, verify). `CELL=32`, `STEP=10.767`, `MIN_Y`, `baseCells` / `baseSpawn` / `baseTeamOfTile`, `mirrorCell`, sky net: `layBaseLine` → `netAttempt` / `layNet` / `netScore`, `FALLBACKS` (per size) / `FALLBACK_NET`, `NET_ATTEMPTS=1500`, `NET_MIN_COVERAGE=0.7`, `fairness()` / `FAIR_TOL=1`, `NET_CANDIDATES=6`, `NET_MIN_JUNCTIONS`, `NET_APRON=1`, `THIN_MAX=0.25`, `NET_SCORE_JITTER=10`; `teleportPairs()` |
 | `src/maze/rebuild.ts` | Client tile spawn/teardown; persistent base tiles (keyed by x,z,y) |
 | `src/shared/mazeGraph.ts` | Per-tile walk masks → cell graph for bots + verify |
 | `src/paint.ts`, `src/server/paintState.ts` | Paint cells + base lock (client / server) |
@@ -65,18 +66,32 @@ Notes:
 | `src/client/overviewCamera.ts`, `src/client/overviewUi.tsx` | Overview camera + right-edge button (+ zoom / rotate) |
 | `src/teleportOrbs.ts` | Teleport orbs (d20 gold model + wire, gold light, `teleport.mp3`, 1.2 m trigger, 2 s cooldown) |
 | `src/server/bots/manager.ts`, `bot.ts` | Ghost: 1 bot when exactly 1 active human, opposite team, spawns on its own base |
-| `scene.json` | 20×20 parcels; spawns RedBase x/z 78–82, BlueBase x/z 238–242, y 33.5 |
+| `scene.json` | 20×20 parcels; spawns RedBase x/z 94–98, BlueBase x/z 222–226, y 33.5 (base tile centres (96,96) / (224,224)) |
 | `scripts/verify-graph.ts`, `scripts/verify-bot.ts` | Verify (see §2) |
 
 Do **not** touch the ramp paint offset code — Luke confirmed the original works; the tweaks were reverted.
 
 ### Sky layout rules (what verify-graph enforces on every seed)
 
-6×6 grid, bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric (tiles, heights, openings); everything reachable; ≥6 junctions and ≥70% coverage; ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair A ↔ mirror(A) off bases / exits / ramps, landing on floor outside the trigger. Last run: 250/250 pass, fallback 0×, avg 11.5 junctions, 96% coverage, 187 distinct layouts, 1 teleporter pair every round, always on a turn (250/250), pair level L-1/L0/L+1 = 70/0/180, ends 4–10 tiles apart (avg 7.2), 0 layouts rejected for lack of a valid tile.
+5×5 grid (any size ≥4 works), bases flat L0 with 2 exits each and identical every round; levels L-1/L0/L+1 only, all three used; ramps ±1, never orthogonally adjacent, flat tile at both ends; every opening meets an opening at the same height; no dead ends; 180° symmetric when `SKY_SYMMETRIC`, otherwise fair (RED/BLUE walk to centre, nearest L+1 and nearer teleporter end within 1 tile); everything reachable; junctions ≥ ceil(10 × size scale) (4 on 5×5, 6 on 6×6), ≥70% coverage, ≥2 ramps (4 when symmetric); ≥70% distinct layouts over 250 seeds (90% on 8×8+); exactly 1 teleporter pair on a turn/fork/cross, off bases / exits, ends ≥3 apart, landing on floor outside the trigger. Last run (5×5 asymmetric): 250/250 pass, fallback 0×, 248 distinct layouts (111 footprints), junctions avg 8.8 (min 4), ramps 3–6, 91% coverage. Teleporter: 1 pair every round, 242/250 on different levels, end types turn 491 / fork 9 / cross 0, end levels L-1 49 / L0 100 / L+1 101, ends 3–8 tiles apart (avg 6.2). Fairness avg |RED−BLUE|: centre 0.00, nearest L+1 0.34, teleporter 0.26; 2466 layouts rejected as unfair (~10 per round).
+
+**Symmetry flag and fairness:** `SKY_SYMMETRIC` in `level.ts` (default **false**). When it's true, layouts are 180° images of themselves and the teleporter is A ↔ mirror(A). When it's false, layouts are asymmetric but must pass a **fairness check** (`fairness()` / `FAIR_TOL = 1` in `generator.ts`): RED and BLUE tile-graph walking distance to (a) the grid centre, (b) the nearest L+1 tile and (c) the nearer teleporter end must each be within **1 tile** of each other. Layouts that fail are rejected and the search continues (about 10 per round on 5×5).
+
+**Teleporter (asymmetric):** one pair (A, B) on a turn, fork or cross only (never a straight, ramp or end), off bases and exit cells, ≥2 tiles from a base, ends ≥3 tiles apart. Each base's walk to its nearer end must be within 1 tile of the other base's. Score = remoteness of both ends + tile preference (turn +2, fork +0.5, cross 0), +1.5 if the ends are on **different levels**. Layouts with no valid pair are rejected (0 in 250 seeds).
+
+**Size comparison (250 seeds each, all 3 levels required):**
+
+| Grid (inset) | Mode | Pass | Fallback | Distinct layouts | Junctions avg (min) | Ramps | Coverage | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 4×4 (96) | symmetric | 0 | always | 0 | – | – | – | no 3-level layout exists (exhaustive search) |
+| 4×4 (96) | asymmetric, 6000 attempts | 230/250 | 20 (none frozen) | 24 (3 footprints) | 4.6 (4) | 4 | 98% | 3-level layouts rare (66 in 24 000 tries); teleporter always on the same two corners |
+| **5×5 (80)** | **asymmetric, 1500 attempts** | **250/250** | **0** | **248 (111 footprints)** | **8.8 (4)** | **3–6 (avg 4.1)** | **91%** | **chosen** |
+| 6×6 (64) | asymmetric, 600 attempts | 250/250 | 0 | 250 (198 footprints) | 13.4 (8) | 3–8 | 91% | |
+| 6×6 (64) | symmetric | 250/250 | 0 | 187 (31 footprints) | 11.5 (8) | 4–8 | 96% | previous default |
 
 **Teleporter tile rule:** the pair only goes on a turn (corner), fork or cross, never on a straight, ramp or end (and verify still forbids dead ends anywhere). It stays off bases and exit cells, ≥2 tiles from a base, with ends ≥3 tiles apart. Score = remoteness (detour off the shortest RED↔BLUE route + 0.5 × distance to the nearer base + 1 on the grid edge) + tile preference (turn +2, fork +0.5, cross 0). If a layout has no valid tile, `layBaseLine` rejects it and keeps searching. That hasn't happened in 250 seeds. Dead-end stubs were tried and removed: Luke meant a bias in the overall layout, not generated dead ends.
 
-**Teleporter fairness trade-off:** A ↔ mirror(A) is the only single pair that maps onto itself under the 180° symmetry, so each team's distance to "its" end is identical. Its cost is that both ends always share a level. A cross-level single pair can't be symmetric, so one team would get the better end. The earlier two-pair scheme (A ↔ mirror(B), mirror(A) ↔ B) was the fair cross-level option and was replaced at Luke's request.
+**Teleporter fairness trade-off (symmetric mode only):** A ↔ mirror(A) is the only single pair that maps onto itself under the 180° symmetry, so each team's distance to "its" end is identical. Its cost is that both ends always share a level. A cross-level single pair can't be symmetric, so one team would get the better end. The earlier two-pair scheme (A ↔ mirror(B), mirror(A) ↔ B) was the fair cross-level option and was replaced at Luke's request.
 
 ### Switching back to classic
 
@@ -101,7 +116,7 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 | Facing bases (W/E edge, 2×2) | Luke didn't like it; back to diagonal corners |
 | Woven network on 8×8 | Liked, but too large → 6×6 |
 | Generated dead-end stubs to host the teleporter | Removed: not what Luke meant; strict no-dead-ends restored |
-| 4×4 arena (inset 96, bases (0,0)/(3,3), spawns 112/208) | **Not adopted.** An exhaustive search of every symmetric layout under the rules (1-tile corner bases, flat ramp ends, no dead ends, connected) found **zero** layouts using all 3 levels, even with ramps allowed on exit cells and next to each other. Only 10 two-level layouts exist with flat exits (40 with ramped exits). The live generator fails every attempt there. 5×5 (inset 80) was probed: 69/100 seeds generated (31 fell back), only 12 distinct layouts. Needs Luke's call: stay 6×6, accept 2 levels on 4×4, or relax a rule. |
+| 4×4 arena (inset 96, bases (0,0)/(3,3), spawns 112/208) | **Not adopted (twice).** Asymmetric retry: 3-level layouts exist (one raised and one sunk corner each fed by two ramps), but only 24 distinct over 250 seeds and 20 seeds found none even at 6000 attempts. First attempt (symmetric): An exhaustive search of every symmetric layout under the rules (1-tile corner bases, flat ramp ends, no dead ends, connected) found **zero** layouts using all 3 levels, even with ramps allowed on exit cells and next to each other. Only 10 two-level layouts exist with flat exits (40 with ramped exits). The live generator fails every attempt there. 5×5 (inset 80) was probed: 69/100 seeds generated (31 fell back), only 12 distinct layouts. Needs Luke's call: stay 6×6, accept 2 levels on 4×4, or relax a rule. |
 
 ---
 
@@ -110,8 +125,9 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 - **Early-join fall loop:** a player who arrives before their base tile has loaded can fall and be bounced back repeatedly until it appears.
 - **Overview mode:** movement direction relative to the angled camera untested; on mobile only the on-screen buttons work (keys 1 / 4 have no touch mapping). Free pan, auto-rotate on occlusion and the off-screen hint from snowdrift were dropped.
 - **Ghost glide:** on a team switch the ghost respawns on the other base; the client may glide it across instead of snapping. Unseen.
-- **Small-grid repeats:** ~75% distinct layouts over 250 seeds on 6×6 (31 distinct footprints); ~6% of rounds would need the fallback at 200 attempts, hence 600.
-- **Loosened verify gates** for 6×6: junctions ≥6 (was 10 on 8×8), variety ≥70% (90% on 8×8), smart-bot own-paint gate 0.35 (was 0.5).
+- **Asymmetric 5×5 is mostly L0:** on average only ~2 L+1 tiles and ~3 L-1 tiles per layout; the other levels are small pockets. Untested whether it reads as "3 levels" in-world.
+- **Fairness is graph-distance only** (tiles, not metres; ramps count as one tile); it doesn't measure paint area per side.
+- **Loosened verify gates** for small grids: junctions ≥4 on 5×5 / ≥6 on 6×6 (was 10 on 8×8), ramps ≥2 when asymmetric, variety ≥70% (90% on 8×8), smart-bot own-paint gate 0.35 (was 0.5).
 - **Line endings:** `scene.json` and `src/teleportOrbs.ts` were committed with LF (rest CRLF).
 - **Leftovers:** ring-mode wording in the unused bases-only-without-paths branch and its verify branch; `dumpNet()` dev helper still exported from the generator.
 - **Nothing on `level` is playtested in-world or deployed.** Spawn floor, base persistence across a round change, teleporter arrival facing, and the overview → teleport sequence have only been checked by code + verify.

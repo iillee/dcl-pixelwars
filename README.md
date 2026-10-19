@@ -7,7 +7,7 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 **Pixelwars** — the arena underneath. Every round a new layout is grown from a small set of modular tile pieces (corridors, forks, crossings, ramps). The round seed is shared so every player sees the same layout. Two level modes exist (`LEVEL_MODE` in [`src/maze/level.ts`](src/maze/level.ts)):
 
 - **`classic`** (what `main` / the live world runs): a 5×5 tile maze on an 11×11 parcel world (176 m), centre spawn, ground level.
-- **`sky`** (branch `level`, not yet playtested in-world or deployed): a 6×6 tile woven network floating at y 32 on a 20×20 parcel world (320 m), grid at 64–256 m, three levels, 1-tile team bases in opposite corners. See [Sky mode](#sky-mode-branch-level) below.
+- **`sky`** (branch `level`, not yet playtested in-world or deployed): a 5×5 tile woven network (asymmetric but fairness-checked) floating at y 32 on a 20×20 parcel world (320 m), grid at 80–240 m, three levels, 1-tile team bases in opposite corners. See [Sky mode](#sky-mode-branch-level) below.
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
@@ -99,24 +99,38 @@ Switch: `LEVEL_MODE = 'sky'` in `src/maze/level.ts` (current on `level`). Key nu
 | Thing | Value |
 |---|---|
 | World | 20×20 parcels (320 m), `scene.json` |
-| Grid | 6×6 tiles of 32 m over x/z 64–256 m (`SKY_EDGE_INSET = 64`) |
+| Grid | 5×5 tiles of 32 m over x/z 80–240 m (`SKY_EDGE_INSET = 80`) |
 | Levels | L-1 21.233, L0 32 (`SKY_ALTITUDE`), L+1 42.767 — ramp rise `STEP` 10.767 m |
-| Bases | 1 team-locked `turn` tile each: RED (0,0) opening N+E, BLUE (5,5) opening S+W, same every round |
-| Spawns | RED (80, 33.5, 80), BLUE (240, 33.5, 240), facing the centre (160, 33.5, 160) |
-| Symmetry | 180° rotation (x,z) → (5−x, 5−z): tiles, heights and openings |
+| Bases | 1 team-locked `turn` tile each: RED (0,0) opening N+E, BLUE (4,4) opening S+W, same every round |
+| Spawns | RED (96, 33.5, 96), BLUE (224, 33.5, 224) at the base tile centres, facing the centre (160, 33.5, 160); `scene.json` ranges 94–98 / 222–226 |
+| Symmetry | `SKY_SYMMETRIC = false`: asymmetric layouts held to a fairness check (true = 180° rotation of tiles, heights, openings) |
 
 **Generator** (`layBaseLine()` / `netAttempt()` in `src/maze/generator.ts`), seeded from the round seed:
 
-1. Height field: L0 everywhere, 2–3 random rectangles raised to L+1 and 2–3 sunk to L-1, each with its 180° image; bases and their exit cells stay L0.
-2. Ramps where the level steps by one along a line (±1 only, never orthogonally adjacent, flat tiles at both ends), placed in mirrored pairs.
+1. Height field: L0 everywhere, 2–3 random rectangles raised to L+1 and 2–3 sunk to L-1 (1–2 wide below 6×6), each with its 180° image when symmetric; bases and their exit cells stay L0.
+2. Ramps where the level steps by one along a line (±1 only, never orthogonally adjacent, flat tiles at both ends), placed in mirrored pairs when symmetric.
 3. Link every same-level flat neighbour pair; ramps link only their two ends; base exits are fixed.
 4. Prune to the 2-core (no dead ends), keep the component holding both bases.
-5. Thin random mirrored link pairs (up to 25%) while staying connected with no dead ends.
-6. Tiles from openings (straight / turn / fork / cross); ramp r = high side. Check with `validate()`, full connectivity and symmetry.
+5. Thin random links (mirrored pairs when symmetric) (up to 25%) while staying connected with no dead ends.
+6. Tiles from openings (straight / turn / fork / cross); ramp r = high side. Check with `validate()`, full connectivity and symmetry (or the fairness check).
 
-Best of 6 valid candidates (all three levels used, ≥7 junctions on 6×6) by junction / ramp / coverage score with random jitter; up to 600 attempts, else a frozen fallback layout.
+Best of 6 valid candidates (all three levels used, junctions ≥ 12 × size scale: 4 on 5×5, 7 on 6×6, ≥70% coverage, a valid teleporter pair, fair) by junction / ramp / coverage score with random jitter; up to 1500 attempts, else the frozen fallback for that grid size (`FALLBACKS['5x5']` / `['6x6']`).
 
-**Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): exactly **one pair** per round, A ↔ mirror(A) (its 180° image), on remote flat tiles (off bases, exit cells and ramps, ≥2 tiles from a base, ends ≥3 tiles apart when possible). The layout is 180° symmetric, so each end is to one team exactly what the other end is to the other team: fair. Trade-off: both ends are always on the same level (a cross-level single pair can't be symmetric). Ends land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
+**Symmetry flag and fairness:** `SKY_SYMMETRIC` in `level.ts` (default **false**). When it's true, layouts are 180° images of themselves and the teleporter is A ↔ mirror(A). When it's false, layouts are asymmetric but must pass a **fairness check** (`fairness()` / `FAIR_TOL = 1` in `generator.ts`): RED and BLUE tile-graph walking distance to (a) the grid centre, (b) the nearest L+1 tile and (c) the nearer teleporter end must each be within **1 tile** of each other. Layouts that fail are rejected and the search continues (about 10 per round on 5×5).
+
+**Teleporter (asymmetric):** one pair (A, B) on a turn, fork or cross only (never a straight, ramp or end), off bases and exit cells, ≥2 tiles from a base, ends ≥3 tiles apart. Each base's walk to its nearer end must be within 1 tile of the other base's. Score = remoteness of both ends + tile preference (turn +2, fork +0.5, cross 0), +1.5 if the ends are on **different levels**. Layouts with no valid pair are rejected (0 in 250 seeds).
+
+**Size comparison (250 seeds each, all 3 levels required):**
+
+| Grid (inset) | Mode | Pass | Fallback | Distinct layouts | Junctions avg (min) | Ramps | Coverage | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 4×4 (96) | symmetric | 0 | always | 0 | – | – | – | no 3-level layout exists (exhaustive search) |
+| 4×4 (96) | asymmetric, 6000 attempts | 230/250 | 20 (none frozen) | 24 (3 footprints) | 4.6 (4) | 4 | 98% | 3-level layouts rare (66 in 24 000 tries); teleporter always on the same two corners |
+| **5×5 (80)** | **asymmetric, 1500 attempts** | **250/250** | **0** | **248 (111 footprints)** | **8.8 (4)** | **3–6 (avg 4.1)** | **91%** | **chosen** |
+| 6×6 (64) | asymmetric, 600 attempts | 250/250 | 0 | 250 (198 footprints) | 13.4 (8) | 3–8 | 91% | |
+| 6×6 (64) | symmetric | 250/250 | 0 | 187 (31 footprints) | 11.5 (8) | 4–8 | 96% | previous default |
+
+**Teleporters** (`teleportPairs()` + `src/teleportOrbs.ts`): exactly **one pair** per round (see the asymmetric rules above; with `SKY_SYMMETRIC` it is A ↔ mirror(A), which forces both ends onto one level). Ends land 4 m out on corridor floor facing toward the centre; 2 s cooldown; overview turns off on teleport.
 
 **Teleporter tile rule:** the pair only goes on a turn (corner), fork or cross, never on a straight, ramp or end (and verify still forbids dead ends anywhere). It stays off bases and exit cells, ≥2 tiles from a base, with ends ≥3 tiles apart. Score = remoteness (detour off the shortest RED↔BLUE route + 0.5 × distance to the nearer base + 1 on the grid edge) + tile preference (turn +2, fork +0.5, cross 0). If a layout has no valid tile, `layBaseLine` rejects it and keeps searching. That hasn't happened in 250 seeds. Dead-end stubs were tried and removed: Luke meant a bias in the overall layout, not generated dead ends.
 
