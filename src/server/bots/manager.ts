@@ -5,9 +5,10 @@
  *   1. Adjust population to hit `targetActive` humans + bots
  *   2. Tick every bot; apply resulting paint via the injected callback
  *
- * On round boundary: rebuild the walkable graph from the new maze,
- * clear all bot paths, and reseat bots at random walkable cells so
- * they don't remain stranded on tiles that no longer exist.
+ * Spawning: the ghost always starts on its OWN base tile centre (the base
+ * opposite the solo human). On a round boundary the graph is rebuilt and
+ * the ghost is sent back to its base; if the solo human changes team the
+ * ghost is respawned for the other side on the other base.
  *
  * Bots do NOT flow through the paintTick / leaderboard code paths — they
  * call applyPaint directly. That's intentional:
@@ -19,7 +20,7 @@
  * human roster split.
  */
 
-import { generateWithRetry, getPlacedTilesInOrder } from '../../maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../../maze/generator'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { Bot, makeSmartTarget, PaintReader } from './bot'
 
@@ -66,13 +67,35 @@ export function rebuildBotGraph(seed: number): void {
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
 
-  // Reseat any surviving bots. Cheaper than tearing them down and
-  // respawning (preserves team balance state).
-  const nodesArr = [...graph.nodes]
+  // New round: send any surviving ghost back to its own base (the old
+  // cellIds are stale). tickBots() then re-checks its team next tick.
   for (const b of bots) {
-    b.currentCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
+    b.currentCell = baseStartCell(b.team)
     b.clearPath()
   }
+}
+
+/**
+ * Walkable cell at the centre of a team's base tile — the graph node
+ * nearest baseSpawn(team) (same spot human players spawn on, at base
+ * altitude). Prefers deep (off-wall) cells; falls back to any walkable
+ * cell, then any node, so a bot always gets a start.
+ */
+function baseStartCell(team: number): string {
+  const g = graph!
+  const target = baseSpawn(team).pos
+  for (const pool of [g.deepNodes, g.nodes]) {
+    let best: string | null = null, bestD = Infinity
+    for (const id of pool) {
+      if (baseTeamOfCellId(id) !== team) continue
+      const p = g.worldPos.get(id)
+      if (!p) continue
+      const d = (p[0] - target.x) ** 2 + (p[1] - target.y) ** 2 + (p[2] - target.z) ** 2
+      if (d < bestD) { bestD = d; best = id }
+    }
+    if (best) return best
+  }
+  return [...g.nodes][0]
 }
 
 /** Solo-mode: bot team is opposite of the sole human. Defaults to Blue
@@ -87,10 +110,9 @@ function spawnBot(): void {
   // Spawn on the deep (eroded) subgraph so the bot's very first path
   // stays off walls. Fall back to full nodes only in the pathological
   // case where the deep set is empty (shouldn't happen with ARM=10).
-  const spawnSet = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
-  const nodesArr = [...spawnSet]
-  const startCell = nodesArr[Math.floor(Math.random() * nodesArr.length)]
+  // Spawn on the ghost's OWN base — the opposite base from the solo human.
   const team = pickTeamForNewBot()
+  const startCell = baseStartCell(team)
   const bot = new Bot({
     team,
     startCell,
@@ -122,6 +144,27 @@ export function tickBots(dtSec: number): void {
   const desired = humans === SOLO_HUMAN_COUNT ? 1 : 0
   while (bots.length < desired) spawnBot()
   while (bots.length > desired) retireBot()
+
+  // Solo human switched team (or was re-assigned at a new round): the ghost
+  // must play the other side, so retire it and respawn on the opposite base.
+  // Bot.team is fixed per instance (its smart target is bound to it).
+  const solo = deps.soloHumanTeam()
+  if (solo !== null && bots.length === 1 && bots[0].team === solo) {
+    console.log(`[Bots] solo human is now ${solo === 1 ? 'RED' : 'BLUE'} - respawning ghost on the opposite base`)
+    retireBot()
+    spawnBot()
+  }
+
+  // Ghost off the map (its cell no longer exists, e.g. the tile under it
+  // went away): respawn on its own base. Server bots walk the graph and
+  // can't physically fall, so this is the equivalent of a fall respawn.
+  for (const b of bots) {
+    if (!graph.nodes.has(b.currentCell)) {
+      console.log(`[Bots] ghost ${b.team === 1 ? 'RED' : 'BLUE'} lost its cell - back to its base`)
+      b.currentCell = baseStartCell(b.team)
+      b.clearPath()
+    }
+  }
 
   // ── 2. Tick each bot ───────────────────────────────────────────────
   // Each step paints the stepped cell AND its walkable neighbors, matching
