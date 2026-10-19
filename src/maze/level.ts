@@ -27,10 +27,10 @@ export const SKY_LEVEL_COUNT = 3
 export const SKY_BASES_ONLY = true
 /** Base is a SKY_BASE_SIZE × SKY_BASE_SIZE square of cross tiles. */
 export const SKY_BASE_SIZE = 2
-/** World-space inset of the sky grid from every scene edge (m). 16 = one
- *  parcel → 9×9 tiles over 16–304 m. Must keep (320 - 2·inset) a multiple
+/** World-space inset of the sky grid from every scene edge (m). 64 = four
+ *  parcels → 6×6 tiles over 64–256 m. Must keep (320 - 2·inset) a multiple
  *  of 32 for the grid to stay centred. */
-export const SKY_EDGE_INSET = 16
+export const SKY_EDGE_INSET = 64
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0
