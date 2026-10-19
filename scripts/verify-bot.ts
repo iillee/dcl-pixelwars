@@ -93,3 +93,25 @@ console.log('  (smart target = any non-own deep cell, so neutral+enemy should do
 // (seed 42 gave 47% neutral / 53% own). Still catches a bot stuck on own paint.
 if ((neutralHits + enemyHits) / total < 0.35) { console.error('✗ smart bot spends most steps on its own paint'); process.exit(1) }
 if (neutralHits === 0) { console.error('✗ smart bot never reached a neutral cell'); process.exit(1) }
+
+// ─── Ghost spawn: always on the base opposite the solo human ─────────
+import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
+import { baseSpawn } from '../src/maze/generator'
+{
+  let humanTeam = 1
+  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, humanCount: () => 1, soloHumanTeam: () => humanTeam })
+  rebuildBotGraph(42)
+  const near = (team: number) => {
+    const p = getBotPositions()
+    if (p.length !== 1) { console.error(`✗ expected 1 ghost, got ${p.length}`); process.exit(1) }
+    const s = baseSpawn(team).pos
+    const d = Math.hypot(p[0].x - s.x, p[0].z - s.z)
+    if (p[0].team !== team || d > 3 || Math.abs(p[0].y - (s.y - 1.5)) > 1.5) { console.error(`✗ ghost team ${p[0].team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)}), want team ${team} near (${s.x}, ${s.z})`); process.exit(1) }
+    return `team ${team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)})`
+  }
+  tickBots(0); const a = near(2)
+  humanTeam = 2; tickBots(0); const b = near(1)
+  for (let i = 0; i < 40; i++) tickBots(0.2)
+  rebuildBotGraph(43); const c = near(1)
+  console.log(`✓ ghost spawns opposite: human RED → ${a}; human BLUE → ${b}; new round → ${c}`)
+}
