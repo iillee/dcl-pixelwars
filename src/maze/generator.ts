@@ -20,6 +20,10 @@ import {
   openingsAt, highDirAt,
 } from './tiles'
 import { rand, setSeed } from './rng'
+import {
+  IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN,
+  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES,
+} from './level'
 
 // ─── World-scale constants ──────────────────────────────────────────
 // All exported so rebuild.ts can position entities and paint.ts can size
@@ -30,13 +34,17 @@ export const CELL = 16 * TILE_SCALE                                  // one grid
 // maze grid (160 m) centered inside the scene with an 8 m border on all
 // sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
 // so cell (2,2) — the true center — lands exactly at world (88, 88).
-export const SCENE_SIZE = 176
+// Sky mode: 20×20 parcels = 320 m → 10×10 grid, no border (see level.ts).
+export const SCENE_SIZE = IS_SKY ? 320 : 176
 export const GRID_W = Math.floor(SCENE_SIZE / CELL)
 export const GRID_H = Math.floor(SCENE_SIZE / CELL)
 export const MAZE_ORIGIN = (SCENE_SIZE - GRID_W * CELL) / 2         // 8 m border
 export const STEP = 5.3835 * TILE_SCALE                              // ramp Y increment
                                                                      // (5.3835 m = walkable floor-to-floor in the new tile GLBs)
-export const MAX_Y = 40                                              // stack cap — 4 levels max
+/** World Y of the lowest level. 0 in classic; SKY_ALTITUDE in sky. Tiles
+ *  store absolute world Y, so rebuild / paint / mazeGraph need no offset. */
+export const BASE_Y = IS_SKY ? SKY_ALTITUDE : 0
+export const MAX_Y = IS_SKY ? BASE_Y + (SKY_LEVEL_COUNT - 1) * STEP + 0.5 : 40                                              // stack cap — 4 levels max
                                                                      // (Y = 0, 10.77, 21.53, 32.30).
                                                                      // STEP is 10.767 so 40 blocks
                                                                      // level 4 (43.07) while allowing
@@ -215,7 +223,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
       if (nb?.type === 'ramp') return false
       // Also check the ramp-below case: if a lower ramp's high side reaches
       // my opening's level, that's still a ramp-to-ramp connection.
-      if (ny >= STEP) {
+      if (ny >= BASE_Y + STEP - 0.001) {
         const under = grid.get(key(nx, nz, ny - STEP))
         if (under?.type === 'ramp' && highDirAt(under.type, under.r) === OPP[d]) return false
       }
@@ -247,7 +255,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
         // walkway our opening receives — so "open" is still valid. Only reject
         // when neither nb1 nor a matching lower ramp provides the connection.
         if (isOpen) {
-          if (myY < STEP) return false
+          if (myY < BASE_Y + STEP - 0.001) return false
           const under = grid.get(key(nx, nz, myY - STEP))
           if (!under || under.type !== 'ramp' || highDirAt(under.type, under.r) !== back) return false
         }
@@ -270,7 +278,7 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
     //  - If its high side points at me → my side must be OPEN (connects to ramp's high).
     //  - Otherwise (wall side or low side facing me) → my side must be CLOSED,
     //    since there's nothing valid to connect to at this elevation.
-    if (myY >= STEP) {
+    if (myY >= BASE_Y + STEP - 0.001) {
       const nb2 = grid.get(key(nx, nz, myY - STEP))
       if (nb2?.type === 'ramp') {
         const nb2High = highDirAt(nb2.type, nb2.r)
@@ -286,6 +294,9 @@ function canPlace(t: TileType, r: number, x: number, z: number, y: number): bool
 }
 
 function placeTile(t: TileType, r: number, x: number, z: number, y: number): void {
+  // Store Y rounded like the grid key: in sky mode Y starts at 80, so
+  // 80 + STEP + STEP would otherwise leak float noise into cellIds.
+  y = Math.round(y * 1000) / 1000
   grid.set(key(x, z, y), { type: t, r, x, z, y, order: placeCounter++ })
 }
 
@@ -307,7 +318,7 @@ export function validate(): boolean {
         const nb1High = highDirAt(nb1.type, nb1.r)
         if (nb1High !== back && nb1Opens.has(back)) connected = true
       }
-      if (!connected && ny >= STEP) {
+      if (!connected && ny >= BASE_Y + STEP - 0.001) {
         const nb2 = grid.get(key(nx, nz, ny - STEP))
         if (nb2 && highDirAt(nb2.type, nb2.r) === back) connected = true
       }
@@ -349,6 +360,7 @@ function frontierFrom(
  * so each floor fills horizontally before ramps climb.
  */
 export function generate(): void {
+  if (IS_SKY) { generateSky(); return }
   const frontier: { x: number; z: number; y: number }[] = []
 
   // Fixed center seed: place a `cross` tile (4 openings) at the exact
@@ -405,7 +417,222 @@ export function generateWithRetry(startSeed: number, maxAttempts = 500): number 
     setSeed(trySeed)
     resetGrid()
     generate()
-    if (validate()) return trySeed
+    if (validate() && (!IS_SKY || allTilesConnected())) return trySeed
   }
   return null
+}
+
+// ═══ Sky mode ═══════════════════════════════════════════════════════
+// Point-symmetric two-base layout. Every placement is made as a PAIR:
+// (t, r, x, z, y) plus its 180° image (t, r+2, W-1-x, H-1-z, y), so RED
+// and BLUE get the same level. A cell and its image are never orthogonal
+// neighbours on an even grid, so the pair can't break each other's rules.
+//
+// Growth:
+//   1. Seeds: RED base square (mirrored → BLUE base) + optional centre hub.
+//   2. Main path: grow the frontier cell that lies most "between" the RED
+//      base and the hub (min dist-to-base + dist-to-hub, in the RED half
+//      frame) until RED reaches BLUE. Never caps with `end` in this phase.
+//   3. Branches: the classic lowest-Y-first growth; each frontier cell is
+//      capped with `end` first with probability 1 - SKY_BRANCH_DENSITY.
+// generateWithRetry then requires validate() AND every tile connected,
+// so an accepted seed always links the two bases.
+
+/** 180° image of a grid cell. */
+export function mirrorCell(x: number, z: number): [number, number] {
+  return [GRID_W - 1 - x, GRID_H - 1 - z]
+}
+
+const BASE_X0 = Math.floor(GRID_W / 2) - Math.floor(SKY_BASE_SIZE / 2)
+
+/** Grid cells of a team's base (1 = RED, south; 2 = BLUE, north). */
+export function baseCells(team: number): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (let i = 0; i < SKY_BASE_SIZE; i++) {
+    for (let j = 0; j < SKY_BASE_SIZE; j++) {
+      const x = BASE_X0 + i, z = SKY_BASE_MARGIN + j
+      out.push(team === 1 ? [x, z] : mirrorCell(x, z))
+    }
+  }
+  return out
+}
+
+/** Team whose base occupies tile (tx, tz, ty), or 0. Always 0 in classic. */
+export function baseTeamOfTile(tx: number, tz: number, ty: number): number {
+  if (!IS_SKY || Math.abs(ty - BASE_Y) > 0.01) return 0
+  for (const team of [1, 2]) {
+    for (const [x, z] of baseCells(team)) if (x === tx && z === tz) return team
+  }
+  return 0
+}
+
+/** Same as baseTeamOfTile for a paint cellId "tx,tz,ty:col,row". */
+export function baseTeamOfCellId(id: string): number {
+  if (!IS_SKY) return 0
+  const colon = id.indexOf(':')
+  const parts = id.slice(0, colon < 0 ? id.length : colon).split(',')
+  return baseTeamOfTile(+parts[0], +parts[1], +parts[2])
+}
+
+/** World-space spawn (feet) at the centre of a team's base, plus a camera target facing the enemy. */
+export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
+  const cells = baseCells(team)
+  let sx = 0, sz = 0
+  for (const [x, z] of cells) { sx += x; sz += z }
+  const cx = (sx / cells.length + 0.5) * CELL + MAZE_ORIGIN
+  const cz = (sz / cells.length + 0.5) * CELL + MAZE_ORIGIN
+  const y = BASE_Y + 1.5 // walkable slab top is +0.5
+  return { pos: { x: cx, y, z: cz }, look: { x: SCENE_SIZE / 2, y, z: SCENE_SIZE / 2 } }
+}
+
+/** Tiles kept alive across round rebuilds (players stand on them at reset). */
+export function isPersistentTile(p: Placed): boolean {
+  if (IS_SKY) return baseTeamOfTile(p.x, p.z, p.y) !== 0
+  return p.x === Math.floor(GRID_W / 2) && p.z === Math.floor(GRID_H / 2) && p.y === 0
+}
+
+/** Tiles reachable from `p` through matched openings (same rules as validate()). */
+function linkedNeighbours(p: Placed): Placed[] {
+  const out: Placed[] = []
+  const opens = openingsAt(p.type, p.r)
+  const highDir = highDirAt(p.type, p.r)
+  for (const d of opens) {
+    const nx = p.x + DX[d], nz = p.z + DZ[d]
+    if (!inBounds(nx, nz)) continue
+    const ny = highDir === d ? p.y + STEP : p.y
+    const back = OPP[d]
+    const nb1 = grid.get(key(nx, nz, ny))
+    if (nb1 && highDirAt(nb1.type, nb1.r) !== back && openingsAt(nb1.type, nb1.r).has(back)) { out.push(nb1); continue }
+    const nb2 = grid.get(key(nx, nz, ny - STEP))
+    if (nb2 && highDirAt(nb2.type, nb2.r) === back) out.push(nb2)
+  }
+  return out
+}
+
+function reachableFrom(start: Placed): Set<Placed> {
+  const seen = new Set<Placed>([start])
+  const q = [start]
+  while (q.length) {
+    for (const n of linkedNeighbours(q.pop()!)) if (!seen.has(n)) { seen.add(n); q.push(n) }
+  }
+  return seen
+}
+
+/** True when the RED base tile reaches the BLUE base tile. */
+export function basesConnected(): boolean {
+  const [rx, rz] = baseCells(1)[0]
+  const [bx, bz] = baseCells(2)[0]
+  const red = grid.get(key(rx, rz, BASE_Y)), blue = grid.get(key(bx, bz, BASE_Y))
+  if (!red || !blue) return false
+  return reachableFrom(red).has(blue)
+}
+
+/** True when every placed tile is reachable from the RED base (implies basesConnected). */
+export function allTilesConnected(): boolean {
+  const [rx, rz] = baseCells(1)[0]
+  const red = grid.get(key(rx, rz, BASE_Y))
+  if (!red) return false
+  return reachableFrom(red).size === grid.size && basesConnected()
+}
+
+/** Place a tile and its 180° image, or nothing. */
+function placeSym(t: TileType, r: number, x: number, z: number, y: number): boolean {
+  const [mx, mz] = mirrorCell(x, z)
+  const mr = (r + 2) % 4
+  if (mx === x && mz === z) {
+    // Odd grid centre: tile must look the same after a half turn.
+    if (TILES[t].isRamp) return false
+    const a = openingsAt(t, r), b = openingsAt(t, mr)
+    if (a.size !== b.size || [...a].some(d => !b.has(d))) return false
+    if (!canPlace(t, r, x, z, y)) return false
+    placeTile(t, r, x, z, y)
+    return true
+  }
+  if (!canPlace(t, r, x, z, y)) return false
+  placeTile(t, r, x, z, y)
+  if (!canPlace(t, mr, mx, mz, y)) {
+    grid.delete(key(x, z, y)); placeCounter--
+    return false
+  }
+  placeTile(t, mr, mx, mz, y)
+  return true
+}
+
+function skyPrimaryPool(): TileType[] {
+  const pool: TileType[] = []
+  for (let i = 0; i < SKY_RAMP_WEIGHT; i++) pool.push('ramp')
+  return pool.concat(GROWTH_PRIMARY.filter(t => t !== 'ramp'))
+}
+
+function generateSky(): void {
+  const frontier: { x: number; z: number; y: number }[] = []
+  const pushFrontierAt = (x: number, z: number, y: number) => {
+    const p = grid.get(key(x, z, y))
+    if (p) frontierFrom(p, frontier)
+    const [mx, mz] = mirrorCell(x, z)
+    const m = grid.get(key(mx, mz, y))
+    if (m && m !== p) frontierFrom(m, frontier)
+  }
+
+  // 1. Seeds. RED base crosses (images become the BLUE base), then the hub.
+  for (const [x, z] of baseCells(1)) {
+    if (!grid.has(key(x, z, BASE_Y))) placeSym('cross', 0, x, z, BASE_Y)
+  }
+  const hubCells: Array<[number, number]> = []
+  if (SKY_CENTRE_HUB) {
+    const hx = Math.floor(GRID_W / 2) - 1, hz = Math.floor(GRID_H / 2) - 1
+    for (const [x, z] of [[hx, hz], [hx + 1, hz], [hx, hz + 1], [hx + 1, hz + 1]] as Array<[number, number]>) {
+      hubCells.push([x, z])
+      if (!grid.has(key(x, z, BASE_Y))) placeSym('cross', 0, x, z, BASE_Y)
+    }
+  }
+  for (const p of [...grid.values()]) frontierFrom(p, frontier)
+
+  const primary = skyPrimaryPool()
+  const tryPlace = (f: { x: number; z: number; y: number }, pools: TileType[][]): boolean => {
+    for (const pool of pools) {
+      for (const t of shuffle(pool)) {
+        for (const r of shuffle([0, 1, 2, 3])) {
+          if (placeSym(t, r, f.x, f.z, f.y)) { pushFrontierAt(f.x, f.z, f.y); return true }
+        }
+      }
+    }
+    return false
+  }
+  const capReached = () => SKY_MAX_TILES > 0 && grid.size >= SKY_MAX_TILES
+
+  // 2. Main path: RED half frame; target = hub centre (or the BLUE base).
+  const [rbx, rbz] = baseCells(1)[0]
+  const goal = hubCells.length ? hubCells[0] : baseCells(2)[0]
+  const half = (x: number, z: number): [number, number] =>
+    (z >= GRID_H / 2 ? mirrorCell(x, z) : [x, z])
+  const score = (f: { x: number; z: number; y: number }) => {
+    const [x, z] = half(f.x, f.z)
+    const dBase = Math.abs(x - rbx) + Math.abs(z - rbz)
+    const dGoal = Math.abs(x - goal[0]) + Math.abs(z - goal[1])
+    return dBase + dGoal + (f.y - BASE_Y) / STEP * 0.5 + rand() * 0.9
+  }
+  let guard = 2000
+  while (!basesConnected() && frontier.length && guard-- > 0 && !capReached()) {
+    let bi = 0, bs = Infinity
+    for (let i = 0; i < frontier.length; i++) {
+      const s = score(frontier[i])
+      if (s < bs) { bs = s; bi = i }
+    }
+    const f = frontier.splice(bi, 1)[0]
+    if (grid.has(key(f.x, f.z, f.y))) continue
+    tryPlace(f, [primary])
+  }
+
+  // 3. Branches (classic order: lowest Y first, random within a level).
+  guard = 5000
+  while (frontier.length && guard-- > 0) {
+    const minY = Math.min(...frontier.map(f => f.y))
+    const candidates: number[] = []
+    for (let i = 0; i < frontier.length; i++) if (frontier[i].y === minY) candidates.push(i)
+    const f = frontier.splice(candidates[Math.floor(rand() * candidates.length)], 1)[0]
+    if (grid.has(key(f.x, f.z, f.y))) continue
+    const branch = !capReached() && rand() < SKY_BRANCH_DENSITY
+    tryPlace(f, branch ? [primary, GROWTH_FALLBACK] : [GROWTH_FALLBACK, primary])
+  }
 }
