@@ -8,8 +8,8 @@
  *
  * Sky mode (bases + woven net): pairs come from teleportPairs() in
  * generator.ts — a pure function of the round's layout, so every client
- * agrees without network sync. Usually two pairs that are 180° images of
- * each other; one self-mirrored pair when the grid only allows that.
+ * agrees without network sync. Exactly one pair per round, A <-> its 180°
+ * mirror, on a remote turn/fork/cross tile (never a straight, ramp or end).
  * Classic mode keeps the old single random cross-level pair.
  *
  * Arrival: on corridor floor 4 m out from the destination orb (outside its
