@@ -592,12 +592,7 @@ function generateSky(): void {
   // whose openings only face each other (SW opens N+E, SE N+W, NE S+W,
   // NW S+E). The 180° image of RED's block is BLUE's block.
   if (SKY_BASES_ONLY) {
-    const [x0, z0] = baseCells(1)[0]
-    const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
-    for (const [x, z] of baseCells(1)) {
-      const i = Math.min(1, x - x0), j = Math.min(1, z - z0)
-      placeSym('turn', ringRot(i, j), x, z, BASE_Y)
-    }
+    placeRings()
     if (SKY_BASE_LINE) layBaseLine()
     return
   }
@@ -666,45 +661,64 @@ function generateSky(): void {
 }
 
 /**
- * Bases+line: two paths between the bases' INNER ring tiles (RED (1,1),
- * BLUE (6,6) on the 8×8 grid) over three levels: L0 = BASE_Y (bases,
- * crossings), L-1 = BASE_Y - STEP, L+1 = BASE_Y + STEP. Hand-placed:
+ * Bases+paths: FOUR seeded paths between the two bases over three levels
+ * (L-1 = BASE_Y - STEP, L0 = BASE_Y, L+1 = BASE_Y + STEP). Random per round
+ * (uses the round seed via rand()), then validated, with retry and a
+ * hand-checked fallback.
  *
- *   A: RED(1,1) L0 → (2,1) ramp ↓ → (3,1) L-1 → (3,2) ramp ↑ → (3,3) ✚ L0 → (3,4) L0
- *        → (4,4) ✚ L0 → (5,4) ramp ↑ → (6,4) L+1 → (6,5) ramp ↓ → BLUE(6,6) L0
- *   B: the 180° image of A walked RED → BLUE (same cells as A with x/z
- *      swapped): up, L+1, down, crossings, down, L-1, up.
+ * Exits: every base opens all four outward ring edges, RED:
+ *   (1,0)→E (2,0)   (1,1)→E (2,1)   (1,1)→N (1,2)   (0,1)→N (0,2)
+ * (BLUE = their 180° images), so each base has 4 exits and the ring tiles
+ * are the SAME every round (turn / fork / cross / fork) — the persistent
+ * base entities in rebuild.ts never change shape. Rings stay closed loops.
  *
- * Every ramp sits between two flat tiles (never two ramps in a row) and
- * rises exactly one STEP. Crossings (3,3)/(4,4) are L0 for both paths.
- * Entry: [x, z, level, rampHighDir?] — a ramp's level is its LOW end and
- * its high side faces rampHighDir (N=0 E=1 S=2 W=3). Flat tile pieces are
- * chosen from the openings each cell needs. Assumes the 8×8 grid with 2×2
- * corner bases; otherwise no line is laid. Checked by validate().
+ * Per attempt:
+ *   1. Shuffle the 4 exits into a,b,c,d. Path 1 runs RED exit a → BLUE exit
+ *      c', path 2 RED b → BLUE d'. Paths 3/4 are the 180° images of 1/2
+ *      (walked RED → BLUE they use RED exits c,d). So every exit is used once
+ *      per side and the whole layout is 180° symmetric by construction.
+ *   2. Route: randomized depth-first walk from the start cell to the end
+ *      cell (never through bases or its own cells), biased toward the goal
+ *      with a straight-line preference so there is room for ramps; length
+ *      capped at a random 10–18 cells.
+ *   3. Levels: walk the route; on a straight run (prev, cell, next in line)
+ *      a cell may become a ramp (prob 0.45) that steps ±1 level (clamped to
+ *      L-1..L+1). The cells next to a ramp are always flat, the first and
+ *      last path cells are L0. Accept only if it ends on L0 with ≥1 up and
+ *      ≥1 down.
+ *   4. Merge all 4 paths per cell: a shared cell must agree on level and
+ *      ramp-ness/direction (so crossings/merges happen at matching heights);
+ *      no two ramp cells may be orthogonally adjacent.
+ *   5. Tiles: each flat cell gets the junction piece matching the union of
+ *      its openings (straight/turn/fork/cross); ramps use the ramp model
+ *      with r = high side. Then validate() + allTilesConnected() + mirror
+ *      check. Up to SKY_PATH_ATTEMPTS tries, else FALLBACK_PATHS.
+ *
+ * Entry format: [x, z, level, rampHighDir?] — a ramp's level is its LOW end
+ * and it rises toward rampHighDir (N=0 E=1 S=2 W=3).
  */
 type LineCell = [number, number, number, Dir?]
-const BASE_LINE_A: LineCell[] = [
-  [1, 1, 0],
-  [2, 1, -1, 3],  // ramp, high W (toward RED): going east = down
-  [3, 1, -1],
-  [3, 2, -1, 0],  // ramp, high N: going north = up
-  [3, 3, 0],
-  [3, 4, 0],
-  [4, 4, 0],
-  [5, 4, 0, 1],   // ramp, high E: going east = up
-  [6, 4, 1],
-  [6, 5, 0, 2],   // ramp, high S (toward (6,4)): going north = down
-  [6, 6, 0],
+const SKY_PATH_ATTEMPTS = 300
+/** RED exits as [ring cell, first path cell]. */
+const RED_EXITS: Array<[[number, number], [number, number]]> = [
+  [[1, 0], [2, 0]], [[1, 1], [2, 1]], [[1, 1], [1, 2]], [[0, 1], [0, 2]],
 ]
-// 180° image of A, reversed so it also runs RED → BLUE.
-const BASE_LINE_B: LineCell[] = BASE_LINE_A.slice().reverse().map(([x, z, l, h]) => {
+const mirrorLine = (path: LineCell[]): LineCell[] => path.slice().reverse().map(([x, z, l, h]) => {
   const [mx, mz] = [7 - x, 7 - z]
   return (h === undefined ? [mx, mz, l] : [mx, mz, l, ((h + 2) % 4) as Dir]) as LineCell
 })
+// Known-good layout (seed-generated, then frozen) used when every attempt fails.
+// (seed 12345 attempt 1; both halves + their 180° images = 4 paths)
+const FALLBACK_HALF: LineCell[][] = [
+  [[0, 1, 0], [0, 2, 0], [0, 3, 0, 0], [0, 4, 1], [0, 5, 1], [0, 6, 1], [1, 6, 1], [2, 6, 0, 3], [3, 6, 0], [4, 6, 0], [5, 6, 0], [6, 6, 0]],
+  [[1, 1, 0], [1, 2, 0], [2, 2, 0], [3, 2, 0], [4, 2, -1, 3], [5, 2, -1], [5, 3, -1, 0], [5, 4, 0], [5, 5, 0], [5, 6, 0], [5, 7, 0], [6, 7, 0]],
+]
 const baseLineFits = () => SKY_BASE_SIZE === 2 && GRID_W === 8 && GRID_H === 8 && SKY_BASE_MARGIN === 0
+let currentPaths: LineCell[][] = []
+let usedFallback = false
 
 /** Dir from cell a to orthogonally adjacent cell b. */
-function dirTo(a: LineCell, b: LineCell): Dir {
+function dirTo(a: LineCell | [number, number], b: LineCell | [number, number]): Dir {
   for (const d of ALL_DIRS) if (a[0] + DX[d] === b[0] && a[1] + DZ[d] === b[1]) return d
   throw new Error(`cells not adjacent: ${a} ${b}`)
 }
@@ -720,48 +734,159 @@ function tileFor(need: Set<Dir>): { t: TileType; r: number } | null {
   return null
 }
 
-function layBaseLine(): void {
-  if (!baseLineFits()) return
+const isBaseXZ = (x: number, z: number) => (x < 2 && z < 2) || (x > 5 && z > 5)
+
+/** Random cell route start → goal (inclusive), or null. */
+function randomRoute(start: [number, number], goal: [number, number]): Array<[number, number]> | null {
+  const maxLen = 10 + Math.floor(rand() * 9)
+  const route: Array<[number, number]> = [start]
+  const used = new Set<string>([`${start[0]},${start[1]}`])
+  let budget = 3000
+  const dfs = (lastDir: Dir | null): boolean => {
+    if (budget-- <= 0) return false
+    const [x, z] = route[route.length - 1]
+    if (x === goal[0] && z === goal[1]) return true
+    const left = maxLen - route.length
+    if (Math.abs(x - goal[0]) + Math.abs(z - goal[1]) > left) return false
+    const opts = ALL_DIRS.map(d => {
+      const nx = x + DX[d], nz = z + DZ[d]
+      const sc = Math.abs(nx - goal[0]) + Math.abs(nz - goal[1]) + rand() * 3 - (d === lastDir ? 1 : 0)
+      return { d, nx, nz, sc }
+    }).filter(o => inBounds(o.nx, o.nz) && !isBaseXZ(o.nx, o.nz) && !used.has(`${o.nx},${o.nz}`))
+      .sort((a, b) => a.sc - b.sc)
+    for (const o of opts) {
+      route.push([o.nx, o.nz]); used.add(`${o.nx},${o.nz}`)
+      if (dfs(o.d)) return true
+      route.pop(); used.delete(`${o.nx},${o.nz}`)
+    }
+    return false
+  }
+  return dfs(null) ? route : null
+}
+
+/** Give a route (base cell .. base cell) levels + ramps, or null. */
+function assignLevels(cells: Array<[number, number]>): LineCell[] | null {
+  const n = cells.length
+  for (let tries = 0; tries < 20; tries++) {
+    const out: LineCell[] = cells.map(([x, z]) => [x, z, 0] as LineCell)
+    let lvl = 0, prevRamp = false, ups = 0, downs = 0
+    for (let i = 2; i <= n - 3; i++) {
+      out[i][2] = lvl
+      const din = dirTo(cells[i - 1], cells[i]), dout = dirTo(cells[i], cells[i + 1])
+      if (!prevRamp && i <= n - 4 && din === dout && rand() < 0.45) {
+        const up = lvl === 1 ? false : lvl === -1 ? true : rand() < 0.5
+        if (up) { out[i] = [cells[i][0], cells[i][1], lvl, dout]; lvl++; ups++ }
+        else { lvl--; out[i] = [cells[i][0], cells[i][1], lvl, OPP[dout]]; downs++ }
+        prevRamp = true
+      } else prevRamp = false
+    }
+    if (lvl === 0 && ups > 0 && downs > 0) return out
+  }
+  return null
+}
+
+function placeRings(): void {
+  const [x0, z0] = baseCells(1)[0]
+  const ringRot = (i: number, j: number) => (j === 0 ? (i === 0 ? 0 : 3) : (i === 0 ? 1 : 2))
+  for (const [x, z] of baseCells(1)) placeSym('turn', ringRot(Math.min(1, x - x0), Math.min(1, z - z0)), x, z, BASE_Y)
+}
+
+/** Lay paths onto the grid (rings already placed). False on any conflict. */
+function layPaths(paths: LineCell[][]): boolean {
   const need = new Map<string, { c: LineCell; dirs: Set<Dir> }>()
-  const add = (c: LineCell, d: Dir) => {
+  const add = (c: LineCell, d: Dir): boolean => {
     const k = `${c[0]},${c[1]}`
     if (!need.has(k)) {
-      // Start from the ring tile's own openings so rings stay closed loops.
       const ring = grid.get(key(c[0], c[1], BASE_Y))
       need.set(k, { c, dirs: new Set(ring ? openingsAt(ring.type, ring.r) : []) })
     }
     const e = need.get(k)!
-    if (e.c[2] !== c[2] || e.c[3] !== c[3]) throw new Error(`paths disagree at ${k}: ${e.c} vs ${c}`)
+    if (e.c[2] !== c[2] || e.c[3] !== c[3]) return false
     e.dirs.add(d)
+    return true
   }
-  for (const path of [BASE_LINE_A, BASE_LINE_B]) {
+  for (const path of paths) {
     for (let i = 0; i + 1 < path.length; i++) {
-      add(path[i], dirTo(path[i], path[i + 1]))
-      add(path[i + 1], dirTo(path[i + 1], path[i]))
+      if (!add(path[i], dirTo(path[i], path[i + 1]))) return false
+      if (!add(path[i + 1], dirTo(path[i + 1], path[i]))) return false
     }
+  }
+  const ramps = [...need.values()].filter(e => e.c[3] !== undefined)
+  for (const a of ramps) for (const b of ramps) {
+    if (Math.abs(a.c[0] - b.c[0]) + Math.abs(a.c[1] - b.c[1]) === 1) return false
   }
   for (const { c: [x, z, level, high], dirs } of need.values()) {
     grid.delete(key(x, z, BASE_Y))
     const y = BASE_Y + level * STEP
-    if (high !== undefined) { placeTile('ramp', high, x, z, y); continue } // ramp r = high dir
+    if (high !== undefined) { placeTile('ramp', high, x, z, y); continue }
     const tile = tileFor(dirs)
-    if (!tile) throw new Error(`no tile for openings ${[...dirs]} at ${x},${z}`)
+    if (!tile || dirs.size < 2) return false
     placeTile(tile.t, tile.r, x, z, y)
   }
+  return validate() && allTilesConnected() && gridIsSymmetric()
 }
 
-/** Base-line paths as [x, z, level, rampHighDir?] cells, base tiles excluded (verify scripts). */
+function gridIsSymmetric(): boolean {
+  for (const p of grid.values()) {
+    const [mx, mz] = mirrorCell(p.x, p.z)
+    const q = grid.get(key(mx, mz, p.y))
+    if (!q || q.type !== p.type) return false
+    const a = [...openingsAt(p.type, p.r)].map(d => (d + 2) % 4).sort().join(), b = [...openingsAt(q.type, q.r)].sort().join()
+    if (a !== b) return false
+  }
+  return true
+}
+
+/** One random 4-path attempt as full paths (base cell .. base cell), or null. */
+function randomPaths(): LineCell[][] | null {
+  const perm = shuffle([0, 1, 2, 3])
+  const half: LineCell[][] = []
+  for (const [a, c] of [[perm[0], perm[2]], [perm[1], perm[3]]]) {
+    const [ring, start] = RED_EXITS[a]
+    const [bRing, bEnd] = RED_EXITS[c].map(([x, z]) => mirrorCell(x, z)) as [[number, number], [number, number]]
+    const route = randomRoute(start, bEnd)
+    if (!route) return null
+    const lv = assignLevels([ring, ...route, bRing])
+    if (!lv) return null
+    half.push(lv)
+  }
+  return [...half, ...half.map(mirrorLine)]
+}
+
+function layBaseLine(): void {
+  if (!baseLineFits()) return
+  usedFallback = false
+  for (let i = 0; i < SKY_PATH_ATTEMPTS; i++) {
+    const paths = randomPaths()
+    if (paths && layPaths(paths)) { currentPaths = paths; return }
+    resetGrid(); placeRings()
+  }
+  layFallback()
+}
+
+/** Lay the frozen fallback layout (also called by verify-graph to check it). */
+export function layFallback(): void {
+  usedFallback = true
+  resetGrid(); placeRings()
+  currentPaths = [...FALLBACK_HALF, ...FALLBACK_HALF.map(mirrorLine)]
+  if (!layPaths(currentPaths)) throw new Error('fallback layout invalid')
+}
+
+/** True if the last generate() fell back to FALLBACK_PATHS (verify scripts). */
+export function lastLayoutUsedFallback(): boolean { return usedFallback }
+
+/** Current paths as [x, z, level, rampHighDir?] cells, base tiles excluded (verify scripts). */
 export function baseLinePathCells(): LineCell[][] {
   if (!IS_SKY || !SKY_BASES_ONLY || !SKY_BASE_LINE || !baseLineFits()) return []
-  return [BASE_LINE_A, BASE_LINE_B].map(p => p.slice(1, -1))
+  return currentPaths.map(p => p.slice(1, -1))
 }
 
-/** Grid cells of each base-line path, base tiles excluded (verify scripts). */
+/** Grid cells of each path, base tiles excluded (verify scripts). */
 export function baseLinePaths(): Array<Array<[number, number]>> {
   return baseLinePathCells().map(p => p.map(([x, z]) => [x, z] as [number, number]))
 }
 
-/** Union of the base-line path cells (non-base tiles), for verify scripts. */
+/** Union of the path cells (non-base tiles), for verify scripts. */
 export function baseLineCells(): Array<[number, number]> {
   const seen = new Set<string>()
   const out: Array<[number, number]> = []
@@ -771,3 +896,6 @@ export function baseLineCells(): Array<[number, number]> {
   }
   return out
 }
+
+/** Paths incl. base end cells — used to print/freeze a fallback. */
+export function currentFullPaths(): LineCell[][] { return currentPaths.map(p => p.slice()) }
