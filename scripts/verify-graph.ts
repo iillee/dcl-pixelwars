@@ -43,7 +43,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   const isBase = (x: number, z: number) => baseCells(1).concat(baseCells(2)).some(([a, b]) => a === x && b === z)
 
   let baseSig: string | null = null
-  const MIN_JUNCTIONS = 10   // was avg 3.4 with 4 separate lanes
+  const MIN_JUNCTIONS = Math.ceil(10 * (GRID_W * GRID_H - 2) / 62) // 10 on 8×8 (old 4-lane avg 3.4), 6 on 6×6
   const MIN_COVERAGE = 0.7   // share of the 56 non-base cells holding a tile
   /** Intertwining: junctions (fork/cross off-base), coverage, cycles (independent loops = E - V + 1), over-ness (L+1 tiles beside L-1/L0 tiles they don't link to). */
   function weave() {
@@ -195,10 +195,12 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   console.log(`seeds: ${pass}/${N} pass all rules (${(100 * pass / N).toFixed(1)}%); fallback used ${fallbacks}×; avg ${(attempts / N).toFixed(2)} outer attempt(s); ${ms.toFixed(1)} ms/round`)
   console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(cells / Math.max(1, pass)).toFixed(0)} paint cells`)
   const k = Math.max(1, pass)
-  console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}; old 4-lane avg 3.4), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
+  console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
-  if (shapes.size < N * 0.9) fail(`low variety: ${shapes.size}/${N}`)
+  // 6×6 leaves ~17 free mirrored cell pairs, so exact repeats are likelier than on 8×8.
+  const MIN_VARIETY = GRID_W >= 8 ? 0.9 : 0.7
+  if (shapes.size < N * MIN_VARIETY) fail(`low variety: ${shapes.size}/${N} (want ≥${100 * MIN_VARIETY}%)`)
   console.log('✓ every seed: 8×8, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends, L-1/L0/L+1 all used, 180° symmetric, fully connected, junction + coverage gates met')
   process.exit(0)
 }
