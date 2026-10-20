@@ -66,16 +66,6 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   const rgb = rgbOf(team)
   startRipple(p, team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
-  const d = BURST_RADIUS * 2
-  // Fast flat ring out to the shockwave radius (diameter 2R), fading.
-  addFx(BURST_RING_S, e => {
-    Transform.create(e, { position: Vector3.create(p.x, p.y + 0.6, p.z), scale: Vector3.create(0.5, 0.05, 0.5) })
-    MeshRenderer.setSphere(e)
-    glow(e, rgb, 0.55, 4)
-  }, (e, u) => {
-    const s = 0.5 + (d - 0.5) * easeOut(Math.min(1, u / 0.7))
-    Transform.getMutable(e).scale = Vector3.create(s, 0.05 * (1 - u) + 0.01, s)
-  })
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4
