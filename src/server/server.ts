@@ -272,7 +272,7 @@ export async function setupServer(): Promise<void> {
     }
   })
 
-  // Dash PvP prototype (shared/dash.ts). The attacker's client judged the
+  // Dash PvP prototype (shared/pvp.ts). The attacker's client judged the
   // contact; we check teams, round mode and rate, then broadcast so the
   // victim's client can push itself. Positions are not visible here, so
   // distance can't be validated (anti-cheat deferred, see design doc).
