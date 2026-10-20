@@ -33,7 +33,7 @@ import { getBombHud, triggerBomb } from './paintBomb'
 const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
 const GOLD_BORDER = Color4.create(1.0, 0.8, 0.3, 0.95)
-const GOLD_FILL = Color4.create(1.0, 0.8, 0.3, 0.9)
+const GOLD_FILL = Color4.create(1, 1, 1, 0.9)
 const WHITE_BORDER = Color4.create(1, 1, 1, 0.75)
 const DIM_BORDER = Color4.create(1, 1, 1, 0.3)
 const BLACK = Color4.create(0, 0, 0, 1)
@@ -68,7 +68,7 @@ function KeyHint(props: { label: string }) {
       key={`ui_pvp_key_${props.label}`}
       value={props.label}
       fontSize={14}
-      color={Color4.create(1, 1, 1, 0.85)}
+      color={Color4.create(0, 0, 0, 1)}
       uiTransform={{ positionType: 'absolute', position: { top: 6, left: 10 }, width: 16, height: 16 }}
     />
   )
@@ -113,7 +113,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
         <UiEntity
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? WHITE : DIM }}
+          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? Color4.create(0, 0, 0, 1) : WHITE) : DIM }}
         />
       ) : null}
       {!cooling && !props.iconSrc ? (
@@ -234,7 +234,7 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} glyph="»" onPress={triggerLunge} g={g} />}
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
           {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
         </UiEntity>
       </UiEntity>
