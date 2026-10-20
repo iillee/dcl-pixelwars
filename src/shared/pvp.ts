@@ -145,31 +145,23 @@ export const BURST_IMPACT_MAX_AGE_MS = 600
 /** Ghost bots inside the radius: server-side shove (cells) + stun. */
 export const BURST_BOT_SHOVE = 4
 export const BURST_BOT_STUN_S = 1.0
-/** Painting after the shockwave: duration (s), footprint shape and size. */
-export const BURST_PAINT_S = 3
 /** 'square' = (2R+1)² cells (R=3 → 7×7 default, Luke), 'cross' = cells within R grid steps (R=1 → 5-cell +, R=3 → 25). */
+/** One-time paint on activation (server, immediate): footprint shape and size. */
 export const BURST_PAINT_SHAPE: 'square' | 'cross' = 'square'
 export const BURST_PAINT_RADIUS_CELLS = 3 // 7×7 (was 1 = 3×3)
 /** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
 export const BURST_PAINT_MAX_DY = 1.5
-/** Client resends its centre cell at least this often while active (s); also on every cell change. */
-export const BURST_PAINT_RESEND_S = 0.25
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
-/** Server: active window slack over BURST_PAINT_S (latency) (s). */
-export const SERVER_BURST_ACTIVE_SLACK_S = 0.5
-/** Server: burstPaint centre may be at most this far (m) from where the burst fired. */
-export const SERVER_BURST_MAX_TRAVEL = 60
 /** Expanding ring, particles, aura. */
 export const BURST_RING_S = 0.35
 export const BURST_PARTICLES = 8
-export const BURST_AURA_ALPHA = 0.18
 /** Tile ripple (adapted from dcl-canvas paint.ts brush-lift overlays): cell-sized team
- *  slabs on the attacker's level pop up and settle, rippling out to BURST_RADIUS.
+ *  slabs over the whole paint footprint (7×7) pop up and settle, rippling outward.
  *  Visual only; the flat ring stays alongside. */
 export const BURST_TILE_RIPPLE = true
-/** Time for the wave front to travel centre → BURST_RADIUS (s). */
-export const BURST_TILE_RIPPLE_S = 0.4
+/** Time for the wave front to travel centre → footprint corner (s). */
+export const BURST_TILE_RIPPLE_S = 0.45
 /** Peak height above the floor (m) (dcl-canvas BRUSH_LIFT_METERS 0.25). */
 export const BURST_TILE_LIFT = 0.35
 /** Per-slab rise / settle times (s) (dcl-canvas 140 / 220 ms). */
@@ -179,7 +171,7 @@ export const BURST_TILE_DOWN_S = 0.2
 export const BURST_TILE_SIZE = 1.9
 export const BURST_TILE_THICK = 0.3
 /** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
-export const BURST_TILE_POOL = 40
+export const BURST_TILE_POOL = 100 // ≥ 2 × 49: two overlapping full 7×7 bursts
 
 /** Is Paint Burst live for this UTC round index? */
 export function burstEnabledForRound(roundIndex: number): boolean {

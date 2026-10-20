@@ -85,7 +85,7 @@ export type Events = {
   'lunge:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
 
   // Paint Burst. Subscriber: client/paintBurst.
-  'burst:state': { progress: number; charged: boolean; active: boolean }
+  'burst:state': { progress: number; charged: boolean }
   'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number }
   'burst:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
   // Broadcast: Paint Bomb telegraph / detonation. Subscriber: client/paintBomb.

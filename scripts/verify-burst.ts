@@ -2,10 +2,11 @@
  * verify-burst.ts — offline checks for Paint Burst logic (shared/burst.ts).
  * Run: npx tsx scripts/verify-burst.ts. Charge rules, 3D radius, outward
  * direction, server hit ledger, and the paint footprint on a real maze graph
- * (stays on walkable adjacency: no gaps, no other levels). Feel, LOS raycast
+ * (stays on walkable adjacency: no gaps, no other levels), and the one-time
+ * paint centre resolution (burstUse cell → footprint). Feel, LOS raycast
  * and networking need an Explorer playtest.
  */
-import { BurstCharge, BurstLedger, inBurst, burstDir, burstFootprint } from '../src/shared/burst'
+import { BurstCharge, BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
 import { BURST_CHARGE_CELLS, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
@@ -92,6 +93,17 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
   check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS}: ≤ 49 cells (max ${mx}), full 7×7 somewhere (${full})`, mx <= 49 && full > 0)
   check('default footprint stays connected, same level, inside 7×7', badD === 0)
   check(`charge needs ${BURST_CHARGE_CELLS} captures`, BURST_CHARGE_CELLS === 100)
+}
+{
+  // One-time paint: burstUse resolves its centre once, the whole footprint is painted from it.
+  const id0 = [...g.nodes].find(id => burstFootprint(g, id).length === 49)!
+  const [x, y, z] = g.worldPos.get(id0)!
+  const P0 = { x: x + 0.3, y, z: z - 0.3 }
+  check('one-time paint: reported cell is used as the centre', burstCentre(g, id0, P0) === id0)
+  check('one-time paint: no / bogus cell → nearest walkable cell under the player', burstCentre(g, '', P0) === id0 && burstCentre(g, 'nope', P0) === id0)
+  check('one-time paint: reported cell far from the player is ignored', burstCentre(g, id0, { x: x + 20, y, z }) !== id0)
+  check('one-time paint: nothing under the player (gap / mid-air) → no centre', burstCentre(g, '', { x: x, y: y + 40, z }) === null)
+  check('one-time paint: full 7×7 (49 cells) painted in one go from that centre', burstFootprint(g, burstCentre(g, id0, P0)!).length === 49)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 

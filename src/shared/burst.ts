@@ -82,6 +82,20 @@ export function burstFootprint(graph: WalkableGraph, center: string,
   return out
 }
 
+/** Footprint centre: the reported cell if it's a walkable node near p, else the
+ *  nearest walkable cell to p on p's level (within 3 m horizontally). */
+export function burstCentre(graph: WalkableGraph, cell: string, p: V3): string | null {
+  const c = cell ? graph.worldPos.get(cell) : undefined
+  if (c && graph.nodes.has(cell) && Math.hypot(c[0] - p.x, c[2] - p.z) <= 3 && Math.abs(c[1] - p.y) <= BURST_PAINT_MAX_DY + 1) return cell
+  let best: string | null = null, bd = 3
+  for (const [id, q] of graph.worldPos) {
+    if (Math.abs(q[1] - p.y) > BURST_PAINT_MAX_DY + 1) continue
+    const d = Math.hypot(q[0] - p.x, q[2] - p.z)
+    if (d < bd) { bd = d; best = id }
+  }
+  return best
+}
+
 /** Server: one live burst per attacker; each target accepted once, within the hit window. */
 export class BurstLedger {
   private last = new Map<string, { id: number; at: number; hits: Set<string> }>()

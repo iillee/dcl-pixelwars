@@ -4,24 +4,24 @@
  * Adapted from dcl-canvas src/client/paint.ts "brush-lift overlays": there a
  * transient box per cell under the brush tweens up BRUSH_LIFT_METERS in 140 ms
  * and back down in 220 ms, then despawns. Here a pooled, cell-sized team-colour
- * slab per walkable cell within BURST_RADIUS pops up and settles, each one
- * delayed by its distance from the centre so the bumps ripple outward over
- * BURST_TILE_RIPPLE_S. Animated per frame (no Tween) so pooled entities can be
+ * slab per cell of the burst paint footprint (7×7) pops up and settles, each
+ * one delayed by its distance from the centre so the bumps ripple outward
+ * over BURST_TILE_RIPPLE_S. Animated per frame (no Tween) so pooled entities can be
  * reused mid-flight.
  *
  * Cells come from shared/burst.ts burstFootprint (walkable adjacency, same
- * level ±BURST_PAINT_MAX_DY, no gaps) on a client copy of the walkable graph,
- * then clipped to the 3D radius. Works for local and remote bursts (centre =
+ * level ±BURST_PAINT_MAX_DY, no gaps) on a client copy of the walkable graph
+ * (the same cells the server paints). Works for local and remote bursts (centre =
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MaterialTransparencyMode, MeshRenderer, Transform } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { Team, TEAM_RGB } from '../shared/team'
 import {
-  BURST_RADIUS, BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
-  BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL, BURST_PAINT_MAX_DY,
+  BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
+  BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
 } from '../shared/pvp'
-import { burstFootprint, V3 } from '../shared/burst'
+import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder } from '../maze/generator'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
@@ -42,16 +42,6 @@ function ensureGraph(): WalkableGraph | null {
   return graph
 }
 
-function nearestCell(g: WalkableGraph, p: V3): string | null {
-  let best: string | null = null, bd = CELL_M * 1.5
-  for (const [id, c] of g.worldPos) {
-    if (Math.abs(c[1] - p.y) > BURST_PAINT_MAX_DY) continue
-    const d = Math.hypot(c[0] - p.x, c[2] - p.z)
-    if (d < bd) { bd = d; best = id }
-  }
-  return best
-}
-
 function setColour(s: Slab): void {
   const c = TEAM_RGB[s.team] ?? { r: 1, g: 1, b: 1 }
   Material.setPbrMaterial(s.ent, {
@@ -62,20 +52,23 @@ function setColour(s: Slab): void {
 }
 
 /** Start the ripple for a burst fired at feet position `p` by `team`. */
-export function startRipple(p: V3, team: Team): void {
+export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
   const g = ensureGraph()
   if (!g) return
-  const centre = nearestCell(g, p)
+  const centre = burstCentre(g, cell, p)
   if (!centre) return
-  const cells = burstFootprint(g, centre, 'square', Math.ceil(BURST_RADIUS / CELL_M))
+  // Same cells the server paints (default shape/size), so the ripple covers the whole 7×7.
+  const cells = burstFootprint(g, centre)
+  const c0 = g.worldPos.get(centre)!
+  let maxD = CELL_M
+  for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }
   for (const id of cells) {
     const c = g.worldPos.get(id)!
-    const d = Math.hypot(c[0] - p.x, c[2] - p.z)
-    if (Math.hypot(d, c[1] - p.y) > BURST_RADIUS + CELL_M / 2) continue
+    const d = Math.hypot(c[0] - c0[0], c[2] - c0[2])
     const s = pool.find(x => !x.busy)
     if (!s) break // cap reached
-    s.busy = true; s.t = 0; s.delay = Math.min(1, d / BURST_RADIUS) * BURST_TILE_RIPPLE_S
+    s.busy = true; s.t = 0; s.delay = (d / maxD) * BURST_TILE_RIPPLE_S
     s.x = c[0]; s.y = c[1]; s.z = c[2]
     if (s.team !== team) { s.team = team; setColour(s) }
     // Hidden until the wave front reaches it (see the system).
