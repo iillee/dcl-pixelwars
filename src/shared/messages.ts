@@ -149,9 +149,7 @@ export const Messages = {
   lungeImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
   // Paint Burst (shared/pvp.ts BURST_*, client/paintBurst.ts, shared/burst.ts).
-  // Server → one client: its charge (progress 0..BURST_CHARGE_CELLS-1, charged).
-  burstState: Schemas.Map({ progress: Schemas.Int, charged: Schemas.Boolean }),
-  // Client → Server: use the charge at (x, y, z) on `cell`, facing (fx, fz). Server consumes, paints the
+  // Client → Server: burst at (x, y, z) on `cell`, facing (fx, fz). Server checks the cooldown, paints the
   // footprint once and rebroadcasts burstFired.
   burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number }),
   burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),

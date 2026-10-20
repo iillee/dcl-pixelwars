@@ -1,13 +1,13 @@
 /**
  * verify-burst.ts — offline checks for Paint Burst logic (shared/burst.ts).
- * Run: npx tsx scripts/verify-burst.ts. Charge rules, 3D radius, outward
+ * Run: npx tsx scripts/verify-burst.ts. Cooldown config, 3D radius, outward
  * direction, server hit ledger, and the paint footprint on a real maze graph
  * (stays on walkable adjacency: no gaps, no other levels), and the one-time
  * paint centre resolution (burstUse cell → footprint). Feel, LOS raycast
  * and networking need an Explorer playtest.
  */
-import { BurstCharge, BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
-import { BURST_CHARGE_CELLS, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
+import { BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
+import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 
@@ -18,16 +18,8 @@ function check(name: string, ok: boolean): void {
 }
 const P = (x: number, z: number, y = 0) => ({ x, y, z })
 
-// Charge.
-const c = new BurstCharge()
-c.add(BURST_CHARGE_CELLS - 1)
-check(`${BURST_CHARGE_CELLS - 1} conversions: not charged`, !c.charged && c.progress === BURST_CHARGE_CELLS - 1)
-c.add(3)
-check(`reaching ${BURST_CHARGE_CELLS}: charged, progress 0, no reserve`, c.charged && c.progress === 0)
-check('conversions while charged are ignored (max 1, no reserve)', !c.add(5) && c.progress === 0)
-check('consume uses the charge and resets', c.consume() && !c.charged && c.progress === 0)
-check('consume without a charge fails', !c.consume())
-check('zero conversions (repaints) change nothing', !c.add(0) && c.progress === 0)
+// Cooldown (timer, server-enforced; no paint quota).
+check(`cooldown ${BURST_COOLDOWN_S} s, server gap ${SERVER_MIN_BURST_GAP_S} s (slack, < cooldown)`, BURST_COOLDOWN_S === 12 && SERVER_MIN_BURST_GAP_S < BURST_COOLDOWN_S && SERVER_MIN_BURST_GAP_S > BURST_COOLDOWN_S - 1)
 
 // Radius / direction.
 check(`opponent ${BURST_RADIUS - 0.1} m away is hit`, inBurst(P(0, 0), P(BURST_RADIUS - 0.1, 0)))
@@ -75,35 +67,38 @@ check(`square footprint ≤ 9 cells (max ${maxSq}), 9 in open floor (${nine}/${t
 check(`cross footprint ≤ 5 cells (max ${maxCross}), 5 in open floor (${five}/${total})`, maxCross <= 5 && five > total * 0.3)
 check('footprints stay on walkable, connected cells of the same level (no gaps / other levels)', bad === 0)
 {
-  // Default config (BURST_PAINT_* in pvp.ts): 7×7 square, same restrictions.
+  // Default config (BURST_PAINT_* in pvp.ts): circle R=3.5 cells, same restrictions.
   let mx = 0, full = 0, badD = 0
+  const R_M = BURST_PAINT_RADIUS_CELLS * 2
   for (const id of g.nodes) {
     const fp = burstFootprint(g, id)
     mx = Math.max(mx, fp.length)
-    if (fp.length === 49) full++
+    if (fp.length === 37) full++
     const c0 = g.worldPos.get(id)!
     const set = new Set(fp), seen = new Set([id]), q = [id]
     while (q.length) { const x = q.pop()!; for (const n of g.adj.get(x) ?? []) if (set.has(n) && !seen.has(n)) { seen.add(n); q.push(n) } }
     if (seen.size !== set.size) badD++
     for (const f of fp) {
       const p = g.worldPos.get(f)!
-      if (Math.abs(p[1] - c0[1]) > BURST_PAINT_MAX_DY || Math.abs(p[0] - c0[0]) > 6.5 || Math.abs(p[2] - c0[2]) > 6.5) badD++
+      if (Math.abs(p[1] - c0[1]) > BURST_PAINT_MAX_DY || Math.hypot(p[0] - c0[0], p[2] - c0[2]) > R_M + 0.06) badD++
     }
   }
-  check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS}: ≤ 49 cells (max ${mx}), full 7×7 somewhere (${full})`, mx <= 49 && full > 0)
-  check('default footprint stays connected, same level, inside 7×7', badD === 0)
-  check(`charge needs ${BURST_CHARGE_CELLS} captures`, BURST_CHARGE_CELLS === 100)
+  // 37 on flat floor; ramp cells sit closer together horizontally (slope), so a disc over a ramp can hold a couple more.
+  check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS} cells: 37 on flat floor (${full} centres), ≤ 41 over ramps (max ${mx})`, BURST_PAINT_SHAPE === 'circle' && mx <= 41 && full > 0)
+  check(`default footprint: connected, same level, every cell centre within ${R_M} m (circle)`, badD === 0)
+  const sq = burstFootprint(g, [...g.nodes].find(id => burstFootprint(g, id).length === 37)!, 'square', BURST_PAINT_RADIUS_CELLS).length
+  check(`square option still available (7×7 = ${sq} cells there)`, sq === 49)
 }
 {
   // One-time paint: burstUse resolves its centre once, the whole footprint is painted from it.
-  const id0 = [...g.nodes].find(id => burstFootprint(g, id).length === 49)!
+  const id0 = [...g.nodes].find(id => burstFootprint(g, id).length === 37)!
   const [x, y, z] = g.worldPos.get(id0)!
   const P0 = { x: x + 0.3, y, z: z - 0.3 }
   check('one-time paint: reported cell is used as the centre', burstCentre(g, id0, P0) === id0)
   check('one-time paint: no / bogus cell → nearest walkable cell under the player', burstCentre(g, '', P0) === id0 && burstCentre(g, 'nope', P0) === id0)
   check('one-time paint: reported cell far from the player is ignored', burstCentre(g, id0, { x: x + 20, y, z }) !== id0)
   check('one-time paint: nothing under the player (gap / mid-air) → no centre', burstCentre(g, '', { x: x, y: y + 40, z }) === null)
-  check('one-time paint: full 7×7 (49 cells) painted in one go from that centre', burstFootprint(g, burstCentre(g, id0, P0)!).length === 49)
+  check('one-time paint: full circle (37 cells) painted in one go from that centre', burstFootprint(g, burstCentre(g, id0, P0)!).length === 37)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 

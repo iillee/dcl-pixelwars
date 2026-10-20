@@ -2,12 +2,9 @@
  * paintBurst.ts — Paint Burst (F), client side. Spec: Luke 2026-10-20.
  * Numbers in shared/pvp.ts (BURST_*), pure logic in shared/burst.ts.
  *
- * Charge: server-authoritative (burstState). The server counts our paintTick
- * cells that actually flipped to our team; at BURST_CHARGE_CELLS we hold 1
- * charge. Falls/respawns keep progress and the charge; a new round resets.
+ * Cooldown: BURST_COOLDOWN_S timer (like Lunge), enforced by the server too.
  *
- * Use (F / the hotbar slot on mobile): consume the charge (optimistic, the
- * server resyncs if it disagrees) and fire one shockwave at our feet:
+ * Use (F / the hotbar slot on mobile): start the cooldown and fire one shockwave at our feet:
  *   - opponents within BURST_RADIUS (3D) with clear line of sight (raycast,
  *     BURST_LOS) → burstHit → server dedupes → burstImpact → the victim's own
  *     client knocks itself outward (ImpactGate: dedupe + stale; respawn-immune).
@@ -25,7 +22,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_CHARGE_CELLS, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   LUNGE_KNOCKBACK, burstEnabledForRound,
@@ -40,11 +37,9 @@ import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
-const CHARGE_SRC = 'assets/sounds/pop.mp3'
 const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
 
-let progress = 0
-let charged = false
+let cooldownLeft = 0
 let burstId = 0
 let knockForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
@@ -115,38 +110,14 @@ function posOf(who: string): V3 | null {
   return null
 }
 
-function chargeFlash(): void {
-  const p = posOf('')
-  if (!p) return
-  const rgb = rgbOf(localTeam())
-  addFx(0.35, e => {
-    Transform.create(e, { position: Vector3.create(p.x, p.y + 1.1, p.z), scale: Vector3.create(0.4, 0.4, 0.4) })
-    MeshRenderer.setSphere(e)
-    glow(e, { r: (rgb.r + 1) / 2, g: (rgb.g + 1) / 2, b: (rgb.b + 1) / 2 }, 0.6, 5)
-  }, (e, u) => {
-    const q = posOf('')
-    const s = 0.4 + 2.2 * easeOut(u)
-    const tr = Transform.getMutable(e)
-    tr.scale = Vector3.create(s, s, s)
-    if (q) tr.position = Vector3.create(q.x, q.y + 1.1, q.z)
-  })
-  addFx(0.8, e => {
-    Transform.create(e, { position: Vector3.create(p.x, p.y + 1.1, p.z) })
-    AudioSource.create(e, { audioClipUrl: CHARGE_SRC, playing: true, loop: false, volume: 0.8, global: true })
-  })
-}
-
 // ─── HUD ────────────────────────────────────────────────────────────
 export function isBurstEnabledNow(): boolean { return burstEnabledForRound(getRoundIndex()) }
 
-/** F slot state. text = '37/100' while charging, '' when ready. */
-export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text: string } {
+/** F slot state, same shape as getLungeHud (fill = cooldown, no number). cooldownFrac: 1 = just used, 0 = ready. */
+export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number } {
   const enabled = isBurstEnabledNow() && localTeam() !== Team.None
-  return {
-    show: BURST_MODE !== 'off', enabled, ready: enabled && charged, cooldown: charged ? 0 : 1,
-    cooldownFrac: charged ? 0 : 1 - progress / BURST_CHARGE_CELLS,
-    text: charged ? '' : `${progress}/${BURST_CHARGE_CELLS}`,
-  }
+  const cd = Math.max(0, cooldownLeft)
+  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S }
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
@@ -180,14 +151,14 @@ function losThen(from: V3, to: V3, cb: () => void): void {
 
 export function triggerBurst(): void {
   const team = localTeam()
-  if (!isBurstEnabledNow() || team === Team.None || !charged) return
+  if (!isBurstEnabledNow() || team === Team.None || cooldownLeft > 0) return
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return
   const p: V3 = { x: t.position.x, y: t.position.y, z: t.position.z }
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
-  charged = false; progress = 0
+  cooldownLeft = BURST_COOLDOWN_S
   const cell = getCurrentCellId() ?? ''
   sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
   showShockwave(p, team, true, cell)
@@ -244,12 +215,6 @@ export function initPaintBurst(): void {
   initKnockbackState()
   knockForceEnt = engine.addEntity()
   initBurstRipple()
-  events.on('burst:state', s => {
-    const wasCharged = charged
-    progress = s.progress
-    charged = s.charged
-    if (charged && !wasCharged) chargeFlash()
-  })
   events.on('burst:fired', ({ attacker, id, team, x, y, z }) => {
     const att = attacker.toLowerCase()
     gate.sawStart(att, id, Date.now())
@@ -257,11 +222,9 @@ export function initPaintBurst(): void {
     showShockwave({ x, y, z }, team, false)
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
-  events.on('round:reset', () => {
-    progress = 0; charged = false
-  })
 
   engine.addSystem((dt: number) => {
+    if (cooldownLeft > 0) cooldownLeft -= dt
     if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) triggerBurst()
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]

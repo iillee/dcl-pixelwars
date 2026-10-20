@@ -101,9 +101,6 @@ function wireInbound(): void {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
 
-  room.onMessage('burstState', ({ progress, charged }) => {
-    events.emit('burst:state', { progress, charged })
-  })
   room.onMessage('burstFired', ({ attacker, id, team, x, y, z }) => {
     events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z })
   })

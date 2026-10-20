@@ -37,10 +37,10 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
-  burstEnabledForRound, BURST_RADIUS, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
+  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
-import { BurstCharge, BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
+import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { SCENE_SIZE } from '../maze/generator'
 
@@ -119,18 +119,9 @@ export async function setupServer(): Promise<void> {
   // Paint Bomb: last accepted drop per bomber + bombs waiting on their fuse.
   const lastBombAt = new Map<string, number>()
   const lunges = new LungeLedger()
-  // Paint Burst: charge per player (counts paintTick conversions) + hit dedupe. Cleared on round reset.
-  const burstCharge = new Map<string, BurstCharge>()
+  // Paint Burst: last accepted burst per player (cooldown) + hit dedupe.
+  const lastBurstAt = new Map<string, number>()
   const bursts = new BurstLedger()
-  const chargeOf = (u: string): BurstCharge => {
-    let c = burstCharge.get(u)
-    if (!c) { c = new BurstCharge(); burstCharge.set(u, c) }
-    return c
-  }
-  const sendBurstState = (u: string): void => {
-    const c = chargeOf(u)
-    room.send('burstState', { progress: c.progress, charged: c.charged }, { to: [u] })
-  }
   const pendingBombs: Array<{ from: string; team: number; x: number; y: number; z: number; at: number }> = []
 
   // Detect real disconnects so the bot respawns immediately when a
@@ -147,7 +138,7 @@ export async function setupServer(): Promise<void> {
     lastBombAt.delete(userId)
     lunges.forget(userId)
     bursts.forget(userId)
-    burstCharge.delete(userId)
+    lastBurstAt.delete(userId)
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -208,9 +199,6 @@ export async function setupServer(): Promise<void> {
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
-      // Paint Burst charge: real paintTick conversions only (applyPaint true). Burst cells are
-      // painted by burstUse directly, never through paintTick, so they never count.
-      if (burstEnabledForRound(currentRoundIndex()) && chargeOf(from).add(gained)) sendBurstState(from)
     }
   })
 
@@ -386,7 +374,7 @@ export async function setupServer(): Promise<void> {
   })
 
   // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
-  // burstUse: consume the server-side charge, open the painting window,
+  // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S),
   // rebroadcast burstFired; opponent ghost bots in range are shoved here.
   // burstHit: attacker client found a player in range + LOS; accepted once
   // per (attacker, burst id, target) within SERVER_BURST_HIT_WINDOW_S.
@@ -397,14 +385,14 @@ export async function setupServer(): Promise<void> {
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) return
     const now = Date.now()
-    if (!chargeOf(from).consume()) {
-      console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: no charge`)
-      sendBurstState(from) // resync the client's HUD
+    if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) {
+      console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
+    lastBurstAt.set(from, now)
     markActive(from)
     bursts.start(from, id, now)
-    // Paint the footprint once (same score credit as normal paint; not via paintTick, so no charge).
+    // Paint the footprint once (same score credit as normal paint).
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
     let gained = 0
@@ -415,7 +403,6 @@ export async function setupServer(): Promise<void> {
     }
     console.log(`[Server] burst ${from.slice(0, 8)} #${id} painted ${gained} cells`)
     room.send('burstFired', { attacker: from, id, team, x, y, z })
-    sendBurstState(from)
     for (const b of getBotPositions()) {
       if (b.team === team || !inBurst({ x, y, z }, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
       let dx = b.x - x, dz = b.z - z
@@ -543,7 +530,6 @@ export async function setupServer(): Promise<void> {
     roundCells.clear()
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
-    burstCharge.clear() // new round: progress and charge reset (clients reset on roundReset)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is

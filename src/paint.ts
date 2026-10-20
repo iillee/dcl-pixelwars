@@ -253,7 +253,7 @@ export function cellId(tx: number, tz: number, ty: number, col: number, row: num
 // ─── Public: paint a cell (idempotent for same team) ─────────────────
 // Matte PBR material spec for a team. Roughness=1 + metallic=0 + no specular
 // kills the shine so paint reads as flat pigment, not plastic.
-function cellMaterial(team: Team) {
+export function cellMaterial(team: Team) {
   return {
     albedoColor: TEAM_COLORS[team],
     roughness: 1.0,

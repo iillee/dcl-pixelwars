@@ -24,7 +24,7 @@ export type AbilityMode = 'on' | 'off' | 'alternate'
 // dashHit. Paint Bomb (F) is back on alongside Lunge (E).
 export const DASH_MODE: AbilityMode = 'off'
 export const BOMB_MODE: AbilityMode = 'off' // replaced by Paint Burst on F (Luke, 2026-10-20); code kept, not wired
-/** Paint Burst (F): charged by painting, see the ═══ Paint Burst block below. */
+/** Paint Burst (F): cooldown ability, see the ═══ Paint Burst block below. */
 export const BURST_MODE: AbilityMode = 'on'
 
 export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
@@ -121,12 +121,13 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 
 // ═══ Paint Burst (F) ═════════════════════════════════════════════════
 // Luke's spec 2026-10-20. Code: shared/burst.ts (pure), client/paintBurst.ts,
-// server.ts (burst* handlers). Charge is server-authoritative: it counts the
-// sender's paintTick cells that applyPaint actually flipped (neutral/enemy →
-// own team), so repaints and duplicate ids never count.
+// server.ts (burst* handlers). Simple timer cooldown (no paint quota, Luke);
+// the server enforces it.
 
-/** Cells you must convert for one charge. Max 1 charge, no reserve. */
-export const BURST_CHARGE_CELLS = 100 // was 10 (Luke)
+/** Seconds between bursts. Keeps running through respawn. */
+export const BURST_COOLDOWN_S = 12
+/** Server cooldown slack: accept the next burst this long after the previous one (s). */
+export const SERVER_MIN_BURST_GAP_S = BURST_COOLDOWN_S - 0.5
 /** Shockwave radius, 3D distance from the attacker's feet to the target's feet (m). */
 export const BURST_RADIUS = 4
 /** Line of sight check (raycast attacker chest → target chest, physics colliders). */
@@ -145,10 +146,11 @@ export const BURST_IMPACT_MAX_AGE_MS = 600
 /** Ghost bots inside the radius: server-side shove (cells) + stun. */
 export const BURST_BOT_SHOVE = 4
 export const BURST_BOT_STUN_S = 1.0
-/** 'square' = (2R+1)² cells (R=3 → 7×7 default, Luke), 'cross' = cells within R grid steps (R=1 → 5-cell +, R=3 → 25). */
-/** One-time paint on activation (server, immediate): footprint shape and size. */
-export const BURST_PAINT_SHAPE: 'square' | 'cross' = 'square'
-export const BURST_PAINT_RADIUS_CELLS = 3 // 7×7 (was 1 = 3×3)
+/** One-time paint on activation (server, immediate): footprint shape and size (cells, 1 cell = 2 m).
+ *  'circle' = cells whose centre is within R cells of the centre cell's centre (R=3.5 → 37 cells,
+ *  ≈ the 7×7 square's size, Luke). 'square' = |dx|,|dz| ≤ R (R=3 or 3.5 → 7×7). 'cross' = |dx|+|dz| ≤ R. */
+export const BURST_PAINT_SHAPE: 'circle' | 'square' | 'cross' = 'circle'
+export const BURST_PAINT_RADIUS_CELLS = 3.5
 /** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
 export const BURST_PAINT_MAX_DY = 1.5
 /** Server: accept burstHit this long after burstUse (s). */
@@ -157,7 +159,7 @@ export const SERVER_BURST_HIT_WINDOW_S = 1.0
 export const BURST_RING_S = 0.35
 export const BURST_PARTICLES = 8
 /** Tile ripple (adapted from dcl-canvas paint.ts brush-lift overlays): cell-sized team
- *  slabs over the whole paint footprint (7×7) pop up and settle, rippling outward.
+ *  slabs (floor paint material) over the whole paint footprint pop up and settle, rippling outward.
  *  Visual only; the flat ring stays alongside. */
 export const BURST_TILE_RIPPLE = true
 /** Time for the wave front to travel centre → footprint corner (s). */

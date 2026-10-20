@@ -3,33 +3,13 @@
  * and scripts/verify-burst.ts. No engine imports.
  */
 import {
-  BURST_CHARGE_CELLS, BURST_RADIUS, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
+  BURST_RADIUS, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
   SERVER_BURST_HIT_WINDOW_S,
 } from './pvp'
 import type { WalkableGraph } from './mazeGraph'
 
 export type V3 = { x: number; y: number; z: number }
 const CELL_M = 2 // CELL / SIZE
-
-/** Per-player charge (server-authoritative). */
-export class BurstCharge {
-  progress = 0
-  charged = false
-  /** `gained` = cells applyPaint actually flipped to the player's team. Returns true if state changed. */
-  add(gained: number): boolean {
-    if (gained <= 0 || this.charged) return false
-    this.progress += gained
-    if (this.progress >= BURST_CHARGE_CELLS) { this.charged = true; this.progress = 0 }
-    return true
-  }
-  /** Use the charge. False (no change) if there isn't one. */
-  consume(): boolean {
-    if (!this.charged) return false
-    this.charged = false
-    this.progress = 0
-    return true
-  }
-}
 
 /** Is target inside the shockwave? Real 3D feet-to-feet distance. */
 export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS): boolean {
@@ -47,26 +27,28 @@ export function burstDir(origin: V3, t: V3, fx: number, fz: number): { x: number
 /**
  * Footprint cells around `center` on the walkable graph: BFS over walkable
  * adjacency that only steps through cells inside the shape (square: |dx|,|dz|
- * ≤ R cells; cross: |dx|+|dz| ≤ R cells) and within BURST_PAINT_MAX_DY of the
+ * ≤ R cells; cross: |dx|+|dz| ≤ R cells; circle: centre distance ≤ R cells) and within BURST_PAINT_MAX_DY of the
  * centre. Because it walks adjacency, it never jumps a gap, a disconnected
  * walkway or onto another level. Base lock is applied later by applyPaint.
  */
 export function burstFootprint(graph: WalkableGraph, center: string,
-  shape: 'square' | 'cross' = BURST_PAINT_SHAPE, r = BURST_PAINT_RADIUS_CELLS): string[] {
+  shape: 'circle' | 'square' | 'cross' = BURST_PAINT_SHAPE, r = BURST_PAINT_RADIUS_CELLS): string[] {
   const c = graph.worldPos.get(center)
   if (!c || !graph.nodes.has(center)) return []
   const lim = r * CELL_M + 0.5
+  const circ = r * CELL_M + 0.05 // circle: cell centres within R cells
   const inside = (id: string): boolean => {
     const p = graph.worldPos.get(id)
     if (!p) return false
     const dx = Math.abs(p[0] - c[0]), dz = Math.abs(p[2] - c[2])
     if (Math.abs(p[1] - c[1]) > BURST_PAINT_MAX_DY) return false
+    if (shape === 'circle') return Math.hypot(dx, dz) <= circ
     return shape === 'square' ? dx <= lim && dz <= lim : dx + dz <= lim
   }
   const out = [center]
   const seen = new Set([center])
   let frontier = [center]
-  const maxSteps = shape === 'square' ? 2 * r : r
+  const maxSteps = Math.ceil(shape === 'cross' ? r : 2 * r)
   for (let s = 0; s < maxSteps && frontier.length; s++) {
     const nextF: string[] = []
     for (const id of frontier) {

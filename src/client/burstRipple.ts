@@ -4,7 +4,7 @@
  * Adapted from dcl-canvas src/client/paint.ts "brush-lift overlays": there a
  * transient box per cell under the brush tweens up BRUSH_LIFT_METERS in 140 ms
  * and back down in 220 ms, then despawns. Here a pooled, cell-sized team-colour
- * slab per cell of the burst paint footprint (7×7) pops up and settles, each
+ * slab (floor paint material) per cell of the burst paint footprint (circle) pops up and settles, each
  * one delayed by its distance from the centre so the bumps ripple outward
  * over BURST_TILE_RIPPLE_S. Animated per frame (no Tween) so pooled entities can be
  * reused mid-flight.
@@ -14,9 +14,10 @@
  * (the same cells the server paints). Works for local and remote bursts (centre =
  * nearest walkable cell to the broadcast position).
  */
-import { engine, Entity, Material, MaterialTransparencyMode, MeshRenderer, Transform } from '@dcl/sdk/ecs'
-import { Color4, Vector3 } from '@dcl/sdk/math'
-import { Team, TEAM_RGB } from '../shared/team'
+import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
+import { Team } from '../shared/team'
+import { cellMaterial } from '../paint'
 import {
   BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
   BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
@@ -43,12 +44,9 @@ function ensureGraph(): WalkableGraph | null {
 }
 
 function setColour(s: Slab): void {
-  const c = TEAM_RGB[s.team] ?? { r: 1, g: 1, b: 1 }
-  Material.setPbrMaterial(s.ent, {
-    albedoColor: Color4.create(c.r, c.g, c.b, 0.95), emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: 1.2, roughness: 1, metallic: 0, specularIntensity: 0,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND, castShadows: false,
-  })
+  // Exactly the painted floor's material (paint.ts cellMaterial: TEAM_COLORS albedo,
+  // matte, opaque, no emissive) so the raised tiles read as the floor's paint colour.
+  Material.setPbrMaterial(s.ent, cellMaterial(s.team))
 }
 
 /** Start the ripple for a burst fired at feet position `p` by `team`. */
