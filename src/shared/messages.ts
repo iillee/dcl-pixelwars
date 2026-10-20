@@ -122,6 +122,18 @@ export const Messages = {
       z: Schemas.Number,
     })),
   }),
+
+  // Dash PvP prototype (shared/dash.ts, design/dash-prototype.md).
+  // Client → Server: the sender's dash touched `target` (PlayerIdentityData
+  // address) on the sender's screen. dx/dz = horizontal push direction.
+  // The server can't see positions, so distance is the attacker's call;
+  // it validates teams, round mode and per-attacker rate only.
+  dashHit: Schemas.Map({ target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+
+  // Server → Clients (broadcast): an accepted dashHit. The target's own
+  // client applies the knockback (a scene can only push its local player);
+  // everyone else shows the impact effect. dx/dz normalised by the server.
+  dashImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 }
 
 export const room = registerMessages(Messages)

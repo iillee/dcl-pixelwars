@@ -75,6 +75,14 @@ export type Events = {
   'bots:positions': {
     bots: Array<{ id: number; team: number; x: number; y: number; z: number }>
   }
+
+  // Broadcast: server accepted a dash hit. Subscriber: client/dash
+  // (victim self-applies knockback; everyone shows the impact).
+  'dash:impact': { attacker: string; target: string; dx: number; dz: number }
+
+  // Local: client/player teleported us home (spawn, round reset, fall).
+  // Subscriber: client/dash (brief knockback immunity).
+  'player:respawned': { why: string }
 }
 
 // ─── Bus implementation ─────────────────────────────────────────────

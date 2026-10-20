@@ -32,6 +32,7 @@ import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } 
 // so client (src/round.ts) and server share the exact same cadence. Do not
 // redefine here; edit the shared module if the cadence changes.
 import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
+import { dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH } from '../shared/dash'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -102,6 +103,10 @@ export async function setupServer(): Promise<void> {
   const SNAPSHOT_COOLDOWN_MS = 5000
   const lastSnapshotAt = new Map<string, number>()
 
+  // Dash hit-window state per attacker (see the dashHit handler).
+  const dashWindowStart = new Map<string, number>()
+  const dashWindowTargets = new Map<string, Set<string>>()
+
   // Detect real disconnects so the bot respawns immediately when a
   // second player leaves (instead of waiting up to 60s for the activity
   // window to expire). markInactive() keeps the roster slot for rejoin
@@ -111,6 +116,8 @@ export async function setupServer(): Promise<void> {
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
     // instead of being rate-limited into a blank map.
     lastSnapshotAt.delete(userId)
+    dashWindowStart.delete(userId)
+    dashWindowTargets.delete(userId)
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -254,6 +261,40 @@ export async function setupServer(): Promise<void> {
     if (c.total > 0) {
       console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total} bots=${botCount()}`)
     }
+  })
+
+  // Dash PvP prototype (shared/dash.ts). The attacker's client judged the
+  // contact; we check teams, round mode and rate, then broadcast so the
+  // victim's client can push itself. Positions are not visible here, so
+  // distance can't be validated (anti-cheat deferred, see design doc).
+  room.onMessage('dashHit', ({ target, dx, dz }, context) => {
+    const from = context?.from
+    if (!from) return
+    if (!dashEnabledForRound(currentRoundIndex())) return
+    const attackerTeam = getTeam(from)
+    const want = target.toLowerCase()
+    const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
+    if (attackerTeam === null || !victim || victim.team === attackerTeam || victim.userId === from) {
+      console.log(`[Server] dashHit ${from.slice(0, 8)} → ${target.slice(0, 8)} rejected: team check`)
+      return
+    }
+    const len = Math.hypot(dx, dz)
+    if (!isFinite(len) || len < 1e-3) return
+    const now = Date.now()
+    const start = dashWindowStart.get(from)
+    if (start === undefined || now - start >= SERVER_MIN_DASH_GAP_S * 1000) {
+      dashWindowStart.set(from, now)
+      dashWindowTargets.set(from, new Set())
+    } else if (now - start > SERVER_HIT_WINDOW_S * 1000) {
+      console.log(`[Server] dashHit ${from.slice(0, 8)} rejected: outside hit window (${now - start}ms)`)
+      return
+    }
+    const hits = dashWindowTargets.get(from)!
+    if (hits.has(victim.userId) || hits.size >= SERVER_MAX_HITS_PER_DASH) return
+    hits.add(victim.userId)
+    markActive(from)
+    console.log(`[Server] dashImpact ${from.slice(0, 8)} → ${victim.userId.slice(0, 8)}`)
+    room.send('dashImpact', { attacker: from, target: victim.userId, dx: dx / len, dz: dz / len })
   })
 
   // Snapshot handler (Phase 4 Step 5). Late/reloading clients ask once
