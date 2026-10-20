@@ -17,6 +17,7 @@ Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponen
   - Offline tests: `npx tsx scripts/verify-lunge.ts`.
 - **Test dummies (`LUNGE_TEST_DUMMY = true`, `LUNGE_DUMMY_COUNT = 4`, `src/client/lungeDummy.ts`):** client-local opponent-coloured 0.8×1.8×0.8 boxes, each on the exact centre of a distinct random non-base tile (flat tiles first, ramps only if not enough flat ones; any level), floor y from the walkable graph. Re-rolled on maze rebuild, team change and RESPAWN DUMMY (chip top-centre under the coverage pill, `client/dummyUi.tsx`, or key 2) → all 4 to NEW random tiles. Lunge hits each once per lunge; each gets the same `LUNGE_KNOCK*` values via a kinematic sim (× `LUNGE_DUMMY_UNIT` = 0.25, gravity 20, friction 14). Falls → hidden. Set the flag false before any real release.
 - **Paint Bomb back on F (2026-10-20):** `BOMB_MODE = 'on'`, `initPaintBomb()` re-added in `client/index.ts`, hotbar is LUNGE (E) left + PAINT BOMB (F) right with tooltips on the outer sides, native F hidden on mobile again. Bomb code unchanged since 9bd8b2b (no fuse ring). Dash stays parked.
+- **Hotbar restyle (2026-10-20):** gold accents → neutral white (borders/tooltip chips/bridges 0.95, cooldown fill white @ 0.3); E/F hints are black letters on small white badges; lunge icon is `assets/images/lunge_chevron.png` (white upward double chevron, replaces `»`). Overview UI keeps its own gold active state.
 - Sections below describe the Dash/Bomb era and are kept for when they come back.
 
 ---
