@@ -95,6 +95,23 @@ export function playDashSfx(): void {
   })
 }
 
+/** Lunge start: Luke's recorded takes (split from one WAV), mono mp3. */
+export const LUNGE_SRCS = [1, 2, 3, 4, 5, 6].map(n => `assets/sounds/lunge_0${n}.mp3`)
+let lastLungeIdx = -1
+/** Random take, never the same one twice in a row. */
+export function pickLungeSrc(): string {
+  let i = Math.floor(Math.random() * (LUNGE_SRCS.length - 1))
+  if (i >= lastLungeIdx && lastLungeIdx >= 0) i++
+  if (lastLungeIdx < 0) i = Math.floor(Math.random() * LUNGE_SRCS.length)
+  lastLungeIdx = i
+  return LUNGE_SRCS[i]
+}
+/** Local player's lunge start (reuses the dash sfx entity on the camera). */
+export function playLungeSfx(): void {
+  if (!dashSfxEnt) return
+  AudioSource.createOrReplace(dashSfxEnt, { audioClipUrl: pickLungeSrc(), playing: true, loop: false, volume: 0.9, global: true })
+}
+
 /** Dash prototype: hit thud for the attacker (on contact) and the victim (on knockback). */
 export function playDashHitSfx(): void {
   if (!dashHitSfxEnt) return

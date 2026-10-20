@@ -19,7 +19,7 @@
  *    teams, broadcasts lungeImpact; the VICTIM's client applies its own
  *    knockback and drops it if it arrives > LUNGE_IMPACT_MAX_AGE_MS after
  *    it saw that lunge start, or twice.
- * C. Feedback: press = team glow puff (no input delay) + swoosh; active =
+ * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.mp3); active =
  *    streak behind the avatar (shown on remote avatars too via
  *    lungeStarted); hit = pop + impact boom + big burst at contact, attacker
  *    brakes on the spot (hit-stop stand-in); miss = small grey dust puff
@@ -42,7 +42,7 @@ import {
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
 } from '../shared/pvp'
 import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
-import { playDashSfx, DASH_HIT_SRC } from './audio'
+import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTarget, hitDummy } from './lungeDummy'
@@ -215,10 +215,10 @@ export function triggerLunge(): void {
     Physics.applyImpulseToPlayer(Vector3.create(dir.x * LUNGE_IMPULSE, LUNGE_LIFT, dir.z * LUNGE_IMPULSE))
   })
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
-  // Anticipation without input delay: team glow at the chest + swoosh.
+  // Anticipation without input delay: team glow at the chest + lunge take.
   spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(localTeam()),
     0.08, 0.08, 0.5, 1.1, 0.5)
-  playDashSfx()
+  playLungeSfx()
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)
@@ -279,7 +279,10 @@ function onStarted(attacker: string, id: number): void {
   if (att === myAddress()) return
   lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0 })
   const p = avatarPos(att)
-  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(teamOfUser(att)), 0.08, 0.08, 0.5, 1.1, 0.5)
+  // Remote lunge: glow + the same lunge take set, positional at that avatar.
+  // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
+  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(teamOfUser(att)), 0.08, 0.7, 0.5, 1.1, 0.5,
+    { src: pickLungeSrc(), vol: 0.9 })
 }
 
 function onImpact(attacker: string, id: number, target: string, dx: number, dz: number): void {
