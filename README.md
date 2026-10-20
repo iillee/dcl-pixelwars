@@ -6,8 +6,8 @@ A team tile-coverage game played on a procedurally generated 3D maze, built for 
 
 **Pixelwars** — the arena underneath. Every round a new layout is grown from a small set of modular tile pieces (corridors, forks, crossings, ramps). The round seed is shared so every player sees the same layout. Two level modes exist (`LEVEL_MODE` in [`src/maze/level.ts`](src/maze/level.ts)):
 
-- **`classic`** (what `main` / the live world runs): a 5×5 tile maze on an 11×11 parcel world (176 m), centre spawn, ground level.
-- **`sky`** (branch `level`, not yet playtested in-world or deployed): a 5×5 tile woven network (asymmetric but fairness-checked) floating at y 32 on a 20×20 parcel world (320 m), grid at 80–240 m, three levels, 1-tile team bases in opposite corners. See [Sky mode](#sky-mode-branch-level) below.
+- **`classic`** (what `main` is): a 5×5 tile maze on an 11×11 parcel world (176 m), centre spawn, ground level.
+- **`sky`** (branch `level`, what [pixelwars.dcl.eth](https://play.decentraland.org/?realm=pixelwars.dcl.eth) is running): a 5×5 tile woven network (asymmetric but fairness-checked) floating at y 32 on a 20×20 parcel world (320 m), grid at 80–240 m, three levels, 1-tile team bases in opposite corners. See [Sky mode](#sky-mode-branch-level) below. This branch does not spawn greybox columns. The world online as of 2026-10-20 00:54 UTC was built from an older bundle that still draws the lavender boxes; pull `level` and redeploy to clear them.
 
 **Multiplayer:** authoritative headless server (`authoritativeMultiplayer: true`) owns the paint state and round clock; clients render and stream paint ticks at 10 Hz, server broadcasts deltas at 5 Hz.
 
@@ -17,7 +17,7 @@ The scene is intended to be **downloaded, remixed, and shared**. All source asse
 
 ---
 
-## Status: V0 live · V1 in progress · sky level on branch `level` (untested in-world)
+## Status: V0 live · V1 in progress · sky level on branch `level`
 
 ### V0 — vertical slice (live, classic mode)
 
@@ -36,9 +36,11 @@ The scene is intended to be **downloaded, remixed, and shared**. All source asse
 - **Chunked paint messages** — `paintDelta` / snapshot split into ≤200-change messages.
 - Ramp paint offset experiments were tried and reverted; the original ramp paint code is the confirmed-good one.
 
-### Branch `level` (ahead of `main`; not playtested in-world, not deployed)
+### Branch `level` (ahead of `main`)
 
 Sky level mode, seeded woven generator, corner bases, teleporters, ghost-on-opposite-base, overview camera, fall respawn, and 250-seed verify scripts. Details below and in [`docs/HANDOFF.md`](docs/HANDOFF.md).
+
+Greybox columns are not in this branch (`400aa94` removed `SKY_PILLARS` / `spawnPillar`). The deployed `bin/index.js` on `pixelwars.dcl.eth` (entity published 2026-10-20 00:54 UTC) is an older production bundle that still runs the tween lavender boxes from `1ac9e83`. Pull `level`, delete `bin/index.js` if it is already there, and redeploy with `npm run deploy` (do not pass `--skip-build`).
 
 ### V1 — planned (4-week scope)
 
