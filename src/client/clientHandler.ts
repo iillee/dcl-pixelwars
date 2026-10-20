@@ -101,6 +101,16 @@ function wireInbound(): void {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
 
+  room.onMessage('burstState', ({ progress, charged, active }) => {
+    events.emit('burst:state', { progress, charged, active })
+  })
+  room.onMessage('burstFired', ({ attacker, id, team, x, y, z }) => {
+    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z })
+  })
+  room.onMessage('burstImpact', ({ attacker, id, target, dx, dz }) => {
+    events.emit('burst:impact', { attacker, id, target, dx, dz })
+  })
+
   room.onMessage('bombArmed', ({ attacker, team, x, y, z }) => {
     events.emit('bomb:armed', { attacker, team: team as Team, x, y, z })
   })
@@ -228,3 +238,15 @@ export function sendLungeHit(id: number, target: string, dx: number, dz: number,
   console.log(`[Client] → lungeHit #${id} ${target.slice(0, 8)}`)
   room.send('lungeHit', { id, target, dx, dz, x, y, z })
 }
+
+/** Paint Burst (client/paintBurst.ts). */
+export function sendBurstUse(id: number, x: number, y: number, z: number, fx: number, fz: number): void {
+  console.log(`[Client] → burstUse #${id}`)
+  room.send('burstUse', { id, x, y, z, fx, fz })
+}
+export function sendBurstHit(id: number, target: string, dx: number, dz: number): void {
+  console.log(`[Client] → burstHit #${id} ${target.slice(0, 8)}`)
+  room.send('burstHit', { id, target, dx, dz })
+}
+export function sendBurstPaint(id: number, cell: string): void { room.send('burstPaint', { id, cell }) }
+export function sendBurstEnd(id: number): void { room.send('burstEnd', { id }) }

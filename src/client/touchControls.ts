@@ -4,7 +4,7 @@
  *
  * Hides the native IA_PRIMARY (E) and IA_SECONDARY (F) buttons on mobile:
  * the scene's own hotbar (client/abilityHotbar.tsx) is the touch surface
- * for Lunge and Paint Bomb, and native buttons would double-trigger.
+ * for Lunge and Paint Burst, and native buttons would double-trigger.
  * Native IA_ACTION_3 (1, overview toggle) and IA_ACTION_6 (4, overview
  * rotate) are left at their defaults. No-op on desktop.
  */

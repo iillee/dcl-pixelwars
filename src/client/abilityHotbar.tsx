@@ -26,9 +26,9 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
-import { LUNGE_MODE, BOMB_MODE } from '../shared/pvp'
+import { LUNGE_MODE, BURST_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
-import { getBombHud, triggerBomb } from './paintBomb'
+import { getBurstHud, triggerBurst } from './paintBurst'
 
 const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -59,7 +59,7 @@ type Geo = {
 const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50, tuck: 24 }
 const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 38 }
 
-type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number }
+type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string }
 
 function KeyHint(props: { label: string }) {
   if (isMobile()) return null
@@ -114,6 +114,17 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? Color4.create(0, 0, 0, 1) : WHITE) : DIM }}
+        />
+      ) : null}
+      {hud.text ? (
+        // Burst: charge progress ('7/10') or active seconds ('2s'), bottom of the slot.
+        <Label
+          key={`ui_pvp_text_${props.id}`}
+          value={`<b>${hud.text}</b>`}
+          fontSize={Math.round(g.slot * 0.18)}
+          color={fill > 0.2 ? BLACK : WHITE}
+          textAlign="middle-center"
+          uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(g.slot * 0.06), left: 0 }, width: '100%', height: Math.round(g.slot * 0.22) }}
         />
       ) : null}
       {!props.iconSrc ? (
@@ -182,14 +193,14 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
 }
 
 function roundLabel(lunge: Hud, bomb: Hud): string {
-  if (LUNGE_MODE !== 'alternate' && BOMB_MODE !== 'alternate') return ''
-  return lunge.enabled || bomb.enabled ? 'LUNGE + BOMB ROUND' : 'PAINT ONLY'
+  if (LUNGE_MODE !== 'alternate' && BURST_MODE !== 'alternate') return ''
+  return lunge.enabled || bomb.enabled ? 'LUNGE + BURST ROUND' : 'PAINT ONLY'
 }
 
 /** Render inside the full-screen UI root (src/ui.tsx). */
 export function AbilityHotbar() {
   const lunge = getLungeHud()
-  const bomb = getBombHud()
+  const bomb = getBurstHud()
   if (!lunge.show && !bomb.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
@@ -204,9 +215,9 @@ export function AbilityHotbar() {
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
       {mobile && lungeTip && <Bridge id="lunge" side="left" g={g} />}
-      {mobile && bombTip && <Bridge id="bomb" side="right" g={g} />}
+      {mobile && bombTip && <Bridge id="burst" side="right" g={g} />}
       {lungeTip && <Tooltip id="lunge" side="left" text="LUNGE" onPress={triggerLunge} g={g} />}
-      {bombTip && <Tooltip id="bomb" side="right" text="BOMB" onPress={triggerBomb} g={g} />}
+      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={triggerBurst} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -225,7 +236,7 @@ export function AbilityHotbar() {
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
           {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
-          {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
+          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={triggerBurst} g={g} />}
         </UiEntity>
       </UiEntity>
     </UiEntity>

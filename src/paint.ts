@@ -384,6 +384,10 @@ let lastCenterId: string | null = null
 export function isOnOwnPaint(): boolean {
   return onOwnPaint
 }
+/** Walkable cell the local player is over right now (null off the floor). Paint Burst centre. */
+export function getCurrentCellId(): string | null {
+  return lastCenterId
+}
 /** Round reset: forget the current cell so the bonus drops immediately. */
 export function resetOwnPaint(): void {
   onOwnPaint = false

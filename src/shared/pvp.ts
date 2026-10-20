@@ -1,5 +1,5 @@
 /**
- * pvp.ts — PvP prototype config: Lunge (E) + Paint Bomb (F). Dash parked (mode 'off').
+ * pvp.ts — PvP prototype config: Lunge (E) + Paint Burst (F). Dash and Paint Bomb parked (mode 'off').
  * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
  *
  * Pure constants + helpers, no engine imports: read by the client
@@ -23,7 +23,9 @@ export type AbilityMode = 'on' | 'off' | 'alternate'
 // wired into client/index.ts or the hotbar, and with 'off' the server drops
 // dashHit. Paint Bomb (F) is back on alongside Lunge (E).
 export const DASH_MODE: AbilityMode = 'off'
-export const BOMB_MODE: AbilityMode = 'on' // back on (Luke, 2026-10-20), as at 9bd8b2b
+export const BOMB_MODE: AbilityMode = 'off' // replaced by Paint Burst on F (Luke, 2026-10-20); code kept, not wired
+/** Paint Burst (F): charged by painting, see the ═══ Paint Burst block below. */
+export const BURST_MODE: AbilityMode = 'on'
 
 export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
   if (mode === 'on') return true
@@ -115,6 +117,57 @@ export const SERVER_MIN_BOMB_GAP_S = BOMB_COOLDOWN_S - 0.5
 /** Is Paint Bomb live for this UTC round index? */
 export function bombEnabledForRound(roundIndex: number): boolean {
   return modeEnabledForRound(BOMB_MODE, roundIndex)
+}
+
+// ═══ Paint Burst (F) ═════════════════════════════════════════════════
+// Luke's spec 2026-10-20. Code: shared/burst.ts (pure), client/paintBurst.ts,
+// server.ts (burst* handlers). Charge is server-authoritative: it counts the
+// sender's paintTick cells that applyPaint actually flipped (neutral/enemy →
+// own team), so repaints and duplicate ids never count.
+
+/** Cells you must convert for one charge. Max 1 charge, no reserve. */
+export const BURST_CHARGE_CELLS = 10
+/** Shockwave radius, 3D distance from the attacker's feet to the target's feet (m). */
+export const BURST_RADIUS = 4
+/** Line of sight check (raycast attacker chest → target chest, physics colliders). */
+export const BURST_LOS = true
+/** Chest height for the LOS ray (m above feet). */
+export const BURST_LOS_HEIGHT = 1.0
+/** No raycast answer within this time → treat as clear (s). */
+export const BURST_LOS_TIMEOUT_S = 0.3
+/** Victim knockback: outward impulse (Lunge 93), lift (Lunge 10), sustained force (Lunge 38). */
+export const BURST_KNOCKBACK = 70
+export const BURST_KNOCK_LIFT = 12
+export const BURST_KNOCK_FORCE = 26
+export const BURST_KNOCK_FORCE_S = 0.3
+/** Victim drops an impact this long after it saw the burst fire (ms). */
+export const BURST_IMPACT_MAX_AGE_MS = 600
+/** Ghost bots inside the radius: server-side shove (cells) + stun. */
+export const BURST_BOT_SHOVE = 4
+export const BURST_BOT_STUN_S = 1.0
+/** Painting after the shockwave: duration (s), footprint shape and size. */
+export const BURST_PAINT_S = 3
+/** 'square' = (2R+1)² cells (R=1 → 3×3), 'cross' = cells within R grid steps (R=1 → 5-cell +). */
+export const BURST_PAINT_SHAPE: 'square' | 'cross' = 'square'
+export const BURST_PAINT_RADIUS_CELLS = 1
+/** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
+export const BURST_PAINT_MAX_DY = 1.5
+/** Client resends its centre cell at least this often while active (s); also on every cell change. */
+export const BURST_PAINT_RESEND_S = 0.25
+/** Server: accept burstHit this long after burstUse (s). */
+export const SERVER_BURST_HIT_WINDOW_S = 1.0
+/** Server: active window slack over BURST_PAINT_S (latency) (s). */
+export const SERVER_BURST_ACTIVE_SLACK_S = 0.5
+/** Server: burstPaint centre may be at most this far (m) from where the burst fired. */
+export const SERVER_BURST_MAX_TRAVEL = 60
+/** Expanding ring, particles, aura. */
+export const BURST_RING_S = 0.35
+export const BURST_PARTICLES = 8
+export const BURST_AURA_ALPHA = 0.18
+
+/** Is Paint Burst live for this UTC round index? */
+export function burstEnabledForRound(roundIndex: number): boolean {
+  return modeEnabledForRound(BURST_MODE, roundIndex)
 }
 
 // ═══ Lunge (E) ══════════════════════════════════════════════════════

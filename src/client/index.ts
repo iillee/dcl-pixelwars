@@ -38,7 +38,7 @@ import { initNametags } from './nametags'
 import { initSpeedBonus } from './speed'
 // Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
-import { initPaintBomb } from './paintBomb'
+import { initPaintBurst } from './paintBurst'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
@@ -137,7 +137,7 @@ export async function setupClient(): Promise<void> {
   initBotVisual()
   initLunge()
   initLungeDummy()
-  initPaintBomb()
+  initPaintBurst()
   setupTouchControls()
 
   // Register the network boundary LAST so `room.onMessage` subscribers

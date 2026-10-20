@@ -84,6 +84,10 @@ export type Events = {
   'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number }
   'lunge:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
 
+  // Paint Burst. Subscriber: client/paintBurst.
+  'burst:state': { progress: number; charged: boolean; active: boolean }
+  'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number }
+  'burst:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
   // Broadcast: Paint Bomb telegraph / detonation. Subscriber: client/paintBomb.
   'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
   'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }

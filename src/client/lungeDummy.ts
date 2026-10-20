@@ -140,10 +140,10 @@ export function respawnDummy(): void {
 }
 
 /** Lunge hit on dummy i: same values the victim client gets, × LUNGE_DUMMY_UNIT. */
-export function hitDummy(i: number, dx: number, dz: number): void {
+export function hitDummy(i: number, dx: number, dz: number, mult = 1): void {
   const d = dummies[i]
   if (!d || !d.alive) return
-  const k = LUNGE_DUMMY_UNIT
+  const k = LUNGE_DUMMY_UNIT * mult // mult: Paint Burst passes BURST_KNOCKBACK / LUNGE_KNOCKBACK
   d.vel.x += dx * LUNGE_KNOCKBACK * k
   d.vel.z += dz * LUNGE_KNOCKBACK * k
   d.vel.y += LUNGE_KNOCK_LIFT * k

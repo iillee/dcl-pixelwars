@@ -17,7 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
   saveToStorage as saveLeaderboard,
@@ -37,8 +37,11 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
+  burstEnabledForRound, BURST_RADIUS, BURST_PAINT_S, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
+  SERVER_BURST_ACTIVE_SLACK_S, SERVER_BURST_MAX_TRAVEL,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
+import { BurstCharge, BurstLedger, burstFootprint, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { SCENE_SIZE } from '../maze/generator'
 
@@ -117,6 +120,21 @@ export async function setupServer(): Promise<void> {
   // Paint Bomb: last accepted drop per bomber + bombs waiting on their fuse.
   const lastBombAt = new Map<string, number>()
   const lunges = new LungeLedger()
+  // Paint Burst: charge per player (counts paintTick conversions), live burst
+  // (active painting window), hit dedupe. Cleared on round reset.
+  const burstCharge = new Map<string, BurstCharge>()
+  const burstLive = new Map<string, { id: number; team: number; until: number; x: number; y: number; z: number; lastPaintAt: number }>()
+  const bursts = new BurstLedger()
+  const chargeOf = (u: string): BurstCharge => {
+    let c = burstCharge.get(u)
+    if (!c) { c = new BurstCharge(); burstCharge.set(u, c) }
+    return c
+  }
+  const burstActive = (u: string, now: number): boolean => (burstLive.get(u)?.until ?? 0) > now
+  const sendBurstState = (u: string): void => {
+    const c = chargeOf(u)
+    room.send('burstState', { progress: c.progress, charged: c.charged, active: burstActive(u, Date.now()) }, { to: [u] })
+  }
   const pendingBombs: Array<{ from: string; team: number; x: number; y: number; z: number; at: number }> = []
 
   // Detect real disconnects so the bot respawns immediately when a
@@ -132,6 +150,9 @@ export async function setupServer(): Promise<void> {
     dashWindowTargets.delete(userId)
     lastBombAt.delete(userId)
     lunges.forget(userId)
+    bursts.forget(userId)
+    burstLive.delete(userId)
+    burstCharge.delete(userId)
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -192,6 +213,9 @@ export async function setupServer(): Promise<void> {
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+      // Paint Burst charge: real conversions only (applyPaint true), never while
+      // our own burst is painting (those cells are the burst's, not earned).
+      if (burstEnabledForRound(currentRoundIndex()) && !burstActive(from, Date.now()) && chargeOf(from).add(gained)) sendBurstState(from)
     }
   })
 
@@ -366,6 +390,84 @@ export async function setupServer(): Promise<void> {
     room.send('lungeImpact', { attacker: from, id, target: victimId, dx: ux, dz: uz })
   })
 
+  // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
+  // burstUse: consume the server-side charge, open the painting window,
+  // rebroadcast burstFired; opponent ghost bots in range are shoved here.
+  // burstHit: attacker client found a player in range + LOS; accepted once
+  // per (attacker, burst id, target) within SERVER_BURST_HIT_WINDOW_S.
+  // burstPaint: centre cell while active → footprint from the walkable graph.
+  room.onMessage('burstUse', ({ id, x, y, z, fx, fz }, context) => {
+    const from = context?.from
+    if (!from || !burstEnabledForRound(currentRoundIndex())) return
+    const team = getTeam(from)
+    if (team === null || ![x, y, z].every(isFinite)) return
+    const now = Date.now()
+    if (burstActive(from, now) || !chargeOf(from).consume()) {
+      console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: no charge / active`)
+      sendBurstState(from) // resync the client's HUD
+      return
+    }
+    markActive(from)
+    burstLive.set(from, { id, team, until: now + (BURST_PAINT_S + SERVER_BURST_ACTIVE_SLACK_S) * 1000, x, y, z, lastPaintAt: 0 })
+    bursts.start(from, id, now)
+    room.send('burstFired', { attacker: from, id, team, x, y, z })
+    sendBurstState(from)
+    for (const b of getBotPositions()) {
+      if (b.team === team || !inBurst({ x, y, z }, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
+      let dx = b.x - x, dz = b.z - z
+      const l = Math.hypot(dx, dz)
+      if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
+      const dl = Math.hypot(dx, dz) || 1
+      if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_RADIUS, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+        bursts.hit(from, id, `bot:${b.id}`, now)
+        room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl })
+      }
+    }
+  })
+
+  room.onMessage('burstHit', ({ id, target, dx, dz }, context) => {
+    const from = context?.from
+    if (!from || !burstEnabledForRound(currentRoundIndex())) return
+    const len = Math.hypot(dx, dz)
+    if (!isFinite(len) || len < 1e-3) return
+    const attackerTeam = getTeam(from)
+    if (attackerTeam === null) return
+    const want = target.toLowerCase()
+    const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
+    if (!victim || victim.team === attackerTeam || victim.userId === from) return
+    const verdict = bursts.hit(from, id, victim.userId, Date.now())
+    if (verdict !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`); return }
+    room.send('burstImpact', { attacker: from, id, target: victim.userId, dx: dx / len, dz: dz / len })
+  })
+
+  room.onMessage('burstPaint', ({ id, cell }, context) => {
+    const from = context?.from
+    if (!from) return
+    const live = burstLive.get(from)
+    const now = Date.now()
+    if (!live || live.id !== id || live.until <= now) return
+    if (now - live.lastPaintAt < 80) return // rate cap (~12 Hz)
+    const graph = getWalkableGraph()
+    const c = graph?.worldPos.get(cell)
+    if (!graph || !c) return
+    if (Math.hypot(c[0] - live.x, c[2] - live.z) > SERVER_BURST_MAX_TRAVEL) return
+    live.lastPaintAt = now
+    let gained = 0
+    for (const cid of burstFootprint(graph, cell)) if (applyPaint(cid, live.team)) gained++
+    // Same score credit as normal paint; never burst charge.
+    if (gained > 0) {
+      leaderboardIncrement(from, gained)
+      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+    }
+  })
+
+  room.onMessage('burstEnd', ({ id }, context) => {
+    const from = context?.from
+    if (!from) return
+    const live = burstLive.get(from)
+    if (live && live.id === id) { burstLive.delete(from); sendBurstState(from) }
+  })
+
   // Paint Bomb (shared/pvp.ts). Position is the bomber's own report (the
   // server can't see avatars); everything else is decided here: cooldown,
   // floor snap, the painted circle (from the bot walkable graph, base lock
@@ -465,6 +567,7 @@ export async function setupServer(): Promise<void> {
     roundCells.clear()
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
+    burstCharge.clear(); burstLive.clear() // new round: progress, charge and live bursts reset (clients reset on roundReset)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is
