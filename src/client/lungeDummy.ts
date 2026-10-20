@@ -35,6 +35,7 @@ import { TILES } from '../maze/tiles'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
 import { localTeam } from './knockback'
+import { teleporterTiles } from '../teleportOrbs'
 
 /** Anvil model (Creator Hub asset pack). GLB bounds: x −0.50…0.63, y 0…0.77 (origin at its
  *  base), z ±0.35 m. Scaled ×ANVIL_SCALE → ≈1.7 × 1.15 × 1.06 m; ANVIL_OFFSET_X centres the
@@ -112,7 +113,9 @@ function shuffle<T>(a: T[]): T[] {
 function pickSpots(): Array<{ x: number; y: number; z: number }> {
   const flat: Array<{ x: number; y: number; z: number }> = []
   const ramps: Array<{ x: number; y: number; z: number }> = []
-  const seen = new Set<string>()
+  // Never on a teleporter: skip its whole grid square (any level). The pad (1.2 m trigger at the
+  // tile centre) can't overlap a neighbouring tile, so no neighbours need excluding.
+  const seen = new Set<string>(teleporterTiles().map(t => `${t.x},${t.z}`))
   for (const p of getPlacedTilesInOrder()) {
     const k = `${p.x},${p.z}`
     if (seen.has(k)) continue // stacked tiles: one dummy per grid square

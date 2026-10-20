@@ -44,6 +44,11 @@ type V = { x: number; y: number; z: number }
 interface Orb { pos: Vector3; baseY: number; land: V; look: V | null; orb: Entity; parts: Entity[]; snd: Entity; wasInside: boolean; partner: number }
 
 let orbs: Orb[] = []
+let tpTiles: Placed[] = []
+
+/** Tiles carrying a teleporter pad this round (sky or classic). The pad is a 1.2 m trigger at
+ *  the tile centre, so it never reaches a neighbouring (32 m) tile. */
+export function teleporterTiles(): Placed[] { return tpTiles }
 let cooldown = 0
 let clock = 0
 
@@ -59,6 +64,7 @@ function teardown(): void {
  *  right after generation, while the generator grid is the new layout. */
 export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
   teardown()
+  tpTiles = []
   const ends: Array<[{ tile: Placed; land: V; look: V | null }, { tile: Placed; land: V; look: V | null }]> = []
   if (IS_SKY) {
     for (const [a, b] of teleportPairs()) ends.push([a, b])
@@ -70,6 +76,7 @@ export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
     const i = orbs.length
     orbs.push(makeOrb(a.tile, b.land, b.look, i + 1))
     orbs.push(makeOrb(b.tile, a.land, a.look, i))
+    tpTiles.push(a.tile, b.tile)
     console.log(`[Teleport] pair (${a.tile.x},${a.tile.z},${a.tile.y}) <-> (${b.tile.x},${b.tile.z},${b.tile.y})`)
   }
 }
