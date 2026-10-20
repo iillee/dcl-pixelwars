@@ -45,7 +45,7 @@ import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
-import { getDummyTarget, hitDummy } from './lungeDummy'
+import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
@@ -245,7 +245,7 @@ function checkHits(a0: V3, a1: V3): void {
     if (!sweptHit(a0, a1, t, startPos, dir.x, dir.z)) return
     hitThis.add(id)
     const k = knockDir(a1, t, dir.x, dir.z)
-    if (id === 'dummy') hitDummy(k.x, k.z) // local test box, no server
+    if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z) // local test box, no server
     else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
     impactFx(t, myTeam, true) // optimistic: the attacker feels it now
     dbgMark({ x: t.x, y: t.y + 2.2, z: t.z }, { r: 1, g: 0, b: 0 }, 0.5)
@@ -267,8 +267,7 @@ function checkHits(a0: V3, a1: V3): void {
     if (b.team === myTeam) continue
     tryHit(`bot:${b.id}`, { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
   }
-  const dummy = getDummyTarget()
-  if (dummy) tryHit('dummy', dummy)
+  for (const d of getDummyTargets()) tryHit(`dummy:${d.i}`, d.pos)
   dbgMark({ x: a1.x, y: a1.y + 1, z: a1.z }, { r: 0, g: 1, b: 1 }, 2.2, 0.3)
 }
 

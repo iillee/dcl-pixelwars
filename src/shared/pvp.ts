@@ -179,6 +179,8 @@ export const LUNGE_BOT_STUN_S = 1.2
 // ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
 /** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */
 export const LUNGE_TEST_DUMMY = true
+/** How many dummies (each on the centre of a distinct random tile). */
+export const LUNGE_DUMMY_COUNT = 4
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
  *  LUNGE_KNOCK* numbers × this: 62 → 15.5 m/s horizontal, lift 8 → 2 m/s, force
  *  25 → 6.25 m/s² for 0.35 s. Tune until the dummy flies like a real victim. */
