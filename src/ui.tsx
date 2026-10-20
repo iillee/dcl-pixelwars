@@ -49,6 +49,10 @@ const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 const BAR_W = 200
 const BAR_BORDER = 3
 const BAR_FILL_H = 16
+const BAR_INNER_W = BAR_W - BAR_BORDER * 2
+const STAR_SIZE = 14
+const STAR_PAD = 4
+const STAR_SRC = 'assets/images/star_white.png'
 const BAR_TRACK = Color4.create(0.08, 0.08, 0.1, 0.87) // flagtag PANEL_BG_SEMI
 const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
@@ -141,6 +145,12 @@ export const uiMenu = () => (
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {(() => {
               const pct = coveragePct()
+              // Winning star: centred in the leader's segment, only if it fits with padding; none on a tie / 0–0.
+              const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
+              const leadW = lead ? BAR_INNER_W * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
+              const star = lead !== null && leadW >= STAR_SIZE + STAR_PAD * 2
+                ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />
+                : null
               return (
                 <UiEntity
                   uiTransform={{
@@ -154,13 +164,13 @@ export const uiMenu = () => (
                     uiBackground={{ color: Color4.White() }}
                   >
                     {pct.red > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: { topLeft: BAR_FILL_H / 2, bottomLeft: BAR_FILL_H / 2, topRight: 0, bottomRight: 0 } }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: { topLeft: BAR_FILL_H / 2, bottomLeft: BAR_FILL_H / 2, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_RED }}
-                    />}
+                    >{lead === 'red' && star}</UiEntity>}
                     {pct.blue > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_FILL_H / 2, bottomRight: BAR_FILL_H / 2 } }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_FILL_H / 2, bottomRight: BAR_FILL_H / 2 }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_BLUE }}
-                    />}
+                    >{lead === 'blue' && star}</UiEntity>}
                   </UiEntity>
                 </UiEntity>
               )
