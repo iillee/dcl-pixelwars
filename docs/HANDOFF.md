@@ -157,6 +157,12 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ---
 
+## 5a. Dash PvP prototype (experiment, branch `cursor/pvp-dash-b679`)
+
+Not V1 scope, not deployed. Press F or tap the round DASH button for a 0.4 s burst (5 s cooldown). Enemies you touch get knocked back and can fall off the sky arena. They respawn at base with 1.5 s immunity. The attacker's client detects the hit, the server checks teams, round and rate, then broadcasts it, and the victim's client pushes itself (the SDK can only move the local player). All knobs, including `DASH_MODE` `'on'` / `'off'` / `'alternate'` (paint-only vs Dash rounds), live in `src/shared/dash.ts`. Impulse magnitudes are untested guesses. Full write-up, limitations and the two-player test plan: [`design/dash-prototype.md`](../design/dash-prototype.md).
+
+---
+
 ## 6. Next ideas
 
 - Art pass for the sky level: pillars / stilts under the tiles running down to water (Monument Valley, Little Island).

@@ -157,6 +157,8 @@ Best of 6 valid candidates (all three levels used, junctions ≥ 12 × size scal
 
 **Overview mode** (`src/client/overviewCamera.ts`, button on the right edge, key 1 / 4 rotates): angled follow camera ported from dcl-snowdrift. Keep-or-drop is undecided.
 
+**Dash (experiment, branch `cursor/pvp-dash-b679` only):** F or the round DASH button on the right edge (also on mobile) for a short burst that knocks enemies back. Config is in `src/shared/dash.ts` (`DASH_MODE = 'off'` disables it). See [`design/dash-prototype.md`](design/dash-prototype.md).
+
 ### Verify
 
 ```bash
