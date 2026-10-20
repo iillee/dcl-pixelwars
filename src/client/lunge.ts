@@ -41,7 +41,7 @@ import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE,
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
-  LUNGE_EMOTE, LUNGE_EMOTE_NAME,
+  LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_HIT_FORWARD, LUNGE_HIT_RADIUS,
 } from '../shared/pvp'
 import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
@@ -284,7 +284,7 @@ function checkHits(a0: V3, a1: V3): void {
     tryHit(`bot:${b.id}`, { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
   }
   for (const d of getDummyTargets()) tryHit(`dummy:${d.i}`, d.pos)
-  dbgMark({ x: a1.x, y: a1.y + 1, z: a1.z }, { r: 0, g: 1, b: 1 }, 2.2, 0.3)
+  dbgMark({ x: a1.x + dir.x * LUNGE_HIT_FORWARD, y: a1.y + 1, z: a1.z + dir.z * LUNGE_HIT_FORWARD }, { r: 0, g: 1, b: 1 }, 2 * LUNGE_HIT_RADIUS, 0.3)
 }
 
 // ─── Network events ─────────────────────────────────────────────────

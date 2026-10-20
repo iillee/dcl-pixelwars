@@ -4,26 +4,30 @@
  * No engine imports so it runs under plain node/tsx.
  */
 import {
-  LUNGE_HIT_RADIUS, LUNGE_HIT_MAX_DY, LUNGE_HIT_BEHIND, LUNGE_KNOCK_FACING_WEIGHT,
+  LUNGE_HIT_RADIUS, LUNGE_HIT_MAX_DY, LUNGE_HIT_FORWARD, LUNGE_HIT_OVERLAP, LUNGE_HIT_BEHIND, LUNGE_KNOCK_FACING_WEIGHT,
   SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S,
 } from './pvp'
 
 export type V3 = { x: number; y: number; z: number }
 
 /**
- * Swept hitbox: does the target touch the capsule swept by the attacker
- * this frame (segment a0→a1, radius LUNGE_HIT_RADIUS)? `start` is where the
+ * Swept hitbox: does the target touch the capsule swept this frame by a
+ * point LUNGE_HIT_FORWARD ahead of the attacker (segment a0→a1 shifted along
+ * (dx, dz), radius LUNGE_HIT_RADIUS)? Point-blank targets (within
+ * LUNGE_HIT_OVERLAP of the attacker) hit at any angle. `start` is where the
  * lunge began and (dx, dz) its unit direction: targets more than
  * LUNGE_HIT_BEHIND m behind the start line never count (directional).
  */
 export function sweptHit(a0: V3, a1: V3, t: V3, start: V3, dx: number, dz: number): boolean {
   if (Math.abs(t.y - a1.y) > LUNGE_HIT_MAX_DY) return false
   if ((t.x - start.x) * dx + (t.z - start.z) * dz < -LUNGE_HIT_BEHIND) return false
+  if (Math.hypot(t.x - a1.x, t.z - a1.z) <= LUNGE_HIT_OVERLAP) return true
+  const ox = dx * LUNGE_HIT_FORWARD, oz = dz * LUNGE_HIT_FORWARD
   const sx = a1.x - a0.x, sz = a1.z - a0.z
   const l2 = sx * sx + sz * sz
-  let u = l2 > 1e-9 ? ((t.x - a0.x) * sx + (t.z - a0.z) * sz) / l2 : 0
+  let u = l2 > 1e-9 ? ((t.x - a0.x - ox) * sx + (t.z - a0.z - oz) * sz) / l2 : 0
   u = Math.max(0, Math.min(1, u))
-  const cx = a0.x + sx * u, cz = a0.z + sz * u
+  const cx = a0.x + ox + sx * u, cz = a0.z + oz + sz * u
   return Math.hypot(t.x - cx, t.z - cz) <= LUNGE_HIT_RADIUS
 }
 

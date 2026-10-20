@@ -5,7 +5,7 @@
  * Movement feel, ramps and real networking need Explorer playtests.
  */
 import { sweptHit, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
-import { LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS, LUNGE_HIT_RADIUS } from '../src/shared/pvp'
+import { LUNGE_HIT_FORWARD, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS, LUNGE_HIT_RADIUS } from '../src/shared/pvp'
 
 let fails = 0
 function check(name: string, ok: boolean): void {
@@ -20,6 +20,10 @@ check('stationary enemy 1 m ahead is hit', sweptHit(O, P(0, 0.1), P(0, 1), O, 0,
 check('enemy 4 m ahead, not reached this frame: no hit', !sweptHit(O, P(0, 0.5), P(0, 4), O, 0, 1))
 check('fast frame (3 m in one step) still hits enemy mid-path (swept)', sweptHit(P(0, 0), P(0, 3), P(0.5, 1.5), O, 0, 1))
 check('close-range miss: 1.5 m to the side', !sweptHit(O, P(0, 2), P(1.5, 1), O, 0, 1))
+check(`standing lunge: target 1.6 m ahead hits (reach ${(LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS).toFixed(1)} m)`, sweptHit(O, O, P(0, 1.6), O, 0, 1))
+check('standing lunge: target 1.9 m ahead misses', !sweptHit(O, O, P(0, 1.9), O, 0, 1))
+check('point-blank target beside the attacker (0.5 m, 90°) still hits', sweptHit(O, O, P(0.5, 0), O, 0, 1))
+check('target 1.0 m to the side at the attacker misses (hitbox is ahead)', !sweptHit(O, O, P(1.05, -0.2), O, 0, 1))
 check(`hitbox edge: ${LUNGE_HIT_RADIUS} m side offset hits`, sweptHit(O, P(0, 2), P(LUNGE_HIT_RADIUS - 0.01, 1), O, 0, 1))
 check('enemy behind the attacker is never hit', !sweptHit(O, P(0, 0.2), P(0, -0.8), O, 0, 1))
 check('overlapping enemy (0.2 m) is hit', sweptHit(O, O, P(0.2, 0.05), O, 0, 1))

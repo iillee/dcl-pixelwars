@@ -139,8 +139,6 @@ export const LUNGE_SLASH = true
 export const LUNGE_SLASH_WIDTH = 2.2
 /** Height above the attacker's feet (m) — chest band. */
 export const LUNGE_SLASH_HEIGHT = 1.1
-/** Plane centre ahead of the attacker (m). Width/4 puts the arc's outer edge at the hitbox front (1.1 m). */
-export const LUNGE_SLASH_FORWARD = 0.55
 /** Shrink + fade after the active window (s). */
 export const LUNGE_SLASH_FADE_S = 0.12
 /** Peak opacity. */
@@ -176,12 +174,20 @@ export const LUNGE_COOLDOWN_S = 1.75
 // ─── B. Hit detection (attacker client, swept every frame) ──────────
 /** Capsule radius around the attacker's per-frame path (m). Small but forgiving. */
 export const LUNGE_HIT_RADIUS = 1.1
+/** Capsule centre sits this far ahead of the attacker along the lunge (m).
+ *  Reach = LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS ≈ 1.7 m. */
+export const LUNGE_HIT_FORWARD = 0.6
+/** Targets this close to the attacker always hit, any angle (point-blank). */
+export const LUNGE_HIT_OVERLAP = 0.7
 /** Max vertical offset (m): no hits through floors / between levels. */
 export const LUNGE_HIT_MAX_DY = 1.8
 /** Targets more than this behind the start line never count (directional). */
 export const LUNGE_HIT_BEHIND = 0.3
 /** Extra hit time after the active window (avatar interpolation lag, s). */
 export const LUNGE_HIT_GRACE_S = 0.06
+/** Slash VFX plane centre ahead of the attacker (m), derived so the arc's outer edge
+ *  (centre + width/2) lands exactly on the hitbox's leading edge (FORWARD + RADIUS = 1.7 m). */
+export const LUNGE_SLASH_FORWARD = LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS - LUNGE_SLASH_WIDTH / 2
 
 // ─── Victim knockback (victim's own client) ─────────────────────────
 /** Weight of the lunge direction vs attacker→target direction. */

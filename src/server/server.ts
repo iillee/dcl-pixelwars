@@ -35,7 +35,7 @@ import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
-  lungeEnabledForRound, LUNGE_HIT_RADIUS, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
+  lungeEnabledForRound, LUNGE_HIT_RADIUS, LUNGE_HIT_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
@@ -359,7 +359,7 @@ export async function setupServer(): Promise<void> {
       return
     }
     if (victimId.startsWith('bot:')) {
-      if (!punchBot(parseInt(victimId.slice(4), 10), x, y, z, ux, uz, LUNGE_HIT_RADIUS + 2 + SERVER_LUNGE_BOT_SLACK,
+      if (!punchBot(parseInt(victimId.slice(4), 10), x, y, z, ux, uz, LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS + 2 + SERVER_LUNGE_BOT_SLACK,
         LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S * 1000)) return
     }
     console.log(`[Server] lungeImpact ${from.slice(0, 8)} #${id} → ${victimId.slice(0, 8)}`)
