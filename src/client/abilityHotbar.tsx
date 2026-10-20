@@ -13,6 +13,8 @@
  *   - Gold tooltip chip with black text beside each slot while the ability
  *     is ready: DASH to the left, PAINT BOMB to the right. Tapping it fires
  *     the ability too. Mobile adds the gold bridge strip joining slot and chip.
+ *     Bridge + tooltips render before the slots so buttons win the overlap
+ *     (snowdrift: hotbarBridge → inventoryHotbar → prompts).
  *   - When any mode is 'alternate', a small chip above says whether this
  *     round has abilities or is paint-only.
  *
@@ -100,13 +102,16 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
         </UiEntity>
       )}
       <KeyHint label={props.keyLabel} />
-      {props.iconSrc ? (
+      {/* Glyph / icon hide while cooling so the countdown is the only centre mark
+          (Dash arrows especially — they clutter the seconds). */}
+      {!cooling && props.iconSrc ? (
         <UiEntity
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? WHITE : DIM }}
         />
-      ) : (
+      ) : null}
+      {!cooling && !props.iconSrc ? (
         <Label
           key={`ui_pvp_glyph_${props.id}`}
           value={props.glyph ?? ''}
@@ -115,7 +120,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           textAlign="middle-center"
           uiTransform={{ width: g.icon, height: g.icon }}
         />
-      )}
+      ) : null}
       {cooling && (
         <Label
           key={`ui_pvp_cd_${props.id}`}
@@ -191,6 +196,8 @@ export function AbilityHotbar() {
   const label = roundLabel(dash, bomb)
   const dashTip = dash.show && dash.ready
   const bombTip = bomb.show && bomb.ready
+  // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
+  // where the chip kisses the button edge.
   return (
     <UiEntity
       key="ui_pvp_root"
@@ -198,6 +205,8 @@ export function AbilityHotbar() {
     >
       {mobile && dashTip && <Bridge id="dash" side="left" g={g} />}
       {mobile && bombTip && <Bridge id="bomb" side="right" g={g} />}
+      {dashTip && <Tooltip id="dash" side="left" text="DASH" onPress={triggerDash} g={g} />}
+      {bombTip && <Tooltip id="bomb" side="right" text="PAINT BOMB" onPress={triggerBomb} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -219,8 +228,6 @@ export function AbilityHotbar() {
           {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
         </UiEntity>
       </UiEntity>
-      {dashTip && <Tooltip id="dash" side="left" text="DASH" onPress={triggerDash} g={g} />}
-      {bombTip && <Tooltip id="bomb" side="right" text="PAINT BOMB" onPress={triggerBomb} g={g} />}
     </UiEntity>
   )
 }
