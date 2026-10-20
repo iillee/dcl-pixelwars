@@ -22,6 +22,8 @@ import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { drainPaintOutbox, setLocalTeam } from '../paint'
+import { SeedHolder, seedHolder } from '../shared/components'
+import { ensureMazeSeed } from '../maze/rebuild'
 
 // Locally-tracked team for this session. Written on team:assigned; used
 // only to log the human-readable team name. paint.ts owns the "does this
@@ -66,8 +68,12 @@ function wireInbound(): void {
     })
   })
 
-  room.onMessage('snapshot', ({ entries, red, blue, total }) => {
-    console.log(`[Client] snapshot received: ${entries.length} cells`)
+  room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
+    console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
+    gotSnapshot = true
+    // Authoritative seed: build now (before the paint lands) if the SeedHolder CRDT hasn't given us it.
+    if (seed && SeedHolder.get(seedHolder).seed !== seed) SeedHolder.createOrReplace(seedHolder, { seed })
+    ensureMazeSeed(seed)
     events.emit('paint:snapshot', {
       entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
       red, blue, total,
@@ -145,7 +151,19 @@ function wireTeamAssigned(): void {
     console.log('[Client] → requestSnapshot')
     room.send('requestSnapshot', {})
   })
+  // Retry until a snapshot (paint + maze seed) arrives; server rate-limits to 1 per 5 s.
+  let retry = 0
+  engine.addSystem((dt: number) => {
+    if (gotSnapshot || myTeam === Team.None) return
+    retry += dt
+    if (retry < SNAPSHOT_RETRY_S) return
+    retry = 0
+    console.log('[Client] → requestSnapshot (retry, none received yet)')
+    room.send('requestSnapshot', {})
+  })
 }
+let gotSnapshot = false
+const SNAPSHOT_RETRY_S = 6
 
 // ─── Outbound: room.send from local systems ───────────────────────────
 function wireOutbound(): void {

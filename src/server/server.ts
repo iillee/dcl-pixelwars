@@ -519,7 +519,7 @@ export async function setupServer(): Promise<void> {
     // (same path as paint:delta), so order and count don't matter. An empty
     // round still sends one empty chunk so the client sees the server alive.
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total }, { to: [from] })
+      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, seed: currentRoundIndex() }, { to: [from] })
     }
   })
 

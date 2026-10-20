@@ -10,7 +10,9 @@
  *              tile level (MIN_Y; bases+line mode has a level below the bases).
  */
 
-import { engine, Transform } from '@dcl/sdk/ecs'
+import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
+import { isMazeReady } from '../maze/rebuild'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
@@ -63,10 +65,30 @@ export function initPlayerNet(): void {
 
   // Sky: fall respawn below MIN_Y - FALL_RESPAWN_DROP. Off when the lowest
   // level is near the ground (MIN_Y < FALL_RESPAWN_DROP): nothing to fall to.
+  // Sky: until the maze exists, invisible static pads under both base spawns hold players that
+  // spawn early (scene spawn point = RED base); removed once the maze has finished building.
+  if (IS_SKY) {
+    const pads = [1, 2].map(team => {
+      const s = baseSpawn(team).pos
+      const e = engine.addEntity()
+      Transform.create(e, { position: Vector3.create(s.x, s.y - 1.1, s.z), scale: Vector3.create(16, 0.2, 16) }) // top = slab top
+      MeshCollider.setBox(e, ColliderLayer.CL_PHYSICS)
+      return e
+    })
+    const sys = () => {
+      if (!isMazeReady()) return
+      pads.forEach(e => engine.removeEntity(e))
+      engine.removeSystem(sys)
+      console.log('[Player] maze ready → spawn pads removed')
+    }
+    engine.addSystem(sys)
+  }
+
   if (IS_SKY && MIN_Y >= FALL_RESPAWN_DROP) {
     let cooldown = 0
     engine.addSystem((dt: number) => {
       if (cooldown > 0) { cooldown -= dt; return }
+      if (!isMazeReady()) return // no level to land on yet: the next teleport would just fall again
       const t = Transform.getOrNull(engine.PlayerEntity)
       if (!t || t.position.y >= MIN_Y - FALL_RESPAWN_DROP) return
       cooldown = 2

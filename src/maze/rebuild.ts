@@ -98,6 +98,19 @@ export function rebuildMaze(seed: number): void {
   spawnTeleportOrbsForMaze(tiles)
 }
 
+/** Build the maze for this synced seed unless it's already the one built (seed watcher + snapshot). */
+let requestedSeed = 0
+export function ensureMazeSeed(seed: number): void {
+  if (seed === 0 || seed === requestedSeed) return
+  requestedSeed = seed
+  rebuildMaze(seed)
+}
+
+/** True once a maze has been generated and its reveal cascade has finished. */
+export function isMazeReady(): boolean {
+  return requestedSeed !== 0 && spawnQueue.length === 0
+}
+
 /** For diagnostics / debug HUD only. */
 export function getCurrentSeed(): number {
   return currentSeed

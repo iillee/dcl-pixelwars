@@ -42,7 +42,7 @@ import { initPaintBurst } from './paintBurst'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
-import { rebuildMaze, initMazeNet } from '../maze/rebuild'
+import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
@@ -53,14 +53,7 @@ const STRESS_COUNT = 0
 // ─── Seed watcher ───────────────────────────────────────────────────
 // Reacts to any change in the synced seed (set by first-joiner init or by
 // the server's roundReset message) and rebuilds the maze.
-let currentSeed = 0
-engine.addSystem(() => {
-  const s = SeedHolder.get(seedHolder).seed
-  if (s !== 0 && s !== currentSeed) {
-    currentSeed = s
-    rebuildMaze(s)
-  }
-})
+engine.addSystem(() => ensureMazeSeed(SeedHolder.get(seedHolder).seed))
 
 // ─── First-joiner initialization ────────────────────────
 // If we've been in-scene for a grace period and the synced seed is still 0,

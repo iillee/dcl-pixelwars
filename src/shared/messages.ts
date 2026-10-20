@@ -69,6 +69,9 @@ export const Messages = {
     red: Schemas.Int,
     blue: Schemas.Int,
     total: Schemas.Int,
+    // Current round's maze seed (= server round index): late joiners build the maze from this
+    // even if the SeedHolder CRDT never reaches them.
+    seed: Schemas.Int,
   }),
 
   // Server → Client (broadcast): UTC round boundary crossed. Carries the
