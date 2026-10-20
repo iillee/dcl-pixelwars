@@ -41,6 +41,7 @@ type Slash = {
 const pool: Slash[] = []
 let next = 0
 let getPos: (who: string) => Vector3 | null = () => null
+let frameLocal: Vector3 | null = null // this frame's local PlayerEntity position (lunge.ts)
 
 function setMat(s: Slash, alpha: number): void {
   const f = s.flash
@@ -93,10 +94,10 @@ function intro(s: Slash): void {
 
 /** k = scale factor; m = 0 at the fist point → 1 at the normal slash position. */
 function place(s: Slash, k: number, m = 1): void {
-  const p = getPos(s.who) ?? s.lastPos
+  const p = (s.who === '' ? frameLocal : null) ?? getPos(s.who) ?? s.lastPos
   const tr = Transform.getMutable(s.ent)
   if (!p) { tr.position = HIDDEN; return }
-  s.lastPos = p
+  s.lastPos = Vector3.create(p.x, p.y, p.z) // copy, not the live Transform object
   const yaw = Math.atan2(s.dx, s.dz) * 180 / Math.PI + (LUNGE_SLASH_FLIP ? 180 : 0)
   // Right of facing (dx, dz) is (dz, -dx).
   const f = LUNGE_SLASH_FIST_OFFSET
@@ -120,7 +121,15 @@ export function initLungeSlash(positionOf: (who: string) => Vector3 | null): voi
     MeshRenderer.setPlane(ent)
     pool.push({ ent, who: '', dx: 0, dz: 1, rgb: { r: 1, g: 1, b: 1 }, t: 0, flash: 0, live: false, introDone: false, alpha: -1, lastPos: null })
   }
-  engine.addSystem((dt: number) => {
+}
+
+/** Per-frame update, called from lunge.ts's system right where the hitbox box is
+ *  placed, so the local slash uses the exact same PlayerEntity position that frame
+ *  (`localPos`); remote slashes read that avatar's Transform here. */
+export function tickSlash(dt: number, localPos: Vector3 | null): void {
+  if (!LUNGE_SLASH) return
+  frameLocal = localPos
+  {
     for (const s of pool) {
       if (!s.live) continue
       s.t += dt
@@ -136,5 +145,5 @@ export function initLungeSlash(positionOf: (who: string) => Vector3 | null): voi
       setMat(s, LUNGE_SLASH_ALPHA * (1 - f))
       place(s, 1 - 0.35 * f)
     }
-  })
+  }
 }

@@ -49,7 +49,7 @@ import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
-import { initLungeSlash, startSlash, flashSlash } from './lungeSlash'
+import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
@@ -77,11 +77,11 @@ let lastHitBy = ''
 let lastHitAge = 999
 
 // ─── FX (pooled-free: few entities, removed after life) ─────────────
-type Fx = { ent: Entity; t: number; dur: number; life: number; from: number; to: number }
+type Fx = { ent: Entity; t: number; dur: number; life: number; from: number; to: number; follow?: { who: string; off: V3 } }
 const fx: Fx[] = []
 
 function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number, life: number, from: number, to: number,
-  alpha: number, sound?: { src: string; vol: number }): void {
+  alpha: number, sound?: { src: string; vol: number }, follow?: { who: string; off: V3 }): void {
   const ent = engine.addEntity()
   Transform.create(ent, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(from, from, from) })
   MeshRenderer.setSphere(ent)
@@ -92,7 +92,7 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
   })
   if (sound) AudioSource.create(ent, { audioClipUrl: sound.src, playing: true, loop: false, volume: sound.vol, global: false })
-  fx.push({ ent, t: 0, dur, life, from, to })
+  fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
 const GREY = { r: 0.7, g: 0.7, b: 0.7 }
@@ -252,7 +252,7 @@ export function triggerLunge(): void {
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
   // Anticipation without input delay: team glow at the chest + lunge take.
   spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(localTeam()),
-    0.08, 0.08, 0.5, 1.1, 0.5)
+    0.08, 0.08, 0.5, 1.1, 0.5, undefined, { who: '', off: { x: dir.x * 0.6, y: 1.1, z: dir.z * 0.6 } })
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
   startSlash('', dir.x, dir.z, localTeam())
   startHitbox('', dir.x, dir.z, localTeam())
@@ -329,7 +329,7 @@ function onStarted(attacker: string, id: number, dx: number, dz: number): void {
   // Remote lunge: glow + the same lunge take set, positional at that avatar.
   // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
   if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(teamOfUser(att)), 0.08, 0.7, 0.5, 1.1, 0.5,
-    { src: pickLungeSrc(), vol: 0.9 })
+    { src: pickLungeSrc(), vol: 0.9 }, { who: att, off: { x: 0, y: 1.1, z: 0 } })
 }
 
 function onImpact(attacker: string, id: number, target: string, dx: number, dz: number): void {
@@ -442,14 +442,20 @@ export function initLunge(): void {
     }
     prevPos = pos
 
+    tickSlash(dt, t ? t.position : null) // same PlayerEntity position as the hit test + box
     tickStreaks(dt)
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]
       f.t += dt
       if (f.t >= f.life) { engine.removeEntity(f.ent); fx.splice(i, 1); continue }
+      if (f.follow) { // glow (and its positional sound) rides on the avatar, no trailing
+        const a = f.follow.who === '' ? pos : avatarPos(f.follow.who)
+        if (a) Transform.getMutable(f.ent).position = Vector3.create(a.x + f.follow.off.x, a.y + f.follow.off.y, a.z + f.follow.off.z)
+      }
       if (f.t >= f.dur) { if (MeshRenderer.has(f.ent)) MeshRenderer.deleteFrom(f.ent); continue }
       const s = f.from + (f.to - f.from) * (f.t / f.dur)
-      Transform.getMutable(f.ent).scale = Vector3.create(s, s, s)
+      const tr = Transform.getMutable(f.ent)
+      tr.scale = Vector3.create(s, s, s)
     }
   })
 }
