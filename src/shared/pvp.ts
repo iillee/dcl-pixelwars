@@ -303,6 +303,8 @@ export const LUNGE_BOT_STUN_S = 1.2
 export const LUNGE_TEST_DUMMY = true
 /** How many dummies (each on the centre of a distinct random tile). */
 export const LUNGE_DUMMY_COUNT = 4
+/** A dummy that falls off respawns at a random tile centre after this delay (s). */
+export const LUNGE_DUMMY_RESPAWN_S = 1
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
  *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
  *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).

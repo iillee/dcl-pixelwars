@@ -2,13 +2,15 @@
  * lungeDummy.ts — client-local Lunge test dummies (LUNGE_TEST_DUMMY,
  * LUNGE_DUMMY_COUNT in shared/pvp.ts). No server, nobody else sees them.
  *
- * Placement: LUNGE_DUMMY_COUNT opponent-coloured 0.8 × 1.8 × 0.8 m boxes,
+ * Placement: LUNGE_DUMMY_COUNT anvils (Luke's Creator Hub asset
+ * assets/asset-packs/anvil/Anvil_01/Anvil_01.glb, ×ANVIL_SCALE, no collider),
  * each at the exact centre of a distinct random tile, any level. Base
  * tiles (where players spawn) are skipped; flat tiles first, ramps only if
  * there aren't enough flat ones; a tile whose centre has no walkable cell
  * is skipped. Floor y = the walkable cell at the centre (shared/mazeGraph,
  * same graph the server bots use). Re-rolled to NEW random tiles on maze
- * rebuild, team change and "Respawn dummy" (UI chip / key 2).
+ * rebuild, team change and key 2. A dummy that falls off respawns on its own
+ * after LUNGE_DUMMY_RESPAWN_S at a random free tile centre (same picker).
  *
  * Knockback: client/lunge.ts hits each dummy once per lunge like a real
  * target; each gets the SAME LUNGE_KNOCK* values the victim client would
@@ -17,15 +19,15 @@
  *   held force → acceleration force × LUNGE_DUMMY_UNIT for LUNGE_KNOCK_FORCE_S,
  *   gravity, ground friction while grounded; floor = highest walkable cell
  *   within ~1 cell under it, none → it falls. Below the fall-respawn height
- *   a dummy hides until respawn. Logs travel distance per hit.
+ *   a dummy hides, then auto-respawns. Logs travel distance per hit.
  */
 
-import { engine, Entity, Material, MeshRenderer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
-import { Color4, Vector3 } from '@dcl/sdk/math'
-import { Team, TEAM_RGB } from '../shared/team'
+import { engine, Entity, GltfContainer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
+import { Team } from '../shared/team'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
-  LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S,
+  LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_DUMMY_RESPAWN_S,
 } from '../shared/pvp'
 import { buildWalkableGraph, WalkableGraph } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, baseTeamOfTile, MIN_Y, CELL, MAZE_ORIGIN } from '../maze/generator'
@@ -34,7 +36,12 @@ import { FALL_RESPAWN_DROP } from '../maze/level'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
 import { localTeam } from './knockback'
 
-const SIZE = Vector3.create(0.8, 1.8, 0.8)
+/** Anvil model (Creator Hub asset pack). GLB bounds: x −0.50…0.63, y 0…0.77 (origin at its
+ *  base), z ±0.35 m. Scaled ×ANVIL_SCALE → ≈1.7 × 1.15 × 1.06 m; ANVIL_OFFSET_X centres the
+ *  horn-heavy x extent on the dummy's feet point. The hit point (feet) is unchanged. */
+const ANVIL_SRC = 'assets/asset-packs/anvil/Anvil_01/Anvil_01.glb'
+const ANVIL_SCALE = 1.5
+const ANVIL_OFFSET_X = -0.07 * ANVIL_SCALE
 const HIDDEN = Vector3.create(8, -50, 8)
 /** worldPos y of a walkable cell sits FLAT_OFFSET (0.55) above the tile; slab top ≈ +0.5. */
 const FLOOR_FROM_NODE = -0.05
@@ -50,6 +57,7 @@ type Dummy = {
   alive: boolean
   tracking: boolean
   hitFrom: { x: number; z: number }
+  respawnIn: number // s until auto-respawn after a fall (< 0 = none)
 }
 const dummies: Dummy[] = []
 let graph: WalkableGraph | null = null
@@ -64,8 +72,6 @@ export function getDummyTargets(): Array<{ i: number; pos: { x: number; y: numbe
   dummies.forEach((d, i) => { if (d.alive) out.push({ i, pos: { x: d.pos.x, y: d.pos.y, z: d.pos.z } }) })
   return out
 }
-
-function enemyOf(t: Team): Team { return t === Team.Blue ? Team.Red : Team.Blue }
 
 function floorAt(x: number, z: number, y: number): number | null {
   if (!graph) return null
@@ -117,26 +123,42 @@ function pickSpots(): Array<{ x: number; y: number; z: number }> {
 }
 
 function place(d: Dummy): void {
-  Transform.getMutable(d.ent).position = d.alive ? Vector3.create(d.pos.x, d.pos.y + SIZE.y / 2, d.pos.z) : HIDDEN
+  Transform.getMutable(d.ent).position = d.alive ? Vector3.create(d.pos.x, d.pos.y, d.pos.z) : HIDDEN // root at the feet; anvil base sits on the floor
 }
 
-/** Re-roll every dummy onto new random tile centres (UI chip / key 2 / rebuild). */
+/** Re-roll every dummy onto new random tile centres (key 2 / rebuild / team change). */
 export function respawnDummy(): void {
   if (!LUNGE_TEST_DUMMY || dummies.length === 0) return
   if (!graph) { console.log('[Dummy] no maze yet'); return }
   const spots = pickSpots()
-  const c = TEAM_RGB[enemyOf(localTeam())] ?? { r: 1, g: 1, b: 1 }
   dummies.forEach((d, i) => {
     const s = spots[i]
     d.vel = { x: 0, y: 0, z: 0 }
     d.forceLeft = 0
     d.tracking = false
+    d.respawnIn = -1
     d.alive = !!s
     if (s) d.pos = { x: s.x, y: s.y, z: s.z }
-    Material.setPbrMaterial(d.ent, { albedoColor: Color4.create(c.r, c.g, c.b, 1), emissiveColor: Color4.create(c.r, c.g, c.b, 1), emissiveIntensity: 0.4 })
     place(d)
   })
   console.log(`[Dummy] respawned ${spots.length}: ${spots.map(s => `${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`).join('  ')}`)
+}
+
+/** Auto-respawn one fallen dummy at a random tile centre (same picker), away from the others. */
+function respawnOne(i: number): void {
+  const d = dummies[i]
+  d.respawnIn = -1
+  if (!graph) return
+  const others = dummies.filter((o, j) => j !== i && o.alive)
+  const s = pickSpots().find(p => others.every(o => Math.hypot(o.pos.x - p.x, o.pos.z - p.z) > CELL)) ?? pickSpots()[0]
+  if (!s) return
+  d.vel = { x: 0, y: 0, z: 0 }
+  d.forceLeft = 0
+  d.tracking = false
+  d.pos = { x: s.x, y: s.y, z: s.z }
+  d.alive = true
+  place(d)
+  console.log(`[Dummy ${i}] auto-respawned at ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`)
 }
 
 /** Lunge hit on dummy i: same values the victim client gets, × LUNGE_DUMMY_UNIT. */
@@ -181,7 +203,8 @@ function step(d: Dummy, i: number, dt: number): void {
   }
   if (d.pos.y < MIN_Y - FALL_RESPAWN_DROP) {
     d.alive = false
-    console.log(`[Dummy ${i}] fell off after ${Math.hypot(d.pos.x - d.hitFrom.x, d.pos.z - d.hitFrom.z).toFixed(2)} m horizontal — "Respawn dummy" to reset`)
+    d.respawnIn = LUNGE_DUMMY_RESPAWN_S
+    console.log(`[Dummy ${i}] fell off after ${Math.hypot(d.pos.x - d.hitFrom.x, d.pos.z - d.hitFrom.z).toFixed(2)} m horizontal — respawning in ${LUNGE_DUMMY_RESPAWN_S} s`)
   }
   place(d)
 }
@@ -190,10 +213,13 @@ export function initLungeDummy(): void {
   if (!LUNGE_TEST_DUMMY) return
   for (let i = 0; i < LUNGE_DUMMY_COUNT; i++) {
     const ent = engine.addEntity()
-    Transform.create(ent, { position: HIDDEN, scale: SIZE })
-    MeshRenderer.setBox(ent)
+    Transform.create(ent, { position: HIDDEN })
+    const model = engine.addEntity()
+    Transform.create(model, { parent: ent, position: Vector3.create(ANVIL_OFFSET_X, 0, 0), scale: Vector3.create(ANVIL_SCALE, ANVIL_SCALE, ANVIL_SCALE) })
+    // Visual only, like the old box (no collider): players walk through it, physics is the sim.
+    GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
     dummies.push({ ent, pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, forceLeft: 0, forceDir: { x: 0, z: 0 },
-      alive: false, tracking: false, hitFrom: { x: 0, z: 0 } })
+      alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1 })
   }
   engine.addSystem((dt: number) => {
     const seed = getCurrentSeed()
@@ -209,6 +235,9 @@ export function initLungeDummy(): void {
     }
     if (inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
     const sdt = Math.min(dt, 0.05)
-    dummies.forEach((d, i) => step(d, i, sdt))
+    dummies.forEach((d, i) => {
+      if (d.respawnIn >= 0) { d.respawnIn -= dt; if (d.respawnIn < 0) respawnOne(i) }
+      step(d, i, sdt)
+    })
   })
 }
