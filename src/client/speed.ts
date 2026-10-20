@@ -15,7 +15,7 @@ import { engine, AvatarLocomotionSettings } from '@dcl/sdk/ecs'
 import { isOnOwnPaint, resetOwnPaint } from '../paint'
 import { events } from '../shared/events'
 
-export const OWN_PAINT_SPEED_MULT: number = 1.3
+export const OWN_PAINT_SPEED_MULT: number = 1
 
 // Client defaults (docs.decentraland.org locomotion page).
 const DEFAULT_JOG = 8
