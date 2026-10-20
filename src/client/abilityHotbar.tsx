@@ -6,14 +6,14 @@
  * rebuilt with plain React-ECS because pixelwars has no UI-kit dependency.
  *
  *   - Slots: 72 px desktop / 112 px mobile, opaque dark bg, 18 px radius,
- *     constant 4 px border (white, white while its tooltip is up).
- *   - Translucent white fill inside the slot = recharge progress (rises from empty after
+ *     constant 4 px border (white, gold while its tooltip is up).
+ *   - Gold fill inside the slot = recharge progress (rises from empty after
  *     use, full when ready). Seconds left are shown while cooling down.
  *   - Small E / F hint top-left on desktop only.
- *   - White tooltip chip with black text tucked under each slot (inner end
+ *   - Gold tooltip chip with black text tucked under each slot (inner end
  *     hidden behind the button, `tuck` px) while the ability
  *     is ready: DASH to the left, PAINT BOMB to the right. Tapping it fires
- *     the ability too. Mobile adds the white bridge strip joining slot and chip.
+ *     the ability too. Mobile adds the gold bridge strip joining slot and chip.
  *     Bridge + tooltips render before the slots so buttons win the overlap
  *     (snowdrift: hotbarBridge → inventoryHotbar → prompts).
  *   - When any mode is 'alternate', a small chip above says whether this
@@ -31,12 +31,10 @@ import { getLungeHud, triggerLunge } from './lunge'
 import { getBombHud, triggerBomb } from './paintBomb'
 
 const SLOT_BG = Color4.create(1, 1, 1, 1)
-// Neutral white accent (was gold 1.0/0.8/0.3, Luke 2026-10-20). Fill is low alpha
-// so the white countdown / icon stay readable over it on the dark slot.
-const ACCENT = Color4.create(0.95, 0.95, 0.95, 1)
-const ACCENT_BORDER = Color4.create(0.95, 0.95, 0.95, 0.95)
-const ACCENT_FILL = Color4.create(1, 1, 1, 0.3)
-const WHITE_BORDER = Color4.create(1, 1, 1, 0.45) // cooling: dimmer than the ready border
+const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
+const GOLD_BORDER = Color4.create(1.0, 0.8, 0.3, 0.95)
+const GOLD_FILL = Color4.create(1.0, 0.8, 0.3, 0.9)
+const WHITE_BORDER = Color4.create(1, 1, 1, 0.75)
 const DIM_BORDER = Color4.create(1, 1, 1, 0.3)
 const BLACK = Color4.create(0, 0, 0, 1)
 const WHITE = Color4.White()
@@ -65,17 +63,14 @@ type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; 
 
 function KeyHint(props: { label: string }) {
   if (isMobile()) return null
-  // Plain black letter on the white slot (no badge).
   return (
-    <UiEntity
+    <Label
       key={`ui_pvp_key_${props.label}`}
-      uiTransform={{
-        positionType: 'absolute', position: { top: 5, left: 6 }, width: 18, height: 18,
-        justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
-      }}
-    >
-      <Label value={props.label} fontSize={13} color={BLACK} textAlign="middle-center" uiTransform={{ width: 18, height: 18 }} />
-    </UiEntity>
+      value={props.label}
+      fontSize={14}
+      color={BLACK}
+      uiTransform={{ positionType: 'absolute', position: { top: 6, left: 10 }, width: 16, height: 16 }}
+    />
   )
 }
 
@@ -83,7 +78,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
   const { hud, g } = props
   const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
-  const border = !hud.enabled ? DIM_BORDER : hud.ready ? ACCENT_BORDER : WHITE_BORDER
+  const border = !hud.enabled ? DIM_BORDER : hud.ready ? GOLD_BORDER : WHITE_BORDER
   return (
     <UiEntity
       key={`ui_pvp_slot_${props.id}`}
@@ -107,7 +102,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           <UiEntity
             key={`ui_pvp_fill_${props.id}`}
             uiTransform={{ width: '100%', height: `${Math.round(fill * 100)}%`, borderRadius: RADIUS_SM }}
-            uiBackground={{ color: ACCENT_FILL }}
+            uiBackground={{ color: GOLD_FILL }}
           />
         </UiEntity>
       )}
@@ -126,7 +121,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_glyph_${props.id}`}
           value={props.glyph ?? ''}
           fontSize={Math.round(g.icon * 0.9)}
-          color={!hud.enabled ? DIM : WHITE}
+          color={!hud.enabled ? DIM : BLACK}
           textAlign="middle-center"
           uiTransform={{ width: g.icon, height: g.icon }}
         />
@@ -136,7 +131,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_cd_${props.id}`}
           value={`${Math.ceil(hud.cooldown)}`}
           fontSize={Math.round(g.slot * 0.36)}
-          color={WHITE}
+          color={BLACK}
           textAlign="middle-center"
           uiTransform={{ positionType: 'absolute', width: '100%', height: '100%' }}
         />
@@ -162,9 +157,9 @@ function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPr
         padding: props.side === 'left'
           ? { left: g.tipPadX, right: g.tipPadX + g.tuck }
           : { left: g.tipPadX + g.tuck, right: g.tipPadX },
-        borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: ACCENT_BORDER, pointerFilter: 'block',
+        borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: GOLD_BORDER, pointerFilter: 'block',
       }}
-      uiBackground={{ color: ACCENT }}
+      uiBackground={{ color: GOLD }}
       onMouseDown={props.onPress}
     >
       <Label
@@ -191,7 +186,7 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
         margin: props.side === 'left' ? { right: g.bridgeInner } : { left: g.bridgeInner },
         width: g.bridgeW, height: g.tipH, pointerFilter: 'none',
       }}
-      uiBackground={{ color: ACCENT }}
+      uiBackground={{ color: GOLD }}
     />
   )
 }
@@ -235,7 +230,7 @@ export function AbilityHotbar() {
             uiTransform={{ height: 28, padding: { left: 12, right: 12 }, margin: { bottom: 8 }, borderRadius: 14, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: CHIP_BG }}
           >
-            <Label value={label} fontSize={14} color={label === 'PAINT ONLY' ? WHITE : ACCENT} textAlign="middle-center" />
+            <Label value={label} fontSize={14} color={label === 'PAINT ONLY' ? WHITE : GOLD} textAlign="middle-center" />
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
