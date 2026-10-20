@@ -327,6 +327,9 @@ export const ANVIL_PREDICT_CLOSE_M = 1.0
 export const ANVIL_BLEND_S = 0.2
 export const ANVIL_BLEND_FAR_S = 0.12
 export const ANVIL_SNAP_M = 3
+/** After the server confirms our predicted slide, keep rendering the local sim (it runs ~RTT ahead of the
+ *  snapshots on the same path) until the server anvil stops, diverges, or this many seconds pass. */
+export const ANVIL_PREDICT_CONFIRMED_MAX_S = 4
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
  *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
  *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).

@@ -125,6 +125,32 @@ for (let r = 0; r < 4; r++) {
     }
     check(`prediction stays within ANVIL_PREDICT_CLOSE_M of the server over the timeout (max ${maxErr.toFixed(3)} m)`, maxErr <= ANVIL_PREDICT_CLOSE_M)
   }
+  {
+    // Reconcile without rollback: the server applies our hit ~100 ms later (RTT) on the same path, so
+    // every snapshot must trail the client sim along the travel direction (never ahead / off to the
+    // side), and both must come to rest at ~the same spot (the only blend left is that tiny gap).
+    const srv = new AnvilWorld(), cli = new AnvilWorld()
+    srv.setMaze(buildWalkableGraph(tiles), tiles, tp)
+    cli.setMaze(buildWalkableGraph(tiles), tiles, [], false)
+    Object.assign(cli.anvils[0], { pos: { ...srv.anvils[0].pos }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false })
+    const ux = 0.6, uz = 0.8, LAG = 0.1
+    cli.hit(0, ux, uz)
+    let minAlong = 1e9, maxSide = 0, t = 0
+    for (; t < 6; t += 1 / 60) {
+      if (Math.abs(t - LAG) < 1 / 120) srv.hit(0, ux, uz)
+      srv.tick(1 / 60); cli.tick(1 / 60)
+      if (t > LAG + 0.2 && !srv.isMoving(srv.anvils[0]) && !cli.isMoving(cli.anvils[0])) break // both at rest (before any respawn)
+      const s0 = srv.anvils[0], c0 = cli.anvils[0]
+      if (t > LAG && s0.alive && c0.alive && Math.hypot(s0.vel.x, s0.vel.z) > 0.05) {
+        const ex = c0.pos.x - s0.pos.x, ez = c0.pos.z - s0.pos.z
+        minAlong = Math.min(minAlong, ex * ux + ez * uz); maxSide = Math.max(maxSide, Math.abs(ex * uz - ez * ux))
+      }
+    }
+    const s0 = srv.anvils[0], c0 = cli.anvils[0]
+    const rest = s0.alive === c0.alive && (!s0.alive || Math.hypot(s0.pos.x - c0.pos.x, s0.pos.z - c0.pos.z) < 0.1)
+    check(`lagged server trails the prediction (min ahead ${minAlong.toFixed(3)} m, max side ${maxSide.toFixed(3)} m)`, minAlong > -0.1 && maxSide <= ANVIL_PREDICT_CLOSE_M * 0.5)
+    check(`prediction and lagged server end at the same spot (alive ${c0.alive}/${s0.alive}, gap ${Math.hypot(s0.pos.x - c0.pos.x, s0.pos.z - c0.pos.z).toFixed(3)} m, v ${Math.hypot(s0.vel.x, s0.vel.z).toFixed(2)}/${Math.hypot(c0.vel.x, c0.vel.z).toFixed(2)})`, rest)
+  }
   w.anvils[1].pos.y = -1000; w.anvils[1].tracking = true; w.tick(0.05)
   check('fallen anvil hides', !w.anvils[1].alive && w.anvils[1].respawnIn > 0)
   w.tick(LUNGE_DUMMY_RESPAWN_S + 0.1)

@@ -17,7 +17,7 @@ import { Vector3, Quaternion } from '@dcl/sdk/math'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT,
   ANVIL_LAUNCH_ENABLED, ANVIL_LAUNCH_MIN_SPEED, ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, ANVIL_LAUNCH_COOLDOWN_S,
-  ANVIL_PREDICT_ENABLED, ANVIL_PREDICT_TIMEOUT_S, ANVIL_PREDICT_CLOSE_M, ANVIL_BLEND_S, ANVIL_BLEND_FAR_S, ANVIL_SNAP_M,
+  ANVIL_PREDICT_ENABLED, ANVIL_PREDICT_TIMEOUT_S, ANVIL_PREDICT_CLOSE_M, ANVIL_BLEND_S, ANVIL_BLEND_FAR_S, ANVIL_SNAP_M, ANVIL_PREDICT_CONFIRMED_MAX_S,
   BURST_KNOCKBACK, LUNGE_KNOCKBACK,
 } from '../shared/pvp'
 import { AnvilWorld } from '../shared/anvilSim'
@@ -55,6 +55,8 @@ type Dummy = {
   predicted: boolean // rendering our local prediction (own hit not yet confirmed by the server)
   predictLeft: number // s until we give up waiting for the server's snapshot of our hit
   predictSlide: number // server slide id when our predicted hit started
+  confirmed: boolean // server's snapshot for our hit matched; still rendering the (ahead-in-time) local sim
+  predictDir: V3 // horizontal unit travel direction of the prediction (for the lag check)
   offset: V3 // render offset from the server target, decayed over blendLeft / blendTotal
   blendLeft: number
   blendTotal: number
@@ -109,6 +111,8 @@ function startPredict(d: Dummy, i: number, dx: number, dz: number, kind: 0 | 1):
   }
   predictWorld.hit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
   d.predicted = true
+  d.confirmed = false
+  d.predictDir = { x: dx / len, y: 0, z: dz / len }
   d.predictLeft = ANVIL_PREDICT_TIMEOUT_S
   d.blendLeft = 0
 }
@@ -124,11 +128,39 @@ function serverTarget(d: Dummy): V3 {
 function endPredict(d: Dummy, i: number, why: string): void {
   if (!d.predicted) return
   d.predicted = false
+  d.confirmed = false
+  if (d.launchedSlide === -2 - d.predictSlide) d.launchedSlide = d.slide // launched during prediction: same slide
   const tgt = serverTarget(d)
   d.offset = { x: d.pos.x - tgt.x, y: d.pos.y - tgt.y, z: d.pos.z - tgt.z }
   const err = Math.hypot(d.offset.x, d.offset.y, d.offset.z)
   d.blendTotal = d.blendLeft = err <= ANVIL_PREDICT_CLOSE_M ? ANVIL_BLEND_S : ANVIL_BLEND_FAR_S
   console.log(`[Dummy ${i}] prediction ${why}: error ${err.toFixed(2)} m, blend ${d.blendTotal}s`)
+}
+
+/** Server snapshot while predicting. The snapshot trails our sim by ~RTT along the same path, so
+ *  blending to it straight away pulls the anvil backward. Instead, if the server is on our path and
+ *  behind us (not ahead, not off to the side), keep rendering the sim ("confirmed") and only blend
+ *  once the server anvil has stopped: both then rest at ~the same spot, so the blend is tiny. */
+function reconcile(d: Dummy, i: number, slide: number): void {
+  if (!d.confirmed && slide === d.predictSlide) return // still waiting for our hit's snapshot
+  if (d.confirmed && slide !== d.predictSlide) { endPredict(d, i, 'newer server slide (another hit)'); return }
+  const a = predictWorld.anvils[i]
+  const t = serverTarget(d)
+  const ex = a.pos.x - t.x, ez = a.pos.z - t.z
+  const along = ex * d.predictDir.x + ez * d.predictDir.z // > 0: we're ahead of the server
+  const side = Math.abs(ex * d.predictDir.z - ez * d.predictDir.x)
+  // Sim already fell off while the (trailing) server is still sliding: keep hiding, the server follows.
+  const lagOk = !a.alive ? d.moving || !d.alive
+    : d.alive && along > -0.1 && side <= ANVIL_PREDICT_CLOSE_M * 0.5 &&
+      along <= ANVIL_PREDICT_CLOSE_M + Math.hypot(d.vel.x, d.vel.z) * ANVIL_PREDICT_TIMEOUT_S
+  if (!lagOk) { endPredict(d, i, `diverged (ahead ${along.toFixed(2)} m, side ${side.toFixed(2)} m)`); return }
+  if (!d.moving) { endPredict(d, i, 'reconciled (server stopped)'); return }
+  if (!d.confirmed) {
+    if (d.launchedSlide === -2 - d.predictSlide) d.launchedSlide = -2 - slide
+    d.confirmed = true
+    d.predictSlide = slide
+    d.predictLeft = ANVIL_PREDICT_CONFIRMED_MAX_S
+  }
 }
 
 // Anvil launch contact volume: anvil ≈ 1.7 × 1.15 × 1.06 m around the feet point + player radius.
@@ -167,7 +199,7 @@ function render(d: Dummy, i: number, dt: number): void {
     const a = predictWorld.anvils[i]
     d.predictLeft -= dt
     if (a.alive) d.pos = { ...a.pos }
-    if (d.predictLeft <= 0) endPredict(d, i, 'timed out (no server snapshot for our hit)')
+    if (d.predictLeft <= 0) endPredict(d, i, d.confirmed ? 'confirmed, max time' : 'timed out (no server snapshot for our hit)')
     else {
       // Predicted fall off the map: hide until the server's respawn arrives.
       tr.position = a.alive ? Vector3.create(d.pos.x, d.pos.y, d.pos.z) : HIDDEN
@@ -202,7 +234,7 @@ export function initLungeDummy(): void {
     GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     const z = { x: 0, y: 0, z: 0 }
     dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
-      predicted: false, predictLeft: 0, predictSlide: -1, offset: { ...z }, blendLeft: 0, blendTotal: 1 })
+      predicted: false, confirmed: false, predictDir: { ...z }, predictLeft: 0, predictSlide: -1, offset: { ...z }, blendLeft: 0, blendTotal: 1 })
   }
   room.onMessage('anvilState', ({ a }) => {
     a.forEach((s, i) => {
@@ -217,10 +249,7 @@ export function initLungeDummy(): void {
       d.yaw = s.yaw
       d.slide = s.slide
       if (respawned) { d.predicted = false; d.blendLeft = 0; d.pos = { ...d.srv } } // appear in place (snap only on respawn)
-      else if (d.predicted && s.slide !== d.predictSlide) {
-        if (d.launchedSlide === -2 - d.predictSlide) d.launchedSlide = s.slide // launched during prediction: same slide
-        endPredict(d, i, 'reconciled') // server's state for our hit (or a newer one)
-      }
+      else if (d.predicted) reconcile(d, i, s.slide)
     })
   })
   engine.addSystem((dt: number) => {
