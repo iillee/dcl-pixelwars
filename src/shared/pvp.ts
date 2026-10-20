@@ -143,6 +143,16 @@ export const LUNGE_SLASH_HEIGHT = 1.1
 export const LUNGE_SLASH_FADE_S = 0.12
 /** Peak opacity. */
 export const LUNGE_SLASH_ALPHA = 0.85
+/** Intro (visual only; the hitbox is live from frame 0): 'grow' = scale up from the
+ *  fist point, 'fade' = alpha 0 → LUNGE_SLASH_ALPHA, 'both' = both together. */
+export const LUNGE_SLASH_INTRO: 'grow' | 'fade' | 'both' = 'both'
+/** Intro duration (s, ease-out), counted inside the active window. */
+export const LUNGE_SLASH_GROW_S = 0.07
+/** Starting scale for 'grow' (fraction of full size). */
+export const LUNGE_SLASH_START_SCALE = 0.15
+/** Fist point the slash grows from, in the attacker's frame (m): x = right, y = up from
+ *  the feet, z = forward. Right side because the 'punch' emote is right-handed. */
+export const LUNGE_SLASH_FIST_OFFSET = { x: 0.2, y: 1.15, z: 0.3 }
 /** Set true if the arc renders pointing backwards in the Explorer (plane UV orientation). */
 export const LUNGE_SLASH_FLIP = false
 
