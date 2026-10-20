@@ -164,6 +164,22 @@ export const SERVER_BURST_MAX_TRAVEL = 60
 export const BURST_RING_S = 0.35
 export const BURST_PARTICLES = 8
 export const BURST_AURA_ALPHA = 0.18
+/** Tile ripple (adapted from dcl-canvas paint.ts brush-lift overlays): cell-sized team
+ *  slabs on the attacker's level pop up and settle, rippling out to BURST_RADIUS.
+ *  Visual only; the flat ring stays alongside. */
+export const BURST_TILE_RIPPLE = true
+/** Time for the wave front to travel centre → BURST_RADIUS (s). */
+export const BURST_TILE_RIPPLE_S = 0.4
+/** Peak height above the floor (m) (dcl-canvas BRUSH_LIFT_METERS 0.25). */
+export const BURST_TILE_LIFT = 0.35
+/** Per-slab rise / settle times (s) (dcl-canvas 140 / 220 ms). */
+export const BURST_TILE_UP_S = 0.1
+export const BURST_TILE_DOWN_S = 0.2
+/** Slab footprint (m, cell = 2 m) and thickness (m). */
+export const BURST_TILE_SIZE = 1.9
+export const BURST_TILE_THICK = 0.3
+/** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
+export const BURST_TILE_POOL = 40
 
 /** Is Paint Burst live for this UTC round index? */
 export function burstEnabledForRound(roundIndex: number): boolean {

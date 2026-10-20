@@ -33,6 +33,7 @@ import {
 import { inBurst, burstDir, V3 } from '../shared/burst'
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId } from '../paint'
+import { initBurstRipple, startRipple } from './burstRipple'
 import { playDashHitSfx, playBurstSfx, BURST_SFX_SRC } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstPaint, sendBurstEnd } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
@@ -73,6 +74,7 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
 function showShockwave(p: V3, team: Team, local: boolean): void {
   const rgb = rgbOf(team)
+  startRipple(p, team) // raised-tile ripple (BURST_TILE_RIPPLE)
   const d = BURST_RADIUS * 2
   // Fast flat ring out to the shockwave radius (diameter 2R), fading.
   addFx(BURST_RING_S, e => {
@@ -274,6 +276,7 @@ export function initPaintBurst(): void {
   if (BURST_MODE === 'off') return
   initKnockbackState()
   knockForceEnt = engine.addEntity()
+  initBurstRipple()
   events.on('burst:state', s => {
     const wasCharged = charged
     progress = s.progress

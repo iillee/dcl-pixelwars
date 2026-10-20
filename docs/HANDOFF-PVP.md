@@ -25,6 +25,7 @@ Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponen
   - Paint: while active the client sends its current cell (on change + every 0.25 s); server paints `burstFootprint` (BFS on walkable adjacency inside a 3×3 square or 5-cell cross, |dy| ≤ 1.5) through applyPaint → normal paintDelta. Fall → burstEnd, no refund. F during active = nothing.
   - HUD: F slot shows `n/10` + fill while charging, full + tooltip BURST when ready, `Ns` + draining fill while active; icon `assets/images/burst.png`. Lunge untouched.
 - **Paint Burst tuning (2026-10-20):** charge 100 captures (HUD `n/100`); default footprint 7×7 square (`BURST_PAINT_RADIUS_CELLS = 3`, 'cross' still available); own impact sound `assets/sounds/burst_impact.wav` synthesized by `scripts/make-burst-sfx.py` (thump + whoosh + click), preloaded in `client/audio.ts`.
+- **Burst tile ripple (2026-10-20):** `client/burstRipple.ts`, flag `BURST_TILE_RIPPLE` (+ `BURST_TILE_*` tuning). Adapted from dcl-canvas paint.ts brush-lift overlays (box per cell, up 140 ms / down 220 ms, then despawn): here a pool of 40 cell-sized team slabs, cells = `burstFootprint` on a client copy of the walkable graph clipped to BURST_RADIUS (same level, no gaps), each delayed by distance so the pop ripples out over 0.4 s. Local + remote bursts. Flat ring kept.
 - Sections below describe the Dash/Bomb era and are kept for when they come back.
 
 ---
