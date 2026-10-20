@@ -35,6 +35,7 @@ function teleportHome(why: string): void {
   // Leave overview first so the cameraTarget look lands (as in snowdrift).
   exitOverview()
   movePlayerTo({ newRelativePosition: pos, cameraTarget: look }).catch(() => {})
+  events.emit('player:respawned', { why })
 }
 
 export function initPlayerNet(): void {

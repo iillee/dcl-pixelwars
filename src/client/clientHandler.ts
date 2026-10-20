@@ -89,6 +89,16 @@ function wireInbound(): void {
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
     events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
   })
+
+  room.onMessage('dashImpact', ({ attacker, target, dx, dz }) => {
+    events.emit('dash:impact', { attacker, target, dx, dz })
+  })
+}
+
+/** Dash prototype: report that our dash touched `target` (see client/dash.ts). */
+export function sendDashHit(target: string, dx: number, dz: number): void {
+  console.log(`[Client] → dashHit ${target.slice(0, 8)}`)
+  room.send('dashHit', { target, dx, dz })
 }
 
 // ─── Team assignment reply ────────────────────────────────────────────

@@ -20,10 +20,14 @@ const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
+export const DASH_SRC = 'assets/sounds/teleport.mp3'
+export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
 
 let musicEnt: Entity = 0 as Entity
 let muteClickEnt: Entity = 0 as Entity
 let claimSfxEnt: Entity = 0 as Entity
+let dashSfxEnt: Entity = 0 as Entity
+let dashHitSfxEnt: Entity = 0 as Entity
 let musicMuted = true
 let playStartMs = 0
 let pausedPositionSec = 0
@@ -33,6 +37,10 @@ export function initAudio(): void {
   Transform.create(muteClickEnt, { parent: engine.CameraEntity })
   claimSfxEnt = engine.addEntity()
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
+  dashSfxEnt = engine.addEntity()
+  Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
+  dashHitSfxEnt = engine.addEntity()
+  Transform.create(dashHitSfxEnt, { parent: engine.CameraEntity })
   musicEnt = engine.addEntity()
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
@@ -74,6 +82,24 @@ export function playClaimSfx(): void {
   AudioSource.createOrReplace(claimSfxEnt, {
     audioClipUrl: CLAIM_SRC,
     playing: true, loop: false, volume: 0.15, global: true,
+  })
+}
+
+/** Dash prototype: whoosh when the local player dashes. */
+export function playDashSfx(): void {
+  if (!dashSfxEnt) return
+  AudioSource.createOrReplace(dashSfxEnt, {
+    audioClipUrl: DASH_SRC,
+    playing: true, loop: false, volume: 0.5, global: true,
+  })
+}
+
+/** Dash prototype: hit thud for the attacker (on contact) and the victim (on knockback). */
+export function playDashHitSfx(): void {
+  if (!dashHitSfxEnt) return
+  AudioSource.createOrReplace(dashHitSfxEnt, {
+    audioClipUrl: DASH_HIT_SRC,
+    playing: true, loop: false, volume: 1, global: true,
   })
 }
 
