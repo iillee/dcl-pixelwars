@@ -37,6 +37,8 @@ import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
 import { initSpeedBonus } from './speed'
 import { initDash } from './dash'
+import { initPaintBomb } from './paintBomb'
+import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
@@ -132,6 +134,8 @@ export async function setupClient(): Promise<void> {
   initSpeedBonus()
   initBotVisual()
   initDash()
+  initPaintBomb()
+  setupTouchControls()
 
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.

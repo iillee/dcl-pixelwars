@@ -32,7 +32,12 @@ import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } 
 // so client (src/round.ts) and server share the exact same cadence. Do not
 // redefine here; edit the shared module if the cadence changes.
 import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
-import { dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH } from '../shared/dash'
+import {
+  dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
+  bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
+} from '../shared/pvp'
+import { bombCells, bombFloorY } from './paintBomb'
+import { SCENE_SIZE } from '../maze/generator'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -106,6 +111,9 @@ export async function setupServer(): Promise<void> {
   // Dash hit-window state per attacker (see the dashHit handler).
   const dashWindowStart = new Map<string, number>()
   const dashWindowTargets = new Map<string, Set<string>>()
+  // Paint Bomb: last accepted drop per bomber + bombs waiting on their fuse.
+  const lastBombAt = new Map<string, number>()
+  const pendingBombs: Array<{ from: string; team: number; x: number; y: number; z: number; at: number }> = []
 
   // Detect real disconnects so the bot respawns immediately when a
   // second player leaves (instead of waiting up to 60s for the activity
@@ -118,6 +126,7 @@ export async function setupServer(): Promise<void> {
     lastSnapshotAt.delete(userId)
     dashWindowStart.delete(userId)
     dashWindowTargets.delete(userId)
+    lastBombAt.delete(userId)
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -297,6 +306,53 @@ export async function setupServer(): Promise<void> {
     room.send('dashImpact', { attacker: from, target: victim.userId, dx: dx / len, dz: dz / len })
   })
 
+  // Paint Bomb (shared/pvp.ts). Position is the bomber's own report (the
+  // server can't see avatars); everything else is decided here: cooldown,
+  // floor snap, the painted circle (from the bot walkable graph, base lock
+  // via applyPaint) and the blast broadcast. Opponents knock themselves back.
+  room.onMessage('bombDrop', ({ x, y, z }, context) => {
+    const from = context?.from
+    if (!from) return
+    if (!bombEnabledForRound(currentRoundIndex())) return
+    const team = getTeam(from)
+    if (team === null) return
+    if (![x, y, z].every(isFinite) || x < 0 || z < 0 || x > SCENE_SIZE || z > SCENE_SIZE || y < -50 || y > 200) {
+      console.log(`[Server] bombDrop from ${from.slice(0, 8)} rejected: bad position`)
+      return
+    }
+    const now = Date.now()
+    const last = lastBombAt.get(from) ?? 0
+    if (now - last < SERVER_MIN_BOMB_GAP_S * 1000) {
+      console.log(`[Server] bombDrop from ${from.slice(0, 8)} rejected: cooldown (${now - last}ms)`)
+      return
+    }
+    lastBombAt.set(from, now)
+    markActive(from)
+    const by = bombFloorY(x, y, z) ?? y
+    pendingBombs.push({ from, team, x, y: by, z, at: now + BOMB_FUSE_S * 1000 })
+    room.send('bombArmed', { attacker: from, team, x, y: by, z })
+  })
+
+  engine.addSystem(() => {
+    if (pendingBombs.length === 0) return
+    const now = Date.now()
+    for (let i = pendingBombs.length - 1; i >= 0; i--) {
+      const b = pendingBombs[i]
+      if (now < b.at) continue
+      pendingBombs.splice(i, 1)
+      let gained = 0
+      for (const id of bombCells(b.x, b.y, b.z)) {
+        if (applyPaint(id, b.team)) gained++
+      }
+      if (gained > 0) {
+        leaderboardIncrement(b.from, gained)
+        roundCells.set(b.from, (roundCells.get(b.from) ?? 0) + gained)
+      }
+      console.log(`[Server] bombBlast ${b.from.slice(0, 8)} at ${b.x.toFixed(1)},${b.y.toFixed(1)},${b.z.toFixed(1)} → ${gained} cells`)
+      room.send('bombBlast', { attacker: b.from, team: b.team, x: b.x, y: b.y, z: b.z, cells: gained })
+    }
+  })
+
   // Snapshot handler (Phase 4 Step 5). Late/reloading clients ask once
   // after teamAssigned; we reply with the full paint map addressed to
   // just them. Rate limit: 1 per 5s per sender — a rapid reconnect loop
@@ -347,6 +403,8 @@ export async function setupServer(): Promise<void> {
       room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
     }
     roundCells.clear()
+    // A bomb armed in the old round would paint stale cell ids.
+    pendingBombs.length = 0
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is

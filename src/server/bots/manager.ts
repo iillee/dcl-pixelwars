@@ -196,6 +196,10 @@ export function tickBots(dtSec: number): void {
 /** Diagnostics for the coverage log. */
 export function botCount(): number { return bots.length }
 
+/** Current round's walkable graph (null until the first rebuild succeeds).
+ *  Also read by server/paintBomb to resolve the blast circle. */
+export function getWalkableGraph(): WalkableGraph | null { return graph }
+
 /**
  * Snapshot of every bot's current world position. Called by the server's
  * 2 Hz botPositions broadcast tick. Empty array = no bots (broadcast

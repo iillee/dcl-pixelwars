@@ -123,7 +123,7 @@ export const Messages = {
     })),
   }),
 
-  // Dash PvP prototype (shared/dash.ts, design/dash-prototype.md).
+  // Dash PvP prototype (shared/pvp.ts, design/pvp-prototype.md).
   // Client → Server: the sender's dash touched `target` (PlayerIdentityData
   // address) on the sender's screen. dx/dz = horizontal push direction.
   // The server can't see positions, so distance is the attacker's call;
@@ -134,6 +134,22 @@ export const Messages = {
   // client applies the knockback (a scene can only push its local player);
   // everyone else shows the impact effect. dx/dz normalised by the server.
   dashImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+
+  // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
+  // sender's position. Server checks round mode, team and cooldown, snaps
+  // it to the floor, broadcasts bombArmed, and after BOMB_FUSE_S paints
+  // the circle itself from its walkable graph (no client cell ids, so the
+  // paintTick cap doesn't apply) and broadcasts bombBlast.
+  bombDrop: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+
+  // Server → Clients (broadcast): telegraph. Everyone shows the blinking
+  // bomb + fuse + blast-area ring at (x, y, z).
+  bombArmed: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+
+  // Server → Clients (broadcast): detonation. Everyone shows the explosion;
+  // opponents of `team` within BOMB_KNOCKBACK_RADIUS push themselves.
+  // Painted cells arrive through the normal paintDelta tick.
+  bombBlast: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, cells: Schemas.Int }),
 }
 
 export const room = registerMessages(Messages)

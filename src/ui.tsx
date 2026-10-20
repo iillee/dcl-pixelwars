@@ -6,7 +6,7 @@ import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { OverviewUi } from "./client/overviewUi"
-import { DashUi } from "./client/dashUi"
+import { AbilityHotbar } from "./client/abilityHotbar"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -207,8 +207,8 @@ export const uiMenu = () => (
         Rendered before the banner so the banner stays on top. */}
     <OverviewUi />
 
-    {/* ─── Right edge, lower: Dash prototype button (client/dashUi.tsx). */}
-    <DashUi />
+    {/* ─── Bottom centre: PvP prototype hotbar, Dash (E) + Paint Bomb (F). */}
+    <AbilityHotbar />
 
     {/* ─── Round-end banner: centered full-screen overlay ─────────────
         Fills the viewport so headline + subline are visually centered

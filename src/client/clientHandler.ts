@@ -93,6 +93,20 @@ function wireInbound(): void {
   room.onMessage('dashImpact', ({ attacker, target, dx, dz }) => {
     events.emit('dash:impact', { attacker, target, dx, dz })
   })
+
+  room.onMessage('bombArmed', ({ attacker, team, x, y, z }) => {
+    events.emit('bomb:armed', { attacker, team: team as Team, x, y, z })
+  })
+
+  room.onMessage('bombBlast', ({ attacker, team, x, y, z, cells }) => {
+    events.emit('bomb:blast', { attacker, team: team as Team, x, y, z, cells })
+  })
+}
+
+/** Paint Bomb prototype: drop a bomb at our position (see client/paintBomb.ts). */
+export function sendBombDrop(x: number, y: number, z: number): void {
+  console.log(`[Client] → bombDrop ${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`)
+  room.send('bombDrop', { x, y, z })
 }
 
 /** Dash prototype: report that our dash touched `target` (see client/dash.ts). */

@@ -1,24 +1,34 @@
 /**
- * dash.ts — Dash PvP prototype config (EXPERIMENT, not approved V1 scope).
+ * pvp.ts — PvP prototype config: Dash (E) and Paint Bomb (F).
+ * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
  *
  * Pure constants + helpers, no engine imports: read by the client
- * (client/dash.ts, client/dashUi.tsx) and the server (dashHit validation),
- * so both sides agree on whether Dash is live this round.
+ * (client/dash.ts, client/paintBomb.ts, client/abilityHotbar.tsx) and the
+ * server (dashHit / bombDrop validation), so both sides agree on whether
+ * an ability is live this round.
  *
- * Every magnitude below is a first guess — the SDK does not document the
- * units of Physics impulses/forces (the docs examples use 40–50). Tune in
- * a two-player playtest. See design/dash-prototype.md.
+ * Dash magnitudes are first guesses — the SDK does not document the units
+ * of Physics impulses/forces (the docs examples use 40–50). Paint Bomb
+ * knockback reuses flagtag's tuned bomb values. Tune in a two-player playtest.
  */
 
 /**
- * 'on'        — Dash every round.
- * 'off'       — Dash disabled everywhere (no button, server drops hits).
- * 'alternate' — Dash only on even UTC round indices, so a paint-only round
- *               and a Dash round alternate (playtest comparison).
+ * 'on'        — every round.
+ * 'off'       — disabled everywhere (no slot, server drops requests).
+ * 'alternate' — only on even UTC round indices, so a paint-only round and
+ *               an ability round alternate (playtest comparison).
  */
-export type DashMode = 'on' | 'off' | 'alternate'
-export const DASH_MODE: DashMode = 'on'
+export type AbilityMode = 'on' | 'off' | 'alternate'
+export const DASH_MODE: AbilityMode = 'on'
+export const BOMB_MODE: AbilityMode = 'on'
 
+export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
+  if (mode === 'on') return true
+  if (mode === 'off') return false
+  return roundIndex % 2 === 0
+}
+
+// ═══ Dash (E) ═══════════════════════════════════════════════════════
 // ─── Attacker burst ─────────────────────────────────────────────────
 /** Length of the dash (s): the sustain force and the hit window. */
 export const DASH_DURATION_S = 0.4
@@ -66,7 +76,37 @@ export const SERVER_MAX_HITS_PER_DASH = 3
 
 /** Is Dash live for this UTC round index (shared/roundTiming getRoundIndex)? */
 export function dashEnabledForRound(roundIndex: number): boolean {
-  if (DASH_MODE === 'on') return true
-  if (DASH_MODE === 'off') return false
-  return roundIndex % 2 === 0
+  return modeEnabledForRound(DASH_MODE, roundIndex)
+}
+
+// ═══ Paint Bomb (F) ═════════════════════════════════════════════════
+// Starting point: flagtag's bomb (src/systems/bombSystem.ts,
+// src/server/combat.ts). Kept from flagtag: 6 m blast radius, knockback
+// Physics.applyKnockbackToPlayer(blast, 40, radius, LINEAR), fireball +
+// shockwave + debris FX, blinking Bomb_01/Bomb_red model, fuse +
+// bomb_exploding sounds. Changed for pixelwars: 0.4 s fuse (flagtag 5 s),
+// 8 s cooldown (flagtag 10 s), no stun/emote/input lock, paints a circle.
+
+/** Telegraph time between the press and the blast (s). */
+export const BOMB_FUSE_S = 0.4
+/** Seconds between bombs. Keeps running through respawn (never reset). */
+export const BOMB_COOLDOWN_S = 8
+/** Walkable cells whose centre is within this horizontal distance get painted (m). */
+export const BOMB_PAINT_RADIUS = 5.5
+/** Only cells within this height of the blast are painted (no painting through levels). */
+export const BOMB_PAINT_MAX_DY = 3
+/** Opponents within this 3D distance of the blast are knocked back (flagtag: 6). */
+export const BOMB_KNOCKBACK_RADIUS = 6
+/** applyKnockbackToPlayer magnitude at the centre, LINEAR falloff to 0 at the radius (flagtag: 40). */
+export const BOMB_KNOCKBACK = 40
+/** Extra upward impulse at the centre (same falloff), so floor friction doesn't eat the push. 0 = off. */
+export const BOMB_KNOCKBACK_LIFT = 8
+/** Server snaps the bomb down onto the floor if a walkable cell is this close below (m). */
+export const BOMB_SNAP_MAX_DROP = 4
+/** Server cooldown slack: accept the next bomb this long after the previous one (s). */
+export const SERVER_MIN_BOMB_GAP_S = BOMB_COOLDOWN_S - 0.5
+
+/** Is Paint Bomb live for this UTC round index? */
+export function bombEnabledForRound(roundIndex: number): boolean {
+  return modeEnabledForRound(BOMB_MODE, roundIndex)
 }

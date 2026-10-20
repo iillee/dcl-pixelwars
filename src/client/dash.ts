@@ -1,19 +1,18 @@
 /**
  * dash.ts — Dash PvP prototype, client side (EXPERIMENT, not V1 scope).
  *
- * Config lives in shared/dash.ts; flow and limitations in
- * design/dash-prototype.md. In short:
- *   1. F (IA_SECONDARY) or the on-screen DASH button → impulse + short
- *      sustain force on the LOCAL player along its movement direction
- *      (avatar facing when standing still). Cooldown DASH_COOLDOWN_S.
+ * Config lives in shared/pvp.ts; flow and limitations in
+ * design/pvp-prototype.md. In short:
+ *   1. E (IA_PRIMARY) or the DASH hotbar slot → impulse + short sustain
+ *      force on the LOCAL player along its movement direction (avatar
+ *      facing when standing still). Cooldown DASH_COOLDOWN_S.
  *   2. During the hit window this client checks enemy avatars it can see
  *      (PlayerIdentityData + Transform, team from the roster) and reports
  *      the first contact per target as dashHit.
  *   3. The server validates and broadcasts dashImpact. The TARGET's own
  *      client pushes itself (a scene can only move its local player);
  *      everyone shows a flash + positional pop at the target.
- * Respawn (client/player teleportHome) grants RESPAWN_IMMUNITY_S of
- * knockback immunity. The cooldown is never reset.
+ * Respawn immunity lives in client/knockback. The cooldown is never reset.
  */
 
 import {
@@ -28,10 +27,11 @@ import {
   DASH_MODE, DASH_DURATION_S, DASH_COOLDOWN_S, DASH_IMPULSE, DASH_LIFT, DASH_FORCE,
   DASH_STOP_ON_HIT, DASH_MIN_MOVE_SPEED, HIT_RADIUS, HIT_MAX_DY, HIT_WINDOW_S,
   KNOCKBACK_DASH_DIR_WEIGHT, KNOCKBACK_IMPULSE, KNOCKBACK_LIFT, KNOCKBACK_FORCE,
-  KNOCKBACK_FORCE_S, RESPAWN_IMMUNITY_S, dashEnabledForRound,
-} from '../shared/dash'
+  KNOCKBACK_FORCE_S, dashEnabledForRound,
+} from '../shared/pvp'
 import { playDashSfx, playDashHitSfx, DASH_HIT_SRC } from './audio'
 import { sendDashHit } from './clientHandler'
+import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
 const FLASH_S = 0.3
 /** Entity outlives the mesh so the positional pop (~0.37 s) isn't cut off. */
@@ -42,13 +42,9 @@ const FLASH_TO = 2.6
 const MAX_SANE_SPEED = 60
 const VEL_SMOOTH_RATE = 12
 
-let myTeam: Team = Team.None
-const teamByUser = new Map<string, Team>() // lowercased userId → team
-
 let cooldownLeft = 0
 let dashLeft = 0      // sustain force time left
 let hitWindowLeft = 0
-let immuneLeft = 0
 let dashDir = { x: 0, z: 1 }
 const hitThisDash = new Set<string>()
 
@@ -61,33 +57,26 @@ let knockForceEnt: Entity = 0 as Entity
 type Flash = { ent: Entity; t: number }
 const flashes: Flash[] = []
 
-function myAddress(): string {
-  return (PlayerIdentityData.getOrNull(engine.PlayerEntity)?.address ?? '').toLowerCase()
-}
-
 export function isDashEnabledNow(): boolean {
   return dashEnabledForRound(getRoundIndex())
 }
 
-/** HUD state for client/dashUi.tsx. */
-export function getDashHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; roundLabel: string } {
+/** HUD state for client/abilityHotbar.tsx. cooldownFrac: 1 = just used, 0 = ready. */
+export function getDashHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number } {
   const enabled = isDashEnabledNow()
+  const cd = Math.max(0, cooldownLeft)
   return {
     show: DASH_MODE !== 'off',
     enabled,
-    ready: enabled && myTeam !== Team.None && cooldownLeft <= 0,
-    cooldown: Math.max(0, cooldownLeft),
-    roundLabel: DASH_MODE === 'alternate' ? (enabled ? 'DASH ROUND' : 'PAINT ONLY') : '',
+    ready: enabled && localTeam() !== Team.None && cd <= 0,
+    cooldown: cd,
+    cooldownFrac: cd / DASH_COOLDOWN_S,
   }
 }
 
-function safe(what: string, fn: () => void): void {
-  try { fn() } catch (err) { console.log(`[Dash] ${what} failed (Physics unsupported?):`, err) }
-}
-
-/** Start a dash if allowed. Bound to F and the DASH button. */
+/** Start a dash if allowed. Bound to E and the DASH slot/tooltip. */
 export function triggerDash(): void {
-  if (!isDashEnabledNow() || myTeam === Team.None || cooldownLeft > 0) return
+  if (!isDashEnabledNow() || localTeam() === Team.None || cooldownLeft > 0) return
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return
 
@@ -105,7 +94,7 @@ export function triggerDash(): void {
   hitWindowLeft = HIT_WINDOW_S
   hitThisDash.clear()
 
-  safe('dash impulse', () => {
+  safePhysics('dash impulse', () => {
     Physics.applyImpulseToPlayer(Vector3.create(dashDir.x * DASH_IMPULSE, DASH_LIFT, dashDir.z * DASH_IMPULSE))
     if (DASH_FORCE > 0) {
       Physics.applyForceToPlayerForDuration(dashForceEnt, DASH_DURATION_S, Vector3.create(dashDir.x, 0, dashDir.z), DASH_FORCE)
@@ -117,7 +106,7 @@ export function triggerDash(): void {
 
 function stopDashForce(): void {
   dashLeft = 0
-  if (DASH_FORCE > 0) safe('remove dash force', () => Physics.removeForceFromPlayer(dashForceEnt))
+  if (DASH_FORCE > 0) safePhysics('remove dash force', () => Physics.removeForceFromPlayer(dashForceEnt))
 }
 
 function spawnFlash(pos: Vector3, team: Team, withSound: boolean): void {
@@ -146,11 +135,12 @@ function avatarPosition(addressLower: string): Vector3 | null {
 }
 
 function checkHits(me: Vector3): void {
+  const myTeam = localTeam()
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
     const uid = pid.address.toLowerCase()
     if (!uid || hitThisDash.has(uid)) continue
-    const team = teamByUser.get(uid)
+    const team = teamOfUser(uid)
     if (team !== Team.Red && team !== Team.Blue) continue
     if (team === myTeam) continue
     const p = tr.position
@@ -177,15 +167,15 @@ function onImpact(attacker: string, target: string, dx: number, dz: number): voi
   const me = myAddress()
   const att = attacker.toLowerCase()
   const tgt = target.toLowerCase()
-  const attackerTeam = teamByUser.get(att) ?? Team.None
+  const attackerTeam = teamOfUser(att)
 
   if (me && tgt === me) {
     const pos = Transform.getOrNull(engine.PlayerEntity)?.position
-    if (immuneLeft > 0 || !isDashEnabledNow()) {
-      console.log(`[Dash] impact from ${att.slice(0, 8)} ignored (immune=${immuneLeft > 0})`)
+    if (isKnockbackImmune() || !isDashEnabledNow()) {
+      console.log(`[Dash] impact from ${att.slice(0, 8)} ignored (immune=${isKnockbackImmune()})`)
       return
     }
-    safe('knockback', () => {
+    safePhysics('dash knockback', () => {
       Physics.applyImpulseToPlayer(Vector3.create(dx * KNOCKBACK_IMPULSE, KNOCKBACK_LIFT, dz * KNOCKBACK_IMPULSE))
       if (KNOCKBACK_FORCE > 0) {
         Physics.applyForceToPlayerForDuration(knockForceEnt, KNOCKBACK_FORCE_S, Vector3.create(dx, 0, dz), KNOCKBACK_FORCE)
@@ -204,16 +194,11 @@ function onImpact(attacker: string, target: string, dx: number, dz: number): voi
 
 export function initDash(): void {
   if (DASH_MODE === 'off') return
+  initKnockbackState()
   dashForceEnt = engine.addEntity()
   knockForceEnt = engine.addEntity()
 
-  events.on('team:assigned', ({ team }) => { myTeam = team })
-  events.on('team:roster', ({ entries }) => {
-    teamByUser.clear()
-    for (const { userId, team } of entries) teamByUser.set(userId.toLowerCase(), team)
-  })
   events.on('player:respawned', () => {
-    immuneLeft = RESPAWN_IMMUNITY_S
     lastPos = null
     vel.x = 0; vel.z = 0
   })
@@ -221,7 +206,6 @@ export function initDash(): void {
 
   engine.addSystem((dt: number) => {
     if (cooldownLeft > 0) cooldownLeft -= dt
-    if (immuneLeft > 0) immuneLeft -= dt
 
     const t = Transform.getOrNull(engine.PlayerEntity)
     if (t && dt > 0) {
@@ -237,7 +221,7 @@ export function initDash(): void {
       lastPos = Vector3.clone(p)
     }
 
-    if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) triggerDash()
+    if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) triggerDash()
 
     if (dashLeft > 0) dashLeft -= dt
     if (hitWindowLeft > 0) {
