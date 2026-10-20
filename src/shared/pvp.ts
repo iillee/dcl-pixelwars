@@ -139,16 +139,18 @@ export const LUNGE_DEBUG = false
 /** Active lunge time (s). Hits only count in this window (+ grace). */
 export const LUNGE_ACTIVE_S = 0.20
 /** Target travel (m). Informational: drives the impulse below, logged vs measured. */
-export const LUNGE_DISTANCE = 2.0
-/** Horizontal impulse at start (Δv, assumed m/s: 2.0 m / 0.20 s = 10, +20% for
- *  ground friction). Cancelled by a brake impulse at the end, so the lunge
- *  stops where it should instead of sliding/launching. Units unconfirmed:
- *  tune with the logged "[Lunge] travelled" distance. */
-export const LUNGE_IMPULSE = 12
+export const LUNGE_DISTANCE = 4.0 // was 2.0: Luke wants to overtake a player you're chasing
+/** Horizontal impulse at start (Δv, assumed m/s: 4.0 m / 0.20 s = 20, +20% for
+ *  ground friction). Added ON TOP of run speed. Cancelled by a brake impulse at
+ *  the end that removes only the lunge's extra speed (run speed is kept), so the
+ *  lunge stops cleanly instead of sliding/launching. Units unconfirmed: tune with
+ *  the logged "[Lunge] travelled" distance (measured from the press, run included). */
+export const LUNGE_IMPULSE = 24 // was 12
 /** Vertical part of the attacker's impulse. 0 = surface-following, no ramp launches. */
 export const LUNGE_LIFT = 0
-/** Brake at the end: fraction of the start impulse removed (scaled by measured
- *  remaining speed / peak speed, so a lunge into a wall doesn't bounce back). */
+/** Brake at the end: fraction of the start impulse removed, scaled by the lunge's
+ *  remaining EXTRA speed (forward speed minus the speed at the press) / its peak
+ *  extra, so run momentum survives and a lunge into a wall doesn't bounce back. */
 export const LUNGE_BRAKE = 1.0
 /** After the active window: no new lunge, run/jog/jump disabled (walk only). */
 export const LUNGE_RECOVERY_S = 0.20

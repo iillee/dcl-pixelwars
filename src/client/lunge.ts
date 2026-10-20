@@ -66,6 +66,8 @@ let hitWindowLeft = 0
 let hitAny = false
 let peakSpeed = 0
 let curSpeed = 0
+let baseSpeed = 0 // forward speed at the press (run momentum), kept by the brake
+const lastVel = { x: 0, z: 0 }
 const hitThis = new Set<string>()
 const gate = new ImpactGate(LUNGE_IMPACT_MAX_AGE_MS)
 let knockForceEnt: Entity = 0 as Entity
@@ -216,7 +218,9 @@ export function triggerLunge(): void {
   state = 'active'; stateLeft = LUNGE_ACTIVE_S
   cooldownLeft = LUNGE_COOLDOWN_S
   hitWindowLeft = LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S
-  hitAny = false; peakSpeed = 0; curSpeed = 0
+  hitAny = false
+  baseSpeed = Math.max(0, lastVel.x * dir.x + lastVel.z * dir.z)
+  peakSpeed = baseSpeed; curSpeed = baseSpeed
   hitThis.clear()
   setReducedControl(true)
   safePhysics('lunge impulse', () => {
@@ -234,12 +238,14 @@ export function triggerLunge(): void {
 
 function endActive(): void {
   // Brake: cancel what's left of the start impulse (no slide, no launch carry).
-  const frac = peakSpeed > 1e-3 ? Math.max(0, Math.min(1, curSpeed / peakSpeed)) : 1
+  // Only the lunge's extra speed above the run speed at the press is braked.
+  const peakExtra = peakSpeed - baseSpeed
+  const frac = peakExtra > 0.5 ? Math.max(0, Math.min(1, (curSpeed - baseSpeed) / peakExtra)) : 1
   const b = LUNGE_IMPULSE * LUNGE_BRAKE * frac
   if (b > 0.01) safePhysics('lunge brake', () => Physics.applyImpulseToPlayer(Vector3.create(-dir.x * b, 0, -dir.z * b)))
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   const travelled = p ? Math.hypot(p.x - startPos.x, p.z - startPos.z) : 0
-  console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE}) hit=${hitAny} brake=${frac.toFixed(2)}`)
+  console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE}) hit=${hitAny} brake=${frac.toFixed(2)} run=${baseSpeed.toFixed(1)} peak=${peakSpeed.toFixed(1)}`)
   if (!hitAny && p) spawnFx({ x: p.x, y: p.y + 0.15, z: p.z }, GREY, 0.2, 0.2, 0.3, 0.9, 0.35) // miss: dust
   state = 'recovery'; stateLeft = LUNGE_RECOVERY_S
   dbgLog(`#${lungeId} → recovery`)
@@ -374,6 +380,10 @@ export function initLunge(): void {
       if (stateLeft <= 0) { setReducedControl(false); state = cooldownLeft > 0 ? 'cooldown' : 'ready'; dbgLog(`#${lungeId} → ${state}`) }
     } else if (state === 'cooldown' && cooldownLeft <= 0) {
       state = 'ready'
+    }
+    if (pos && prevPos && dt > 0) {
+      const vx = (pos.x - prevPos.x) / dt, vz = (pos.z - prevPos.z) / dt
+      if (Math.hypot(vx, vz) < 60) { lastVel.x = vx; lastVel.z = vz } // ignore teleports
     }
     prevPos = pos
 
