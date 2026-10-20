@@ -160,3 +160,21 @@ export function toggleMusic(): void {
     musicMuted = false
   }
 }
+
+/** Paint Burst shockwave (synthesized by scripts/make-burst-sfx.py: low thump + whoosh + click).
+ *  Preloaded at startup; the local burst plays it from a camera-parented source,
+ *  remote bursts play it positionally (client/paintBurst.ts). */
+export const BURST_SFX_SRC = 'assets/sounds/burst_impact.wav'
+let burstSfxEnt: Entity | null = null
+function initBurstSfx(): void {
+  const pre = engine.addEntity()
+  AssetLoad.create(pre, { assets: [BURST_SFX_SRC] })
+  burstSfxEnt = engine.addEntity()
+  Transform.create(burstSfxEnt, { parent: engine.CameraEntity })
+  AudioSource.create(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: false, loop: false, volume: 1, global: true })
+}
+/** Local player's Paint Burst: on the input frame. */
+export function playBurstSfx(): void {
+  if (!burstSfxEnt) return
+  AudioSource.createOrReplace(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
+}
