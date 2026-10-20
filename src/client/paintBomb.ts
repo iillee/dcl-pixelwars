@@ -91,7 +91,6 @@ function releaseBomb(b: PooledBomb): void {
 type Telegraph = {
   attacker: string
   bomb: PooledBomb | null
-  ring: Entity
   fuse: Entity
   pos: Vector3
   t: number
@@ -120,27 +119,17 @@ function startTelegraph(attacker: string, team: Team, pos: Vector3): void {
     t.scale = Vector3.create(BOMB_SCALE, BOMB_SCALE, BOMB_SCALE)
     setBlink(bomb, false)
   }
-  // Blast-area ring: flat team-coloured disc that grows to the paint radius
-  // over the fuse, so everyone can read where the paint (and the push) lands.
-  const ring = engine.addEntity()
-  Transform.create(ring, { position: Vector3.create(pos.x, pos.y + 0.08, pos.z), scale: Vector3.create(0.5, 0.02, 0.5) })
-  MeshRenderer.setCylinder(ring)
-  Material.setPbrMaterial(ring, {
-    albedoColor: teamColor(team, 0.35),
-    emissiveColor: teamColor(team, 1),
-    emissiveIntensity: 1.5,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-  })
+  // No growing blast-area ring (Luke: read as a 'loading circle'). The
+  // telegraph is the blinking bomb GLB + fuse.mp3; the blast FX shows the area.
   const fuse = engine.addEntity()
   Transform.create(fuse, { position: Vector3.create(pos.x, pos.y + 0.5, pos.z) })
   AudioSource.create(fuse, { audioClipUrl: FUSE_SRC, playing: true, loop: false, volume: 0.6, global: false })
-  telegraphs.set(attacker, { attacker, bomb, ring, fuse, pos: Vector3.clone(pos), t: 0, blinkT: 0, blinkRed: false })
+  telegraphs.set(attacker, { attacker, bomb, fuse, pos: Vector3.clone(pos), t: 0, blinkT: 0, blinkRed: false })
 }
 
 function moveTelegraph(g: Telegraph, pos: Vector3): void {
   g.pos = Vector3.clone(pos)
   if (g.bomb) Transform.getMutable(g.bomb.root).position = Vector3.create(pos.x, pos.y, pos.z)
-  Transform.getMutable(g.ring).position = Vector3.create(pos.x, pos.y + 0.08, pos.z)
   Transform.getMutable(g.fuse).position = Vector3.create(pos.x, pos.y + 0.5, pos.z)
 }
 
@@ -149,7 +138,6 @@ function endTelegraph(attacker: string): void {
   if (!g) return
   telegraphs.delete(attacker)
   if (g.bomb) releaseBomb(g.bomb)
-  engine.removeEntity(g.ring)
   engine.removeEntity(g.fuse)
 }
 
@@ -296,9 +284,6 @@ export function initPaintBomb(): void {
     for (const g of Array.from(telegraphs.values())) {
       g.t += dt
       if (g.t >= TELEGRAPH_TIMEOUT_S) { endTelegraph(g.attacker); continue }
-      const u = Math.min(1, g.t / BOMB_FUSE_S)
-      const s = 0.5 + (BOMB_PAINT_RADIUS * 2 - 0.5) * u
-      Transform.getMutable(g.ring).scale = Vector3.create(s, 0.02, s)
       g.blinkT += dt
       if (g.bomb && g.blinkT >= BLINK_S) {
         g.blinkT = 0
