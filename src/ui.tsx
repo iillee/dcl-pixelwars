@@ -50,7 +50,8 @@ const BAR_W = 200
 const BAR_BORDER = 3
 const BAR_FILL_H = 16
 const BAR_INNER_W = BAR_W - BAR_BORDER * 2
-const BAR_INNER_R = BAR_FILL_H // renderer under-rounds at exactly h/2; over-size so the inner ends are fully round like the outer pill
+const BAR_INNER_R = BAR_FILL_H / 2
+const BAR_CAP = BAR_FILL_H / 2 // each end always shows its team colour (rounded cap) so nothing sits outside the bar at 0%
 const STAR_SIZE = 14
 const STAR_PAD = 4
 const STAR_SRC = 'assets/images/star_white.png'
@@ -167,12 +168,12 @@ export const uiMenu = () => (
                     uiTransform={{ width: '100%', height: '100%', borderRadius: BAR_INNER_R }}
                     uiBackground={{ color: Color4.White() }}
                   >
-                    {pct.red > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
+                    {<UiEntity
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: BAR_CAP + (BAR_INNER_W - BAR_CAP * 2) * pct.red / 100, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_RED }}
                     >{lead === 'red' && star}</UiEntity>}
-                    {pct.blue > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
+                    {<UiEntity
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (BAR_INNER_W - BAR_CAP * 2) * pct.blue / 100, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_BLUE }}
                     >{lead === 'blue' && star}</UiEntity>}
                   </UiEntity>
