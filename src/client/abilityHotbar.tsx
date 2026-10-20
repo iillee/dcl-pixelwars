@@ -206,7 +206,7 @@ export function AbilityHotbar() {
       {mobile && lungeTip && <Bridge id="lunge" side="left" g={g} />}
       {mobile && bombTip && <Bridge id="bomb" side="right" g={g} />}
       {lungeTip && <Tooltip id="lunge" side="left" text="LUNGE" onPress={triggerLunge} g={g} />}
-      {bombTip && <Tooltip id="bomb" side="right" text="PAINT BOMB" onPress={triggerBomb} g={g} />}
+      {bombTip && <Tooltip id="bomb" side="right" text="BOMB" onPress={triggerBomb} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
