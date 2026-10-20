@@ -42,8 +42,13 @@ const BLUE_COLOR   = Color4.create(106/255, 153/255, 252/255, 1) // pallet.jpeg 
 const COUNTDOWN_BG = Color4.create(0.1, 0.1, 0.1, 0.92)
 const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 
+// Territory bar styling taken from flagtag's drown (air) bar, src/ui/components/ProgressBar.tsx:
+// pill-shaped dark semi-transparent track (PANEL_BG_SEMI), uniform border padding, fully rounded
+// fills (radius = half the fill height). No texture, no label.
 const BAR_W = 200
-const BAR_H = 24
+const BAR_BORDER = 3
+const BAR_FILL_H = 16
+const BAR_TRACK = Color4.create(0.08, 0.08, 0.1, 0.87) // flagtag PANEL_BG_SEMI
 const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
 
@@ -137,17 +142,25 @@ export const uiMenu = () => (
               const pct = coveragePct()
               return (
                 <UiEntity
-                  uiTransform={{ width: BAR_W, height: BAR_H, margin: { top: 6 } }}
-                  uiBackground={{ color: Color4.White() }}
+                  uiTransform={{
+                    width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 },
+                    borderRadius: (BAR_FILL_H + BAR_BORDER * 2) / 2, padding: BAR_BORDER,
+                  }}
+                  uiBackground={{ color: BAR_TRACK }}
                 >
                   <UiEntity
-                    uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%' }}
-                    uiBackground={{ color: BAR_RED }}
-                  />
-                  <UiEntity
-                    uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%' }}
-                    uiBackground={{ color: BAR_BLUE }}
-                  />
+                    uiTransform={{ width: '100%', height: '100%', borderRadius: BAR_FILL_H / 2 }}
+                    uiBackground={{ color: Color4.White() }}
+                  >
+                    {pct.red > 0 && <UiEntity
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: BAR_FILL_H / 2 }}
+                      uiBackground={{ color: BAR_RED }}
+                    />}
+                    {pct.blue > 0 && <UiEntity
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: BAR_FILL_H / 2 }}
+                      uiBackground={{ color: BAR_BLUE }}
+                    />}
+                  </UiEntity>
                 </UiEntity>
               )
             })()}
