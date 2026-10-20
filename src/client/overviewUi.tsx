@@ -3,10 +3,9 @@
  *
  * Ported from dcl-snowdrift layer.cameraToggle.tsx (parcel-grid icon,
  * gold when active), restyled to the pixelwars HUD: same dark panel colour
- * and 18 px radius as the timer. Sits on the right edge, vertically
- * centred — clear of the top-centre timer/coverage pill, the full-screen
- * round banner (rendered above it) and the mobile joystick / jump buttons
- * at the bottom corners.
+ * and 18 px radius as the timer. Hidden behind a small eye (from
+ * dcl-snowdrift) under the timer's star; the eye opens the buttons as a row
+ * to the LEFT of the timer.
  */
 
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
@@ -38,7 +37,7 @@ function SmallButton(props: { id: string; label: string; enabled: boolean; onPre
   return (
     <UiEntity
       key={props.id}
-      uiTransform={{ width: SMALL, height: SMALL, margin: { bottom: 8 }, justifyContent: 'center', alignItems: 'center', borderRadius: 14, pointerFilter: 'block' }}
+      uiTransform={{ width: SMALL, height: SMALL, margin: { right: ROW_GAP }, justifyContent: 'center', alignItems: 'center', borderRadius: 14, pointerFilter: 'block' }}
       uiBackground={{ color: PANEL_BG }}
       onMouseDown={() => { if (!props.enabled) return; playUiClick(); props.onPress() }}
     >
@@ -47,29 +46,52 @@ function SmallButton(props: { id: string; label: string; enabled: boolean; onPre
   )
 }
 
-/** Right-edge overview column. Render inside the full-screen UI root. */
-export function OverviewUi() {
+// Eye toggle (icon + tint copied from dcl-snowdrift layer.brushSize.tsx SpectatorButton:
+// assets/images/eye.png, white silhouette, 3:2 box, gold while active).
+const EYE_SRC = 'assets/images/eye.png'
+const EYE_W = 21
+const EYE_H = 14
+const ROW_GAP = 8
+let rowOpen = false
+
+/** Small eye under the timer's star (absolute inside the timer panel): opens/closes the row. */
+export function OverviewEye() {
+  return (
+    <UiEntity
+      key="ui_overview_eye"
+      uiTransform={{
+        width: EYE_W, height: EYE_H,
+        positionType: 'absolute', position: { top: 46, left: 19 },
+        pointerFilter: 'block',
+      }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: rowOpen || isOverviewActive() ? GOLD : Color4.White() }}
+      onMouseDown={() => { playUiClick(); rowOpen = !rowOpen }}
+    />
+  )
+}
+
+/** Overview buttons in a row popping out to the LEFT of the timer column (absolute in it). */
+export function OverviewRow() {
+  if (!rowOpen) return null
   const on = isOverviewActive()
   return (
     <UiEntity
-      key="ui_overview_wrap"
+      key="ui_overview_row"
       uiTransform={{
-        width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
-        flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', pointerFilter: 'none',
+        positionType: 'absolute', position: { top: 0, right: 200 + ROW_GAP },
+        flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
-      <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { right: 32 }, pointerFilter: 'none' }}>
-        {on && <SmallButton id="ov_in" label="+" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
-        {on && <SmallButton id="ov_out" label="−" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
-        {on && <SmallButton id="ov_rot" label="⟳" enabled={true} onPress={() => rotateOverview(1)} />}
-        <UiEntity
-          key="ui_overview_btn"
-          uiTransform={{ width: BTN, height: BTN, justifyContent: 'center', alignItems: 'center', borderRadius: 18, pointerFilter: 'block' }}
-          uiBackground={{ color: PANEL_BG }}
-          onMouseDown={() => { playUiClick(); toggleOverview() }}
-        >
-          <ParcelGridIcon color={on ? GOLD : Color4.White()} />
-        </UiEntity>
+      {on && <SmallButton id="ov_in" label="+" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
+      {on && <SmallButton id="ov_out" label="−" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
+      {on && <SmallButton id="ov_rot" label="⟳" enabled={true} onPress={() => rotateOverview(1)} />}
+      <UiEntity
+        key="ui_overview_btn"
+        uiTransform={{ width: BTN, height: BTN, justifyContent: 'center', alignItems: 'center', borderRadius: 18, pointerFilter: 'block' }}
+        uiBackground={{ color: PANEL_BG }}
+        onMouseDown={() => { playUiClick(); toggleOverview() }}
+      >
+        <ParcelGridIcon color={on ? GOLD : Color4.White()} />
       </UiEntity>
     </UiEntity>
   )

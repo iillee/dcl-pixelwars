@@ -6,7 +6,7 @@ import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
-import { OverviewUi } from "./client/overviewUi"
+import { OverviewEye, OverviewRow } from "./client/overviewUi"
 import { AbilityHotbar } from "./client/abilityHotbar"
 
 // Popup open/close state — module-local, driven by star-button clicks.
@@ -106,6 +106,7 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
+            <OverviewRow />
             <UiEntity
               uiTransform={{
                 width: 200, height: 68,
@@ -128,6 +129,7 @@ export const uiMenu = () => (
               >
                 <Label value="★" fontSize={22} color={Color4.White()} textAlign="middle-center" />
               </UiEntity>
+              <OverviewEye />
               {/* Mute icon docked inside the timer panel on the right. No pill
                   background — just the icon sitting on the panel. */}
               <UiEntity
@@ -244,7 +246,6 @@ export const uiMenu = () => (
 
     {/* ─── Right edge: overview-mode button (+ zoom/rotate while on).
         Rendered before the banner so the banner stays on top. */}
-    <OverviewUi />
 
     {/* ─── Bottom centre: PvP hotbar, Lunge (E) + Paint Bomb (F). */}
     <AbilityHotbar />
