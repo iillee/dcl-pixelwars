@@ -9,12 +9,12 @@ Out of scope on purpose: health, damage, elimination, weapons, progression, and 
 **Dash (E)**
 - A burst along your current movement direction, or along the way the avatar faces if you're standing still. Duration 0.4 s, cooldown 5 s.
 - An enemy you touch during the dash gets a strong push, mostly along your dash, and can be sent off the arena. There are no guard rails, so a missed dash can carry you off too.
-- Feedback: whoosh on dash (`teleport.mp3`). On a hit there's a pop (`pop.mp3`) and a team-coloured flash at the victim.
+- Feedback: wind whoosh on dash (`swoosh.mp3` from flagtag) plus a white/cyan wind trail at the feet during the burst. On a hit there's a pop (`pop.mp3`) and a team-coloured flash at the victim.
 
 **Paint Bomb (F)**
 - No aiming. The bomb drops at your feet, blinks red with a fuse hiss and a growing team-coloured ring for 0.4 s, then explodes.
-- It paints every walkable cell within 5.5 m in your team colour. Enemy bases stay locked, and bomb cells count for the leaderboard and the end-of-round breakdown like normal paint.
-- Opponents within 6 m are pushed away from the blast (LINEAR falloff, strongest at the centre) and can fall off. You and your teammates are never pushed.
+- It paints every walkable cell within 11 m in your team colour. Enemy bases stay locked, and bomb cells count for the leaderboard and the end-of-round breakdown like normal paint.
+- Opponents within 12 m are pushed away from the blast (LINEAR falloff, strongest at the centre) and can fall off. You and your teammates are never pushed.
 - Feedback for everyone: fireball, team-coloured shockwave ring out to the paint radius, six debris bits and `bomb_exploding.mp3` at the blast point.
 
 **Both**
@@ -51,7 +51,7 @@ Pure constants with no engine imports, so the client and the server read the sam
 |---|---|---|
 | `DASH_MODE` | `'on'` | Switch |
 | `DASH_DURATION_S` / `DASH_COOLDOWN_S` | 0.4 / 5 | Burst length, seconds between dashes |
-| `DASH_IMPULSE` / `DASH_LIFT` / `DASH_FORCE` | 20 / 3 / 25 | Start impulse, its upward part, sustain force over the burst |
+| `DASH_IMPULSE` / `DASH_LIFT` / `DASH_FORCE` | 40 / 4 / 55 | Start impulse, its upward part, sustain force over the burst |
 | `DASH_STOP_ON_HIT` / `DASH_MIN_MOVE_SPEED` | true / 1 m/s | Stop the sustain on the first hit; movement vs facing threshold |
 | `HIT_RADIUS` / `HIT_MAX_DY` / `HIT_WINDOW_S` | 1.6 m / 2 m / 0.5 s | Contact test on the attacker's screen |
 | `KNOCKBACK_DASH_DIR_WEIGHT` | 0.5 | Push direction = 50% dash direction + 50% attacker→victim |
@@ -66,11 +66,11 @@ Pure constants with no engine imports, so the client and the server read the sam
 | `BOMB_MODE` | `'on'` | – | Switch |
 | `BOMB_FUSE_S` | 0.4 | 5 | Telegraph time from press to blast |
 | `BOMB_COOLDOWN_S` | 8 | 10 | Seconds between bombs |
-| `BOMB_PAINT_RADIUS` | 5.5 m | – | Walkable cells whose centre is within this horizontal distance get painted |
-| `BOMB_PAINT_MAX_DY` | 3 m | – | No painting through levels (they're 10.8 m apart) |
-| `BOMB_KNOCKBACK_RADIUS` | 6 m | 6 | 3D distance for knockback |
-| `BOMB_KNOCKBACK` | 40, LINEAR | 40, LINEAR | `Physics.applyKnockbackToPlayer(blast, 40, 6, LINEAR)` |
-| `BOMB_KNOCKBACK_LIFT` | 8 | – | Extra upward impulse with the same falloff, so floor friction doesn't eat the push (0 = flagtag-exact) |
+| `BOMB_PAINT_RADIUS` | 11 m | – | Walkable cells whose centre is within this horizontal distance get painted (~2× first pass) |
+| `BOMB_PAINT_MAX_DY` | 4 m | – | No painting through levels (they're 10.8 m apart) |
+| `BOMB_KNOCKBACK_RADIUS` | 12 m | 6 | 3D distance for knockback (~2× flagtag) |
+| `BOMB_KNOCKBACK` | 48, LINEAR | 40, LINEAR | `Physics.applyKnockbackToPlayer(blast, 48, 12, LINEAR)` |
+| `BOMB_KNOCKBACK_LIFT` | 10 | – | Extra upward impulse with the same falloff, so floor friction doesn't eat the push |
 | `BOMB_SNAP_MAX_DROP` | 4 m | – | Server snaps the bomb down onto a floor cell this close below |
 | `SERVER_MIN_BOMB_GAP_S` | 7.5 | – | Server cooldown with 0.5 s slack |
 | `RESPAWN_IMMUNITY_S` | 1.5 | – | Shared by both abilities |
@@ -81,10 +81,11 @@ Tuning hints: knockback too weak to threaten at an edge → raise `BOMB_KNOCKBAC
 
 [iillee/flagtag](https://github.com/iillee/flagtag), `src/systems/bombSystem.ts` and `src/server/combat.ts`:
 
-- **Assets** (copied): `assets/models/bomb/Bomb_01.glb` and `Bomb_red.glb` (from flagtag's `asset-packs/iron_grenade`), `assets/sounds/fuse.mp3`, `assets/sounds/bomb_exploding.mp3`, `assets/images/bomb.png` (hotbar icon).
+- **Assets** (copied): `assets/models/bomb/Bomb_01.glb` and `Bomb_red.glb` (from flagtag's `asset-packs/iron_grenade`), `assets/sounds/fuse.mp3`, `assets/sounds/bomb_exploding.mp3`, `assets/sounds/swoosh.mp3` (Dash whoosh; used by flagtag's updraft), `assets/images/bomb.png` (hotbar icon).
 - **Telegraph:** the blink is done by swapping the normal and red child models' scale (no GLB reload), from a small pre-created pool at a tiny scale so the models are loaded before the first bomb. The blink interval is 80 ms; flagtag goes from 800 to 100 ms over its 5 s fuse, and our whole fuse is the "about to blow" end. The fuse sound plays at the bomb.
 - **Explosion VFX:** the same three parts with flagtag's sizes and timing (0.6 s): a fireball sphere growing 0.3 → 4 m then shrinking, a flat shockwave ring, and six debris spheres flying outward. Changes: the ring and half the debris are in the team colour, and the ring grows to the paint diameter. It's animated per frame instead of with `Tween` (flagtag needed a separate `vfxLifetime` registry to stop tweened VFX getting stuck).
-- **Knockback:** the victim's client calls `Physics.applyKnockbackToPlayer(blastPos, 40, 6, KnockbackFalloff.LINEAR)`, plus our small lift.
+- **Dash wind trail:** orb trail at the feet during the burst, same pool/tween pattern as flagtag's `boostTrailSystem.ts`, tinted white/cyan.
+- **Knockback:** the victim's client calls `Physics.applyKnockbackToPlayer(blastPos, 48, 12, KnockbackFalloff.LINEAR)`, plus our small lift.
 - **Not taken:** flagtag's 3 s stun, `getHit` emote, `InputModifier` movement lock and hit flash (closer to damage than we want), dropping from height / ground raycast / contact detonation, ghost killing, the server-side victim list (our server has no avatar positions), and flagtag's self-knock (its server pushes everyone in range, owner included). Here the bomber and teammates are never pushed, as the brief asks.
 
 ## Code map
@@ -99,7 +100,7 @@ Tuning hints: knockback too weak to threaten at an edge → raise `BOMB_KNOCKBAC
 | `src/server/bots/manager.ts` | `getWalkableGraph()` export |
 | `src/client/clientHandler.ts` | Inbound → events; `sendDashHit()`, `sendBombDrop()` |
 | `src/client/knockback.ts` | Local team, roster map, respawn immunity, guarded Physics calls |
-| `src/client/dash.ts` | Dash input, Physics, hit detection, knockback, flash |
+| `src/client/dash.ts` | Dash input, Physics, hit detection, knockback, flash, wind trail |
 | `src/client/paintBomb.ts` | Bomb input, telegraph, explosion FX/sound, knockback |
 | `src/client/abilityHotbar.tsx` | E/F hotbar + tooltips (rendered in `src/ui.tsx`) |
 | `src/client/touchControls.ts` | Hides native E/F buttons on mobile |
@@ -119,7 +120,7 @@ Tuning hints: knockback too weak to threaten at an edge → raise `BOMB_KNOCKBAC
 3. When the fuse runs out, the server paints every walkable cell in the circle from its own walkable graph: the same graph the ghost bot uses, built from the round seed. `applyPaint` keeps bases locked. The server credits the leaderboard and round contribution, then broadcasts `bombBlast`. The paint reaches everyone through the normal 5 Hz `paintDelta`, so it shows up a frame or two after the blast.
 4. Every client shows the explosion. A client whose local player is on the other team, inside 6 m and not immune, pushes itself.
 
-**Why the server computes the cells:** it already has the walkable graph with every cell's world position, so it doesn't have to trust client cell ids. That also means a bomb needs no chunking against the 100-id `paintTick` cap. A 5.5 m circle is about 24 cells on a corridor, checked offline at a red base.
+**Why the server computes the cells:** it already has the walkable graph with every cell's world position, so it doesn't have to trust client cell ids. That also means a bomb needs no chunking against the 100-id `paintTick` cap. An 11 m circle covers a much wider swath of the woven maze than the first 5.5 m pass.
 
 ## Technical limitations and decisions
 

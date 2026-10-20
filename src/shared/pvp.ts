@@ -34,12 +34,12 @@ export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): bool
 export const DASH_DURATION_S = 0.4
 /** Seconds between dashes. Keeps running through respawn (never reset). */
 export const DASH_COOLDOWN_S = 5
-/** One-shot horizontal impulse at dash start (direction × this). */
-export const DASH_IMPULSE = 20
+/** One-shot horizontal impulse at dash start (direction × this). Tuned up for a snappy burst. */
+export const DASH_IMPULSE = 40
 /** Small upward part of the start impulse so ground friction doesn't eat it. */
-export const DASH_LIFT = 3
+export const DASH_LIFT = 4
 /** Horizontal force held for DASH_DURATION_S to sustain the burst. 0 = impulse only. */
-export const DASH_FORCE = 25
+export const DASH_FORCE = 55
 /** Stop the sustain force on the first hit (attacker "spends" the dash on the target). */
 export const DASH_STOP_ON_HIT = true
 /** Above this horizontal speed (m/s) dash goes along movement; below, along avatar facing. */
@@ -91,16 +91,16 @@ export function dashEnabledForRound(roundIndex: number): boolean {
 export const BOMB_FUSE_S = 0.4
 /** Seconds between bombs. Keeps running through respawn (never reset). */
 export const BOMB_COOLDOWN_S = 8
-/** Walkable cells whose centre is within this horizontal distance get painted (m). */
-export const BOMB_PAINT_RADIUS = 5.5
+/** Walkable cells whose centre is within this horizontal distance get painted (m). ~2× the first prototype. */
+export const BOMB_PAINT_RADIUS = 11
 /** Only cells within this height of the blast are painted (no painting through levels). */
-export const BOMB_PAINT_MAX_DY = 3
-/** Opponents within this 3D distance of the blast are knocked back (flagtag: 6). */
-export const BOMB_KNOCKBACK_RADIUS = 6
-/** applyKnockbackToPlayer magnitude at the centre, LINEAR falloff to 0 at the radius (flagtag: 40). */
-export const BOMB_KNOCKBACK = 40
+export const BOMB_PAINT_MAX_DY = 4
+/** Opponents within this 3D distance of the blast are knocked back (~2× flagtag's 6). */
+export const BOMB_KNOCKBACK_RADIUS = 12
+/** applyKnockbackToPlayer magnitude at the centre, LINEAR falloff to 0 at the radius. */
+export const BOMB_KNOCKBACK = 48
 /** Extra upward impulse at the centre (same falloff), so floor friction doesn't eat the push. 0 = off. */
-export const BOMB_KNOCKBACK_LIFT = 8
+export const BOMB_KNOCKBACK_LIFT = 10
 /** Server snaps the bomb down onto the floor if a walkable cell is this close below (m). */
 export const BOMB_SNAP_MAX_DROP = 4
 /** Server cooldown slack: accept the next bomb this long after the previous one (s). */

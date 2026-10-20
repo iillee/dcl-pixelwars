@@ -5,7 +5,8 @@
  * design/pvp-prototype.md. In short:
  *   1. E (IA_PRIMARY) or the DASH hotbar slot → impulse + short sustain
  *      force on the LOCAL player along its movement direction (avatar
- *      facing when standing still). Cooldown DASH_COOLDOWN_S.
+ *      facing when standing still). Cooldown DASH_COOLDOWN_S. Plays
+ *      flagtag's swoosh.mp3 and a white/cyan wind trail at the feet.
  *   2. During the hit window this client checks enemy avatars it can see
  *      (PlayerIdentityData + Transform, team from the roster) and reports
  *      the first contact per target as dashHit.
@@ -17,7 +18,7 @@
 
 import {
   engine, Entity, InputAction, Material, MaterialTransparencyMode, MeshRenderer, PlayerIdentityData,
-  PointerEventType, Transform, AudioSource, inputSystem, Physics,
+  PointerEventType, Transform, AudioSource, Tween, EasingFunction, inputSystem, Physics,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
@@ -42,6 +43,21 @@ const FLASH_TO = 2.6
 const MAX_SANE_SPEED = 60
 const VEL_SMOOTH_RATE = 12
 
+// Wind trail (flagtag boostTrail pattern): white/cyan orbs at the feet while dashing.
+const WIND_SPAWN_INTERVAL = 0.05
+const WIND_LIFETIME_MS = 450
+const WIND_START_SCALE = 0.35
+const WIND_POOL_SIZE = 28
+const WIND_HIDDEN = Vector3.create(0, -100, 0)
+const WIND_MAT = {
+  albedoColor: Color4.create(0.85, 0.95, 1.0, 0.45),
+  emissiveColor: Color4.create(0.6, 0.85, 1.0, 1),
+  emissiveIntensity: 2.2,
+  roughness: 1.0,
+  metallic: 0.0,
+  transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+}
+
 let cooldownLeft = 0
 let dashLeft = 0      // sustain force time left
 let hitWindowLeft = 0
@@ -56,6 +72,69 @@ let knockForceEnt: Entity = 0 as Entity
 
 type Flash = { ent: Entity; t: number }
 const flashes: Flash[] = []
+
+const windPool: Entity[] = []
+let windPoolIdx = 0
+let windPoolReady = false
+const windPuffs: Array<{ entity: Entity; expiresAt: number }> = []
+let windSpawnAccum = 0
+let windLastPos: Vector3 | null = null
+
+function initWindPool(): void {
+  if (windPoolReady) return
+  windPoolReady = true
+  for (let i = 0; i < WIND_POOL_SIZE; i++) {
+    const e = engine.addEntity()
+    Transform.create(e, { position: WIND_HIDDEN, scale: Vector3.Zero() })
+    MeshRenderer.setSphere(e)
+    Material.setPbrMaterial(e, WIND_MAT)
+    windPool.push(e)
+  }
+}
+
+function spawnWindPuff(position: Vector3): void {
+  initWindPool()
+  const puff = windPool[windPoolIdx % WIND_POOL_SIZE]
+  windPoolIdx++
+  const s = WIND_START_SCALE * (0.7 + Math.random() * 0.6)
+  const t = Transform.getMutable(puff)
+  t.position = Vector3.create(
+    position.x + (Math.random() - 0.5) * 0.35,
+    position.y + 0.35 + (Math.random() - 0.5) * 0.25,
+    position.z + (Math.random() - 0.5) * 0.35,
+  )
+  t.scale = Vector3.create(s, s * 0.7, s)
+  Material.setPbrMaterial(puff, WIND_MAT)
+  Tween.createOrReplace(puff, {
+    mode: Tween.Mode.Scale({ start: Vector3.create(s, s * 0.7, s), end: Vector3.Zero() }),
+    duration: WIND_LIFETIME_MS,
+    easingFunction: EasingFunction.EF_EASEINQUAD,
+  })
+  windPuffs.push({ entity: puff, expiresAt: Date.now() + WIND_LIFETIME_MS + 50 })
+}
+
+function tickWindTrail(dt: number, dashing: boolean, pos: Vector3 | null): void {
+  const now = Date.now()
+  for (let i = windPuffs.length - 1; i >= 0; i--) {
+    if (now < windPuffs[i].expiresAt) continue
+    const e = windPuffs[i].entity
+    const tr = Transform.getMutableOrNull(e)
+    if (tr) { tr.position = WIND_HIDDEN; tr.scale = Vector3.Zero() }
+    if (Tween.has(e)) Tween.deleteFrom(e)
+    windPuffs.splice(i, 1)
+  }
+  if (!dashing || !pos) { windLastPos = null; windSpawnAccum = 0; return }
+  windSpawnAccum += dt
+  if (windLastPos) {
+    const moved = Math.hypot(pos.x - windLastPos.x, pos.z - windLastPos.z)
+    if (moved < 0.04 && windSpawnAccum < WIND_SPAWN_INTERVAL * 2) return
+  }
+  while (windSpawnAccum >= WIND_SPAWN_INTERVAL) {
+    windSpawnAccum -= WIND_SPAWN_INTERVAL
+    spawnWindPuff(pos)
+  }
+  windLastPos = Vector3.clone(pos)
+}
 
 export function isDashEnabledNow(): boolean {
   return dashEnabledForRound(getRoundIndex())
@@ -224,6 +303,7 @@ export function initDash(): void {
     if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) triggerDash()
 
     if (dashLeft > 0) dashLeft -= dt
+    tickWindTrail(dt, dashLeft > 0, t?.position ?? null)
     if (hitWindowLeft > 0) {
       hitWindowLeft -= dt
       if (t) checkHits(t.position)

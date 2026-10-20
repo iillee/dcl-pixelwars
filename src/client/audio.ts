@@ -20,7 +20,8 @@ const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
-export const DASH_SRC = 'assets/sounds/teleport.mp3'
+/** flagtag's swoosh.mp3 — dash wind whoosh. */
+export const DASH_SRC = 'assets/sounds/swoosh.mp3'
 export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
 
 let musicEnt: Entity = 0 as Entity
@@ -85,12 +86,12 @@ export function playClaimSfx(): void {
   })
 }
 
-/** Dash prototype: whoosh when the local player dashes. */
+/** Dash prototype: wind whoosh (flagtag swoosh.mp3) when the local player dashes. */
 export function playDashSfx(): void {
   if (!dashSfxEnt) return
   AudioSource.createOrReplace(dashSfxEnt, {
     audioClipUrl: DASH_SRC,
-    playing: true, loop: false, volume: 0.5, global: true,
+    playing: true, loop: false, volume: 0.85, global: true,
   })
 }
 
