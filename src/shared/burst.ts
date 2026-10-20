@@ -3,7 +3,7 @@
  * and scripts/verify-burst.ts. No engine imports.
  */
 import {
-  BURST_RADIUS, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
+  BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
   SERVER_BURST_HIT_WINDOW_S,
 } from './pvp'
 import type { WalkableGraph } from './mazeGraph'
@@ -11,9 +11,10 @@ import type { WalkableGraph } from './mazeGraph'
 export type V3 = { x: number; y: number; z: number }
 const CELL_M = 2 // CELL / SIZE
 
-/** Is target inside the shockwave? Real 3D feet-to-feet distance. */
+/** Is target inside the shockwave? Horizontal feet-to-feet distance (like the paint footprint)
+ *  within `radius`, and within BURST_HIT_MAX_DY in height. */
 export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS): boolean {
-  return Math.hypot(t.x - origin.x, t.y - origin.y, t.z - origin.z) <= radius
+  return Math.hypot(t.x - origin.x, t.z - origin.z) <= radius && Math.abs(t.y - origin.y) <= BURST_HIT_MAX_DY
 }
 
 /** Outward horizontal unit direction (fallback = facing when on top of each other). */

@@ -37,7 +37,7 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
-  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
+  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
@@ -416,7 +416,7 @@ export async function setupServer(): Promise<void> {
       const l = Math.hypot(dx, dz)
       if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
       const dl = Math.hypot(dx, dz) || 1
-      if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_RADIUS, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+      if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
         bursts.hit(from, id, `bot:${b.id}`, now)
         room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl })
       }

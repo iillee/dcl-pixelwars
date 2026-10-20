@@ -5,7 +5,7 @@
  * Cooldown: BURST_COOLDOWN_S timer (like Lunge), enforced by the server too.
  *
  * Use (F / the hotbar slot on mobile): start the cooldown and fire one shockwave at our feet:
- *   - opponents within BURST_RADIUS (3D) with clear line of sight (raycast,
+ *   - opponents within BURST_RADIUS (horizontal, ≤ BURST_HIT_MAX_DY up/down) with clear line of sight (raycast,
  *     BURST_LOS) → burstHit → server dedupes → burstImpact → the victim's own
  *     client knocks itself outward (ImpactGate: dedupe + stale; respawn-immune).
  *   - local test dummies are knocked directly; ghost bots are shoved server-side.
@@ -71,7 +71,7 @@ function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4
-    const r = BURST_RADIUS * (0.6 + Math.random() * 0.4)
+    const r = 4 * (0.6 + Math.random() * 0.4) // visual ring size unchanged (was BURST_RADIUS = 4)
     const from = Vector3.create(p.x, p.y + 0.8, p.z)
     const to = Vector3.create(p.x + Math.cos(a) * r, p.y + 0.3 + Math.random() * 1.2, p.z + Math.sin(a) * r)
     const size = 0.25 + Math.random() * 0.15

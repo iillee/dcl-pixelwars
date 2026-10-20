@@ -128,8 +128,6 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 export const BURST_COOLDOWN_S = 12
 /** Server cooldown slack: accept the next burst this long after the previous one (s). */
 export const SERVER_MIN_BURST_GAP_S = BURST_COOLDOWN_S - 0.5
-/** Shockwave radius, 3D distance from the attacker's feet to the target's feet (m). */
-export const BURST_RADIUS = 4
 /** Line of sight check (raycast attacker chest → target chest, physics colliders). */
 export const BURST_LOS = true
 /** Chest height for the LOS ray (m above feet). */
@@ -159,6 +157,12 @@ export const BURST_PAINT_SHAPE: 'circle' | 'square' | 'cross' = 'circle'
 export const BURST_PAINT_RADIUS_CELLS = 5
 /** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
 export const BURST_PAINT_MAX_DY = 1.5
+/** Shockwave (knockback) radius = the paint footprint's outer edge: cell centres within
+ *  BURST_PAINT_RADIUS_CELLS × 2 m, plus half a cell (R=5 → 11 m). Horizontal feet-to-feet. Same
+ *  full-strength knock across the radius (as before). Was 4 m (3D). */
+export const BURST_RADIUS = BURST_PAINT_RADIUS_CELLS * 2 + 1
+/** …and within this height (a full R-cell ramp run climbs ~3.5 m; a level is ~5.4 m). */
+export const BURST_HIT_MAX_DY = 3.5
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Expanding ring, particles, aura. */

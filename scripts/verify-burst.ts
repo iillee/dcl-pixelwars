@@ -26,8 +26,10 @@ check(`cooldown ${BURST_COOLDOWN_S} s, server gap ${SERVER_MIN_BURST_GAP_S} s (s
 // Radius / direction.
 check(`opponent ${BURST_RADIUS - 0.1} m away is hit`, inBurst(P(0, 0), P(BURST_RADIUS - 0.1, 0)))
 check(`opponent ${BURST_RADIUS + 0.1} m away is not`, !inBurst(P(0, 0), P(BURST_RADIUS + 0.1, 0)))
-check('stacked platform 10.8 m above is not hit (3D distance)', !inBurst(P(0, 0), P(0.5, 0.5, 10.8)))
-check('3D: 3 m out and 3 m up is outside 4 m', !inBurst(P(0, 0), P(3, 0, 3)))
+check('stacked platform 10.8 m above is not hit (height limit)', !inBurst(P(0, 0), P(0.5, 0.5, 10.8)))
+check(`hit radius ${BURST_RADIUS} m = paint footprint edge (R=${BURST_PAINT_RADIUS_CELLS} cells × 2 m + half a cell)`, BURST_RADIUS === BURST_PAINT_RADIUS_CELLS * 2 + 1)
+check('outermost painted cell centre (R cells out, diagonal too) is hit', inBurst(P(0, 0), P(BURST_PAINT_RADIUS_CELLS * 2, 0)) && inBurst(P(0, 0), P(7, 7)))
+check('up a ramp run (3 m higher, 8 m out) is hit; next level (5.4 m up) is not', inBurst(P(0, 0), P(8, 0, 3)) && !inBurst(P(0, 0), P(2, 0, 5.4)))
 const d1 = burstDir(P(0, 0), P(2, 0), 0, 1)
 check('knock direction is outward from the centre', Math.abs(d1.x - 1) < 1e-9 && Math.abs(d1.z) < 1e-9)
 const d2 = burstDir(P(0, 0), P(0.05, 0.05), 0, 1)
