@@ -176,6 +176,17 @@ export const LUNGE_IMPACT_MAX_AGE_MS = 400
 export const LUNGE_BOT_SHOVE = 6
 export const LUNGE_BOT_STUN_S = 1.2
 
+// ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
+/** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */
+export const LUNGE_TEST_DUMMY = true
+/** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
+ *  LUNGE_KNOCK* numbers × this: 62 → 15.5 m/s horizontal, lift 8 → 2 m/s, force
+ *  25 → 6.25 m/s² for 0.35 s. Tune until the dummy flies like a real victim. */
+export const LUNGE_DUMMY_UNIT = 0.25
+/** Dummy gravity (m/s²) and ground friction (m/s² of horizontal deceleration). */
+export const LUNGE_DUMMY_GRAVITY = 20
+export const LUNGE_DUMMY_FRICTION = 14
+
 // ─── Server validation ──────────────────────────────────────────────
 /** Next lunge start accepted no sooner than this (s). */
 export const SERVER_MIN_LUNGE_GAP_S = LUNGE_COOLDOWN_S - 0.25

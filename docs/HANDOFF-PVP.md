@@ -14,6 +14,7 @@ Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponen
   - Debug: `LUNGE_DEBUG = true` draws hitbox/direction/hit/knockback markers + state log.
   - Feedback: team glow + swoosh on press (no input delay), streak during the lunge (also on remote avatars), hit = pop + bomb boom + big burst, miss = grey dust puff, nothing on presses during cooldown. No camera shake / emote.
   - Offline tests: `npx tsx scripts/verify-lunge.ts`.
+- **Test dummy (`LUNGE_TEST_DUMMY = true`, `src/client/lungeDummy.ts`):** client-local opponent-coloured 0.8×1.8×0.8 box on the most exposed L0 cell 5–14 m from your base spawn. Lunge hits it like an enemy; it gets the same `LUNGE_KNOCK*` values via a kinematic sim (× `LUNGE_DUMMY_UNIT` = 0.25 m/s per impulse unit, gravity 20, friction 14, floor from the walkable graph). Falls → hidden. Reset: "RESPAWN DUMMY" chip left of the LUNGE slot, or key 2. Logs `[Dummy] stopped after / fell off after X m`. Set the flag false before any real release.
 - Sections below describe the Dash/Bomb era and are kept for when they come back.
 
 ---

@@ -28,6 +28,7 @@ import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { LUNGE_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
+import { isDummyEnabled, respawnDummy } from './lungeDummy'
 // Dash / Paint Bomb parked: their getDashHud/triggerDash (./dash) and
 // getBombHud/triggerBomb (./paintBomb) slots were DASH left + PAINT BOMB right.
 
@@ -192,6 +193,28 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
   )
 }
 
+/** Test-dummy reset chip, left of the LUNGE slot (lunge tooltip is on the right). */
+function DummyChip(props: { g: Geo }) {
+  const { g } = props
+  const mobile = isMobile()
+  const h = mobile ? 72 : 44
+  return (
+    <UiEntity
+      key="ui_pvp_dummy"
+      uiTransform={{
+        positionType: 'absolute', position: { bottom: g.bottom + (g.slot - h) / 2, right: '50%' },
+        margin: { right: g.halfRow + 8 }, height: h, padding: { left: 14, right: 14 },
+        borderRadius: RADIUS_SM, borderWidth: 2, borderColor: WHITE_BORDER,
+        justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
+      }}
+      uiBackground={{ color: CHIP_BG }}
+      onMouseDown={respawnDummy}
+    >
+      <Label value={mobile ? 'RESPAWN DUMMY' : 'RESPAWN DUMMY (2)'} fontSize={mobile ? 24 : 14} color={WHITE} textAlign="middle-center" />
+    </UiEntity>
+  )
+}
+
 function roundLabel(punch: Hud): string {
   if (LUNGE_MODE !== 'alternate') return ''
   return punch.enabled ? 'LUNGE ROUND' : 'PAINT ONLY'
@@ -212,6 +235,7 @@ export function AbilityHotbar() {
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
       {mobile && punchTip && <Bridge id="punch" side="right" g={g} />}
+      {isDummyEnabled() && <DummyChip g={g} />}
       {punchTip && <Tooltip id="punch" side="right" text="LUNGE" onPress={triggerLunge} g={g} />}
       <UiEntity
         key="ui_pvp_row"
