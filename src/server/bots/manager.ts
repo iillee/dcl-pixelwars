@@ -218,3 +218,46 @@ export function getBotPositions(): Array<{ id: number; team: number; x: number; 
   }
   return out
 }
+
+/**
+ * Punch on a ghost bot. Range-checks the puncher's reported position, then
+ * slides the bot up to `shove` m along (dx, dz), stopping where the floor
+ * it stands on ends (samples every 0.5 m, nearest walkable node within
+ * ~one cell at the same height). Server bots walk the graph and can't fall,
+ * so the ghost is pushed to the edge, not off it. Returns false if rejected.
+ */
+export function punchBot(id: number, ax: number, ay: number, az: number, dx: number, dz: number,
+  maxRange: number, maxDy: number, shove: number, stunMs: number): boolean {
+  if (!graph) return false
+  const b = bots.find(x => x.botId === id)
+  if (!b) return false
+  const pos = b.visualPosition(graph)
+  if (!pos) return false
+  if (Math.hypot(pos[0] - ax, pos[2] - az) > maxRange || Math.abs(pos[1] - ay) > maxDy) {
+    console.log(`[Bots] punch on ghost ${id} rejected: range`)
+    return false
+  }
+  const NODE_TOL = 2.5
+  const nearest = (x: number, y: number, z: number): string | null => {
+    let best: string | null = null
+    let bestD = NODE_TOL
+    for (const nid of graph!.deepNodes) {
+      const p = graph!.worldPos.get(nid)
+      if (!p || Math.abs(p[1] - y) > 1.5) continue
+      const d = Math.hypot(p[0] - x, p[2] - z)
+      if (d < bestD) { bestD = d; best = nid }
+    }
+    return best
+  }
+  let dest = b.currentCell
+  for (let s = 0.5; s <= shove + 1e-6; s += 0.5) {
+    const n = nearest(pos[0] + dx * s, pos[1], pos[2] + dz * s)
+    if (!n) break
+    dest = n
+  }
+  b.currentCell = dest
+  b.clearPath()
+  b.stun(stunMs)
+  console.log(`[Bots] ghost ${id} punched → ${dest}`)
+  return true
+}

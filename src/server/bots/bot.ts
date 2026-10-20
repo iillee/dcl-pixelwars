@@ -305,6 +305,12 @@ export class Bot {
     return stepped
   }
 
+  /** Punch: stand still for ms (reuses the look-around pause). */
+  stun(ms: number): void {
+    this.pauseRemainingMs = Math.max(this.pauseRemainingMs, ms)
+    this.stepAccumMs = 0
+  }
+
   /** Manager can call this to force target re-selection (e.g. round reset). */
   clearPath(): void {
     this.path = []

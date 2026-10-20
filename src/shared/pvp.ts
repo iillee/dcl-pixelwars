@@ -1,5 +1,5 @@
 /**
- * pvp.ts — PvP prototype config: Dash (E) and Paint Bomb (F).
+ * pvp.ts — PvP prototype config: Punch (E). Dash and Paint Bomb parked (mode 'off').
  * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
  *
  * Pure constants + helpers, no engine imports: read by the client
@@ -19,8 +19,14 @@
  *               an ability round alternate (playtest comparison).
  */
 export type AbilityMode = 'on' | 'off' | 'alternate'
-export const DASH_MODE: AbilityMode = 'on'
-export const BOMB_MODE: AbilityMode = 'on'
+// Dash + Paint Bomb are parked (Luke, Oct 2026 pivot to Punch). Their code
+// stays in client/dash.ts, client/paintBomb.ts and server/paintBomb.ts but is
+// not wired into client/index.ts or the hotbar; with 'off' the server drops
+// dashHit / bombDrop too. To bring one back: set 'on' and re-add its init +
+// hotbar slot.
+export const DASH_MODE: AbilityMode = 'off'
+export const BOMB_MODE: AbilityMode = 'off'
+export const PUNCH_MODE: AbilityMode = 'on'
 
 export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
   if (mode === 'on') return true
@@ -112,4 +118,39 @@ export const SERVER_MIN_BOMB_GAP_S = BOMB_COOLDOWN_S - 0.5
 /** Is Paint Bomb live for this UTC round index? */
 export function bombEnabledForRound(roundIndex: number): boolean {
   return modeEnabledForRound(BOMB_MODE, roundIndex)
+}
+
+// ═══ Punch (E) ══════════════════════════════════════════════════════
+// Goal: knock opponents off the edge of the sky map (falling respawns them
+// at their base). Attacker's client finds the target in a short cone in
+// front of it, server checks team / cooldown (and range for the ghost bot,
+// whose position it knows), broadcasts punchImpact, and the victim's own
+// client pushes itself (client/knockback pattern).
+
+/** Seconds between punches. */
+export const PUNCH_COOLDOWN_S = 1.0
+/** Max horizontal reach, attacker centre → target centre (m). */
+export const PUNCH_RANGE = 2.8
+/** Full cone angle in front of the avatar (degrees). */
+export const PUNCH_CONE_DEG = 80
+/** Max vertical offset for a hit (no punching through floors). */
+export const PUNCH_MAX_DY = 1.8
+/** Victim: horizontal impulse away from the puncher. */
+export const PUNCH_KNOCKBACK = 55
+/** Victim: upward part of the impulse so floor friction doesn't eat the push. */
+export const PUNCH_LIFT = 9
+/** Victim: horizontal force held after the impulse (carries them further). 0 = off. */
+export const PUNCH_FORCE = 25
+export const PUNCH_FORCE_S = 0.35
+/** Ghost bot: how far the server shoves it along the punch (m, clamped to the floor it stands on). */
+export const PUNCH_BOT_SHOVE = 6
+/** Ghost bot: it stands dazed this long after a punch (s). */
+export const PUNCH_BOT_STUN_S = 1.2
+/** Server: accept the next punch from the same player no sooner than this (s). */
+export const SERVER_MIN_PUNCH_GAP_S = PUNCH_COOLDOWN_S - 0.2
+/** Server: slack on the bot range check (bot/avatar lag, ghost float). */
+export const SERVER_PUNCH_RANGE_SLACK = 2.5
+
+export function punchEnabledForRound(roundIndex: number): boolean {
+  return modeEnabledForRound(PUNCH_MODE, roundIndex)
 }

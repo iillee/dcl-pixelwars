@@ -80,6 +80,9 @@ export type Events = {
   // (victim self-applies knockback; everyone shows the impact).
   'dash:impact': { attacker: string; target: string; dx: number; dz: number }
 
+  // Broadcast: server accepted a punch. Subscriber: client/punch.
+  'punch:impact': { attacker: string; target: string; dx: number; dz: number }
+
   // Broadcast: Paint Bomb telegraph / detonation. Subscriber: client/paintBomb.
   'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
   'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }

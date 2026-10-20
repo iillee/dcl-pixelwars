@@ -2,6 +2,17 @@
 
 For the next agent (e.g. Grokbot) picking up the Dash + Paint Bomb experiment. Facts only. Full design write-up: [`design/pvp-prototype.md`](../design/pvp-prototype.md). Sky-level context: [`docs/HANDOFF.md`](HANDOFF.md).
 
+## 0. Pivot (2026-10-20): Punch replaces Dash + Paint Bomb
+
+Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponents off the edge of the sky map (Mario Party style; falling below ~y 66.5 respawns at base).
+
+- **Parked, not deleted:** `DASH_MODE` / `BOMB_MODE` = `'off'` in `src/shared/pvp.ts` (server drops `dashHit` / `bombDrop`). `initDash` / `initPaintBomb` unwired from `src/client/index.ts`, slots removed from the hotbar, native F no longer hidden on mobile. Files `client/dash.ts`, `client/paintBomb.ts`, `server/paintBomb.ts` and their messages stay. To restore: mode `'on'`, re-add init + hotbar slot (+ hide IA_SECONDARY in touchControls).
+- **Punch:** `src/client/punch.ts`, tuning in `src/shared/pvp.ts` (`PUNCH_*`): 1.0 s cooldown, 2.8 m reach, 80° cone, ±1.8 m height; victim impulse 55 horizontal + 9 lift, then force 25 for 0.35 s. Nearest opponent in the cone is hit. Messages `punch` (client → server, includes puncher position) / `punchImpact` (broadcast); victim self-applies Physics (`client/knockback` immunity still applies).
+- **Server:** cooldown + team check; range only checked for the ghost (server can't see avatars).
+- **Ghost bot:** punchable. Server slides it up to 6 m along the punch, clamped to its floor (it can't fall), and stuns it 1.2 s (`punchBot` in `server/bots/manager.ts`). It does not punch back.
+- **Feedback:** swoosh on swing + small team puff in front; pop + team-coloured burst at the target (all clients). No emote. "Knocked off by X" is console-only.
+- Sections below describe the Dash/Bomb era and are kept for when they come back.
+
 ---
 
 ## 1. Where the work lives

@@ -135,6 +135,15 @@ export const Messages = {
   // everyone else shows the impact effect. dx/dz normalised by the server.
   dashImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
+  // Punch (shared/pvp.ts, client/punch.ts). Client → Server: our punch
+  // landed on `target` (a player address, or "bot:<id>" for the ghost).
+  // (dx, dz) = push direction; (x, y, z) = puncher position (server range-
+  // checks it against the bot; it cannot see avatars).
+  punch: Schemas.Map({ target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Server → Clients: accepted punch. A player target pushes itself; everyone
+  // shows the burst at the target.
+  punchImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+
   // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
   // sender's position. Server checks round mode, team and cooldown, snaps
   // it to the floor, broadcasts bombArmed, and after BOMB_FUSE_S paints

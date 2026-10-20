@@ -1,6 +1,6 @@
 /**
- * abilityHotbar.tsx — bottom-centre PvP hotbar: DASH (E) left, PAINT BOMB
- * (F) right. Look and geometry ported from dcl-snowdrift
+ * abilityHotbar.tsx — bottom-centre PvP hotbar: one PUNCH (E) slot (Dash /
+ * Paint Bomb parked, see shared/pvp.ts). Look and geometry ported from dcl-snowdrift
  * (layer.inventoryHotbar / layer.brushSize TorchButton + LogsButton +
  * KeyHintBadge / layer.relightPrompt + layer.feedPrompt / layer.hotbarBridge),
  * rebuilt with plain React-ECS because pixelwars has no UI-kit dependency.
@@ -26,9 +26,10 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
-import { DASH_MODE, BOMB_MODE } from '../shared/pvp'
-import { getDashHud, triggerDash } from './dash'
-import { getBombHud, triggerBomb } from './paintBomb'
+import { PUNCH_MODE } from '../shared/pvp'
+import { getPunchHud, triggerPunch } from './punch'
+// Dash / Paint Bomb parked: their getDashHud/triggerDash (./dash) and
+// getBombHud/triggerBomb (./paintBomb) slots were DASH left + PAINT BOMB right.
 
 const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -191,32 +192,27 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
   )
 }
 
-function roundLabel(dash: Hud, bomb: Hud): string {
-  if (DASH_MODE !== 'alternate' && BOMB_MODE !== 'alternate') return ''
-  return dash.enabled || bomb.enabled ? 'DASH + BOMB ROUND' : 'PAINT ONLY'
+function roundLabel(punch: Hud): string {
+  if (PUNCH_MODE !== 'alternate') return ''
+  return punch.enabled ? 'PUNCH ROUND' : 'PAINT ONLY'
 }
 
 /** Render inside the full-screen UI root (src/ui.tsx). */
 export function AbilityHotbar() {
-  const dash = getDashHud()
-  const bomb = getBombHud()
-  if (!dash.show && !bomb.show) return null
+  const punch = getPunchHud()
+  if (!punch.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
-  const label = roundLabel(dash, bomb)
-  const dashTip = dash.show && dash.ready
-  const bombTip = bomb.show && bomb.ready
-  // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
-  // where the chip kisses the button edge.
+  const label = roundLabel(punch)
+  const punchTip = punch.ready
+  // Paint order = snowdrift: bridge + tooltip first (behind), slot last (on top).
   return (
     <UiEntity
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {mobile && dashTip && <Bridge id="dash" side="left" g={g} />}
-      {mobile && bombTip && <Bridge id="bomb" side="right" g={g} />}
-      {dashTip && <Tooltip id="dash" side="left" text="DASH" onPress={triggerDash} g={g} />}
-      {bombTip && <Tooltip id="bomb" side="right" text="PAINT BOMB" onPress={triggerBomb} g={g} />}
+      {mobile && punchTip && <Bridge id="punch" side="right" g={g} />}
+      {punchTip && <Tooltip id="punch" side="right" text="PUNCH" onPress={triggerPunch} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -234,8 +230,7 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {dash.show && <Slot id="dash" keyLabel="E" hud={dash} glyph="»" onPress={triggerDash} g={g} />}
-          {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
+          <Slot id="punch" keyLabel="E" hud={punch} glyph="!" onPress={triggerPunch} g={g} />
         </UiEntity>
       </UiEntity>
     </UiEntity>

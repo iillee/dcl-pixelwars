@@ -268,3 +268,10 @@ export function initBotVisual(): void {
     }
   })
 }
+
+/** Punch: where each ghost is drawn right now (id → smoothed position, incl. float height). */
+export function getBotRenderPositions(): Array<{ id: number; team: number; pos: Vector3 }> {
+  const out: Array<{ id: number; team: number; pos: Vector3 }> = []
+  for (const [id, rec] of bots) out.push({ id, team: rec.team, pos: rec.renderPos })
+  return out
+}

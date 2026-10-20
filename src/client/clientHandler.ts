@@ -94,6 +94,10 @@ function wireInbound(): void {
     events.emit('dash:impact', { attacker, target, dx, dz })
   })
 
+  room.onMessage('punchImpact', ({ attacker, target, dx, dz }) => {
+    events.emit('punch:impact', { attacker, target, dx, dz })
+  })
+
   room.onMessage('bombArmed', ({ attacker, team, x, y, z }) => {
     events.emit('bomb:armed', { attacker, team: team as Team, x, y, z })
   })
@@ -209,4 +213,10 @@ function wireOutbound(): void {
     if (ids.length === 0) return
     room.send('paintTick', { ids })
   })
+}
+
+/** Punch: report that our punch landed on `target` (see client/punch.ts). */
+export function sendPunch(target: string, dx: number, dz: number, x: number, y: number, z: number): void {
+  console.log(`[Client] → punch ${target.slice(0, 8)}`)
+  room.send('punch', { target, dx, dz, x, y, z })
 }
