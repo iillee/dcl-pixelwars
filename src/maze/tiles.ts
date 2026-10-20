@@ -34,12 +34,12 @@ export interface TileDef {
 }
 
 export const TILES: Record<TileType, TileDef> = {
-  end:      { openings: [N],           model: 'assets/models/tile-end.glb' },
-  straight: { openings: [N, S],        model: 'assets/models/tile-straight.glb' },
-  turn:     { openings: [N, E],        model: 'assets/models/tile-turn.glb' },
-  fork:     { openings: [N, S, W],     model: 'assets/models/tile-fork.glb' },
-  cross:    { openings: [N, E, S, W],  model: 'assets/models/tile-cross.glb' },
-  ramp:     { openings: [N, S],        model: 'assets/models/tile-ramp.glb', isRamp: true, rampHighDir: N },
+  end:      { openings: [N],           model: 'assets/models/tile-end_mass01.glb' },
+  straight: { openings: [N, S],        model: 'assets/models/tile-straight_mass01.glb' },
+  turn:     { openings: [N, E],        model: 'assets/models/tile-turn_mass01.glb' },
+  fork:     { openings: [N, S, W],     model: 'assets/models/tile-fork_mass01.glb' },
+  cross:    { openings: [N, E, S, W],  model: 'assets/models/tile-cross_mass01.glb' },
+  ramp:     { openings: [N, S],        model: 'assets/models/tile-ramp_,mass01.glb', isRamp: true, rampHighDir: N },
 }
 
 export const TYPES: TileType[] = ['end', 'straight', 'turn', 'fork', 'cross', 'ramp']
