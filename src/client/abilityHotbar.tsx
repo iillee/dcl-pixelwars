@@ -109,14 +109,14 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
       <KeyHint label={props.keyLabel} />
       {/* Glyph / icon hide while cooling so the countdown is the only centre mark
           (Dash arrows especially — they clutter the seconds). */}
-      {!cooling && props.iconSrc ? (
+      {props.iconSrc ? (
         <UiEntity
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? Color4.create(0, 0, 0, 1) : WHITE) : DIM }}
         />
       ) : null}
-      {!cooling && !props.iconSrc ? (
+      {!props.iconSrc ? (
         <Label
           key={`ui_pvp_glyph_${props.id}`}
           value={props.glyph ?? ''}
@@ -126,16 +126,6 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           uiTransform={{ width: g.icon, height: g.icon }}
         />
       ) : null}
-      {cooling && (
-        <Label
-          key={`ui_pvp_cd_${props.id}`}
-          value={`${Math.ceil(hud.cooldown)}`}
-          fontSize={Math.round(g.slot * 0.36)}
-          color={WHITE}
-          textAlign="middle-center"
-          uiTransform={{ positionType: 'absolute', width: '100%', height: '100%' }}
-        />
-      )}
     </UiEntity>
   )
 }
