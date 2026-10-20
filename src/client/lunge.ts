@@ -48,6 +48,7 @@ import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
+import { initLungeSlash, startSlash, flashSlash } from './lungeSlash'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
@@ -231,6 +232,7 @@ export function triggerLunge(): void {
   spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(localTeam()),
     0.08, 0.08, 0.5, 1.1, 0.5)
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
+  startSlash('', dir.x, dir.z, localTeam())
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)
   checkHits(startPos, startPos)
@@ -261,6 +263,7 @@ function checkHits(a0: V3, a1: V3): void {
     if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z) // local test box, no server
     else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
     impactFx(t, myTeam, true) // optimistic: the attacker feels it now
+    flashSlash('')
     dbgMark({ x: t.x, y: t.y + 2.2, z: t.z }, { r: 1, g: 0, b: 0 }, 0.5)
     for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: t.x + k.x * s, y: t.y + 0.3, z: t.z + k.z * s }, { r: 1, g: 0.3, b: 0 }, 0.18)
     if (!hitAny && state === 'active') {
@@ -285,11 +288,12 @@ function checkHits(a0: V3, a1: V3): void {
 }
 
 // ─── Network events ─────────────────────────────────────────────────
-function onStarted(attacker: string, id: number): void {
+function onStarted(attacker: string, id: number, dx: number, dz: number): void {
   const att = attacker.toLowerCase()
   gate.sawStart(att, id, Date.now())
   if (att === myAddress()) return
   lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0 })
+  startSlash(att, dx, dz, teamOfUser(att))
   const p = avatarPos(att)
   // Remote lunge: glow + the same lunge take set, positional at that avatar.
   // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
@@ -303,6 +307,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   const tgt = target.toLowerCase()
   const attTeam = teamOfUser(att)
   if (me && att === me) return // attacker already showed its FX
+  flashSlash(att)
   if (tgt.startsWith('bot:')) {
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
     if (b) impactFx({ x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }, attTeam, true)
@@ -346,7 +351,8 @@ export function initLunge(): void {
   if (LUNGE_MODE === 'off') return
   initKnockbackState()
   knockForceEnt = engine.addEntity()
-  events.on('lunge:started', ({ attacker, id }) => onStarted(attacker, id))
+  initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
+  events.on('lunge:started', ({ attacker, id, dx, dz }) => onStarted(attacker, id, dx, dz))
   events.on('lunge:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
   events.on('player:respawned', ({ why }) => {
     // Fall/respawn mid-attack: drop the lunge (no brake after a teleport).

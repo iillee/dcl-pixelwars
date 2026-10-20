@@ -132,6 +132,22 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 export const LUNGE_EMOTE = true
 export const LUNGE_EMOTE_NAME = 'punch'
 
+// ─── Slash VFX (client/lungeSlash.ts) — shows the hit area ──────────
+/** Flat team-coloured crescent at the front of the hitbox during the lunge. */
+export const LUNGE_SLASH = true
+/** Crescent width (m). = hitbox diameter (2 × LUNGE_HIT_RADIUS) so players learn the range. */
+export const LUNGE_SLASH_WIDTH = 2.2
+/** Height above the attacker's feet (m) — chest band. */
+export const LUNGE_SLASH_HEIGHT = 1.1
+/** Plane centre ahead of the attacker (m). Width/4 puts the arc's outer edge at the hitbox front (1.1 m). */
+export const LUNGE_SLASH_FORWARD = 0.55
+/** Shrink + fade after the active window (s). */
+export const LUNGE_SLASH_FADE_S = 0.12
+/** Peak opacity. */
+export const LUNGE_SLASH_ALPHA = 0.85
+/** Set true if the arc renders pointing backwards in the Explorer (plane UV orientation). */
+export const LUNGE_SLASH_FLIP = false
+
 /** Debug overlay (client): hitbox spheres, lunge dir, hit marks, knock dir, state log. */
 export const LUNGE_DEBUG = false
 
