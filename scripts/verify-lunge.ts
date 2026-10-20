@@ -5,8 +5,10 @@
  * Movement feel, ramps and real networking need Explorer playtests.
  */
 import { boxHit as sweptHit, hitboxAt, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
-import { rampSurfaceY } from '../src/shared/mazeGraph'
-import { Placed, CELL, MAZE_ORIGIN, STEP } from '../src/maze/generator'
+import { rampSurfaceY, buildWalkableGraph } from '../src/shared/mazeGraph'
+import { AnvilWorld } from '../src/shared/anvilSim'
+import { Placed, CELL, MAZE_ORIGIN, STEP, generateWithRetry, getPlacedTilesInOrder, teleportPairs } from '../src/maze/generator'
+import { LUNGE_DUMMY_COUNT, LUNGE_DUMMY_RESPAWN_S } from '../src/shared/pvp'
 import { LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W, LUNGE_HITBOX_H, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS } from '../src/shared/pvp'
 
 let fails = 0
@@ -86,6 +88,30 @@ for (let r = 0; r < 4; r++) {
   const maxRise = Math.max(...ys.slice(1).map((y, i) => y - ys[i]))
   check(`ramp r=${r}: rises ${STEP.toFixed(2)} m bottom→top, monotonic, ≤ ${maxRise.toFixed(3)} m per 0.1 m (no step a slide can't climb)`,
     Math.abs(ys[ys.length - 1] - ys[0] - STEP) < 1e-6 && ys.every((y, i) => i === 0 || y >= ys[i - 1] - 1e-9) && maxRise < 0.1)
+}
+
+// Shared anvils (server sim, shared/anvilSim.ts) on a real Sky maze.
+{
+  let sd: number | null = null
+  for (let s1 = 1; s1 < 50 && sd === null; s1++) { try { sd = generateWithRetry(s1, 50) } catch { /* next */ } }
+  const tiles = getPlacedTilesInOrder()
+  const tp = teleportPairs().flatMap(([a, b]) => [a.tile, b.tile])
+  const w = new AnvilWorld()
+  w.setMaze(buildWalkableGraph(tiles), tiles, tp)
+  const tpSq = new Set(tp.map(t => `${t.x},${t.z}`))
+  const sq = (a: { pos: { x: number; z: number } }) => `${Math.floor((a.pos.x - MAZE_ORIGIN) / CELL)},${Math.floor((a.pos.z - MAZE_ORIGIN) / CELL)}`
+  check(`anvils: ${LUNGE_DUMMY_COUNT} spawned, distinct tiles, none on a teleporter`, w.anvils.length === LUNGE_DUMMY_COUNT && w.anvils.every(a => a.alive) &&
+    new Set(w.anvils.map(sq)).size === w.anvils.length && w.anvils.every(a => !tpSq.has(sq(a))))
+  const a0 = { ...w.anvils[0].pos }, s0 = w.anvils[0].slide
+  w.hit(0, 1, 0)
+  check('anvil hit starts a new slide and moves it', w.anvils[0].slide === s0 + 1 && w.isMoving(w.anvils[0]))
+  for (let t = 0; t < 10 && w.isMoving(w.anvils[0]); t += 0.1) w.tick(0.1)
+  const moved = Math.hypot(w.anvils[0].pos.x - a0.x, w.anvils[0].pos.z - a0.z)
+  check(`anvil slides then stops or falls (moved ${moved.toFixed(2)} m, alive ${w.anvils[0].alive})`, moved > 0.5 && !w.isMoving(w.anvils[0]))
+  w.anvils[1].pos.y = -1000; w.anvils[1].tracking = true; w.tick(0.05)
+  check('fallen anvil hides', !w.anvils[1].alive && w.anvils[1].respawnIn > 0)
+  w.tick(LUNGE_DUMMY_RESPAWN_S + 0.1)
+  check('…and auto-respawns after LUNGE_DUMMY_RESPAWN_S', w.anvils[1].alive)
 }
 
 if (fails) { console.log(`✗ ${fails} lunge check(s) failed`); process.exit(1) }

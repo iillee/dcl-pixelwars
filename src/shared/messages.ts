@@ -158,6 +158,17 @@ export const Messages = {
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.
   burstImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
+  // Shared anvil dummies (server/anvils.ts owns them; shared/anvilSim.ts).
+  // Client → Server: lunge (kind 0) or burst (kind 1) `id` hit anvil `i`, knock direction (dx, dz).
+  anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number }),
+  // Client → Server: key 2, re-roll all anvils.
+  anvilRespawn: Schemas.Map({ n: Schemas.Int }),
+  // Server → Clients: all anvils (feet pos, velocity, yaw, alive, moving, slide = hit/respawn counter).
+  anvilState: Schemas.Map({ a: Schemas.Array(Schemas.Map({
+    x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, vx: Schemas.Number, vy: Schemas.Number, vz: Schemas.Number,
+    yaw: Schemas.Int, alive: Schemas.Int, moving: Schemas.Int, slide: Schemas.Int,
+  })) }),
+
   // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
   // sender's position. Server checks round mode, team and cooldown, snaps
   // it to the floor, broadcasts bombArmed, and after BOMB_FUSE_S paints

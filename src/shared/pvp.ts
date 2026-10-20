@@ -302,7 +302,7 @@ export const LUNGE_BOT_STUN_S = 1.2
 /** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */
 export const LUNGE_TEST_DUMMY = true
 /** How many dummies (each on the centre of a distinct random tile). */
-export const LUNGE_DUMMY_COUNT = 4
+export const LUNGE_DUMMY_COUNT = 2
 /** A dummy that falls off respawns at a random tile centre after this delay (s). */
 export const LUNGE_DUMMY_RESPAWN_S = 1
 /** Anvil launch: a SLIDING anvil dummy (horizontal speed ≥ MIN_SPEED m/s) that touches the local

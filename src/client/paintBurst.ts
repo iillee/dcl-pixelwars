@@ -181,7 +181,7 @@ export function triggerBurst(): void {
   for (const d of getDummyTargets()) {
     if (!inBurst(p, d.pos)) continue
     const k = burstDir(p, d.pos, f.x, f.z)
-    losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, BURST_KNOCKBACK / LUNGE_KNOCKBACK), DUMMY_LOS_SLACK)
+    losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, 1, id), DUMMY_LOS_SLACK)
   }
   // TEMP (ramp paint debug): reported cell + feet position; compare with the [Server] burst line.
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)

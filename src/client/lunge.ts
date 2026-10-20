@@ -289,7 +289,7 @@ function checkHits(a0: V3, a1: V3): void {
     if (!boxHit(a0, a1, t, startPos, dir.x, dir.z)) return
     hitThis.add(id)
     const k = knockDir(a1, t, dir.x, dir.z)
-    if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z) // local test box, no server
+    if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z, 0, lungeId) // shared anvil: server applies it
     else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
     impactFx(t, myTeam, true) // optimistic: the attacker feels it now
     flashSlash('')

@@ -42,6 +42,8 @@ import {
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
+import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest } from './anvils'
+import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
@@ -92,6 +94,8 @@ export async function setupServer(): Promise<void> {
     soloHumanTeam: activeSoloHumanTeam,
   })
   rebuildBotGraph(currentRoundIndex())
+  initAnvils()
+  anvilsMazeChanged()
 
   // Snapshot rate-limit map, hoisted so onLeaveScene can clear a user's
   // entry on disconnect. Without this, a rejoin within SNAPSHOT_COOLDOWN_MS
@@ -419,6 +423,19 @@ export async function setupServer(): Promise<void> {
     }
   })
 
+  // Shared anvils: the attacker's client detected the hit; same ledgers (once per lunge/burst id
+  // per anvil, within the window) as player hits, then the server knocks the anvil.
+  room.onMessage('anvilHit', ({ kind, id, i, dx, dz }, context) => {
+    const from = context?.from
+    if (!from || ![dx, dz].every(isFinite)) return
+    const len = Math.hypot(dx, dz)
+    if (len < 1e-3) return
+    const verdict = (kind === 1 ? bursts : lunges).hit(from, id, `anvil:${i}`, Date.now())
+    if (verdict !== 'ok') { console.log(`[Server] anvilHit ${from.slice(0, 8)} #${id} anvil ${i} rejected: ${verdict}`); return }
+    anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
+  })
+  room.onMessage('anvilRespawn', (_m, context) => { if (context?.from) anvilsRespawnRequest(context.from) })
+
   room.onMessage('burstHit', ({ id, target, dx, dz }, context) => {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
@@ -541,6 +558,7 @@ export async function setupServer(): Promise<void> {
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round boundary`)
     broadcastRoster('reset')
     rebuildBotGraph(idx)
+    anvilsMazeChanged()
     // Round boundary is our persistence + publish cadence for the
     // leaderboard: 5 min is frequent enough that a server crash loses at
     // most one round of paint credit, infrequent enough that Storage
