@@ -61,7 +61,7 @@ export function OverviewEye() {
       key="ui_overview_eye"
       uiTransform={{
         width: EYE_W, height: EYE_H,
-        positionType: 'absolute', position: { top: 46, left: 19 },
+        positionType: 'absolute', position: { top: 39, left: 19 },
         pointerFilter: 'block',
       }}
       uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: rowOpen || isOverviewActive() ? GOLD : Color4.White() }}
