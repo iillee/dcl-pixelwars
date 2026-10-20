@@ -205,7 +205,7 @@ function applyControl(): void {
 }
 function setReducedControl(on: boolean): void { recoveryOn = on; applyControl() }
 /** Victim lock: extend (never stack) to LUNGE_KNOCKBACK_LOCK_S from now. */
-function startKnockLock(): void {
+export function startKnockLock(): void {
   if (!LUNGE_KNOCKBACK_LOCK) return
   lockLeft = Math.max(lockLeft, LUNGE_KNOCKBACK_LOCK_S)
   applyControl()

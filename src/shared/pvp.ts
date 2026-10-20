@@ -305,6 +305,14 @@ export const LUNGE_TEST_DUMMY = true
 export const LUNGE_DUMMY_COUNT = 4
 /** A dummy that falls off respawns at a random tile centre after this delay (s). */
 export const LUNGE_DUMMY_RESPAWN_S = 1
+/** Anvil launch: a SLIDING anvil dummy (horizontal speed ≥ MIN_SPEED m/s) that touches the local
+ *  player launches them (impulse along the anvil's travel + big lift) — meant to throw you off the
+ *  arena. Client-local like the dummies. Once per anvil per slide; COOLDOWN_S between launches. */
+export const ANVIL_LAUNCH_ENABLED = true
+export const ANVIL_LAUNCH_MIN_SPEED = 3
+export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 93)
+export const ANVIL_LAUNCH_LIFT = 45
+export const ANVIL_LAUNCH_COOLDOWN_S = 1
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
  *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
  *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).

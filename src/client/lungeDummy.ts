@@ -22,19 +22,22 @@
  *   a dummy hides, then auto-respawns. Logs travel distance per hit.
  */
 
-import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { engine, Entity, GltfContainer, ColliderLayer, Transform, Physics, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
   LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_DUMMY_RESPAWN_S,
+  ANVIL_LAUNCH_ENABLED, ANVIL_LAUNCH_MIN_SPEED, ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, ANVIL_LAUNCH_COOLDOWN_S,
 } from '../shared/pvp'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, baseTeamOfTile, MIN_Y, CELL, MAZE_ORIGIN, STEP, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
-import { localTeam } from './knockback'
+import { localTeam, isKnockbackImmune, safePhysics } from './knockback'
+import { startKnockLock } from './lunge'
+import { playDashHitSfx } from './audio'
 import { teleporterTiles } from '../teleportOrbs'
 
 /** Anvil model (Creator Hub asset pack). GLB bounds: x −0.50…0.63, y 0…0.77 (origin at its
@@ -61,6 +64,8 @@ type Dummy = {
   hitFrom: { x: number; z: number }
   respawnIn: number // s until auto-respawn after a fall (< 0 = none)
   yaw: number // this dummy's own 0/90/180/270° roll; changes only when THIS dummy (re)spawns
+  launched: boolean // already launched the local player during this slide
+  launchGraceS: number // just hit by us: no launch yet (so lunging into it doesn't launch you)
 }
 const dummies: Dummy[] = []
 let graph: WalkableGraph | null = null
@@ -195,7 +200,37 @@ export function hitDummy(i: number, dx: number, dz: number, mult = 1): void {
   d.forceLeft = LUNGE_KNOCK_FORCE > 0 ? LUNGE_KNOCK_FORCE_S : 0
   d.hitFrom = { x: d.pos.x, z: d.pos.z }
   d.tracking = true
+  d.launched = false // new slide
+  d.launchGraceS = ANVIL_LAUNCH_GRACE_S
   console.log(`[Dummy ${i}] hit: v0 ${Math.hypot(d.vel.x, d.vel.z).toFixed(1)} m/s horizontal, ${d.vel.y.toFixed(1)} up (unit ${k})`)
+}
+
+// Anvil launch contact volume: anvil ≈ 1.7 × 1.15 × 1.06 m around the feet point + player radius.
+const ANVIL_LAUNCH_REACH = 0.85 + 0.4 // horizontal, m
+const ANVIL_LAUNCH_BELOW = 0.5 // player feet may be this far below the anvil base
+const ANVIL_LAUNCH_ABOVE = 1.2 // …or up to this far above it (standing on top doesn't count beyond)
+const ANVIL_LAUNCH_GRACE_S = 0.35
+let launchCooldown = 0
+
+/** Sliding anvil touching the local player → launch them (client-local, see pvp.ts ANVIL_LAUNCH_*). */
+function checkLaunch(d: Dummy, i: number, dt: number): void {
+  if (d.launchGraceS > 0) { d.launchGraceS -= dt; return }
+  if (!ANVIL_LAUNCH_ENABLED || !d.alive || !d.tracking || d.launched || launchCooldown > 0 || isKnockbackImmune()) return
+  const speed = Math.hypot(d.vel.x, d.vel.z)
+  if (speed < ANVIL_LAUNCH_MIN_SPEED) return
+  const p = Transform.getOrNull(engine.PlayerEntity)?.position
+  if (!p) return
+  const dx = p.x - d.pos.x, dz = p.z - d.pos.z, dy = p.y - d.pos.y
+  if (Math.hypot(dx, dz) > ANVIL_LAUNCH_REACH || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
+  // Along the anvil's travel (it's ≥ MIN_SPEED, so well defined); away from it as a fallback.
+  let ux = d.vel.x / speed, uz = d.vel.z / speed
+  if (!isFinite(ux) || !isFinite(uz)) { const l = Math.hypot(dx, dz) || 1; ux = dx / l; uz = dz / l }
+  d.launched = true
+  launchCooldown = ANVIL_LAUNCH_COOLDOWN_S
+  startKnockLock()
+  safePhysics('anvil launch', () => Physics.applyImpulseToPlayer(Vector3.create(ux * ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, uz * ANVIL_LAUNCH_IMPULSE)))
+  playDashHitSfx()
+  console.log(`[Dummy ${i}] launched the player at ${speed.toFixed(1)} m/s`)
 }
 
 function step(d: Dummy, i: number, dt: number): void {
@@ -244,7 +279,7 @@ export function initLungeDummy(): void {
     // walk graph (no raycasts), so it can't hit itself.
     GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     dummies.push({ ent, pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, forceLeft: 0, forceDir: { x: 0, z: 0 },
-      alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1, yaw: 0 })
+      alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1, yaw: 0, launched: false, launchGraceS: 0 })
   }
   engine.addSystem((dt: number) => {
     const seed = getCurrentSeed()
@@ -261,9 +296,11 @@ export function initLungeDummy(): void {
     }
     if (inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
     const sdt = Math.min(dt, 0.05)
+    if (launchCooldown > 0) launchCooldown -= dt
     dummies.forEach((d, i) => {
       if (d.respawnIn >= 0) { d.respawnIn -= dt; if (d.respawnIn < 0) respawnOne(i) }
       step(d, i, sdt)
+      checkLaunch(d, i, dt)
     })
   })
 }
