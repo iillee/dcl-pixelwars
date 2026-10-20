@@ -141,6 +141,9 @@ export const BURST_KNOCKBACK = 70
 export const BURST_KNOCK_LIFT = 12
 export const BURST_KNOCK_FORCE = 26
 export const BURST_KNOCK_FORCE_S = 0.3
+/** Local player plays this scene emote when Paint Burst fires (others see it natively). Tail of land_three_point (from 0.5 s). */
+export const BURST_EMOTE_ENABLED = true
+export const BURST_EMOTE_SRC = 'assets/emotes/burst_slam_emote.glb'
 /** Victim drops an impact this long after it saw the burst fire (ms). */
 export const BURST_IMPACT_MAX_AGE_MS = 600
 /** Ghost bots inside the radius: server-side shove (cells) + stun. */
