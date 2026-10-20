@@ -1,5 +1,5 @@
 /**
- * pvp.ts — PvP prototype config: Lunge (E). Dash and Paint Bomb parked (mode 'off').
+ * pvp.ts — PvP prototype config: Lunge (E) + Paint Bomb (F). Dash parked (mode 'off').
  * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
  *
  * Pure constants + helpers, no engine imports: read by the client
@@ -19,13 +19,11 @@
  *               an ability round alternate (playtest comparison).
  */
 export type AbilityMode = 'on' | 'off' | 'alternate'
-// Dash + Paint Bomb are parked (Luke, Oct 2026 pivot to Lunge). Their code
-// stays in client/dash.ts, client/paintBomb.ts and server/paintBomb.ts but is
-// not wired into client/index.ts or the hotbar; with 'off' the server drops
-// dashHit / bombDrop too. To bring one back: set 'on' and re-add its init +
-// hotbar slot.
+// Dash is parked (Luke, Oct 2026 pivot to Lunge): client/dash.ts stays but isn't
+// wired into client/index.ts or the hotbar, and with 'off' the server drops
+// dashHit. Paint Bomb (F) is back on alongside Lunge (E).
 export const DASH_MODE: AbilityMode = 'off'
-export const BOMB_MODE: AbilityMode = 'off'
+export const BOMB_MODE: AbilityMode = 'on' // back on (Luke, 2026-10-20), as at 9bd8b2b
 
 export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
   if (mode === 'on') return true
@@ -163,13 +161,13 @@ export const LUNGE_DEBUG = false
 /** Active lunge time (s). Hits only count in this window (+ grace). */
 export const LUNGE_ACTIVE_S = 0.20
 /** Target travel (m). Informational: drives the impulse below, logged vs measured. */
-export const LUNGE_DISTANCE = 4.0 // was 2.0: Luke wants to overtake a player you're chasing
-/** Horizontal impulse at start (Δv, assumed m/s: 4.0 m / 0.20 s = 20, +20% for
+export const LUNGE_DISTANCE = 8.0 // was 4.0 (2.0 before that); Luke: ~2× further
+/** Horizontal impulse at start (Δv, assumed m/s: 8.0 m / 0.20 s = 40, +20% for
  *  ground friction). Added ON TOP of run speed. Cancelled by a brake impulse at
  *  the end that removes only the lunge's extra speed (run speed is kept), so the
  *  lunge stops cleanly instead of sliding/launching. Units unconfirmed: tune with
  *  the logged "[Lunge] travelled" distance (measured from the press, run included). */
-export const LUNGE_IMPULSE = 24 // was 12
+export const LUNGE_IMPULSE = 48 // was 24 (12 before that)
 /** Vertical part of the attacker's impulse. 0 = surface-following, no ramp launches. */
 export const LUNGE_LIFT = 0
 /** Brake at the end: fraction of the start impulse removed, scaled by the lunge's

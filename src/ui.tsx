@@ -7,6 +7,7 @@ import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { OverviewUi } from "./client/overviewUi"
 import { AbilityHotbar } from "./client/abilityHotbar"
+import { DummyUi } from './client/dummyUi'
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -207,8 +208,11 @@ export const uiMenu = () => (
         Rendered before the banner so the banner stays on top. */}
     <OverviewUi />
 
-    {/* ─── Bottom centre: PvP hotbar, Lunge (E). */}
+    {/* ─── Bottom centre: PvP hotbar, Lunge (E) + Paint Bomb (F). */}
     <AbilityHotbar />
+
+    {/* ─── Top centre under the coverage pill: lunge test-dummy reset chip. */}
+    <DummyUi />
 
     {/* ─── Round-end banner: centered full-screen overlay ─────────────
         Fills the viewport so headline + subline are visually centered

@@ -1,6 +1,6 @@
 /**
- * abilityHotbar.tsx — bottom-centre PvP hotbar: one LUNGE (E) slot (Dash /
- * Paint Bomb parked, see shared/pvp.ts). Look and geometry ported from dcl-snowdrift
+ * abilityHotbar.tsx — bottom-centre PvP hotbar: LUNGE (E) left, PAINT BOMB
+ * (F) right (Dash parked, see shared/pvp.ts). Look and geometry ported from dcl-snowdrift
  * (layer.inventoryHotbar / layer.brushSize TorchButton + LogsButton +
  * KeyHintBadge / layer.relightPrompt + layer.feedPrompt / layer.hotbarBridge),
  * rebuilt with plain React-ECS because pixelwars has no UI-kit dependency.
@@ -26,11 +26,9 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
-import { LUNGE_MODE } from '../shared/pvp'
+import { LUNGE_MODE, BOMB_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
-import { isDummyEnabled, respawnDummy } from './lungeDummy'
-// Dash / Paint Bomb parked: their getDashHud/triggerDash (./dash) and
-// getBombHud/triggerBomb (./paintBomb) slots were DASH left + PAINT BOMB right.
+import { getBombHud, triggerBomb } from './paintBomb'
 
 const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -193,50 +191,32 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
   )
 }
 
-/** Test-dummy reset chip, left of the LUNGE slot (lunge tooltip is on the right). */
-function DummyChip(props: { g: Geo }) {
-  const { g } = props
-  const mobile = isMobile()
-  const h = mobile ? 72 : 44
-  return (
-    <UiEntity
-      key="ui_pvp_dummy"
-      uiTransform={{
-        positionType: 'absolute', position: { bottom: g.bottom + (g.slot - h) / 2, right: '50%' },
-        margin: { right: g.halfRow + 8 }, height: h, padding: { left: 14, right: 14 },
-        borderRadius: RADIUS_SM, borderWidth: 2, borderColor: WHITE_BORDER,
-        justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
-      }}
-      uiBackground={{ color: CHIP_BG }}
-      onMouseDown={respawnDummy}
-    >
-      <Label value={mobile ? 'RESPAWN DUMMY' : 'RESPAWN DUMMY (2)'} fontSize={mobile ? 24 : 14} color={WHITE} textAlign="middle-center" />
-    </UiEntity>
-  )
-}
-
-function roundLabel(punch: Hud): string {
-  if (LUNGE_MODE !== 'alternate') return ''
-  return punch.enabled ? 'LUNGE ROUND' : 'PAINT ONLY'
+function roundLabel(lunge: Hud, bomb: Hud): string {
+  if (LUNGE_MODE !== 'alternate' && BOMB_MODE !== 'alternate') return ''
+  return lunge.enabled || bomb.enabled ? 'LUNGE + BOMB ROUND' : 'PAINT ONLY'
 }
 
 /** Render inside the full-screen UI root (src/ui.tsx). */
 export function AbilityHotbar() {
-  const punch = getLungeHud()
-  if (!punch.show) return null
+  const lunge = getLungeHud()
+  const bomb = getBombHud()
+  if (!lunge.show && !bomb.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
-  const label = roundLabel(punch)
-  const punchTip = punch.ready
-  // Paint order = snowdrift: bridge + tooltip first (behind), slot last (on top).
+  const label = roundLabel(lunge, bomb)
+  const lungeTip = lunge.show && lunge.ready
+  const bombTip = bomb.show && bomb.ready
+  // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
+  // where the chip kisses the button edge. Tooltips on the outer sides.
   return (
     <UiEntity
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {mobile && punchTip && <Bridge id="punch" side="right" g={g} />}
-      {isDummyEnabled() && <DummyChip g={g} />}
-      {punchTip && <Tooltip id="punch" side="right" text="LUNGE" onPress={triggerLunge} g={g} />}
+      {mobile && lungeTip && <Bridge id="lunge" side="left" g={g} />}
+      {mobile && bombTip && <Bridge id="bomb" side="right" g={g} />}
+      {lungeTip && <Tooltip id="lunge" side="left" text="LUNGE" onPress={triggerLunge} g={g} />}
+      {bombTip && <Tooltip id="bomb" side="right" text="PAINT BOMB" onPress={triggerBomb} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -254,7 +234,8 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          <Slot id="punch" keyLabel="E" hud={punch} glyph="»" onPress={triggerLunge} g={g} />
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} glyph="»" onPress={triggerLunge} g={g} />}
+          {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
         </UiEntity>
       </UiEntity>
     </UiEntity>
