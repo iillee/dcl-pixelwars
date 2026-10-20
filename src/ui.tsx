@@ -44,7 +44,8 @@ const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 
 // Territory bar styling taken from flagtag's drown (air) bar, src/ui/components/ProgressBar.tsx:
 // pill-shaped dark semi-transparent track (PANEL_BG_SEMI), uniform border padding, fully rounded
-// fills (radius = half the fill height). No texture, no label.
+// outer ends (radius = half the fill height); red/white/blue meet on straight vertical edges.
+// No texture, no label.
 const BAR_W = 200
 const BAR_BORDER = 3
 const BAR_FILL_H = 16
@@ -153,11 +154,11 @@ export const uiMenu = () => (
                     uiBackground={{ color: Color4.White() }}
                   >
                     {pct.red > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: BAR_FILL_H / 2 }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%', borderRadius: { topLeft: BAR_FILL_H / 2, bottomLeft: BAR_FILL_H / 2, topRight: 0, bottomRight: 0 } }}
                       uiBackground={{ color: BAR_RED }}
                     />}
                     {pct.blue > 0 && <UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: BAR_FILL_H / 2 }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_FILL_H / 2, bottomRight: BAR_FILL_H / 2 } }}
                       uiBackground={{ color: BAR_BLUE }}
                     />}
                   </UiEntity>
