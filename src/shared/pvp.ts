@@ -126,7 +126,7 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 // own team), so repaints and duplicate ids never count.
 
 /** Cells you must convert for one charge. Max 1 charge, no reserve. */
-export const BURST_CHARGE_CELLS = 10
+export const BURST_CHARGE_CELLS = 100 // was 10 (Luke)
 /** Shockwave radius, 3D distance from the attacker's feet to the target's feet (m). */
 export const BURST_RADIUS = 4
 /** Line of sight check (raycast attacker chest → target chest, physics colliders). */
@@ -147,9 +147,9 @@ export const BURST_BOT_SHOVE = 4
 export const BURST_BOT_STUN_S = 1.0
 /** Painting after the shockwave: duration (s), footprint shape and size. */
 export const BURST_PAINT_S = 3
-/** 'square' = (2R+1)² cells (R=1 → 3×3), 'cross' = cells within R grid steps (R=1 → 5-cell +). */
+/** 'square' = (2R+1)² cells (R=3 → 7×7 default, Luke), 'cross' = cells within R grid steps (R=1 → 5-cell +, R=3 → 25). */
 export const BURST_PAINT_SHAPE: 'square' | 'cross' = 'square'
-export const BURST_PAINT_RADIUS_CELLS = 1
+export const BURST_PAINT_RADIUS_CELLS = 3 // 7×7 (was 1 = 3×3)
 /** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
 export const BURST_PAINT_MAX_DY = 1.5
 /** Client resends its centre cell at least this often while active (s); also on every cell change. */

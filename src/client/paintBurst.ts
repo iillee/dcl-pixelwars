@@ -33,13 +33,12 @@ import {
 import { inBurst, burstDir, V3 } from '../shared/burst'
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId } from '../paint'
-import { playDashHitSfx } from './audio'
+import { playDashHitSfx, playBurstSfx, BURST_SFX_SRC } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstPaint, sendBurstEnd } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
-const IMPACT_SRC = 'assets/sounds/bomb_exploding.mp3'
 const CHARGE_SRC = 'assets/sounds/pop.mp3'
 const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
 
@@ -72,7 +71,7 @@ function addFx(life: number, setup: (ent: Entity) => void, step: Fx['step'] = ()
 }
 const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
-function showShockwave(p: V3, team: Team): void {
+function showShockwave(p: V3, team: Team, local: boolean): void {
   const rgb = rgbOf(team)
   const d = BURST_RADIUS * 2
   // Fast flat ring out to the shockwave radius (diameter 2R), fading.
@@ -102,9 +101,10 @@ function showShockwave(p: V3, team: Team): void {
       tr.scale = Vector3.create(s, s, s)
     })
   }
-  addFx(1.2, e => {
+  if (local) { playBurstSfx(); return }
+  addFx(1.0, e => {
     Transform.create(e, { position: Vector3.create(p.x, p.y + 0.8, p.z) })
-    AudioSource.create(e, { audioClipUrl: IMPACT_SRC, playing: true, loop: false, volume: 1, global: false })
+    AudioSource.create(e, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: false })
   })
 }
 
@@ -212,7 +212,7 @@ export function triggerBurst(): void {
   active = true; activeLeft = BURST_PAINT_S
   lastCell = null; resendLeft = 0
   sendBurstUse(id, p.x, p.y, p.z, f.x, f.z)
-  showShockwave(p, team)
+  showShockwave(p, team, true)
   startAura('', team)
   // Opponent players (attacker-detected, like Lunge; server dedupes).
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
@@ -288,7 +288,7 @@ export function initPaintBurst(): void {
     const att = attacker.toLowerCase()
     gate.sawStart(att, id, Date.now())
     if (att === myAddress()) return // shown at the press
-    showShockwave({ x, y, z }, team)
+    showShockwave({ x, y, z }, team, false)
     startAura(att, team)
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))

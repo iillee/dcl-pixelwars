@@ -39,6 +39,7 @@ export function initAudio(): void {
   claimSfxEnt = engine.addEntity()
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   initLungeSfx()
+  initBurstSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()

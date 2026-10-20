@@ -24,6 +24,7 @@ Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponen
   - Use (F or slot tap): burstUse → server consumes, opens a 3 s (+0.5 slack) paint window, broadcasts burstFired, shoves opponent ghost bots in range. Attacker client finds opponent players within 4 m (3D), LOS raycast (CL_PHYSICS, fails open after 0.3 s), sends burstHit → server ledger (once per target, 1 s window) → burstImpact → victim applies impulse 70 / lift 12 / force 26 for 0.3 s via ImpactGate (dup + 600 ms stale) unless respawn-immune. Dummies knocked locally.
   - Paint: while active the client sends its current cell (on change + every 0.25 s); server paints `burstFootprint` (BFS on walkable adjacency inside a 3×3 square or 5-cell cross, |dy| ≤ 1.5) through applyPaint → normal paintDelta. Fall → burstEnd, no refund. F during active = nothing.
   - HUD: F slot shows `n/10` + fill while charging, full + tooltip BURST when ready, `Ns` + draining fill while active; icon `assets/images/burst.png`. Lunge untouched.
+- **Paint Burst tuning (2026-10-20):** charge 100 captures (HUD `n/100`); default footprint 7×7 square (`BURST_PAINT_RADIUS_CELLS = 3`, 'cross' still available); own impact sound `assets/sounds/burst_impact.wav` synthesized by `scripts/make-burst-sfx.py` (thump + whoosh + click), preloaded in `client/audio.ts`.
 - Sections below describe the Dash/Bomb era and are kept for when they come back.
 
 ---

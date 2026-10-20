@@ -6,7 +6,7 @@
  * and networking need an Explorer playtest.
  */
 import { BurstCharge, BurstLedger, inBurst, burstDir, burstFootprint } from '../src/shared/burst'
-import { BURST_CHARGE_CELLS, BURST_RADIUS, BURST_PAINT_MAX_DY, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
+import { BURST_CHARGE_CELLS, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 
@@ -73,6 +73,26 @@ for (const id of g.nodes) {
 check(`square footprint ≤ 9 cells (max ${maxSq}), 9 in open floor (${nine}/${total})`, maxSq <= 9 && nine > total * 0.3)
 check(`cross footprint ≤ 5 cells (max ${maxCross}), 5 in open floor (${five}/${total})`, maxCross <= 5 && five > total * 0.3)
 check('footprints stay on walkable, connected cells of the same level (no gaps / other levels)', bad === 0)
+{
+  // Default config (BURST_PAINT_* in pvp.ts): 7×7 square, same restrictions.
+  let mx = 0, full = 0, badD = 0
+  for (const id of g.nodes) {
+    const fp = burstFootprint(g, id)
+    mx = Math.max(mx, fp.length)
+    if (fp.length === 49) full++
+    const c0 = g.worldPos.get(id)!
+    const set = new Set(fp), seen = new Set([id]), q = [id]
+    while (q.length) { const x = q.pop()!; for (const n of g.adj.get(x) ?? []) if (set.has(n) && !seen.has(n)) { seen.add(n); q.push(n) } }
+    if (seen.size !== set.size) badD++
+    for (const f of fp) {
+      const p = g.worldPos.get(f)!
+      if (Math.abs(p[1] - c0[1]) > BURST_PAINT_MAX_DY || Math.abs(p[0] - c0[0]) > 6.5 || Math.abs(p[2] - c0[2]) > 6.5) badD++
+    }
+  }
+  check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS}: ≤ 49 cells (max ${mx}), full 7×7 somewhere (${full})`, mx <= 49 && full > 0)
+  check('default footprint stays connected, same level, inside 7×7', badD === 0)
+  check(`charge needs ${BURST_CHARGE_CELLS} captures`, BURST_CHARGE_CELLS === 100)
+}
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }
