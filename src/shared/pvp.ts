@@ -129,16 +129,32 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 
 /** Seconds between punches. */
 export const PUNCH_COOLDOWN_S = 1.0
-/** Max horizontal reach, attacker centre → target centre (m). */
-export const PUNCH_RANGE = 2.8
-/** Full cone angle in front of the avatar (degrees). */
-export const PUNCH_CONE_DEG = 80
+// ─── Lunge (Luke: punch is a very short dash so the avatar visibly snaps) ─
+/** Lunge length (s): impulse + sustain force; the hit window follows it. */
+export const LUNGE_S = 0.14
+/** One-shot horizontal impulse along facing at lunge start. */
+export const LUNGE_IMPULSE = 30
+/** Horizontal force held for LUNGE_S. */
+export const LUNGE_FORCE = 80
+/** Tiny upward part of the impulse so floor friction doesn't eat it (no hop). */
+export const LUNGE_LIFT = 1.5
+// No-drag estimate (same unconfirmed units as dash): 30·0.14 + ½·80·0.14² ≈ 5.0 m,
+// peak ≈ 41 m/s. Explorer friction/carry after the force will change this — tune live.
+/** Extra hit time after the lunge ends (avatar/network lag). */
+export const LUNGE_HIT_GRACE_S = 0.08
+/** Stop the sustain force on the hit (spend the lunge on the target). */
+export const LUNGE_STOP_ON_HIT = true
+
+/** Max horizontal reach while lunging, attacker centre → target centre (m). */
+export const PUNCH_RANGE = 2.0
+/** Full cone angle in front of the avatar (degrees). Overlap (<0.6 m) always hits. */
+export const PUNCH_CONE_DEG = 70
 /** Max vertical offset for a hit (no punching through floors). */
 export const PUNCH_MAX_DY = 1.8
 /** Victim: horizontal impulse away from the puncher. */
-export const PUNCH_KNOCKBACK = 55
+export const PUNCH_KNOCKBACK = 62 // was 55 before the lunge
 /** Victim: upward part of the impulse so floor friction doesn't eat the push. */
-export const PUNCH_LIFT = 9
+export const PUNCH_LIFT = 10
 /** Victim: horizontal force held after the impulse (carries them further). 0 = off. */
 export const PUNCH_FORCE = 25
 export const PUNCH_FORCE_S = 0.35
@@ -148,8 +164,8 @@ export const PUNCH_BOT_SHOVE = 6
 export const PUNCH_BOT_STUN_S = 1.2
 /** Server: accept the next punch from the same player no sooner than this (s). */
 export const SERVER_MIN_PUNCH_GAP_S = PUNCH_COOLDOWN_S - 0.2
-/** Server: slack on the bot range check (bot/avatar lag, ghost float). */
-export const SERVER_PUNCH_RANGE_SLACK = 2.5
+/** Server: slack on the bot range check (bot/avatar lag, ghost float, lunge travel). */
+export const SERVER_PUNCH_RANGE_SLACK = 3
 
 export function punchEnabledForRound(roundIndex: number): boolean {
   return modeEnabledForRound(PUNCH_MODE, roundIndex)
