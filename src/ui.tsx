@@ -153,7 +153,7 @@ export const uiMenu = () => (
               const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
               const leadW = lead ? BAR_INNER_W * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
               const star = lead !== null && leadW >= STAR_SIZE + STAR_PAD * 2
-                ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE, margin: lead === 'red' ? { bottom: 2 } : undefined }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: STAR_TINT }} />
+                ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE, margin: lead === 'red' ? { bottom: 1 } : undefined }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />
                 : null
               return (
                 <UiEntity
