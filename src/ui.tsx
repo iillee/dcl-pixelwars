@@ -123,7 +123,7 @@ export const uiMenu = () => (
               <UiEntity
                 uiTransform={{
                   width: 19, height: 19,
-                  positionType: 'absolute', position: { top: 16, left: 20 },
+                  positionType: 'absolute', position: { top: 14, left: 20 },
                   justifyContent: 'center', alignItems: 'center',
                   pointerFilter: 'block',
                 }}

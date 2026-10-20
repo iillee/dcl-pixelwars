@@ -52,7 +52,6 @@ const EYE_SRC = 'assets/images/eye.png'
 const EYE_W = 21
 const EYE_H = 14
 const ROW_GAP = 8
-let rowOpen = false
 
 /** Small eye under the timer's star (absolute inside the timer panel): opens/closes the row. */
 export function OverviewEye() {
@@ -61,38 +60,29 @@ export function OverviewEye() {
       key="ui_overview_eye"
       uiTransform={{
         width: EYE_W, height: EYE_H,
-        positionType: 'absolute', position: { top: 39, left: 19 },
+        positionType: 'absolute', position: { top: 41, left: 19 },
         pointerFilter: 'block',
       }}
-      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: rowOpen || isOverviewActive() ? GOLD : Color4.White() }}
-      onMouseDown={() => { playUiClick(); rowOpen = !rowOpen }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? GOLD : Color4.White() }}
+      onMouseDown={() => { playUiClick(); toggleOverview() }}
     />
   )
 }
 
 /** Overview buttons in a row popping out to the LEFT of the timer column (absolute in it). */
 export function OverviewRow() {
-  if (!rowOpen) return null
-  const on = isOverviewActive()
+  if (!isOverviewActive()) return null
   return (
     <UiEntity
       key="ui_overview_row"
       uiTransform={{
-        positionType: 'absolute', position: { top: 0, right: 200 + ROW_GAP },
+        positionType: 'absolute', position: { top: 0, right: 200 },
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
-      {on && <SmallButton id="ov_in" label="+" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
-      {on && <SmallButton id="ov_out" label="−" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
-      {on && <SmallButton id="ov_rot" label="⟳" enabled={true} onPress={() => rotateOverview(1)} />}
-      <UiEntity
-        key="ui_overview_btn"
-        uiTransform={{ width: BTN, height: BTN, justifyContent: 'center', alignItems: 'center', borderRadius: 18, pointerFilter: 'block' }}
-        uiBackground={{ color: PANEL_BG }}
-        onMouseDown={() => { playUiClick(); toggleOverview() }}
-      >
-        <ParcelGridIcon color={on ? GOLD : Color4.White()} />
-      </UiEntity>
+      {<SmallButton id="ov_in" label="+" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
+      {<SmallButton id="ov_out" label="−" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
+      {<SmallButton id="ov_rot" label="⟳" enabled={true} onPress={() => rotateOverview(1)} />}
     </UiEntity>
   )
 }
