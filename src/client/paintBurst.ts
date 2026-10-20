@@ -29,7 +29,10 @@ import {
 } from '../shared/pvp'
 import { inBurst, burstDir, V3 } from '../shared/burst'
 import { triggerSceneEmote } from '~system/RestrictedActions'
-import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_LOOP } from '../shared/pvp'
+import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_HOLD_SRC } from '../shared/pvp'
+
+// Pending switch from the one-shot ground punch to the looping hold of its final pose.
+let emoteHold: { left: number; x: number; z: number } | null = null
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId } from '../paint'
 import { initBurstRipple, startRipple } from './burstRipple'
@@ -158,7 +161,10 @@ export function triggerBurst(): void {
   const cell = getCurrentCellId() ?? ''
   sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
   showShockwave(p, team, true, cell)
-  if (BURST_EMOTE_ENABLED) void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: BURST_EMOTE_LOOP }).catch(() => {})
+  if (BURST_EMOTE_ENABLED) {
+    void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: false }).catch(() => {})
+    emoteHold = BURST_EMOTE_HOLD_SRC ? { left: BURST_EMOTE_S, x: p.x, z: p.z } : null
+  }
   // Opponent players (attacker-detected, like Lunge; server dedupes).
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
@@ -213,6 +219,13 @@ export function initPaintBurst(): void {
   initKnockbackState()
   knockForceEnt = engine.addEntity()
   initBurstRipple()
+  engine.addSystem((dt: number) => {
+    if (!emoteHold || (emoteHold.left -= dt) > 0) return
+    const t = Transform.getOrNull(engine.PlayerEntity)
+    const still = t && Math.hypot(t.position.x - emoteHold.x, t.position.z - emoteHold.z) < 0.15
+    emoteHold = null
+    if (still) void triggerSceneEmote({ src: BURST_EMOTE_HOLD_SRC, loop: true }).catch(() => {})
+  })
   events.on('burst:fired', ({ attacker, id, team, x, y, z }) => {
     const att = attacker.toLowerCase()
     gate.sawStart(att, id, Date.now())

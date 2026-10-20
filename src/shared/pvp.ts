@@ -139,12 +139,15 @@ export const BURST_KNOCKBACK = 70
 export const BURST_KNOCK_LIFT = 12
 export const BURST_KNOCK_FORCE = 26
 export const BURST_KNOCK_FORCE_S = 0.3
-/** Local player plays this scene emote when Paint Burst fires (others see it natively): the FINAL frame
- *  of land_three_point (right hand planted) as a static 1 s clip, played looping so the avatar holds it
- *  until it moves (a non-looping clip returns to idle when it ends). */
+/** Local player plays this scene emote when Paint Burst fires (others see it natively): a ground punch
+ *  authored on the DCL avatar rig (Blender, 30 fps, 15 frames = 0.467 s: wind-up → fist hits the floor
+ *  at 0.3 s → settle). A one-shot returns to idle when it ends, so after BURST_EMOTE_S we start
+ *  BURST_EMOTE_HOLD_SRC (the same final fist-down pose, static) looping — held until the player moves.
+ *  Skipped if the player already moved. HOLD_SRC '' = no hold. */
 export const BURST_EMOTE_ENABLED = true
-export const BURST_EMOTE_SRC = 'assets/emotes/burst_hold_emote.glb'
-export const BURST_EMOTE_LOOP = true
+export const BURST_EMOTE_SRC = 'assets/emotes/burst_groundpunch_emote.glb'
+export const BURST_EMOTE_S = 0.467
+export const BURST_EMOTE_HOLD_SRC = 'assets/emotes/burst_groundpunch_hold_emote.glb'
 /** Victim drops an impact this long after it saw the burst fire (ms). */
 export const BURST_IMPACT_MAX_AGE_MS = 600
 /** Ghost bots inside the radius: server-side shove (cells) + stun. */
