@@ -31,15 +31,18 @@ export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): bool
 // ═══ Dash (E) ═══════════════════════════════════════════════════════
 // ─── Attacker burst ─────────────────────────────────────────────────
 /** Length of the dash (s): the sustain force and the hit window. */
-export const DASH_DURATION_S = 0.4
+export const DASH_DURATION_S = 0.22 // was 0.4: shorter + faster (Luke). Trail and HIT_WINDOW_S follow this.
 /** Seconds between dashes. Keeps running through respawn (never reset). */
 export const DASH_COOLDOWN_S = 5
 /** One-shot horizontal impulse at dash start (direction × this). Tuned up for a snappy burst. */
-export const DASH_IMPULSE = 40
+export const DASH_IMPULSE = 50 // was 40
 /** Small upward part of the start impulse so ground friction doesn't eat it. */
-export const DASH_LIFT = 4
+export const DASH_LIFT = 3 // was 4; low so the faster burst doesn't hop
 /** Horizontal force held for DASH_DURATION_S to sustain the burst. 0 = impulse only. */
-export const DASH_FORCE = 55
+export const DASH_FORCE = 80 // was 55
+// Rough no-drag estimate (impulse as Δv m/s, force as m/s², carry after the
+// burst ignored): old 40·0.4 + ½·55·0.4² ≈ 20.4 m, peak ≈ 62 m/s;
+// new 50·0.22 + ½·80·0.22² ≈ 12.9 m (≈63%), peak ≈ 68 m/s. Units unconfirmed in Explorer.
 /** Stop the sustain force on the first hit (attacker "spends" the dash on the target). */
 export const DASH_STOP_ON_HIT = true
 /** Above this horizontal speed (m/s) dash goes along movement; below, along avatar facing. */
