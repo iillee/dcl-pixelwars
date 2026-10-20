@@ -10,6 +10,7 @@ import { BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../
 import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
+import { applyPaint, teamOfCell, drainDelta } from '../src/server/paintState'
 
 let fails = 0
 function check(name: string, ok: boolean): void {
@@ -129,6 +130,29 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
     missing += miss.length; leaks += leak.length
   }
   check(`ramp: burst mid-ramp paints the full ramp run inside the circle, > ${BURST_PAINT_MAX_DY * 2} m of climb, no other level (${ok}/${tried} ramps; missing ${missing}, leaks ${leaks})`, tried > 0 && ok === tried)
+}
+{
+  // Server paint path (server.ts burstUse): burstCentre → burstFootprint → applyPaint, fired from
+  // a player standing mid-ramp. Every ramp cell in the footprint must change owner and go out in
+  // the paintDelta.
+  let tried = 0, bad = 0
+  for (const t of getPlacedTilesInOrder().filter(t => t.type === 'ramp')) {
+    const pre = `${t.x},${t.z},${t.y}:`
+    const mid = [...g.nodes].find(n => n === `${pre}8,8`)
+    if (!mid) continue
+    const [x, y, z] = g.worldPos.get(mid)!
+    for (const cell of [mid, '']) { // reported cell, and the nearest-cell fallback
+      const team = tried % 2 ? 1 : 2
+      const centre = burstCentre(g, cell, { x, y: y - 0.55, z }) // player feet ≈ walkable top
+      const fp = centre ? burstFootprint(g, centre) : []
+      for (const id of fp) applyPaint(id, team)
+      const sent = new Set(drainDelta().map(d => d.id))
+      const rampFp = fp.filter(id => id.startsWith(pre))
+      if (!centre || rampFp.length < 20 || rampFp.some(id => teamOfCell(id) !== team || !sent.has(id))) bad++
+      tried++
+    }
+  }
+  check(`server burst path paints ramp cells (${tried} bursts on ramps, ${bad} failed)`, tried > 0 && bad === 0)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 
