@@ -8,8 +8,9 @@
  */
 import { BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
 import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
-import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
-import { buildWalkableGraph } from '../src/shared/mazeGraph'
+import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
+import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
+import { worldToCellId } from '../src/paint'
 import { applyPaint, teamOfCell, drainDelta } from '../src/server/paintState'
 
 let fails = 0
@@ -153,6 +154,40 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
     }
   }
   check(`server burst path paints ramp cells (${tried} bursts on ramps, ${bad} failed)`, tried > 0 && bad === 0)
+}
+{
+  // Real player on every ramp, every rotation, across many Sky layouts: feet on the slope at
+  // sampled points, cell = what the client reports (paint.ts worldToCellId, as getCurrentCellId),
+  // then the server burst (burstCentre → burstFootprint → applyPaint). The cell under the player
+  // and every ramp cell of that ramp inside the circle must change owner.
+  const R_M = BURST_PAINT_RADIUS_CELLS * 2
+  const per: Record<number, { n: number; bad: number }> = { 0: { n: 0, bad: 0 }, 1: { n: 0, bad: 0 }, 2: { n: 0, bad: 0 }, 3: { n: 0, bad: 0 } }
+  let team = 1
+  for (let s1 = 1; s1 < 25; s1++) {
+    let sd: number | null = null
+    try { sd = generateWithRetry(s1, 50) } catch { continue }
+    if (sd === null) continue
+    const gg = buildWalkableGraph(getPlacedTilesInOrder())
+    for (const t of getPlacedTilesInOrder().filter(t => t.type === 'ramp')) {
+      const pre = `${t.x},${t.z},${t.y}:`
+      const ux = Math.sin(t.r * Math.PI / 2), uz = Math.cos(t.r * Math.PI / 2)
+      const cx = t.x * CELL + MAZE_ORIGIN + CELL / 2, cz = t.z * CELL + MAZE_ORIGIN + CELL / 2
+      for (let a = -15; a <= 15; a += 5) for (const side of [-3, 0, 3]) {
+        const x = cx + ux * a + uz * side, z = cz + uz * a - ux * side
+        const y = rampSurfaceY(t, x, z) - 0.05
+        team = team === 1 ? 2 : 1
+        per[t.r].n++
+        const hit = worldToCellId(x, y, z, CELL, STEP, lookupTile)
+        const centre = hit ? burstCentre(gg, hit.id, { x, y, z }) : null
+        const fp = centre ? burstFootprint(gg, centre) : []
+        for (const id of fp) applyPaint(id, team)
+        drainDelta()
+        const want = [...gg.nodes].filter(n => n.startsWith(pre) && (() => { const q = gg.worldPos.get(n)!, c = gg.worldPos.get(hit!.id)!; return Math.hypot(q[0] - c[0], q[2] - c[2]) <= R_M + 0.05 })())
+        if (!hit || centre !== hit.id || teamOfCell(hit.id) !== team || want.some(n => teamOfCell(n) !== team)) per[t.r].bad++
+      }
+    }
+  }
+  for (const r of [0, 1, 2, 3]) check(`ramp r=${r}: player on the slope → reported cell + ramp cells in the circle painted (${per[r].n - per[r].bad}/${per[r].n})`, per[r].n > 0 && per[r].bad === 0)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 

@@ -42,7 +42,7 @@ import {
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
-import { SCENE_SIZE } from '../maze/generator'
+import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -401,7 +401,10 @@ export async function setupServer(): Promise<void> {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
     }
-    console.log(`[Server] burst ${from.slice(0, 8)} #${id} painted ${gained} cells`)
+    // TEMP (ramp paint debug): reported cell vs resolved centre, footprint size, ramp cells in it.
+    const fp = graph && centre ? burstFootprint(graph, centre) : []
+    const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
+    console.log(`[Server] burst ${from.slice(0, 8)} #${id} painted ${gained} cells | cell=${cell || '(none)'} centre=${centre ?? 'null'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
     room.send('burstFired', { attacker: from, id, team, x, y, z })
     for (const b of getBotPositions()) {
       if (b.team === team || !inBurst({ x, y, z }, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue

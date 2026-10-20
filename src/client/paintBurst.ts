@@ -183,7 +183,8 @@ export function triggerBurst(): void {
     const k = burstDir(p, d.pos, f.x, f.z)
     losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, BURST_KNOCKBACK / LUNGE_KNOCKBACK), DUMMY_LOS_SLACK)
   }
-  console.log(`[Burst] #${id} fired`)
+  // TEMP (ramp paint debug): reported cell + feet position; compare with the [Server] burst line.
+  console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
 function onImpact(attacker: string, id: number, target: string, dx: number, dz: number): void {
