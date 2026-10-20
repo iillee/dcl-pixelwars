@@ -41,27 +41,44 @@ import { SeedHolder, seedHolder } from '../shared/components'
 // players pass straight through to the fall-respawn height. Ramps use the
 // same box: its top sits under the ramp's low end, so it stays below the
 // whole sloped surface. Pillars live and die with their tile entity.
+// Grow is a transform write, not a Tween: a paper-thin start scale plus
+// Tween.Mode.Scale stalled scene load.
 const PILLAR_WIDTH = 0.6 * CELL // 19.2 m of the 32 m footprint
 const PILLAR_GAP = 0.5          // m below the tile floor
+const PILLAR_GROW_S = 0.7
+const PILLAR_START_H = 1
 const pillarOf = new Map<Entity, Entity>()
+const pillarGrow: Array<{ entity: Entity; height: number; elapsed: number }> = []
 function spawnPillar(tile: Entity, p: Placed): void {
   const h = p.y - PILLAR_GAP
   if (h <= 0) return
   const e = engine.addEntity()
+  const startH = Math.min(PILLAR_START_H, h)
   const cx = (p.x + 0.5) * CELL + MAZE_ORIGIN, cz = (p.z + 0.5) * CELL + MAZE_ORIGIN
   Transform.create(e, {
-    position: Vector3.create(cx, h / 2, cz),
-    scale: Vector3.create(PILLAR_WIDTH, 0.001, PILLAR_WIDTH),
+    position: Vector3.create(cx, startH / 2, cz),
+    scale: Vector3.create(PILLAR_WIDTH, startH, PILLAR_WIDTH),
   })
   MeshRenderer.setBox(e)
   Material.setPbrMaterial(e, { albedoColor: Color4.create(0.62, 0.6, 0.86, 1), roughness: 0.9, metallic: 0 })
-  Tween.create(e, {
-    mode: Tween.Mode.Scale({ start: Vector3.create(PILLAR_WIDTH, 0.001, PILLAR_WIDTH), end: Vector3.create(PILLAR_WIDTH, h, PILLAR_WIDTH) }),
-    duration: 700,
-    easingFunction: EasingFunction.EF_EASEOUTQUAD,
-  })
   pillarOf.set(tile, e)
+  if (startH < h) pillarGrow.push({ entity: e, height: h, elapsed: 0 })
 }
+engine.addSystem((dt: number) => {
+  if (pillarGrow.length === 0) return
+  for (let i = pillarGrow.length - 1; i >= 0; i--) {
+    const g = pillarGrow[i]
+    const tr = Transform.getMutableOrNull(g.entity)
+    if (!tr) { pillarGrow.splice(i, 1); continue }
+    g.elapsed += dt
+    const t = Math.min(1, g.elapsed / PILLAR_GROW_S)
+    const ease = 1 - (1 - t) * (1 - t)
+    const y = PILLAR_START_H + (g.height - PILLAR_START_H) * ease
+    tr.scale.y = y
+    tr.position.y = y / 2 // base stays on y = 0 while the column grows up
+    if (t >= 1) pillarGrow.splice(i, 1)
+  }
+})
 
 // ─── Pipeline state ─────────────────────────────────────────────────
 const spawnedEntities: Entity[] = []
@@ -214,7 +231,12 @@ engine.addSystem(() => {
     const e = teardownQueue.pop()!
     removePaintForTile(e)
     const pl = pillarOf.get(e)
-    if (pl !== undefined) { engine.removeEntity(pl); pillarOf.delete(e) }
+    if (pl !== undefined) {
+      const gi = pillarGrow.findIndex(g => g.entity === pl)
+      if (gi !== -1) pillarGrow.splice(gi, 1)
+      engine.removeEntity(pl)
+      pillarOf.delete(e)
+    }
     engine.removeEntity(e)
   }
 })
