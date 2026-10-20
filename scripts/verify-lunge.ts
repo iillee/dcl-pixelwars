@@ -5,6 +5,8 @@
  * Movement feel, ramps and real networking need Explorer playtests.
  */
 import { boxHit as sweptHit, hitboxAt, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
+import { rampSurfaceY } from '../src/shared/mazeGraph'
+import { Placed, CELL, MAZE_ORIGIN, STEP } from '../src/maze/generator'
 import { LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W, LUNGE_HITBOX_H, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS } from '../src/shared/pvp'
 
 let fails = 0
@@ -72,6 +74,19 @@ check('duplicate impact dropped', G.accept('a', 1, 1210) === 'dup')
 G.sawStart('a', 2, 2000)
 check(`impact > ${LUNGE_IMPACT_MAX_AGE_MS} ms after start dropped`, G.accept('a', 2, 2000 + LUNGE_IMPACT_MAX_AGE_MS + 1) === 'stale')
 check('impact whose start was never seen is still applied', G.accept('a', 3, 5000) === 'ok')
+
+// Ramp surface (dummy slides): continuous slope height for every rotation.
+for (let r = 0; r < 4; r++) {
+  const t: Placed = { type: 'ramp', r, x: 1, z: 1, y: 0, order: 0 }
+  const c = { x: CELL * 1.5 + MAZE_ORIGIN, z: CELL * 1.5 + MAZE_ORIGIN }
+  // canonical +lz in world = (sin r, cos r)
+  const ux = Math.sin(r * Math.PI / 2), uz = Math.cos(r * Math.PI / 2)
+  const ys: number[] = []
+  for (let s = -CELL / 2 + 0.01; s <= CELL / 2 - 0.01; s += 0.1) ys.push(rampSurfaceY(t, c.x + ux * s, c.z + uz * s))
+  const maxRise = Math.max(...ys.slice(1).map((y, i) => y - ys[i]))
+  check(`ramp r=${r}: rises ${STEP.toFixed(2)} m bottom→top, monotonic, ≤ ${maxRise.toFixed(3)} m per 0.1 m (no step a slide can't climb)`,
+    Math.abs(ys[ys.length - 1] - ys[0] - STEP) < 1e-6 && ys.every((y, i) => i === 0 || y >= ys[i - 1] - 1e-9) && maxRise < 0.1)
+}
 
 if (fails) { console.log(`✗ ${fails} lunge check(s) failed`); process.exit(1) }
 console.log('✓ all lunge checks passed')

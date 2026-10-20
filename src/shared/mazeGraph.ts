@@ -228,6 +228,18 @@ const FLAT_OFFSET = 0.275 * 2
  * top based on `row` (canonical, pre-rotation). Good enough for a floating
  * bot marker; not used for actual paint positioning.
  */
+/** Continuous walkable-surface Y (same frame as worldPos node Y) at world (x, z) on ramp tile p:
+ *  inverse of cellCenterWorld's rotation → canonical lz, then flat landing / linear incline /
+ *  top landing. Used by the client test dummies to slide up and down slopes. */
+export function rampSurfaceY(p: Placed, x: number, z: number): number {
+  const rad = p.r * Math.PI / 2
+  const wxRel = x - (p.x * CELL + MAZE_ORIGIN + CELL / 2)
+  const wzRel = z - (p.z * CELL + MAZE_ORIGIN + CELL / 2)
+  const lz = wxRel * Math.sin(rad) + wzRel * Math.cos(rad) + CELL / 2
+  const t = Math.max(0, Math.min(1, (lz - RAMP_GEO.inclineStart) / (RAMP_GEO.inclineEnd - RAMP_GEO.inclineStart)))
+  return p.y + FLAT_OFFSET + t * STEP
+}
+
 function cellCenterWorld(p: Placed, col: number, row: number): [number, number, number] {
   const cellSize = CELL / SIZE
   const tileWorldX = p.x * CELL + MAZE_ORIGIN

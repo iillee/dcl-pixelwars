@@ -29,8 +29,8 @@ import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
   LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_DUMMY_RESPAWN_S,
 } from '../shared/pvp'
-import { buildWalkableGraph, WalkableGraph } from '../shared/mazeGraph'
-import { getPlacedTilesInOrder, baseTeamOfTile, MIN_Y, CELL, MAZE_ORIGIN } from '../maze/generator'
+import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
+import { getPlacedTilesInOrder, baseTeamOfTile, MIN_Y, CELL, MAZE_ORIGIN, STEP, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
@@ -46,6 +46,7 @@ const HIDDEN = Vector3.create(8, -50, 8)
 /** worldPos y of a walkable cell sits FLAT_OFFSET (0.55) above the tile; slab top ≈ +0.5. */
 const FLOOR_FROM_NODE = -0.05
 const STEP_UP = 0.6
+const SNAP_DOWN = 0.6 // grounded dummy sticks to a floor up to this far below (down-ramps)
 const CELL_SIZE = 2 // shared/mazeGraph: CELL 32 / SIZE 16
 
 type Dummy = {
@@ -62,6 +63,7 @@ type Dummy = {
 const dummies: Dummy[] = []
 let graph: WalkableGraph | null = null
 let graphSeed = -1
+let rampTiles: Placed[] = []
 let graphTeam: Team = Team.None
 
 export function isDummyEnabled(): boolean { return LUNGE_TEST_DUMMY }
@@ -78,7 +80,11 @@ function floorAt(x: number, z: number, y: number): number | null {
   let best: number | null = null
   for (const p of graph.worldPos.values()) {
     if (Math.abs(p[0] - x) > CELL_SIZE * 0.6 || Math.abs(p[2] - z) > CELL_SIZE * 0.6) continue
-    const fy = p[1] + FLOOR_FROM_NODE
+    // Ramp node: use the continuous slope height at (x, z), not the node's stepped cell height
+    // (ramp nodes rise ~0.7 m per cell > STEP_UP, which made uphill slides pass through and fall).
+    const ramp = rampTiles.find(t => p[1] > t.y && p[1] < t.y + STEP + 1 &&
+      Math.abs(p[0] - (t.x * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2 && Math.abs(p[2] - (t.z * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2)
+    const fy = (ramp ? rampSurfaceY(ramp, x, z) : p[1]) + FLOOR_FROM_NODE
     if (fy > y + STEP_UP) continue
     if (best === null || fy > best) best = fy
   }
@@ -185,12 +191,13 @@ function step(d: Dummy, i: number, dt: number): void {
     d.vel.z += d.forceDir.z * a * dt
     d.forceLeft -= dt
   }
+  const wasGrounded = d.vel.y === 0
   d.vel.y -= LUNGE_DUMMY_GRAVITY * dt
   const nx = d.pos.x + d.vel.x * dt, nz = d.pos.z + d.vel.z * dt
   let ny = d.pos.y + d.vel.y * dt
   const floor = floorAt(nx, nz, d.pos.y)
   let grounded = false
-  if (floor !== null && ny <= floor) { ny = floor; d.vel.y = 0; grounded = true }
+  if (floor !== null && (ny <= floor || (wasGrounded && ny - floor <= SNAP_DOWN))) { ny = floor; d.vel.y = 0; grounded = true }
   d.pos = { x: nx, y: ny, z: nz }
   if (grounded) {
     const h = Math.hypot(d.vel.x, d.vel.z)
@@ -226,6 +233,7 @@ export function initLungeDummy(): void {
     const team = localTeam()
     if (!isRebuilding() && seed !== graphSeed && getPlacedTilesInOrder().length > 0) {
       graph = buildWalkableGraph(getPlacedTilesInOrder())
+      rampTiles = getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp)
       graphSeed = seed
       if (team !== Team.None) respawnDummy()
     }
