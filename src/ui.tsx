@@ -5,6 +5,7 @@ import { coverage } from "./paint"
 import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
+import { Team, TEAM_RGB } from "./shared/team"
 import { OverviewUi } from "./client/overviewUi"
 import { AbilityHotbar } from "./client/abilityHotbar"
 
@@ -41,12 +42,18 @@ const BLUE_COLOR   = Color4.create(106/255, 153/255, 252/255, 1) // pallet.jpeg 
 const COUNTDOWN_BG = Color4.create(0.1, 0.1, 0.1, 0.92)
 const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 
-function coveragePct(): { red: string; blue: string } {
+const BAR_W = 200
+const BAR_H = 24
+const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
+const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
+
+/** Territory shares in %, same source and 1-decimal rounding the old text readout showed. */
+function coveragePct(): { red: number; blue: number } {
   const { red, blue, total } = coverage()
-  if (total === 0) return { red: '0%', blue: '0%' }
+  if (total === 0) return { red: 0, blue: 0 }
   return {
-    red:  `${((red  / total) * 100).toFixed(1)}%`,
-    blue: `${((blue / total) * 100).toFixed(1)}%`,
+    red:  Number(((red  / total) * 100).toFixed(1)),
+    blue: Number(((blue / total) * 100).toFixed(1)),
   }
 }
 
@@ -125,18 +132,25 @@ export const uiMenu = () => (
                 onMouseDown={toggleMusic}
               />
             </UiEntity>
-            <UiEntity
-              uiTransform={{
-                width: 200, height: 36,
-                margin: { top: 6 }, borderRadius: 18,
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-              }}
-              uiBackground={{ color: COUNTDOWN_BG }}
-            >
-              <Label value={coveragePct().red}  fontSize={16} color={RED_COLOR}     textAlign="middle-center" />
-              <Label value="  —  "              fontSize={16} color={Color4.White()} textAlign="middle-center" />
-              <Label value={coveragePct().blue} fontSize={16} color={BLUE_COLOR}    textAlign="middle-center" />
-            </UiEntity>
+            {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
+            {(() => {
+              const pct = coveragePct()
+              return (
+                <UiEntity
+                  uiTransform={{ width: BAR_W, height: BAR_H, margin: { top: 6 } }}
+                  uiBackground={{ color: Color4.White() }}
+                >
+                  <UiEntity
+                    uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: `${pct.red}%`, height: '100%' }}
+                    uiBackground={{ color: BAR_RED }}
+                  />
+                  <UiEntity
+                    uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: `${pct.blue}%`, height: '100%' }}
+                    uiBackground={{ color: BAR_BLUE }}
+                  />
+                </UiEntity>
+              )
+            })()}
           </UiEntity>
         </UiEntity>
       )
