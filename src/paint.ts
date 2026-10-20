@@ -669,6 +669,10 @@ export function worldToCellId(
 // the avatar is grounded on a flat tile at tile.y = 0.
 const WALKABLE_TOP = 0.5
 
+/** True when the local player was within ground tolerance of a walkable cell last frame. */
+let playerGrounded = true
+export function isPlayerGrounded(): boolean { return playerGrounded }
+
 // ─── Painting system (per-frame, single-player for now) ──────────────
 // Reads player position, resolves current cell, paints it.
 // Team is hard-coded to Red for Phase 1 solo testing.
@@ -694,7 +698,7 @@ export function initPaintingSystem(
     if (!t) return
     const { x, y, z } = t.position
     const center = worldToCellId(x, y, z, CELL, STEP, lookupTile)
-    if (!center) { onOwnPaint = false; lastCenterId = null; return }
+    if (!center) { onOwnPaint = false; lastCenterId = null; playerGrounded = false; return }
     // Own-paint check happens on ENTERING a cell and BEFORE we paint it,
     // otherwise optimistic local paint would make every cell 'ours' at once.
     // Airborne frames keep the previous state (no flicker on jumps).
@@ -702,7 +706,8 @@ export function initPaintingSystem(
       lastCenterId = center.id
       onOwnPaint = localTeam !== Team.None && cellTeam.get(center.id) === localTeam
     }
-    if (y - center.groundY > GROUND_TOLERANCE) return
+    playerGrounded = y - center.groundY <= GROUND_TOLERANCE
+    if (!playerGrounded) return
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue

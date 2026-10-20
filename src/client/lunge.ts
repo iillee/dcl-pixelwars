@@ -33,6 +33,7 @@ import {
   PlayerIdentityData, PointerEventType, Transform, AudioSource, inputSystem, Physics, Tween, EasingFunction, AvatarMask,
 } from '@dcl/sdk/ecs'
 import { triggerEmote } from '~system/RestrictedActions'
+import { isPlayerGrounded } from '../paint'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -253,7 +254,8 @@ export function triggerLunge(): void {
   safePhysics('lunge impulse', () => {
     Physics.applyImpulseToPlayer(Vector3.create(dir.x * LUNGE_IMPULSE, LUNGE_LIFT, dir.z * LUNGE_IMPULSE))
     // Downhill: push down during the lunge so we follow the ramp instead of launching off it.
-    Physics.applyForceToPlayerForDuration(stickForceEnt, LUNGE_ACTIVE_S, Vector3.create(0, -1, 0), LUNGE_STICK_FORCE)
+    // Only when the lunge starts on the ground; an air lunge keeps its arc.
+    if (isPlayerGrounded()) Physics.applyForceToPlayerForDuration(stickForceEnt, LUNGE_ACTIVE_S, Vector3.create(0, -1, 0), LUNGE_STICK_FORCE)
   })
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
   // Anticipation without input delay: team glow at the chest + lunge take.
