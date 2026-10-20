@@ -29,7 +29,7 @@ import {
 } from '../shared/pvp'
 import { inBurst, burstDir, V3 } from '../shared/burst'
 import { triggerSceneEmote } from '~system/RestrictedActions'
-import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC } from '../shared/pvp'
+import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_LOOP } from '../shared/pvp'
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId } from '../paint'
 import { initBurstRipple, startRipple } from './burstRipple'
@@ -158,7 +158,7 @@ export function triggerBurst(): void {
   const cell = getCurrentCellId() ?? ''
   sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
   showShockwave(p, team, true, cell)
-  if (BURST_EMOTE_ENABLED) void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: false }).catch(() => {})
+  if (BURST_EMOTE_ENABLED) void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: BURST_EMOTE_LOOP }).catch(() => {})
   // Opponent players (attacker-detected, like Lunge; server dedupes).
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
