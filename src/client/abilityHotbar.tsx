@@ -10,7 +10,8 @@
  *   - Gold fill inside the slot = recharge progress (rises from empty after
  *     use, full when ready). Seconds left are shown while cooling down.
  *   - Small E / F hint top-left on desktop only.
- *   - Gold tooltip chip with black text beside each slot while the ability
+ *   - Gold tooltip chip with black text tucked under each slot (inner end
+ *     hidden behind the button, `tuck` px) while the ability
  *     is ready: DASH to the left, PAINT BOMB to the right. Tapping it fires
  *     the ability too. Mobile adds the gold bridge strip joining slot and chip.
  *     Bridge + tooltips render before the slots so buttons win the overlap
@@ -50,9 +51,13 @@ type Geo = {
   slot: number; icon: number; bottom: number; halfRow: number; tipH: number
   tipBorder: number; tipPadX: number; tipFont: number
   bridgeInner: number; bridgeW: number
+  /** How far the chip's inner end tucks under the slot (px). = snowdrift's
+   *  bridge depth into the button (desktop 24, mobile 38), so the chip's
+   *  inner edge lands where snowdrift's gold connector starts. */
+  tuck: number
 }
-const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50 }
-const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80 }
+const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50, tuck: 24 }
+const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 38 }
 
 type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number }
 
@@ -144,9 +149,14 @@ function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPr
       uiTransform={{
         positionType: 'absolute',
         position: props.side === 'left' ? { bottom: g.bottom, right: '50%' } : { bottom: g.bottom, left: '50%' },
-        margin: props.side === 'left' ? { right: g.halfRow } : { left: g.halfRow },
+        // Underlap: inner end starts `tuck` px inside the slot footprint
+        // (halfRow = slot outer edge) and hides behind the slot, which
+        // paints later. Inner padding grows by `tuck` so the text clears.
+        margin: props.side === 'left' ? { right: g.halfRow - g.tuck } : { left: g.halfRow - g.tuck },
         height: g.tipH, flexDirection: 'row', alignItems: 'center',
-        padding: { left: g.tipPadX, right: g.tipPadX },
+        padding: props.side === 'left'
+          ? { left: g.tipPadX, right: g.tipPadX + g.tuck }
+          : { left: g.tipPadX + g.tuck, right: g.tipPadX },
         borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: GOLD_BORDER, pointerFilter: 'block',
       }}
       uiBackground={{ color: GOLD }}
