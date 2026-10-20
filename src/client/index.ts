@@ -27,6 +27,7 @@ import { syncEntity } from '@dcl/sdk/network'
 import { SeedHolder, seedHolder, LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { setupUi } from '../ui'
 import { setupOverviewCamera } from './overviewCamera'
+import { setupSkybox } from './skybox'
 import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
@@ -97,6 +98,7 @@ export async function setupClient(): Promise<void> {
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
   setupOverviewCamera()
+  setupSkybox()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
   // decorative lever entity from an earlier iteration where pulling it
