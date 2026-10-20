@@ -175,7 +175,7 @@ export const LUNGE_STICK_FORCE = 120
 /** Brake at the end: fraction of the start impulse removed, scaled by the lunge's
  *  remaining EXTRA speed (forward speed minus the speed at the press) / its peak
  *  extra, so run momentum survives and a lunge into a wall doesn't bounce back. */
-export const LUNGE_BRAKE = 1.0
+export const LUNGE_BRAKE = 0.7
 /** After the active window: no new lunge, run/jog/jump disabled (walk only). */
 export const LUNGE_RECOVERY_S = 0.20
 /** Press → press (s). Covers active + recovery. */
