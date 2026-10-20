@@ -32,7 +32,7 @@ import { getBombHud, triggerBomb } from './paintBomb'
 
 const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
-const GOLD_BORDER = Color4.create(1.0, 0.8, 0.3, 0.95)
+const GOLD_BORDER = Color4.create(1, 1, 1, 0.95)
 const GOLD_FILL = Color4.create(1, 1, 1, 0.9)
 const WHITE_BORDER = Color4.create(1, 1, 1, 0.75)
 const DIM_BORDER = Color4.create(1, 1, 1, 0.3)
@@ -66,7 +66,7 @@ function KeyHint(props: { label: string }) {
   return (
     <Label
       key={`ui_pvp_key_${props.label}`}
-      value={props.label}
+      value={`<b>${props.label}</b>`}
       fontSize={14}
       color={Color4.create(0, 0, 0, 1)}
       uiTransform={{ positionType: 'absolute', position: { top: 6, left: 10 }, width: 16, height: 16 }}
@@ -159,7 +159,7 @@ function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPr
           : { left: g.tipPadX + g.tuck, right: g.tipPadX },
         borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: GOLD_BORDER, pointerFilter: 'block',
       }}
-      uiBackground={{ color: GOLD }}
+      uiBackground={{ color: WHITE }}
       onMouseDown={props.onPress}
     >
       <Label
@@ -186,7 +186,7 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
         margin: props.side === 'left' ? { right: g.bridgeInner } : { left: g.bridgeInner },
         width: g.bridgeW, height: g.tipH, pointerFilter: 'none',
       }}
-      uiBackground={{ color: GOLD }}
+      uiBackground={{ color: WHITE }}
     />
   )
 }
