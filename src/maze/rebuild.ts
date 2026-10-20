@@ -20,7 +20,7 @@ import {
   engine, Transform, GltfContainer, ColliderLayer,
   Tween, EasingFunction, AudioSource, Entity, MeshRenderer, Material,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 
 import {
   Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
@@ -28,14 +28,40 @@ import {
   generateWithRetry, getPlacedTilesInOrder, gridSize,
 } from './generator'
 import { TILES } from './tiles'
+import { IS_SKY, SKY_PILLARS } from './level'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
 import { SeedHolder, seedHolder } from '../shared/components'
 
-// Suppress unused-import complaint from the linter — MeshRenderer/Material
-// are only kept in the import list for future tile decoration; harmless.
-void MeshRenderer; void Material
+// ─── Sky pillars (greybox) ──────────────────────────────────────────
+// One box per tile, centred under it, from PILLAR_GAP below the tile floor
+// down to y 0. MeshRenderer only — no MeshCollider — so it can't block,
+// trap, or catch raycasts (paint, pointer, overview camera); falling
+// players pass straight through to the fall-respawn height. Ramps use the
+// same box: its top sits under the ramp's low end, so it stays below the
+// whole sloped surface. Pillars live and die with their tile entity.
+const PILLAR_WIDTH = 0.6 * CELL // 19.2 m of the 32 m footprint
+const PILLAR_GAP = 0.5          // m below the tile floor
+const pillarOf = new Map<Entity, Entity>()
+function spawnPillar(tile: Entity, p: Placed): void {
+  const h = p.y - PILLAR_GAP
+  if (h <= 0) return
+  const e = engine.addEntity()
+  const cx = (p.x + 0.5) * CELL + MAZE_ORIGIN, cz = (p.z + 0.5) * CELL + MAZE_ORIGIN
+  Transform.create(e, {
+    position: Vector3.create(cx, h / 2, cz),
+    scale: Vector3.create(PILLAR_WIDTH, 0.001, PILLAR_WIDTH),
+  })
+  MeshRenderer.setBox(e)
+  Material.setPbrMaterial(e, { albedoColor: Color4.create(0.62, 0.6, 0.86, 1), roughness: 0.9, metallic: 0 })
+  Tween.create(e, {
+    mode: Tween.Mode.Scale({ start: Vector3.create(PILLAR_WIDTH, 0.001, PILLAR_WIDTH), end: Vector3.create(PILLAR_WIDTH, h, PILLAR_WIDTH) }),
+    duration: 700,
+    easingFunction: EasingFunction.EF_EASEOUTQUAD,
+  })
+  pillarOf.set(tile, e)
+}
 
 // ─── Pipeline state ─────────────────────────────────────────────────
 const spawnedEntities: Entity[] = []
@@ -169,6 +195,7 @@ function spawnTileWithGrow(p: Placed): void {
     })
   }
   spawnedEntities.push(e)
+  if (IS_SKY && SKY_PILLARS) spawnPillar(e, p)
 
   // Painting overlay: spawns per-cell plane entities parented to this
   // tile. No-op unless a mask is defined for the tile type in paint.ts.
@@ -186,6 +213,8 @@ engine.addSystem(() => {
   for (let i = 0; i < n; i++) {
     const e = teardownQueue.pop()!
     removePaintForTile(e)
+    const pl = pillarOf.get(e)
+    if (pl !== undefined) { engine.removeEntity(pl); pillarOf.delete(e) }
     engine.removeEntity(e)
   }
 })

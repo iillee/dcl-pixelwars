@@ -31,7 +31,8 @@ Remote: `dcl-pixelwars` → github.com/iillee/dcl-pixelwars. Push `level` only u
 | `c8502a3`, `e07db2e` | Docs + this handoff |
 | `a5dba33`, `0541689` | Stubs removed; teleporter only on turn/fork/cross |
 | `43f9a98`, `e5e2829` | `SKY_SYMMETRIC=false` + fairness check; 5×5 default (inset 80), 5×5 fallback, coverage gate in generator |
-| (latest) | Verticality: region-flood height field, harder L0 thinning, verticality gate + score, 5×5 fallback re-frozen |
+| (latest) | Greybox pillars under sky tiles (`SKY_PILLARS`) |
+| `000ef1c`, `c28a0fa` | Verticality: region-flood height field, harder L0 thinning, verticality gate + score, 5×5 fallback re-frozen |
 | `ca94945`, `036a9d4` | Exactly one teleporter pair, A ↔ mirror(A); 4×4 arena investigated and not adopted (see §4) |
 | `8d60b8f`, `68aae66` | Teleporter dead-end stubs (reverted next) |
 
@@ -79,6 +80,8 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 **Symmetry flag and fairness:** `SKY_SYMMETRIC` in `level.ts` (default **false**). When it's true, layouts are 180° images of themselves and the teleporter is A ↔ mirror(A). When it's false, layouts are asymmetric but must pass a **fairness check** (`fairness()` / `FAIR_TOL = 1` in `generator.ts`): RED and BLUE tile-graph walking distance to (a) the grid centre, (b) the nearest L+1 tile and (c) the nearer teleporter end must each be within **1 tile** of each other. Layouts that fail are rejected and the search continues (about 10 per round on 5×5).
 
 **Teleporter (asymmetric):** one pair (A, B) on a turn, fork or cross only (never a straight, ramp or end), off bases and exit cells, ≥2 tiles from a base, ends ≥3 tiles apart. Each base's walk to its nearer end must be within 1 tile of the other base's. Score = remoteness of both ends + tile preference (turn +2, fork +0.5, cross 0), +1.5 if the ends are on **different levels**. Layouts with no valid pair are rejected (0 in 250 seeds).
+
+**Pillars (greybox, `SKY_PILLARS = true` in `level.ts`):** one lavender PBR box (albedo 0.62/0.60/0.86, roughness 0.9) under every sky tile, ramps and bases included. Each is 19.2 × 19.2 m (60% of the 32 m tile), centred, running from 0.5 m under the tile floor (a ramp's low end) down to y 0. MeshRenderer only, no collider, so it can't block, trap or catch raycasts, and falling players still reach fall respawn. Spawned and removed with its tile in `rebuild.ts`, with a 0.7 s vertical grow-in tween. +1 entity per tile (~22).
 
 **Verticality (asymmetric):** the height field grows 1–2 raised and 1–2 sunk regions of 3–6 cells each by random flood fill. Only the base exit cells (plus whatever connects them) stay flat L0. Ramps: 5–8 per attempt. L0 links are thinned harder (15–50%, before other links) so the flat level reads as paths, not a slab, still with no dead ends and full connectivity. Every round must pass a gate (`VERT_MIN_SHARE` / `VERT_MIN_EACH` / `VERT_MIN_RAMPS` in `generator.ts`): **≥45% of non-base tiles off flat L0** (L+1, L-1 or ramp), **≥3 flat tiles on L+1 and ≥3 on L-1**, **≥4 ramps**. The candidate score adds 12 × off-L0 share.
 
@@ -146,6 +149,7 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 - **Loosened verify gates** for small grids: junctions ≥4 on 5×5 / ≥6 on 6×6 (was 10 on 8×8), ramps ≥2 when asymmetric, variety ≥70% (90% on 8×8), smart-bot own-paint gate 0.35 (was 0.5).
 - **Line endings:** `scene.json` and `src/teleportOrbs.ts` were committed with LF (rest CRLF).
 - **Leftovers:** ring-mode wording in the unused bases-only-without-paths branch and its verify branch; `dumpNet()` dev helper still exported from the generator.
+- **Pillars untested in-world:** colour vs the tile trim, how they look at different levels, draw cost of ~22 large boxes, and the grow-in from the middle (scale tween around the box centre) are all unseen. Base pillars are created once with the persistent base tiles.
 - **Nothing on `level` is playtested in-world or deployed.** Spawn floor, base persistence across a round change, teleporter arrival facing, and the overview → teleport sequence have only been checked by code + verify.
 
 ---

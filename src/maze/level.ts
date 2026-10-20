@@ -43,6 +43,9 @@ export const SKY_BASE_MARGIN = 0
  *  instead (RED/BLUE walking distance to centre, nearest L+1 and nearer
  *  teleporter end within FAIR_TOL tiles); needed for grids below 6×6. */
 export const SKY_SYMMETRIC = false
+/** Greybox stilts: a lavender box pillar under every sky tile, down to y 0
+ *  (visual only, no collider). See rebuild.ts. */
+export const SKY_PILLARS = true
 /** Put a 2×2 cross hub at the grid centre (the main path's meeting point). */
 export const SKY_CENTRE_HUB = true
 /** 0..1. Chance a branch frontier cell keeps branching instead of being
