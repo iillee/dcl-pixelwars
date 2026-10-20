@@ -53,6 +53,7 @@ const BAR_INNER_W = BAR_W - BAR_BORDER * 2
 const STAR_SIZE = 14
 const STAR_PAD = 4
 const STAR_SRC = 'assets/images/star_white.png'
+const STAR_TINT = Color4.create(0.33, 0.33, 0.34, 1) // matches the bar track's on-screen grey
 const BAR_TRACK = Color4.create(0.08, 0.08, 0.1, 0.87) // flagtag PANEL_BG_SEMI
 const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
@@ -149,7 +150,7 @@ export const uiMenu = () => (
               const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
               const leadW = lead ? BAR_INNER_W * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
               const star = lead !== null && leadW >= STAR_SIZE + STAR_PAD * 2
-                ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />
+                ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE, margin: lead === 'red' ? { bottom: 2 } : undefined }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: STAR_TINT }} />
                 : null
               return (
                 <UiEntity
