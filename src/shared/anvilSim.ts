@@ -62,12 +62,12 @@ export class AnvilWorld {
   }
 
   /** New maze: graph + tiles + teleporter tiles (never spawn there), then re-roll all. */
-  setMaze(graph: WalkableGraph | null, tiles: Placed[], teleporters: Placed[]): void {
+  setMaze(graph: WalkableGraph | null, tiles: Placed[], teleporters: Placed[], respawn = true): void {
     this.graph = graph
     this.tiles = tiles
     this.rampTiles = tiles.filter(t => TILES[t.type].isRamp)
     this.noSpawn = new Set(teleporters.map(t => `${t.x},${t.z}`))
-    this.respawnAll()
+    if (respawn) this.respawnAll() // clients (prediction only) pass false
   }
 
   floorAt(x: number, z: number, y: number): number | null {

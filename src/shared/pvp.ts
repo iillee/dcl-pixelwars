@@ -313,6 +313,17 @@ export const ANVIL_LAUNCH_MIN_SPEED = 3
 export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 93)
 export const ANVIL_LAUNCH_LIFT = 45
 export const ANVIL_LAUNCH_COOLDOWN_S = 1
+/** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
+ *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot
+ *  for that hit arrives (or PREDICT_TIMEOUT_S passes: e.g. the hit was rejected); then the render
+ *  blends to the server state: error ≤ PREDICT_CLOSE_M over BLEND_S, else over BLEND_FAR_S.
+ *  Errors > SNAP_M snap (same as plain snapshot rendering), and respawns always snap. */
+export const ANVIL_PREDICT_ENABLED = true
+export const ANVIL_PREDICT_TIMEOUT_S = 0.5
+export const ANVIL_PREDICT_CLOSE_M = 1.0
+export const ANVIL_BLEND_S = 0.2
+export const ANVIL_BLEND_FAR_S = 0.12
+export const ANVIL_SNAP_M = 3
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
  *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
  *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).

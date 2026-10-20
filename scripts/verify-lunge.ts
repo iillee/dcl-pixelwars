@@ -8,7 +8,7 @@ import { boxHit as sweptHit, hitboxAt, knockDir, LungeLedger, ImpactGate } from 
 import { rampSurfaceY, buildWalkableGraph } from '../src/shared/mazeGraph'
 import { AnvilWorld } from '../src/shared/anvilSim'
 import { Placed, CELL, MAZE_ORIGIN, STEP, generateWithRetry, getPlacedTilesInOrder, teleportPairs } from '../src/maze/generator'
-import { LUNGE_DUMMY_COUNT, LUNGE_DUMMY_RESPAWN_S } from '../src/shared/pvp'
+import { LUNGE_DUMMY_COUNT, LUNGE_DUMMY_RESPAWN_S, ANVIL_PREDICT_CLOSE_M } from '../src/shared/pvp'
 import { LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W, LUNGE_HITBOX_H, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS } from '../src/shared/pvp'
 
 let fails = 0
@@ -108,6 +108,23 @@ for (let r = 0; r < 4; r++) {
   for (let t = 0; t < 10 && w.isMoving(w.anvils[0]); t += 0.1) w.tick(0.1)
   const moved = Math.hypot(w.anvils[0].pos.x - a0.x, w.anvils[0].pos.z - a0.z)
   check(`anvil slides then stops or falls (moved ${moved.toFixed(2)} m, alive ${w.anvils[0].alive})`, moved > 0.5 && !w.isMoving(w.anvils[0]))
+  {
+    // Prediction vs server: a client copy (setMaze respawn=false) seeded with the rendered state and
+    // given the same knock tracks the server sim closely despite different frame rates.
+    const srv = new AnvilWorld(), cli = new AnvilWorld()
+    srv.setMaze(buildWalkableGraph(tiles), tiles, tp)
+    cli.setMaze(buildWalkableGraph(tiles), tiles, [], false)
+    check('client prediction copy does not spawn anvils itself', cli.anvils.every(a => !a.alive))
+    Object.assign(cli.anvils[0], { pos: { ...srv.anvils[0].pos }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false })
+    srv.hit(0, 0.6, 0.8); cli.hit(0, 0.6, 0.8)
+    let maxErr = 0
+    for (let t = 0; t < 0.6; t += 1 / 30) {
+      srv.tick(1 / 60); srv.tick(1 / 60) // server 60 Hz, client 30 Hz
+      cli.tick(1 / 30)
+      if (srv.anvils[0].alive && cli.anvils[0].alive) maxErr = Math.max(maxErr, Math.hypot(srv.anvils[0].pos.x - cli.anvils[0].pos.x, srv.anvils[0].pos.z - cli.anvils[0].pos.z))
+    }
+    check(`prediction stays within ANVIL_PREDICT_CLOSE_M of the server over the timeout (max ${maxErr.toFixed(3)} m)`, maxErr <= ANVIL_PREDICT_CLOSE_M)
+  }
   w.anvils[1].pos.y = -1000; w.anvils[1].tracking = true; w.tick(0.05)
   check('fallen anvil hides', !w.anvils[1].alive && w.anvils[1].respawnIn > 0)
   w.tick(LUNGE_DUMMY_RESPAWN_S + 0.1)
