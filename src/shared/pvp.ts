@@ -1,5 +1,5 @@
 /**
- * pvp.ts — PvP prototype config: Punch (E). Dash and Paint Bomb parked (mode 'off').
+ * pvp.ts — PvP prototype config: Lunge (E). Dash and Paint Bomb parked (mode 'off').
  * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
  *
  * Pure constants + helpers, no engine imports: read by the client
@@ -19,14 +19,13 @@
  *               an ability round alternate (playtest comparison).
  */
 export type AbilityMode = 'on' | 'off' | 'alternate'
-// Dash + Paint Bomb are parked (Luke, Oct 2026 pivot to Punch). Their code
+// Dash + Paint Bomb are parked (Luke, Oct 2026 pivot to Lunge). Their code
 // stays in client/dash.ts, client/paintBomb.ts and server/paintBomb.ts but is
 // not wired into client/index.ts or the hotbar; with 'off' the server drops
 // dashHit / bombDrop too. To bring one back: set 'on' and re-add its init +
 // hotbar slot.
 export const DASH_MODE: AbilityMode = 'off'
 export const BOMB_MODE: AbilityMode = 'off'
-export const PUNCH_MODE: AbilityMode = 'on'
 
 export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): boolean {
   if (mode === 'on') return true
@@ -120,53 +119,72 @@ export function bombEnabledForRound(roundIndex: number): boolean {
   return modeEnabledForRound(BOMB_MODE, roundIndex)
 }
 
-// ═══ Punch (E) ══════════════════════════════════════════════════════
-// Goal: knock opponents off the edge of the sky map (falling respawns them
-// at their base). Attacker's client finds the target in a short cone in
-// front of it, server checks team / cooldown (and range for the ghost bot,
-// whose position it knows), broadcasts punchImpact, and the victim's own
-// client pushes itself (client/knockback pattern).
+// ═══ Lunge (E) ══════════════════════════════════════════════════════
+// Shoulder-charge (Mario Party Bumper Brawl): a short committed lunge along
+// avatar facing; opponents touched during it get a big knockback toward the
+// sky-arena edges. Code: client/lunge.ts, shared/lunge.ts, server.ts.
+// Spec (Luke, 2026-10-20): 0.20 s, ~2 m, small forgiving hitbox, 1.75 s
+// cooldown, 0.20 s recovery, no attacker lift (ramps), opposing team only.
 
-/** Seconds between punches. */
-export const PUNCH_COOLDOWN_S = 1.0
-// ─── Lunge (Luke: punch is a very short dash so the avatar visibly snaps) ─
-/** Lunge length (s): impulse + sustain force; the hit window follows it. */
-export const LUNGE_S = 0.14
-/** One-shot horizontal impulse along facing at lunge start. */
-export const LUNGE_IMPULSE = 30
-/** Horizontal force held for LUNGE_S. */
-export const LUNGE_FORCE = 80
-/** Tiny upward part of the impulse so floor friction doesn't eat it (no hop). */
-export const LUNGE_LIFT = 1.5
-// No-drag estimate (same unconfirmed units as dash): 30·0.14 + ½·80·0.14² ≈ 5.0 m,
-// peak ≈ 41 m/s. Explorer friction/carry after the force will change this — tune live.
-/** Extra hit time after the lunge ends (avatar/network lag). */
-export const LUNGE_HIT_GRACE_S = 0.08
-/** Stop the sustain force on the hit (spend the lunge on the target). */
-export const LUNGE_STOP_ON_HIT = true
+/** Debug overlay (client): hitbox spheres, lunge dir, hit marks, knock dir, state log. */
+export const LUNGE_DEBUG = false
 
-/** Max horizontal reach while lunging, attacker centre → target centre (m). */
-export const PUNCH_RANGE = 2.0
-/** Full cone angle in front of the avatar (degrees). Overlap (<0.6 m) always hits. */
-export const PUNCH_CONE_DEG = 70
-/** Max vertical offset for a hit (no punching through floors). */
-export const PUNCH_MAX_DY = 1.8
-/** Victim: horizontal impulse away from the puncher. */
-export const PUNCH_KNOCKBACK = 62 // was 55 before the lunge
-/** Victim: upward part of the impulse so floor friction doesn't eat the push. */
-export const PUNCH_LIFT = 10
-/** Victim: horizontal force held after the impulse (carries them further). 0 = off. */
-export const PUNCH_FORCE = 25
-export const PUNCH_FORCE_S = 0.35
-/** Ghost bot: how far the server shoves it along the punch (m, clamped to the floor it stands on). */
-export const PUNCH_BOT_SHOVE = 6
-/** Ghost bot: it stands dazed this long after a punch (s). */
-export const PUNCH_BOT_STUN_S = 1.2
-/** Server: accept the next punch from the same player no sooner than this (s). */
-export const SERVER_MIN_PUNCH_GAP_S = PUNCH_COOLDOWN_S - 0.2
-/** Server: slack on the bot range check (bot/avatar lag, ghost float, lunge travel). */
-export const SERVER_PUNCH_RANGE_SLACK = 3
+// ─── A. Attacker movement ───────────────────────────────────────────
+/** Active lunge time (s). Hits only count in this window (+ grace). */
+export const LUNGE_ACTIVE_S = 0.20
+/** Target travel (m). Informational: drives the impulse below, logged vs measured. */
+export const LUNGE_DISTANCE = 2.0
+/** Horizontal impulse at start (Δv, assumed m/s: 2.0 m / 0.20 s = 10, +20% for
+ *  ground friction). Cancelled by a brake impulse at the end, so the lunge
+ *  stops where it should instead of sliding/launching. Units unconfirmed:
+ *  tune with the logged "[Lunge] travelled" distance. */
+export const LUNGE_IMPULSE = 12
+/** Vertical part of the attacker's impulse. 0 = surface-following, no ramp launches. */
+export const LUNGE_LIFT = 0
+/** Brake at the end: fraction of the start impulse removed (scaled by measured
+ *  remaining speed / peak speed, so a lunge into a wall doesn't bounce back). */
+export const LUNGE_BRAKE = 1.0
+/** After the active window: no new lunge, run/jog/jump disabled (walk only). */
+export const LUNGE_RECOVERY_S = 0.20
+/** Press → press (s). Covers active + recovery. */
+export const LUNGE_COOLDOWN_S = 1.75
 
-export function punchEnabledForRound(roundIndex: number): boolean {
-  return modeEnabledForRound(PUNCH_MODE, roundIndex)
+// ─── B. Hit detection (attacker client, swept every frame) ──────────
+/** Capsule radius around the attacker's per-frame path (m). Small but forgiving. */
+export const LUNGE_HIT_RADIUS = 1.1
+/** Max vertical offset (m): no hits through floors / between levels. */
+export const LUNGE_HIT_MAX_DY = 1.8
+/** Targets more than this behind the start line never count (directional). */
+export const LUNGE_HIT_BEHIND = 0.3
+/** Extra hit time after the active window (avatar interpolation lag, s). */
+export const LUNGE_HIT_GRACE_S = 0.06
+
+// ─── Victim knockback (victim's own client) ─────────────────────────
+/** Weight of the lunge direction vs attacker→target direction. */
+export const LUNGE_KNOCK_FACING_WEIGHT = 0.5
+/** Horizontal impulse away from the attacker. Strong: must threaten edges. */
+export const LUNGE_KNOCKBACK = 62
+/** Small upward part (breaks floor friction; exaggerates the hit). */
+export const LUNGE_KNOCK_LIFT = 8
+/** Horizontal force held after the impulse (carries the victim further). */
+export const LUNGE_KNOCK_FORCE = 25
+export const LUNGE_KNOCK_FORCE_S = 0.35
+/** Victim drops an impact older than this vs when it saw that lunge start (ms). */
+export const LUNGE_IMPACT_MAX_AGE_MS = 400
+
+// ─── Ghost bot (server-shoved; it walks a graph and can't fall) ─────
+export const LUNGE_BOT_SHOVE = 6
+export const LUNGE_BOT_STUN_S = 1.2
+
+// ─── Server validation ──────────────────────────────────────────────
+/** Next lunge start accepted no sooner than this (s). */
+export const SERVER_MIN_LUNGE_GAP_S = LUNGE_COOLDOWN_S - 0.25
+/** Hits accepted within this long after the accepted start (s): active + grace + jitter. */
+export const SERVER_LUNGE_HIT_WINDOW_S = 0.6
+/** Slack on the ghost range check (lag, float height). */
+export const SERVER_LUNGE_BOT_SLACK = 3
+
+export const LUNGE_MODE: AbilityMode = 'on'
+export function lungeEnabledForRound(roundIndex: number): boolean {
+  return modeEnabledForRound(LUNGE_MODE, roundIndex)
 }

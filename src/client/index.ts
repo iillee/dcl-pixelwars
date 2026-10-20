@@ -38,7 +38,7 @@ import { initNametags } from './nametags'
 import { initSpeedBonus } from './speed'
 // Dash + Paint Bomb parked (shared/pvp.ts DASH_MODE/BOMB_MODE 'off'); re-add
 // `initDash()` / `initPaintBomb()` from './dash' / './paintBomb' to bring them back.
-import { initPunch } from './punch'
+import { initLunge } from './lunge'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { rebuildMaze, initMazeNet } from '../maze/rebuild'
@@ -134,7 +134,7 @@ export async function setupClient(): Promise<void> {
   initNametags()
   initSpeedBonus()
   initBotVisual()
-  initPunch()
+  initLunge()
   setupTouchControls()
 
   // Register the network boundary LAST so `room.onMessage` subscribers

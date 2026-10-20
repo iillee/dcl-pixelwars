@@ -135,14 +135,18 @@ export const Messages = {
   // everyone else shows the impact effect. dx/dz normalised by the server.
   dashImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
-  // Punch (shared/pvp.ts, client/punch.ts). Client → Server: our punch
-  // landed on `target` (a player address, or "bot:<id>" for the ghost).
-  // (dx, dz) = push direction; (x, y, z) = puncher position (server range-
-  // checks it against the bot; it cannot see avatars).
-  punch: Schemas.Map({ target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-  // Server → Clients: accepted punch. A player target pushes itself; everyone
-  // shows the burst at the target.
-  punchImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+  // Lunge (shared/pvp.ts LUNGE_*, client/lunge.ts). Client → Server: we
+  // started lunge `id` (per-client counter) at (x, y, z) along (dx, dz).
+  // Server checks cooldown and rebroadcasts lungeStarted so every client
+  // can show the lunge on that avatar.
+  lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Client → Server: lunge `id` touched `target` (player address, or
+  // "bot:<id>"); (dx, dz) = knockback direction, (x, y, z) = attacker pos.
+  lungeHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Server → Clients: accepted hit (once per lunge id + target). A player
+  // target knocks itself back; everyone shows the impact.
+  lungeImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
   // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
   // sender's position. Server checks round mode, team and cooldown, snaps

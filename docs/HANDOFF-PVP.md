@@ -7,10 +7,13 @@ For the next agent (e.g. Grokbot) picking up the Dash + Paint Bomb experiment. F
 Luke: one simple, clear PvP mechanic — **Punch (E)**, goal is knocking opponents off the edge of the sky map (Mario Party style; falling below ~y 66.5 respawns at base).
 
 - **Parked, not deleted:** `DASH_MODE` / `BOMB_MODE` = `'off'` in `src/shared/pvp.ts` (server drops `dashHit` / `bombDrop`). `initDash` / `initPaintBomb` unwired from `src/client/index.ts`, slots removed from the hotbar, native F no longer hidden on mobile. Files `client/dash.ts`, `client/paintBomb.ts`, `server/paintBomb.ts` and their messages stay. To restore: mode `'on'`, re-add init + hotbar slot (+ hide IA_SECONDARY in touchControls).
-- **Punch = lunge (Luke, same day):** E fires a very short dash (`LUNGE_*`: 0.14 s, impulse 30 + force 80, lift 1.5, ≈5 m no-drag estimate) along avatar facing; during the lunge + 0.08 s grace the first opponent within 2.0 m in a 70° cone (or overlapping) is hit, once per lunge, and the lunge force stops. Knockback 62 horizontal + 10 lift, then force 25 for 0.35 s. Cooldown 1.0 s. Code `src/client/punch.ts`, tuning `src/shared/pvp.ts`. Messages `punch` (includes puncher position) / `punchImpact`; victim self-applies Physics (`client/knockback` immunity still applies).
-- **Server:** cooldown + team check; range only checked for the ghost (server can't see avatars).
-- **Ghost bot:** punchable. Server slides it up to 6 m along the punch, clamped to its floor (it can't fall), and stuns it 1.2 s (`punchBot` in `server/bots/manager.ts`). It does not punch back.
-- **Feedback:** swoosh + white/cyan streak behind the lunge + small team puff in front; pop + team-coloured burst at the target (all clients). No emote, no camera shake (no cheap SDK shake). "Knocked off by X" is console-only.
+- **Lunge (Luke spec, final for now):** shoulder-charge on E / LUNGE slot. Client `src/client/lunge.ts`, pure logic `src/shared/lunge.ts`, tuning `LUNGE_*` in `src/shared/pvp.ts` (`client/punch.ts` removed).
+  - Movement: one horizontal impulse (12, lift 0) along facing, brake impulse at the end of the 0.20 s active window (scaled by measured speed / peak speed), target ≈2 m. No held forces, no lift → follows ramps under gravity, walls still collide. Jump/run/jog off during active + 0.20 s recovery (InputModifier). Cooldown 1.75 s. Logs `[Lunge] #id travelled X m` for tuning.
+  - Hits: attacker client sweeps a 1.1 m capsule from last frame to this frame (+0.06 s grace), ±1.8 m height, nothing >0.3 m behind the start line; each opponent once per lunge; attacker stops dead on first hit.
+  - MP: `lungeStart` → server (cooldown, team) → `lungeStarted` broadcast (remote streak/glow). `lungeHit {id,target}` → server `LungeLedger` (once per attacker+id+target, ≤0.6 s after start, opposing team only) → `lungeImpact` → victim's own client applies impulse 62 + lift 8 + force 25/0.35 s via `ImpactGate` (drops dup, or >400 ms after it saw that start). Ghost: server shove 6 m + 1.2 s stun.
+  - Debug: `LUNGE_DEBUG = true` draws hitbox/direction/hit/knockback markers + state log.
+  - Feedback: team glow + swoosh on press (no input delay), streak during the lunge (also on remote avatars), hit = pop + bomb boom + big burst, miss = grey dust puff, nothing on presses during cooldown. No camera shake / emote.
+  - Offline tests: `npx tsx scripts/verify-lunge.ts`.
 - Sections below describe the Dash/Bomb era and are kept for when they come back.
 
 ---

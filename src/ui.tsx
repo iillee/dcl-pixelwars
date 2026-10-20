@@ -207,7 +207,7 @@ export const uiMenu = () => (
         Rendered before the banner so the banner stays on top. */}
     <OverviewUi />
 
-    {/* ─── Bottom centre: PvP hotbar, Punch (E). */}
+    {/* ─── Bottom centre: PvP hotbar, Lunge (E). */}
     <AbilityHotbar />
 
     {/* ─── Round-end banner: centered full-screen overlay ─────────────

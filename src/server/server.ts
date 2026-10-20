@@ -35,9 +35,10 @@ import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
-  punchEnabledForRound, SERVER_MIN_PUNCH_GAP_S, PUNCH_RANGE, PUNCH_MAX_DY, SERVER_PUNCH_RANGE_SLACK,
-  PUNCH_BOT_SHOVE, PUNCH_BOT_STUN_S,
+  lungeEnabledForRound, LUNGE_HIT_RADIUS, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
+  LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
 } from '../shared/pvp'
+import { LungeLedger } from '../shared/lunge'
 import { bombCells, bombFloorY } from './paintBomb'
 import { SCENE_SIZE } from '../maze/generator'
 
@@ -115,7 +116,7 @@ export async function setupServer(): Promise<void> {
   const dashWindowTargets = new Map<string, Set<string>>()
   // Paint Bomb: last accepted drop per bomber + bombs waiting on their fuse.
   const lastBombAt = new Map<string, number>()
-  const lastPunchAt = new Map<string, number>()
+  const lunges = new LungeLedger()
   const pendingBombs: Array<{ from: string; team: number; x: number; y: number; z: number; at: number }> = []
 
   // Detect real disconnects so the bot respawns immediately when a
@@ -130,7 +131,7 @@ export async function setupServer(): Promise<void> {
     dashWindowStart.delete(userId)
     dashWindowTargets.delete(userId)
     lastBombAt.delete(userId)
-    lastPunchAt.delete(userId)
+    lunges.forget(userId)
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -310,46 +311,59 @@ export async function setupServer(): Promise<void> {
     room.send('dashImpact', { attacker: from, target: victim.userId, dx: dx / len, dz: dz / len })
   })
 
-  // Punch (shared/pvp.ts, client/punch.ts). The puncher's client picked the
-  // target in its cone; we check round mode, cooldown and teams. Player
-  // positions aren't visible here, so range is only checked for the ghost
-  // bot (server-owned); players' range is client-trusted (same as dash).
-  room.onMessage('punch', ({ target, dx, dz, x, y, z }, context) => {
+  // Lunge (shared/pvp.ts LUNGE_*, shared/lunge.ts, client/lunge.ts).
+  // lungeStart: cooldown + team gate, rebroadcast so all clients show it.
+  // lungeHit: the attacker's client detected contact (the server can't see
+  // avatars, so player range is client-trusted; the ghost is range-checked
+  // here). Accepted once per (attacker, lunge id, target) and only within
+  // SERVER_LUNGE_HIT_WINDOW_S of the accepted start.
+  room.onMessage('lungeStart', ({ id, dx, dz, x, y, z }, context) => {
     const from = context?.from
-    if (!from) return
-    if (!punchEnabledForRound(currentRoundIndex())) return
+    if (!from || !lungeEnabledForRound(currentRoundIndex())) return
+    if (getTeam(from) === null) return
+    const len = Math.hypot(dx, dz)
+    if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
+    if (!lunges.start(from, id, Date.now())) {
+      console.log(`[Server] lungeStart ${from.slice(0, 8)} rejected: cooldown`)
+      return
+    }
+    markActive(from)
+    room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z })
+  })
+
+  room.onMessage('lungeHit', ({ id, target, dx, dz, x, y, z }, context) => {
+    const from = context?.from
+    if (!from || !lungeEnabledForRound(currentRoundIndex())) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
     const ux = dx / len, uz = dz / len
     const attackerTeam = getTeam(from)
     if (attackerTeam === null) return
-    const now = Date.now()
-    const last = lastPunchAt.get(from) ?? 0
-    if (now - last < SERVER_MIN_PUNCH_GAP_S * 1000) {
-      console.log(`[Server] punch from ${from.slice(0, 8)} rejected: cooldown (${now - last}ms)`)
-      return
-    }
+    let victimId = target
     if (target.startsWith('bot:')) {
-      const id = parseInt(target.slice(4), 10)
-      const bot = getBotPositions().find(b => b.id === id)
+      const bid = parseInt(target.slice(4), 10)
+      const bot = getBotPositions().find(b => b.id === bid)
       if (!bot || bot.team === attackerTeam) return
-      if (!punchBot(id, x, y, z, ux, uz, PUNCH_RANGE + SERVER_PUNCH_RANGE_SLACK, PUNCH_MAX_DY + SERVER_PUNCH_RANGE_SLACK,
-        PUNCH_BOT_SHOVE, PUNCH_BOT_STUN_S * 1000)) return
-      lastPunchAt.set(from, now)
-      markActive(from)
-      room.send('punchImpact', { attacker: from, target, dx: ux, dz: uz })
+    } else {
+      const want = target.toLowerCase()
+      const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
+      if (!victim || victim.team === attackerTeam || victim.userId === from) {
+        console.log(`[Server] lungeHit ${from.slice(0, 8)} → ${target.slice(0, 8)} rejected: team check`)
+        return
+      }
+      victimId = victim.userId
+    }
+    const verdict = lunges.hit(from, id, victimId, Date.now())
+    if (verdict !== 'ok') {
+      console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`)
       return
     }
-    const want = target.toLowerCase()
-    const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
-    if (!victim || victim.team === attackerTeam || victim.userId === from) {
-      console.log(`[Server] punch ${from.slice(0, 8)} → ${target.slice(0, 8)} rejected: team check`)
-      return
+    if (victimId.startsWith('bot:')) {
+      if (!punchBot(parseInt(victimId.slice(4), 10), x, y, z, ux, uz, LUNGE_HIT_RADIUS + 2 + SERVER_LUNGE_BOT_SLACK,
+        LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S * 1000)) return
     }
-    lastPunchAt.set(from, now)
-    markActive(from)
-    console.log(`[Server] punchImpact ${from.slice(0, 8)} → ${victim.userId.slice(0, 8)}`)
-    room.send('punchImpact', { attacker: from, target: victim.userId, dx: ux, dz: uz })
+    console.log(`[Server] lungeImpact ${from.slice(0, 8)} #${id} → ${victimId.slice(0, 8)}`)
+    room.send('lungeImpact', { attacker: from, id, target: victimId, dx: ux, dz: uz })
   })
 
   // Paint Bomb (shared/pvp.ts). Position is the bomber's own report (the

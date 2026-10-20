@@ -1,5 +1,5 @@
 /**
- * abilityHotbar.tsx — bottom-centre PvP hotbar: one PUNCH (E) slot (Dash /
+ * abilityHotbar.tsx — bottom-centre PvP hotbar: one LUNGE (E) slot (Dash /
  * Paint Bomb parked, see shared/pvp.ts). Look and geometry ported from dcl-snowdrift
  * (layer.inventoryHotbar / layer.brushSize TorchButton + LogsButton +
  * KeyHintBadge / layer.relightPrompt + layer.feedPrompt / layer.hotbarBridge),
@@ -26,8 +26,8 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
-import { PUNCH_MODE } from '../shared/pvp'
-import { getPunchHud, triggerPunch } from './punch'
+import { LUNGE_MODE } from '../shared/pvp'
+import { getLungeHud, triggerLunge } from './lunge'
 // Dash / Paint Bomb parked: their getDashHud/triggerDash (./dash) and
 // getBombHud/triggerBomb (./paintBomb) slots were DASH left + PAINT BOMB right.
 
@@ -193,13 +193,13 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
 }
 
 function roundLabel(punch: Hud): string {
-  if (PUNCH_MODE !== 'alternate') return ''
-  return punch.enabled ? 'PUNCH ROUND' : 'PAINT ONLY'
+  if (LUNGE_MODE !== 'alternate') return ''
+  return punch.enabled ? 'LUNGE ROUND' : 'PAINT ONLY'
 }
 
 /** Render inside the full-screen UI root (src/ui.tsx). */
 export function AbilityHotbar() {
-  const punch = getPunchHud()
+  const punch = getLungeHud()
   if (!punch.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
@@ -212,7 +212,7 @@ export function AbilityHotbar() {
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
       {mobile && punchTip && <Bridge id="punch" side="right" g={g} />}
-      {punchTip && <Tooltip id="punch" side="right" text="PUNCH" onPress={triggerPunch} g={g} />}
+      {punchTip && <Tooltip id="punch" side="right" text="LUNGE" onPress={triggerLunge} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -230,7 +230,7 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          <Slot id="punch" keyLabel="E" hud={punch} glyph="!" onPress={triggerPunch} g={g} />
+          <Slot id="punch" keyLabel="E" hud={punch} glyph="»" onPress={triggerLunge} g={g} />
         </UiEntity>
       </UiEntity>
     </UiEntity>
