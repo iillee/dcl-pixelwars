@@ -19,7 +19,13 @@ export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 
 // ─── Sky tuning ─────────────────────────────────────────────────────
 /** Floor of the lowest level (m). Base tiles sit here; WALKABLE_TOP is +0.5. */
-export const SKY_ALTITUDE = 32 // raised from 0 (troubleshooting); fall respawn active (>= FALL_RESPAWN_DROP)
+/** World Y of the top level (L+1). Luke: 100. Everything else derives from it.
+ *  Raise or lower the whole sky arena here (and the scene.json spawn y). */
+export const SKY_TOP_Y = 100
+/** L0 world Y = top minus one level rise (generator STEP = 5.3835 x TILE_SCALE 2
+ *  = 10.767; keep in sync). L-1 78.466 / L0 89.233 / L+1 100; spawns at L0 + 1.5
+ *  = 90.733; fall respawn below MIN_Y - FALL_RESPAWN_DROP = ~66.47. Was 32. */
+export const SKY_ALTITUDE = SKY_TOP_Y - 5.3835 * 2
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
 /** Bases-only mode: corner bases (+ the woven network when SKY_BASE_LINE).
