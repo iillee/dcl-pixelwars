@@ -150,7 +150,7 @@ export const BURST_BOT_STUN_S = 1.0
  *  'circle' = cells whose centre is within R cells of the centre cell's centre (R=3.5 → 37 cells,
  *  ≈ the 7×7 square's size, Luke). 'square' = |dx|,|dz| ≤ R (R=3 or 3.5 → 7×7). 'cross' = |dx|+|dz| ≤ R. */
 export const BURST_PAINT_SHAPE: 'circle' | 'square' | 'cross' = 'circle'
-export const BURST_PAINT_RADIUS_CELLS = 3.5
+export const BURST_PAINT_RADIUS_CELLS = 5
 /** Footprint cells must be within this height of the centre cell (ramps ok, no other levels). */
 export const BURST_PAINT_MAX_DY = 1.5
 /** Server: accept burstHit this long after burstUse (s). */
@@ -173,7 +173,7 @@ export const BURST_TILE_DOWN_S = 0.2
 export const BURST_TILE_SIZE = 1.9
 export const BURST_TILE_THICK = 0.3
 /** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
-export const BURST_TILE_POOL = 100 // ≥ 2 × 49: two overlapping full 7×7 bursts
+export const BURST_TILE_POOL = 180 // ≥ 2 × 49: two overlapping full 7×7 bursts
 
 /** Is Paint Burst live for this UTC round index? */
 export function burstEnabledForRound(roundIndex: number): boolean {
