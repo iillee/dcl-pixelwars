@@ -58,7 +58,7 @@ let graphTeam: Team = Team.None
 
 export function isDummyEnabled(): boolean { return LUNGE_TEST_DUMMY }
 
-/** Live dummies' feet positions (lunge.ts sweptHit targets). */
+/** Live dummies' feet positions (lunge.ts boxHit targets). */
 export function getDummyTargets(): Array<{ i: number; pos: { x: number; y: number; z: number } }> {
   const out: Array<{ i: number; pos: { x: number; y: number; z: number } }> = []
   dummies.forEach((d, i) => { if (d.alive) out.push({ i, pos: { x: d.pos.x, y: d.pos.y, z: d.pos.z } }) })

@@ -4,8 +4,8 @@
  * direction, server dedupe/cooldown/window and victim stale/dup gates.
  * Movement feel, ramps and real networking need Explorer playtests.
  */
-import { sweptHit, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
-import { LUNGE_HIT_FORWARD, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS, LUNGE_HIT_RADIUS } from '../src/shared/pvp'
+import { boxHit as sweptHit, hitboxAt, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
+import { LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W, LUNGE_HITBOX_H, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS } from '../src/shared/pvp'
 
 let fails = 0
 function check(name: string, ok: boolean): void {
@@ -20,11 +20,21 @@ check('stationary enemy 1 m ahead is hit', sweptHit(O, P(0, 0.1), P(0, 1), O, 0,
 check('enemy 4 m ahead, not reached this frame: no hit', !sweptHit(O, P(0, 0.5), P(0, 4), O, 0, 1))
 check('fast frame (3 m in one step) still hits enemy mid-path (swept)', sweptHit(P(0, 0), P(0, 3), P(0.5, 1.5), O, 0, 1))
 check('close-range miss: 1.5 m to the side', !sweptHit(O, P(0, 2), P(1.5, 1), O, 0, 1))
-check(`standing lunge: target 1.6 m ahead hits (reach ${(LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS).toFixed(1)} m)`, sweptHit(O, O, P(0, 1.6), O, 0, 1))
+check(`standing lunge: target 1.6 m ahead hits (reach ${(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D).toFixed(1)} m)`, sweptHit(O, O, P(0, 1.6), O, 0, 1))
 check('standing lunge: target 1.9 m ahead misses', !sweptHit(O, O, P(0, 1.9), O, 0, 1))
 check('point-blank target beside the attacker (0.5 m, 90°) still hits', sweptHit(O, O, P(0.5, 0), O, 0, 1))
 check('target 1.0 m to the side at the attacker misses (hitbox is ahead)', !sweptHit(O, O, P(1.05, -0.2), O, 0, 1))
-check(`hitbox edge: ${LUNGE_HIT_RADIUS} m side offset hits`, sweptHit(O, P(0, 2), P(LUNGE_HIT_RADIUS - 0.01, 1), O, 0, 1))
+check(`hitbox edge: ${LUNGE_HITBOX_W / 2} m side offset hits`, sweptHit(O, P(0, 2), P(LUNGE_HITBOX_W / 2 - 0.01, 1), O, 0, 1))
+check('just outside the box side misses', !sweptHit(O, O, P(LUNGE_HITBOX_W / 2 + 0.05, 1), O, 0, 1))
+check('box far corner hits (a capsule would miss)', sweptHit(O, O, P(1.0, 1.65), O, 0, 1))
+check('in the gap before the near face, past point-blank: miss', !sweptHit(O, O, P(0.8, 0.2), O, 0, 1))
+check('diagonal lunge (+x+z): target ahead on the diagonal hits', sweptHit(O, O, P(0.8, 0.8), O, Math.SQRT1_2, Math.SQRT1_2))
+check('diagonal lunge: target ahead on the other diagonal misses', !sweptHit(O, O, P(-1.2, 1.2), O, Math.SQRT1_2, Math.SQRT1_2))
+check('box follows current position: 5 m into the lunge, 6.5 m target hits', sweptHit(P(0, 4.8), P(0, 5), P(0, 6.5), O, 0, 1))
+check('box sweeps sideways motion too (strafe frame)', sweptHit(P(-3, 0), P(3, 0), P(0, 1), P(-3, 0), 0, 1))
+check(`target ${LUNGE_HITBOX_H + 0.1} m above misses`, !sweptHit(O, O, P(0, 1, LUNGE_HITBOX_H + 0.1), O, 0, 1))
+const hb = hitboxAt(P(2, 3, 1), 1, 0)
+check('hitboxAt: centre FORWARD + D/2 ahead at mid height, yaw 90°', Math.abs(hb.c.x - (2 + LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D / 2)) < 1e-9 && hb.c.z === 3 && Math.abs(hb.c.y - (1 + LUNGE_HITBOX_H / 2)) < 1e-9 && Math.abs(hb.yaw - Math.PI / 2) < 1e-9)
 check('enemy behind the attacker is never hit', !sweptHit(O, P(0, 0.2), P(0, -0.8), O, 0, 1))
 check('overlapping enemy (0.2 m) is hit', sweptHit(O, O, P(0.2, 0.05), O, 0, 1))
 check('enemy on the level above (dy 10.8) is not hit', !sweptHit(O, P(0, 1), P(0, 1, 10.8), O, 0, 1))

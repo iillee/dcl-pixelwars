@@ -4,31 +4,52 @@
  * No engine imports so it runs under plain node/tsx.
  */
 import {
-  LUNGE_HIT_RADIUS, LUNGE_HIT_MAX_DY, LUNGE_HIT_FORWARD, LUNGE_HIT_OVERLAP, LUNGE_HIT_BEHIND, LUNGE_KNOCK_FACING_WEIGHT,
+  LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_H, LUNGE_HITBOX_FORWARD, LUNGE_HIT_OVERLAP, LUNGE_HIT_BEHIND, LUNGE_KNOCK_FACING_WEIGHT,
   SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S,
 } from './pvp'
 
 export type V3 = { x: number; y: number; z: number }
 
+/** Hitbox geometry for an attacker standing at `a` lunging along unit (dx, dz):
+ *  centre + yaw (rad, about +y, Transform convention) + size. Single source for
+ *  the hit test (boxHit) and the visual box (client/lungeHitbox.ts). */
+export function hitboxAt(a: V3, dx: number, dz: number): { c: V3; yaw: number; w: number; d: number; h: number } {
+  const mid = LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D / 2
+  return {
+    c: { x: a.x + dx * mid, y: a.y + LUNGE_HITBOX_H / 2, z: a.z + dz * mid },
+    yaw: Math.atan2(dx, dz), w: LUNGE_HITBOX_W, d: LUNGE_HITBOX_D, h: LUNGE_HITBOX_H,
+  }
+}
+
 /**
- * Swept hitbox: does the target touch the capsule swept this frame by a
- * point LUNGE_HIT_FORWARD ahead of the attacker (segment a0→a1 shifted along
- * (dx, dz), radius LUNGE_HIT_RADIUS)? Point-blank targets (within
+ * Swept box hit: the box (LUNGE_HITBOX_W wide, LUNGE_HITBOX_D deep, near face
+ * LUNGE_HITBOX_FORWARD ahead, oriented along (dx, dz)) placed at the attacker's
+ * position a0 last frame and a1 this frame; does any box in between contain the
+ * target (feet within LUNGE_HITBOX_H vertically)? Point-blank targets (within
  * LUNGE_HIT_OVERLAP of the attacker) hit at any angle. `start` is where the
- * lunge began and (dx, dz) its unit direction: targets more than
- * LUNGE_HIT_BEHIND m behind the start line never count (directional).
+ * lunge began: targets more than LUNGE_HIT_BEHIND m behind the start line
+ * never count (directional).
  */
-export function sweptHit(a0: V3, a1: V3, t: V3, start: V3, dx: number, dz: number): boolean {
-  if (Math.abs(t.y - a1.y) > LUNGE_HIT_MAX_DY) return false
+export function boxHit(a0: V3, a1: V3, t: V3, start: V3, dx: number, dz: number): boolean {
+  if (Math.abs(t.y - a1.y) > LUNGE_HITBOX_H) return false
   if ((t.x - start.x) * dx + (t.z - start.z) * dz < -LUNGE_HIT_BEHIND) return false
   if (Math.hypot(t.x - a1.x, t.z - a1.z) <= LUNGE_HIT_OVERLAP) return true
-  const ox = dx * LUNGE_HIT_FORWARD, oz = dz * LUNGE_HIT_FORWARD
-  const sx = a1.x - a0.x, sz = a1.z - a0.z
-  const l2 = sx * sx + sz * sz
-  let u = l2 > 1e-9 ? ((t.x - a0.x - ox) * sx + (t.z - a0.z - oz) * sz) / l2 : 0
-  u = Math.max(0, Math.min(1, u))
-  const cx = a0.x + ox + sx * u, cz = a0.z + oz + sz * u
-  return Math.hypot(t.x - cx, t.z - cz) <= LUNGE_HIT_RADIUS
+  // Local frame: u along the lunge, v across. Box at λ: u ∈ [F + λsu, F + D + λsu], |v − λsv| ≤ W/2.
+  const rx = t.x - a0.x, rz = t.z - a0.z
+  const tu = rx * dx + rz * dz, tv = rx * dz - rz * dx
+  const mx = a1.x - a0.x, mz = a1.z - a0.z
+  const su = mx * dx + mz * dz, sv = mx * dz - mz * dx
+  let lo = 0, hi = 1
+  const slab = (p: number, s: number, min: number, max: number): boolean => {
+    // need min ≤ p − λs ≤ max
+    if (Math.abs(s) < 1e-9) return p >= min && p <= max
+    let l1 = (p - max) / s, l2 = (p - min) / s
+    if (l1 > l2) { const k = l1; l1 = l2; l2 = k }
+    lo = Math.max(lo, l1); hi = Math.min(hi, l2)
+    return lo <= hi
+  }
+  return slab(tu, su, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D)
+    && slab(tv, sv, -LUNGE_HITBOX_W / 2, LUNGE_HITBOX_W / 2)
 }
 
 /** Knockback direction: mostly away from the attacker, biased along the lunge. Unit (x, z). */

@@ -41,9 +41,10 @@ import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE,
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
-  LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HIT_FORWARD, LUNGE_HIT_RADIUS,
+  LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
 } from '../shared/pvp'
-import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
+import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
+import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
@@ -254,6 +255,7 @@ export function triggerLunge(): void {
     0.08, 0.08, 0.5, 1.1, 0.5)
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
   startSlash('', dir.x, dir.z, localTeam())
+  startHitbox('', dir.x, dir.z, localTeam())
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)
   checkHits(startPos, startPos)
@@ -278,13 +280,14 @@ function checkHits(a0: V3, a1: V3): void {
   const myTeam = localTeam()
   const tryHit = (id: string, t: V3) => {
     if (hitThis.has(id)) return
-    if (!sweptHit(a0, a1, t, startPos, dir.x, dir.z)) return
+    if (!boxHit(a0, a1, t, startPos, dir.x, dir.z)) return
     hitThis.add(id)
     const k = knockDir(a1, t, dir.x, dir.z)
     if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z) // local test box, no server
     else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
     impactFx(t, myTeam, true) // optimistic: the attacker feels it now
     flashSlash('')
+    flashHitbox('')
     dbgMark({ x: t.x, y: t.y + 2.2, z: t.z }, { r: 1, g: 0, b: 0 }, 0.5)
     for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: t.x + k.x * s, y: t.y + 0.3, z: t.z + k.z * s }, { r: 1, g: 0.3, b: 0 }, 0.18)
     if (!hitAny && state === 'active') {
@@ -305,7 +308,13 @@ function checkHits(a0: V3, a1: V3): void {
     tryHit(`bot:${b.id}`, { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
   }
   for (const d of getDummyTargets()) tryHit(`dummy:${d.i}`, d.pos)
-  dbgMark({ x: a1.x + dir.x * LUNGE_HIT_FORWARD, y: a1.y + 1, z: a1.z + dir.z * LUNGE_HIT_FORWARD }, { r: 0, g: 1, b: 1 }, 2 * LUNGE_HIT_RADIUS, 0.3)
+  // Debug: hitbox centre + its 4 corners at chest height.
+  const hb = hitboxAt(a1, dir.x, dir.z)
+  dbgMark(hb.c, { r: 0, g: 1, b: 1 }, 0.2, 0.3)
+  for (const [su, sv] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+    const u = LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D / 2 + su * LUNGE_HITBOX_D / 2, v = sv * LUNGE_HITBOX_W / 2
+    dbgMark({ x: a1.x + dir.x * u + dir.z * v, y: hb.c.y, z: a1.z + dir.z * u - dir.x * v }, { r: 0, g: 1, b: 1 }, 0.12, 0.3)
+  }
 }
 
 // ─── Network events ─────────────────────────────────────────────────
@@ -315,6 +324,7 @@ function onStarted(attacker: string, id: number, dx: number, dz: number): void {
   if (att === myAddress()) return
   lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0 })
   startSlash(att, dx, dz, teamOfUser(att))
+  startHitbox(att, dx, dz, teamOfUser(att))
   const p = avatarPos(att)
   // Remote lunge: glow + the same lunge take set, positional at that avatar.
   // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
@@ -329,6 +339,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   const attTeam = teamOfUser(att)
   if (me && att === me) return // attacker already showed its FX
   flashSlash(att)
+  flashHitbox(att)
   if (tgt.startsWith('bot:')) {
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
     if (b) impactFx({ x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }, attTeam, true)
@@ -374,6 +385,7 @@ export function initLunge(): void {
   initKnockbackState()
   knockForceEnt = engine.addEntity()
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
+  initLungeHitbox(avatarPos)
   events.on('lunge:started', ({ attacker, id, dx, dz }) => onStarted(attacker, id, dx, dz))
   events.on('round:reset', () => { cancelLunge('round reset'); clearKnockLock() })
   events.on('lunge:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
@@ -413,6 +425,7 @@ export function initLunge(): void {
     if (hitWindowLeft > 0 && pos) {
       hitWindowLeft -= dt
       checkHits(prevPos ?? pos, pos)
+      placeHitbox('', pos) // same position the hit test just used
     }
     if (state === 'active') {
       stateLeft -= dt

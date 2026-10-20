@@ -4,9 +4,9 @@
  * A flat, horizontal crescent (assets/images/lunge_slash.png: white alpha
  * half-ring, tinted with the attacker's team colour, emissive) lying at
  * LUNGE_SLASH_HEIGHT above the attacker's feet. The plane is
- * LUNGE_SLASH_WIDTH wide (= hitbox diameter, 2 × LUNGE_HIT_RADIUS) and half
- * as deep, centred LUNGE_SLASH_FORWARD ahead, so the arc's outer edge traces
- * the front of the 1.1 m hit capsule. It follows the attacker for the
+ * LUNGE_SLASH_WIDTH wide (= LUNGE_HITBOX_W) and half as deep, centred
+ * LUNGE_SLASH_FORWARD ahead, so the arc's outer edge sits on the hitbox's
+ * far face (LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D). It follows the attacker for the
  * active window, then shrinks + fades over LUNGE_SLASH_FADE_S. A hit flashes
  * it brighter/whiter (jumping straight to full size if it lands during the intro).
  * Intro (LUNGE_SLASH_INTRO): grows from a right-hand fist point and/or fades

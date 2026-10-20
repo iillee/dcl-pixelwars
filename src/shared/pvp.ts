@@ -133,7 +133,7 @@ export const LUNGE_EMOTE_NAME = 'punch'
 // ─── Slash VFX (client/lungeSlash.ts) — shows the hit area ──────────
 /** Flat team-coloured crescent at the front of the hitbox during the lunge. */
 export const LUNGE_SLASH = true
-/** Crescent width (m). = hitbox diameter (2 × LUNGE_HIT_RADIUS) so players learn the range. */
+/** Crescent width (m). = LUNGE_HITBOX_W so players learn the range. */
 export const LUNGE_SLASH_WIDTH = 2.2
 /** Height above the attacker's feet (m) — chest band. */
 export const LUNGE_SLASH_HEIGHT = 1.1
@@ -180,22 +180,37 @@ export const LUNGE_RECOVERY_S = 0.20
 export const LUNGE_COOLDOWN_S = 1.75
 
 // ─── B. Hit detection (attacker client, swept every frame) ──────────
-/** Capsule radius around the attacker's per-frame path (m). Small but forgiving. */
-export const LUNGE_HIT_RADIUS = 1.1
-/** Capsule centre sits this far ahead of the attacker along the lunge (m).
- *  Reach = LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS ≈ 1.7 m. */
-export const LUNGE_HIT_FORWARD = 0.6
+/** Hitbox: a box in front of the attacker, oriented along the lunge direction,
+ *  re-placed every frame from the player's CURRENT Transform and swept from last
+ *  frame's box so fast frames can't skip targets (shared/lunge.ts boxHit).
+ *  Width across the lunge (m), = LUNGE_SLASH_WIDTH so the slash shows the range. */
+export const LUNGE_HITBOX_W = 2.2
+/** Depth along the lunge (m), near face → far face. */
+export const LUNGE_HITBOX_D = 1.4
+/** Height (m) from the attacker's feet; also the max |dy| to a target's feet
+ *  (no hits through floors / between levels). */
+export const LUNGE_HITBOX_H = 1.8
+/** Gap from the avatar centre to the box's near face (m). Reach = FORWARD + D = 1.7 m. */
+export const LUNGE_HITBOX_FORWARD = 0.3
+/** Show the hitbox as a translucent team-coloured box (active window + grace). */
+export const LUNGE_HITBOX_VISIBLE = true
+/** Box alpha (flashes brighter on a hit). */
+export const LUNGE_HITBOX_ALPHA = 0.25
+/** false = world-space box placed from the same per-frame numbers as the hit test
+ *  (default). true = child of engine.PlayerEntity with a local offset (try this if
+ *  the box visibly trails the avatar at high speed in the Explorer). */
+export const LUNGE_HITBOX_PARENT = false
 /** Targets this close to the attacker always hit, any angle (point-blank). */
 export const LUNGE_HIT_OVERLAP = 0.7
-/** Max vertical offset (m): no hits through floors / between levels. */
-export const LUNGE_HIT_MAX_DY = 1.8
+/** Max vertical offset (m), kept for the server's bot check (= LUNGE_HITBOX_H). */
+export const LUNGE_HIT_MAX_DY = LUNGE_HITBOX_H
 /** Targets more than this behind the start line never count (directional). */
 export const LUNGE_HIT_BEHIND = 0.3
 /** Extra hit time after the active window (avatar interpolation lag, s). */
 export const LUNGE_HIT_GRACE_S = 0.06
 /** Slash VFX plane centre ahead of the attacker (m), derived so the arc's outer edge
- *  (centre + width/2) lands exactly on the hitbox's leading edge (FORWARD + RADIUS = 1.7 m). */
-export const LUNGE_SLASH_FORWARD = LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS - LUNGE_SLASH_WIDTH / 2
+ *  (centre + width/2) lands exactly on the hitbox's far face (FORWARD + D = 1.7 m). */
+export const LUNGE_SLASH_FORWARD = LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D - LUNGE_SLASH_WIDTH / 2
 
 // ─── Victim knockback (victim's own client) ─────────────────────────
 /** Weight of the lunge direction vs attacker→target direction. */
