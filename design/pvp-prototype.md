@@ -118,7 +118,7 @@ Tuning hints: knockback too weak to threaten at an edge → raise `BOMB_KNOCKBAC
 1. The bomber's client sends `bombDrop { x, y, z }` with its own position and shows the telegraph immediately (predicted), so the 0.4 s fuse reads without waiting for a round trip.
 2. The server checks the round mode, the bomber's team and cooldown, and that the position is inside the scene. It snaps the bomb down to the nearest floor cell, queues it for `BOMB_FUSE_S`, and broadcasts `bombArmed`. Other clients show the telegraph; the bomber's telegraph moves to the snapped spot.
 3. When the fuse runs out, the server paints every walkable cell in the circle from its own walkable graph: the same graph the ghost bot uses, built from the round seed. `applyPaint` keeps bases locked. The server credits the leaderboard and round contribution, then broadcasts `bombBlast`. The paint reaches everyone through the normal 5 Hz `paintDelta`, so it shows up a frame or two after the blast.
-4. Every client shows the explosion. A client whose local player is on the other team, inside 6 m and not immune, pushes itself.
+4. Every client shows the explosion. A client whose local player is on the other team, inside `BOMB_KNOCKBACK_RADIUS` (12 m) and not immune, pushes itself.
 
 **Why the server computes the cells:** it already has the walkable graph with every cell's world position, so it doesn't have to trust client cell ids. That also means a bomb needs no chunking against the 100-id `paintTick` cap. An 11 m circle covers a much wider swath of the woven maze than the first 5.5 m pass.
 
@@ -131,7 +131,7 @@ Tuning hints: knockback too weak to threaten at an edge → raise `BOMB_KNOCKBAC
 - **Predicted feedback can be wrong.** If the server rejects a dash hit or a bomb (rate limit, round boundary), the attacker still saw a flash, or a telegraph that fades after 1.9 s with no blast.
 - **The server fuse adds latency.** The blast fires 0.4 s after the server receives the drop. The bomber sees about 0.4 s plus half a round trip; others see about 0.4 s from when the telegraph arrives.
 - **Painted cells arrive on the next 5 Hz `paintDelta`.** Up to 0.2 s after the explosion.
-- **Ramps:** bomb paint on ramps uses the graph's interpolated cell height, so the circle's edge on a slope is approximate. The 3 m height window keeps it from painting the level above or below.
+- **Ramps:** bomb paint on ramps uses the graph's interpolated cell height, so the circle's edge on a slope is approximate. The `BOMB_PAINT_MAX_DY` (4 m) height window keeps it from painting the level above or below.
 - **Mid-air bombs:** with no floor within 4 m below, the bomb explodes where it was dropped and paints nothing it can't reach.
 - **Round boundary:** bombs still fusing at a boundary are dropped by the server (their cell ids would be stale), and clients clear their telegraphs.
 - **Physics support:** clients without Physics support do nothing on knockback. Calls are wrapped and logged as `[PvP] … failed (Physics unsupported?)`.

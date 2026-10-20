@@ -157,7 +157,7 @@ Best of 6 valid candidates (all three levels used, junctions ≥ 12 × size scal
 
 **Overview mode** (`src/client/overviewCamera.ts`, button on the right edge, key 1 / 4 rotates): angled follow camera ported from dcl-snowdrift. Keep-or-drop is undecided.
 
-**PvP prototype (experiment, branch `cursor/pvp-dash-b679` only):** bottom-centre hotbar. **E** = Dash (a short burst that knocks enemies back), **F** = Paint Bomb (paints a circle around you and pushes nearby opponents). On mobile, tap the slots. Config is in `src/shared/pvp.ts` (`DASH_MODE` / `BOMB_MODE = 'off'` disables each). See [`design/pvp-prototype.md`](design/pvp-prototype.md).
+**PvP prototype (experiment, branch `cursor/pvp-dash-b679` only, PR #3 → `level`):** bottom-centre hotbar. **E** = Dash (faster burst + swoosh + wind trail; knocks enemies back), **F** = Paint Bomb (11 m paint / 12 m knockback). On mobile, tap the slots. Config is in `src/shared/pvp.ts`. Design: [`design/pvp-prototype.md`](design/pvp-prototype.md). Agent handoff: [`docs/HANDOFF-PVP.md`](docs/HANDOFF-PVP.md).
 
 ### Verify
 

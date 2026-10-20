@@ -5,7 +5,7 @@ Sparks from the 2026-09-29 playtest and earlier drafts. They are not scope. The 
 - **Live team headcount.** Ludmila asked how many people are on the other team. V1 answers identity (name tags) and balance, not a roster panel.
 - **In-round personal score.** Tom and chat wanted to see impact during the round, not only at the end. V1 commits to the end-of-round breakdown. A live number only if it fits the existing pills.
 - **Second power-up candidates.** Larger paint radius, jump-landing splash (Vitaly), placeable corruption, repulsor / trap / teleport-away (Tom). Only a paint-focused second item can enter V1, and only if Week 3 picks one. Traps and knockback are combat-adjacent and stay out.
-- **Dash knockback + Paint Bomb (2026-10-20, experiment).** Prototyped on branch `cursor/pvp-dash-b679` (E / F hotbar) to compare paint-only and ability rounds in a playtest. Not V1 scope. See [`pvp-prototype.md`](pvp-prototype.md).
+- **Dash knockback + Paint Bomb (2026-10-20, experiment).** Prototyped on branch `cursor/pvp-dash-b679` (E / F hotbar, draft PR #3). Tuned once for larger bomb + faster Dash + flagtag swoosh/wind trail; awaiting two-player playtest. Not V1 scope. See [`pvp-prototype.md`](pvp-prototype.md) and [`docs/HANDOFF-PVP.md`](../docs/HANDOFF-PVP.md).
 - **Personal pixel stamps** (Pravus). Same team color, personal mark. Readability risk. Not V1.
 - **Pattern bonuses** (Pravus). Filling a shape auto-paints the middle. Future systemic idea.
 - **Clans / community colors, dailies, async farming, weekly HUD countdown, recently-seen list.** Raised in the playtest or the September GDD. Deferred together so V1 stays a territory pass.

@@ -1,6 +1,8 @@
-# Pixelwars — Handoff (2026-10-19)
+# Pixelwars — Handoff (2026-10-19, PvP note 2026-10-20)
 
 For a teammate (e.g. stom) or a future session picking this up cold. Facts only. Branch `level` has passed `npm run build` (clean type check) and both verify scripts. `pixelwars.dcl.eth` is running a sky-scene deploy from 2026-10-20 00:54 UTC whose `bin/index.js` still spawns the greybox columns; the source on `level` does not. Pull `level` and redeploy to replace that bundle.
+
+**PvP Dash + Paint Bomb experiment** lives on branch `cursor/pvp-dash-b679` (draft PR #3 → `level`). Agent handoff for that work: [`docs/HANDOFF-PVP.md`](HANDOFF-PVP.md). Design write-up: [`design/pvp-prototype.md`](../design/pvp-prototype.md).
 
 ---
 
@@ -159,14 +161,19 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ## 5a. PvP prototype: Dash + Paint Bomb (experiment, branch `cursor/pvp-dash-b679`)
 
-Not V1 scope, not deployed. Bottom-centre hotbar in the dcl-snowdrift style: **E = Dash**, a 0.4 s burst with a 5 s cooldown that knocks enemies you touch off the sky arena. **F = Paint Bomb**, after a 0.4 s blinking telegraph, paints a 5.5 m circle in your colour and pushes opponents within 6 m (8 s cooldown; bomb model, sounds and knockback from flagtag). On mobile you tap the slots or tooltips. Players respawn at base with 1.5 s immunity. The server validates both abilities and paints the bomb circle from its own walkable graph. Each victim's client pushes itself, because the SDK can only move the local player. Knobs, including `DASH_MODE` / `BOMB_MODE` (`'on'` / `'off'` / `'alternate'` for paint-only comparison rounds), live in `src/shared/pvp.ts`. Dash magnitudes are untested guesses. Full write-up, flagtag credit, limitations and the two-player test plan: [`design/pvp-prototype.md`](../design/pvp-prototype.md).
+Not V1 scope, not deployed. Tip at handoff: `044bbfa`. Draft PR: https://github.com/iillee/dcl-pixelwars/pull/3 (base `level`).
+
+Bottom-centre hotbar in the dcl-snowdrift style (tooltips behind slots; icons hidden on cooldown): **E = Dash**, a 0.4 s burst with a 5 s cooldown (impulse 40 / force 55), flagtag `swoosh.mp3` + white/cyan wind trail, knocks enemies you touch off the sky arena. **F = Paint Bomb**, after a 0.4 s blinking telegraph, paints an **11 m** circle and pushes opponents within **12 m** (8 s cooldown; bomb model / fuse / explode / knockback from flagtag). On mobile you tap the slots or tooltips; native E/F buttons are hidden. Players respawn at base with 1.5 s immunity. The server validates both abilities and paints the bomb circle from its own walkable graph. Each victim's client pushes itself, because the SDK can only move the local player. Knobs, including `DASH_MODE` / `BOMB_MODE` (`'on'` / `'off'` / `'alternate'`), live in `src/shared/pvp.ts`. **Not yet two-player playtested** after the radius/speed pass.
+
+- Agent handoff (pull commands, commit map, next steps): [`docs/HANDOFF-PVP.md`](HANDOFF-PVP.md)
+- Full write-up, limitations, playtest questions: [`design/pvp-prototype.md`](../design/pvp-prototype.md)
 
 ---
 
 ## 6. Next ideas
 
 - Art pass for the sky level: pillars / stilts under the tiles running down to water (Monument Valley, Little Island).
-- Paint Bomb (V1 Week 3).
+- Paint Bomb / Dash playtest on `cursor/pvp-dash-b679` (see [`HANDOFF-PVP.md`](HANDOFF-PVP.md)); V1 Week 3 Paint Bomb decision still open in the GDD.
 - Block reskin / remodel experiments (V1).
 - Keep README / GDD current as `level` changes.
 - Spawn throttling (tile spawn cascade) to soften join cost.
