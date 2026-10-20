@@ -23,7 +23,7 @@
  */
 
 import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
-import { Vector3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
@@ -131,6 +131,13 @@ function pickSpots(): Array<{ x: number; y: number; z: number }> {
   return [...shuffle(flat), ...shuffle(ramps)].slice(0, LUNGE_DUMMY_COUNT)
 }
 
+/** Random yaw in 90° steps, re-picked on every spawn. Rotates the root, so the anvil model and
+ *  its collider (child, with the x offset in local space) turn together around the feet point,
+ *  which stays the tile centre. Hitbox/physics use only position, so they are unchanged. */
+function randomYaw(d: Dummy): void {
+  Transform.getMutable(d.ent).rotation = Quaternion.fromEulerDegrees(0, 90 * Math.floor(Math.random() * 4), 0)
+}
+
 function place(d: Dummy): void {
   Transform.getMutable(d.ent).position = d.alive ? Vector3.create(d.pos.x, d.pos.y, d.pos.z) : HIDDEN // root at the feet; anvil base sits on the floor
 }
@@ -147,6 +154,7 @@ export function respawnDummy(): void {
     d.tracking = false
     d.respawnIn = -1
     d.alive = !!s
+    randomYaw(d)
     if (s) d.pos = { x: s.x, y: s.y, z: s.z }
     place(d)
   })
@@ -166,6 +174,7 @@ function respawnOne(i: number): void {
   d.tracking = false
   d.pos = { x: s.x, y: s.y, z: s.z }
   d.alive = true
+  randomYaw(d)
   place(d)
   console.log(`[Dummy ${i}] auto-respawned at ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`)
 }
