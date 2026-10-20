@@ -22,7 +22,7 @@
  *   a dummy hides, then auto-respawns. Logs travel distance per hit.
  */
 
-import { engine, Entity, GltfContainer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
 import { Vector3 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import {
@@ -226,8 +226,10 @@ export function initLungeDummy(): void {
     Transform.create(ent, { position: HIDDEN })
     const model = engine.addEntity()
     Transform.create(model, { parent: ent, position: Vector3.create(ANVIL_OFFSET_X, 0, 0), scale: Vector3.create(ANVIL_SCALE, ANVIL_SCALE, ANVIL_SCALE) })
-    // Visual only, like the old box (no collider): players walk through it, physics is the sim.
-    GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+    // Solid for players: the GLB's own invisible collision mesh (Anvil_01_collider) on CL_PHYSICS.
+    // It is a child of the dummy root, so it moves with the dummy. The dummy's own motion uses the
+    // walk graph (no raycasts), so it can't hit itself.
+    GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     dummies.push({ ent, pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, forceLeft: 0, forceDir: { x: 0, z: 0 },
       alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1 })
   }

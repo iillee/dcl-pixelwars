@@ -121,7 +121,11 @@ export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
-function losThen(from: V3, to: V3, cb: () => void): void {
+/** endSlack: hits this close to the target don't count (the target's own collider, e.g. an anvil dummy). */
+// Anvil dummies have a solid collider reaching ~0.9 m from their centre; skip it in the LOS ray.
+const DUMMY_LOS_SLACK = 1.2
+
+function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
   if (!BURST_LOS) { cb(); return }
   const o = Vector3.create(from.x, from.y + BURST_LOS_HEIGHT, from.z)
   const t = Vector3.create(to.x, to.y + BURST_LOS_HEIGHT, to.z)
@@ -141,7 +145,7 @@ function losThen(from: V3, to: V3, cb: () => void): void {
     entity: ent,
     opts: { direction: Vector3.normalize(Vector3.subtract(t, o)), maxDistance: dist, queryType: RaycastQueryType.RQT_HIT_FIRST, collisionMask: ColliderLayer.CL_PHYSICS, continuous: false },
   }, res => {
-    const blocked = res.hits.some(h => h.length < dist - 0.6)
+    const blocked = res.hits.some(h => h.length < dist - endSlack)
     if (blocked) console.log('[Burst] target behind geometry, no hit')
     finish(!blocked)
   })
@@ -177,7 +181,7 @@ export function triggerBurst(): void {
   for (const d of getDummyTargets()) {
     if (!inBurst(p, d.pos)) continue
     const k = burstDir(p, d.pos, f.x, f.z)
-    losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, BURST_KNOCKBACK / LUNGE_KNOCKBACK))
+    losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, BURST_KNOCKBACK / LUNGE_KNOCKBACK), DUMMY_LOS_SLACK)
   }
   console.log(`[Burst] #${id} fired`)
 }
