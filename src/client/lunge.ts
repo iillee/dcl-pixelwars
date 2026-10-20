@@ -38,7 +38,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE,
+  LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE, LUNGE_STICK_FORCE,
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
@@ -73,6 +73,7 @@ const lastVel = { x: 0, z: 0 }
 const hitThis = new Set<string>()
 const gate = new ImpactGate(LUNGE_IMPACT_MAX_AGE_MS)
 let knockForceEnt: Entity = 0 as Entity
+let stickForceEnt: Entity = 0 as Entity
 let lastHitBy = ''
 let lastHitAge = 999
 
@@ -251,6 +252,8 @@ export function triggerLunge(): void {
   setReducedControl(true)
   safePhysics('lunge impulse', () => {
     Physics.applyImpulseToPlayer(Vector3.create(dir.x * LUNGE_IMPULSE, LUNGE_LIFT, dir.z * LUNGE_IMPULSE))
+    // Downhill: push down during the lunge so we follow the ramp instead of launching off it.
+    Physics.applyForceToPlayerForDuration(stickForceEnt, LUNGE_ACTIVE_S, Vector3.create(0, -1, 0), LUNGE_STICK_FORCE)
   })
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
   // Anticipation without input delay: team glow at the chest + lunge take.
@@ -387,6 +390,7 @@ export function initLunge(): void {
   if (LUNGE_MODE === 'off') return
   initKnockbackState()
   knockForceEnt = engine.addEntity()
+  stickForceEnt = engine.addEntity()
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   initLungeHitbox(avatarPos)
   events.on('lunge:started', ({ attacker, id, dx, dz }) => onStarted(attacker, id, dx, dz))

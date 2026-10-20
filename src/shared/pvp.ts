@@ -170,6 +170,8 @@ export const LUNGE_DISTANCE = 8.0 // was 4.0 (2.0 before that); Luke: ~2× furth
 export const LUNGE_IMPULSE = 48 // was 24 (12 before that)
 /** Vertical part of the attacker's impulse. 0 = surface-following, no ramp launches. */
 export const LUNGE_LIFT = 0
+/** Downward force during the lunge window so downhill lunges hug the ramp. */
+export const LUNGE_STICK_FORCE = 120
 /** Brake at the end: fraction of the start impulse removed, scaled by the lunge's
  *  remaining EXTRA speed (forward speed minus the speed at the press) / its peak
  *  extra, so run momentum survives and a lunge into a wall doesn't bounce back. */
