@@ -19,7 +19,7 @@
  *    teams, broadcasts lungeImpact; the VICTIM's client applies its own
  *    knockback and drops it if it arrives > LUNGE_IMPACT_MAX_AGE_MS after
  *    it saw that lunge start, or twice.
- * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.mp3); active =
+ * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.wav, preloaded) + upper-body 'punch' emote (LUNGE_EMOTE); active =
  *    streak behind the avatar (shown on remote avatars too via
  *    lungeStarted); hit = pop + impact boom + big burst at contact, attacker
  *    brakes on the spot (hit-stop stand-in); miss = small grey dust puff
@@ -30,8 +30,9 @@
 
 import {
   engine, Entity, InputAction, InputModifier, Material, MaterialTransparencyMode, MeshRenderer,
-  PlayerIdentityData, PointerEventType, Transform, AudioSource, inputSystem, Physics, Tween, EasingFunction,
+  PlayerIdentityData, PointerEventType, Transform, AudioSource, inputSystem, Physics, Tween, EasingFunction, AvatarMask,
 } from '@dcl/sdk/ecs'
+import { triggerEmote } from '~system/RestrictedActions'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -40,6 +41,7 @@ import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE,
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
+  LUNGE_EMOTE, LUNGE_EMOTE_NAME,
 } from '../shared/pvp'
 import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
@@ -199,6 +201,12 @@ export function triggerLunge(): void {
   if (!isLungeEnabledNow() || localTeam() === Team.None || cooldownLeft > 0 || state !== 'ready') return
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return
+  // Feedback first, on the input frame, before any physics or network work.
+  playLungeSfx()
+  if (LUNGE_EMOTE) {
+    triggerEmote({ predefinedEmote: LUNGE_EMOTE_NAME, mask: AvatarMask.AM_UPPER_BODY })
+      .catch(err => console.log('[Lunge] emote failed:', err))
+  }
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   const fl = Math.hypot(f.x, f.z)
   dir = fl > 1e-3 ? { x: f.x / fl, z: f.z / fl } : { x: 0, z: 1 }
@@ -218,7 +226,6 @@ export function triggerLunge(): void {
   // Anticipation without input delay: team glow at the chest + lunge take.
   spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(localTeam()),
     0.08, 0.08, 0.5, 1.1, 0.5)
-  playLungeSfx()
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)

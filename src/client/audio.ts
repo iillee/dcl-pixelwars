@@ -14,7 +14,7 @@
  * `shared/events` from this module — keeping all audio config in one place.
  */
 
-import { AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
+import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
 
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
@@ -38,6 +38,7 @@ export function initAudio(): void {
   Transform.create(muteClickEnt, { parent: engine.CameraEntity })
   claimSfxEnt = engine.addEntity()
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
+  initLungeSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
@@ -95,21 +96,40 @@ export function playDashSfx(): void {
   })
 }
 
-/** Lunge start: Luke's recorded takes (split from one WAV), mono mp3. */
-export const LUNGE_SRCS = [1, 2, 3, 4, 5, 6].map(n => `assets/sounds/lunge_0${n}.mp3`)
+/** Lunge start: Luke's takes split from one WAV. WAV (not mp3): no encoder
+ *  priming silence; trimmed to ~3 ms lead-in. */
+export const LUNGE_SRCS = [1, 2, 3, 4, 5, 6].map(n => `assets/sounds/lunge_0${n}.wav`)
 let lastLungeIdx = -1
-/** Random take, never the same one twice in a row. */
-export function pickLungeSrc(): string {
-  let i = Math.floor(Math.random() * (LUNGE_SRCS.length - 1))
-  if (i >= lastLungeIdx && lastLungeIdx >= 0) i++
-  if (lastLungeIdx < 0) i = Math.floor(Math.random() * LUNGE_SRCS.length)
+const lungeSfxEnts: Entity[] = []
+/** Random take index, never the same one twice in a row. */
+function pickLungeIdx(): number {
+  const n = LUNGE_SRCS.length
+  let i = Math.floor(Math.random() * (lastLungeIdx < 0 ? n : n - 1))
+  if (lastLungeIdx >= 0 && i >= lastLungeIdx) i++
   lastLungeIdx = i
-  return LUNGE_SRCS[i]
+  return i
 }
-/** Local player's lunge start (reuses the dash sfx entity on the camera). */
+export function pickLungeSrc(): string { return LUNGE_SRCS[pickLungeIdx()] }
+
+/** Startup: download the takes (AssetLoad) and give each its own camera-parented
+ *  AudioSource with the clip already bound, so a press only flips playing. */
+function initLungeSfx(): void {
+  const pre = engine.addEntity()
+  AssetLoad.create(pre, { assets: [...LUNGE_SRCS] })
+  for (const src of LUNGE_SRCS) {
+    const e = engine.addEntity()
+    Transform.create(e, { parent: engine.CameraEntity })
+    AudioSource.create(e, { audioClipUrl: src, playing: false, loop: false, volume: 0.9, global: true })
+    lungeSfxEnts.push(e)
+  }
+}
+
+/** Local player's lunge start: called on the input frame, before any network send. */
 export function playLungeSfx(): void {
-  if (!dashSfxEnt) return
-  AudioSource.createOrReplace(dashSfxEnt, { audioClipUrl: pickLungeSrc(), playing: true, loop: false, volume: 0.9, global: true })
+  if (lungeSfxEnts.length === 0) return
+  const e = lungeSfxEnts[pickLungeIdx()]
+  // Same clip on the same entity: createOrReplace restarts it from 0 without a reload.
+  AudioSource.createOrReplace(e, { audioClipUrl: LUNGE_SRCS[lungeSfxEnts.indexOf(e)], playing: true, loop: false, volume: 0.9, global: true, currentTime: 0 })
 }
 
 /** Dash prototype: hit thud for the attacker (on contact) and the victim (on knockback). */

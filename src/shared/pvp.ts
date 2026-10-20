@@ -126,6 +126,12 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 // Spec (Luke, 2026-10-20): 0.20 s, ~2 m, small forgiving hitbox, 1.75 s
 // cooldown, 0.20 s recovery, no attacker lift (ramps), opposing team only.
 
+/** Play an upper-body SDK predefined emote on lunge start (others see it natively).
+ *  'punch' exists in SDK7's scene-feedback emotes ('push' is the alternative). Upper-body
+ *  mask so the legs stay on locomotion and the lunge impulse doesn't cancel it. */
+export const LUNGE_EMOTE = true
+export const LUNGE_EMOTE_NAME = 'punch'
+
 /** Debug overlay (client): hitbox spheres, lunge dir, hit marks, knock dir, state log. */
 export const LUNGE_DEBUG = false
 
