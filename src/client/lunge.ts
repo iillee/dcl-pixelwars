@@ -41,7 +41,7 @@ import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE,
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
-  LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_HIT_FORWARD, LUNGE_HIT_RADIUS,
+  LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HIT_FORWARD, LUNGE_HIT_RADIUS,
 } from '../shared/pvp'
 import { sweptHit, knockDir, ImpactGate, V3 } from '../shared/lunge'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
@@ -177,10 +177,19 @@ function dbgMark(p: V3, rgb: { r: number; g: number; b: number }, size: number, 
 }
 function dbgLog(msg: string): void { if (LUNGE_DEBUG) console.log(`[Lunge dbg] ${msg}`) }
 
-// ─── Input modifier (reduced control during active + recovery) ──────
-function setReducedControl(on: boolean): void {
+// ─── Input modifier: one owner, two reasons ─────────────────────────
+// recoveryOn: our own lunge (active + recovery) → walk only.
+// lockLeft:   we were knocked back → no movement input at all.
+let recoveryOn = false
+let lockLeft = 0
+let sparkAccum = 0
+function applyControl(): void {
   safePhysics('input modifier', () => {
-    if (on) {
+    if (lockLeft > 0) {
+      InputModifier.createOrReplace(engine.PlayerEntity, {
+        mode: InputModifier.Mode.Standard({ disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true }),
+      })
+    } else if (recoveryOn) {
       InputModifier.createOrReplace(engine.PlayerEntity, {
         mode: InputModifier.Mode.Standard({ disableJump: true, disableRun: true, disableJog: true, disableDoubleJump: true }),
       })
@@ -188,6 +197,18 @@ function setReducedControl(on: boolean): void {
       InputModifier.deleteFrom(engine.PlayerEntity)
     }
   })
+}
+function setReducedControl(on: boolean): void { recoveryOn = on; applyControl() }
+/** Victim lock: extend (never stack) to LUNGE_KNOCKBACK_LOCK_S from now. */
+function startKnockLock(): void {
+  if (!LUNGE_KNOCKBACK_LOCK) return
+  lockLeft = Math.max(lockLeft, LUNGE_KNOCKBACK_LOCK_S)
+  applyControl()
+}
+function clearKnockLock(): void {
+  if (lockLeft <= 0) return
+  lockLeft = 0
+  applyControl()
 }
 
 // ─── Public HUD + trigger ───────────────────────────────────────────
@@ -325,6 +346,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
         Physics.applyForceToPlayerForDuration(knockForceEnt, LUNGE_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), LUNGE_KNOCK_FORCE)
       }
     })
+    startKnockLock()
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) {
       impactFx(p, attTeam, true)
@@ -353,10 +375,12 @@ export function initLunge(): void {
   knockForceEnt = engine.addEntity()
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   events.on('lunge:started', ({ attacker, id, dx, dz }) => onStarted(attacker, id, dx, dz))
+  events.on('round:reset', () => { cancelLunge('round reset'); clearKnockLock() })
   events.on('lunge:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
   events.on('player:respawned', ({ why }) => {
     // Fall/respawn mid-attack: drop the lunge (no brake after a teleport).
     cancelLunge(why)
+    clearKnockLock()
     if (lastHitBy && lastHitAge < LAST_HIT_S) console.log(`[Lunge] knocked off by ${lastHitBy.slice(0, 8)} (${why})`)
     lastHitBy = ''
   })
@@ -364,6 +388,18 @@ export function initLunge(): void {
   engine.addSystem((dt: number) => {
     if (cooldownLeft > 0) cooldownLeft -= dt
     lastHitAge += dt
+    if (lockLeft > 0) {
+      lockLeft -= dt
+      // Dizzy sparks: a small yellow puff circling the head every 0.08 s.
+      sparkAccum += dt
+      const hp = Transform.getOrNull(engine.PlayerEntity)?.position
+      if (hp && sparkAccum >= 0.08) {
+        sparkAccum = 0
+        const a = Math.random() * Math.PI * 2
+        spawnFx({ x: hp.x + Math.cos(a) * 0.35, y: hp.y + 1.9, z: hp.z + Math.sin(a) * 0.35 }, { r: 1, g: 0.9, b: 0.3 }, 0.15, 0.15, 0.12, 0.02, 0.9)
+      }
+      if (lockLeft <= 0) { lockLeft = 0; applyControl() }
+    }
     if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) triggerLunge()
 
     const t = Transform.getOrNull(engine.PlayerEntity)

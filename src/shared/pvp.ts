@@ -203,12 +203,16 @@ export const LUNGE_SLASH_FORWARD = LUNGE_HIT_FORWARD + LUNGE_HIT_RADIUS - LUNGE_
 /** Weight of the lunge direction vs attacker→target direction. */
 export const LUNGE_KNOCK_FACING_WEIGHT = 0.5
 /** Horizontal impulse away from the attacker. Strong: must threaten edges. */
-export const LUNGE_KNOCKBACK = 62
+export const LUNGE_KNOCKBACK = 93 // was 62 (×1.5, Luke)
 /** Small upward part (breaks floor friction; exaggerates the hit). */
-export const LUNGE_KNOCK_LIFT = 8
+export const LUNGE_KNOCK_LIFT = 10 // was 8
 /** Horizontal force held after the impulse (carries the victim further). */
-export const LUNGE_KNOCK_FORCE = 25
+export const LUNGE_KNOCK_FORCE = 38 // was 25
 export const LUNGE_KNOCK_FORCE_S = 0.35
+/** Victim control lock: walk/jog/run/jump disabled while the knockback carries them,
+ *  so they can't steer against the push. A second hit extends it (no stacking). */
+export const LUNGE_KNOCKBACK_LOCK = true
+export const LUNGE_KNOCKBACK_LOCK_S = 0.3
 /** Victim drops an impact older than this vs when it saw that lunge start (ms). */
 export const LUNGE_IMPACT_MAX_AGE_MS = 400
 
@@ -222,8 +226,9 @@ export const LUNGE_TEST_DUMMY = true
 /** How many dummies (each on the centre of a distinct random tile). */
 export const LUNGE_DUMMY_COUNT = 4
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
- *  LUNGE_KNOCK* numbers × this: 62 → 15.5 m/s horizontal, lift 8 → 2 m/s, force
- *  25 → 6.25 m/s² for 0.35 s. Tune until the dummy flies like a real victim. */
+ *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
+ *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).
+ *  Tune until the dummy flies like a real victim. */
 export const LUNGE_DUMMY_UNIT = 0.25
 /** Dummy gravity (m/s²) and ground friction (m/s² of horizontal deceleration). */
 export const LUNGE_DUMMY_GRAVITY = 20
