@@ -5,15 +5,15 @@
  * KeyHintBadge / layer.relightPrompt + layer.feedPrompt / layer.hotbarBridge),
  * rebuilt with plain React-ECS because pixelwars has no UI-kit dependency.
  *
- *   - Slots: 72 px desktop / 112 px mobile, opaque dark bg, 18 px radius,
- *     constant 4 px border (white, white while its tooltip is up).
- *   - Translucent white fill inside the slot = recharge progress (rises from empty after
- *     use, full when ready). Seconds left are shown while cooling down.
+ *   - Slots: 72 px desktop / 112 px mobile, white bg, 18 px radius,
+ *     constant 4 px border (dark when ready, grey while cooling).
+ *   - Dark overlay inside the slot = cooldown left (full after use, drains to
+ *     nothing when ready). Seconds left are shown while cooling down.
  *   - Small E / F hint top-left on desktop only.
- *   - White tooltip chip with black text tucked under each slot (inner end
+ *   - Light-grey tooltip chip (dark outline, black text) tucked under each slot (inner end
  *     hidden behind the button, `tuck` px) while the ability
  *     is ready: DASH to the left, PAINT BOMB to the right. Tapping it fires
- *     the ability too. Mobile adds the white bridge strip joining slot and chip.
+ *     the ability too. Mobile adds the light-grey bridge strip joining slot and chip.
  *     Bridge + tooltips render before the slots so buttons win the overlap
  *     (snowdrift: hotbarBridge → inventoryHotbar → prompts).
  *   - When any mode is 'alternate', a small chip above says whether this
@@ -30,18 +30,18 @@ import { LUNGE_MODE, BOMB_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
 import { getBombHud, triggerBomb } from './paintBomb'
 
-const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
-// Neutral white accent (was gold 1.0/0.8/0.3, Luke 2026-10-20). Fill is low alpha
-// so the white countdown / icon stay readable over it on the dark slot.
-const ACCENT = Color4.create(0.95, 0.95, 0.95, 1)
-const ACCENT_BORDER = Color4.create(0.95, 0.95, 0.95, 0.95)
-const ACCENT_FILL = Color4.create(1, 1, 1, 0.3)
-const WHITE_BORDER = Color4.create(1, 1, 1, 0.45) // cooling: dimmer than the ready border
-const DIM_BORDER = Color4.create(1, 1, 1, 0.3)
-const BLACK = Color4.create(0, 0, 0, 1)
+// Light scheme (Luke 2026-10-20): white slots, black marks.
+const SLOT_BG = Color4.create(1, 1, 1, 1)
+const INK = Color4.create(0.05, 0.05, 0.05, 1)            // E/F hints, chevron, countdown, tooltip text
+const READY_BORDER = Color4.create(0.05, 0.05, 0.05, 0.9)  // ready: dark outline
+const COOL_BORDER = Color4.create(0.55, 0.55, 0.55, 0.6)   // cooling: soft grey outline
+const DIM_BORDER = Color4.create(0.7, 0.7, 0.7, 0.4)       // disabled
+const COOL_OVERLAY = Color4.create(0, 0, 0, 0.35)          // remaining cooldown, drains downward
+const DIM_ICON = Color4.create(0.75, 0.75, 0.75, 0.6)      // disabled icon (light grey)
+const TIP_BG = Color4.create(0.9, 0.9, 0.9, 1)             // tooltip chip + mobile bridge: light grey
+const TIP_BORDER = Color4.create(0.05, 0.05, 0.05, 0.85)   // dark outline so chips read against white slots
 const WHITE = Color4.White()
-const DIM = Color4.create(1, 1, 1, 0.35)
-const CHIP_BG = Color4.create(0.1, 0.1, 0.1, 0.92) // = COUNTDOWN_BG in ui.tsx
+const CHIP_BG = Color4.create(0.1, 0.1, 0.1, 0.92) // = COUNTDOWN_BG in ui.tsx (round-mode chip)
 
 const RADIUS = 18
 const RADIUS_SM = 12
@@ -65,26 +65,25 @@ type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; 
 
 function KeyHint(props: { label: string }) {
   if (isMobile()) return null
-  // Small white badge so the black letter reads on the dark slot or the fill.
   return (
-    <UiEntity
+    <Label
       key={`ui_pvp_key_${props.label}`}
-      uiTransform={{
-        positionType: 'absolute', position: { top: 5, left: 6 }, width: 18, height: 18,
-        borderRadius: 5, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
-      }}
-      uiBackground={{ color: ACCENT }}
-    >
-      <Label value={props.label} fontSize={13} color={BLACK} textAlign="middle-center" uiTransform={{ width: 18, height: 18 }} />
-    </UiEntity>
+      value={props.label}
+      fontSize={14}
+      color={INK}
+      uiTransform={{ positionType: 'absolute', position: { top: 6, left: 10 }, width: 16, height: 16 }}
+    />
   )
 }
 
-function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; g: Geo }) {
+function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; tintIcon?: boolean; onPress: () => void; g: Geo }) {
   const { hud, g } = props
-  const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
-  const border = !hud.enabled ? DIM_BORDER : hud.ready ? ACCENT_BORDER : WHITE_BORDER
+  // Dark overlay = time still to wait: full right after use, drains to 0 when ready.
+  const overlay = cooling ? Math.max(0, Math.min(1, hud.cooldownFrac)) : 0
+  const border = !hud.enabled ? DIM_BORDER : hud.ready ? READY_BORDER : COOL_BORDER
+  // Black-tinted monochrome icons (chevron); coloured art (bomb.png) keeps its colours.
+  const iconColor = !hud.enabled ? DIM_ICON : props.tintIcon ? INK : WHITE
   return (
     <UiEntity
       key={`ui_pvp_slot_${props.id}`}
@@ -96,7 +95,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
       uiBackground={{ color: SLOT_BG }}
       onMouseDown={props.onPress}
     >
-      {fill > 0 && (
+      {overlay > 0 && (
         <UiEntity
           key={`ui_pvp_fillFrame_${props.id}`}
           uiTransform={{
@@ -107,19 +106,18 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
         >
           <UiEntity
             key={`ui_pvp_fill_${props.id}`}
-            uiTransform={{ width: '100%', height: `${Math.round(fill * 100)}%`, borderRadius: RADIUS_SM }}
-            uiBackground={{ color: ACCENT_FILL }}
+            uiTransform={{ width: '100%', height: `${Math.round(overlay * 100)}%`, borderRadius: RADIUS_SM }}
+            uiBackground={{ color: COOL_OVERLAY }}
           />
         </UiEntity>
       )}
       <KeyHint label={props.keyLabel} />
-      {/* Glyph / icon hide while cooling so the countdown is the only centre mark
-          (Dash arrows especially — they clutter the seconds). */}
+      {/* Icon hides while cooling so the countdown is the only centre mark. */}
       {!cooling && props.iconSrc ? (
         <UiEntity
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? WHITE : DIM }}
+          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconColor }}
         />
       ) : null}
       {!cooling && !props.iconSrc ? (
@@ -127,7 +125,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_glyph_${props.id}`}
           value={props.glyph ?? ''}
           fontSize={Math.round(g.icon * 0.9)}
-          color={!hud.enabled ? DIM : WHITE}
+          color={!hud.enabled ? DIM_ICON : INK}
           textAlign="middle-center"
           uiTransform={{ width: g.icon, height: g.icon }}
         />
@@ -135,9 +133,9 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
       {cooling && (
         <Label
           key={`ui_pvp_cd_${props.id}`}
-          value={`${Math.ceil(hud.cooldown)}`}
+          value={isMobile() ? `${Math.ceil(hud.cooldown)}` : `<b>${Math.ceil(hud.cooldown)}</b>`}
           fontSize={Math.round(g.slot * 0.36)}
-          color={WHITE}
+          color={INK}
           textAlign="middle-center"
           uiTransform={{ positionType: 'absolute', width: '100%', height: '100%' }}
         />
@@ -163,16 +161,16 @@ function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPr
         padding: props.side === 'left'
           ? { left: g.tipPadX, right: g.tipPadX + g.tuck }
           : { left: g.tipPadX + g.tuck, right: g.tipPadX },
-        borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: ACCENT_BORDER, pointerFilter: 'block',
+        borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: TIP_BORDER, pointerFilter: 'block',
       }}
-      uiBackground={{ color: ACCENT }}
+      uiBackground={{ color: TIP_BG }}
       onMouseDown={props.onPress}
     >
       <Label
         key={`ui_pvp_tipLabel_${props.id}`}
         value={mobile ? props.text : `<b>${props.text}</b>`}
         fontSize={g.tipFont}
-        color={BLACK}
+        color={INK}
         font="sans-serif"
         textAlign="middle-left"
         uiTransform={{ width: 'auto', height: Math.round(g.tipFont * 1.6) }}
@@ -192,7 +190,7 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
         margin: props.side === 'left' ? { right: g.bridgeInner } : { left: g.bridgeInner },
         width: g.bridgeW, height: g.tipH, pointerFilter: 'none',
       }}
-      uiBackground={{ color: ACCENT }}
+      uiBackground={{ color: TIP_BG }}
     />
   )
 }
@@ -236,11 +234,11 @@ export function AbilityHotbar() {
             uiTransform={{ height: 28, padding: { left: 12, right: 12 }, margin: { bottom: 8 }, borderRadius: 14, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: CHIP_BG }}
           >
-            <Label value={label} fontSize={14} color={label === 'PAINT ONLY' ? WHITE : ACCENT} textAlign="middle-center" />
+            <Label value={label} fontSize={14} color={label === 'PAINT ONLY' ? WHITE : TIP_BG} textAlign="middle-center" />
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" tintIcon onPress={triggerLunge} g={g} />}
           {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
         </UiEntity>
       </UiEntity>
