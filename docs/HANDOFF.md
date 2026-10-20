@@ -157,9 +157,9 @@ Do **not** touch the ramp paint offset code — Luke confirmed the original work
 
 ---
 
-## 5a. Dash PvP prototype (experiment, branch `cursor/pvp-dash-b679`)
+## 5a. PvP prototype: Dash + Paint Bomb (experiment, branch `cursor/pvp-dash-b679`)
 
-Not V1 scope, not deployed. Press F or tap the round DASH button for a 0.4 s burst (5 s cooldown). Enemies you touch get knocked back and can fall off the sky arena. They respawn at base with 1.5 s immunity. The attacker's client detects the hit, the server checks teams, round and rate, then broadcasts it, and the victim's client pushes itself (the SDK can only move the local player). All knobs, including `DASH_MODE` `'on'` / `'off'` / `'alternate'` (paint-only vs Dash rounds), live in `src/shared/dash.ts`. Impulse magnitudes are untested guesses. Full write-up, limitations and the two-player test plan: [`design/dash-prototype.md`](../design/dash-prototype.md).
+Not V1 scope, not deployed. Bottom-centre hotbar in the dcl-snowdrift style: **E = Dash**, a 0.4 s burst with a 5 s cooldown that knocks enemies you touch off the sky arena. **F = Paint Bomb**, after a 0.4 s blinking telegraph, paints a 5.5 m circle in your colour and pushes opponents within 6 m (8 s cooldown; bomb model, sounds and knockback from flagtag). On mobile you tap the slots or tooltips. Players respawn at base with 1.5 s immunity. The server validates both abilities and paints the bomb circle from its own walkable graph. Each victim's client pushes itself, because the SDK can only move the local player. Knobs, including `DASH_MODE` / `BOMB_MODE` (`'on'` / `'off'` / `'alternate'` for paint-only comparison rounds), live in `src/shared/pvp.ts`. Dash magnitudes are untested guesses. Full write-up, flagtag credit, limitations and the two-player test plan: [`design/pvp-prototype.md`](../design/pvp-prototype.md).
 
 ---
 
