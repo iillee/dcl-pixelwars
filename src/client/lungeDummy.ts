@@ -60,6 +60,7 @@ type Dummy = {
   tracking: boolean
   hitFrom: { x: number; z: number }
   respawnIn: number // s until auto-respawn after a fall (< 0 = none)
+  yaw: number // this dummy's own 0/90/180/270° roll; changes only when THIS dummy (re)spawns
 }
 const dummies: Dummy[] = []
 let graph: WalkableGraph | null = null
@@ -135,11 +136,13 @@ function pickSpots(): Array<{ x: number; y: number; z: number }> {
  *  its collider (child, with the x offset in local space) turn together around the feet point,
  *  which stays the tile centre. Hitbox/physics use only position, so they are unchanged. */
 function randomYaw(d: Dummy): void {
-  Transform.getMutable(d.ent).rotation = Quaternion.fromEulerDegrees(0, 90 * Math.floor(Math.random() * 4), 0)
+  d.yaw = 90 * Math.floor(Math.random() * 4)
 }
 
 function place(d: Dummy): void {
-  Transform.getMutable(d.ent).position = d.alive ? Vector3.create(d.pos.x, d.pos.y, d.pos.z) : HIDDEN // root at the feet; anvil base sits on the floor
+  const tr = Transform.getMutable(d.ent)
+  tr.position = d.alive ? Vector3.create(d.pos.x, d.pos.y, d.pos.z) : HIDDEN // root at the feet; anvil base sits on the floor
+  tr.rotation = Quaternion.fromEulerDegrees(0, d.yaw, 0) // per-dummy, stored, re-applied every placement
 }
 
 /** Re-roll every dummy onto new random tile centres (key 2 / rebuild / team change). */
@@ -155,6 +158,7 @@ export function respawnDummy(): void {
     d.respawnIn = -1
     d.alive = !!s
     randomYaw(d)
+    console.log(`[Dummy ${i}] respawn yaw ${d.yaw}°`)
     if (s) d.pos = { x: s.x, y: s.y, z: s.z }
     place(d)
   })
@@ -176,7 +180,7 @@ function respawnOne(i: number): void {
   d.alive = true
   randomYaw(d)
   place(d)
-  console.log(`[Dummy ${i}] auto-respawned at ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`)
+  console.log(`[Dummy ${i}] auto-respawned at ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)} yaw ${d.yaw}°`)
 }
 
 /** Lunge hit on dummy i: same values the victim client gets, × LUNGE_DUMMY_UNIT. */
@@ -240,7 +244,7 @@ export function initLungeDummy(): void {
     // walk graph (no raycasts), so it can't hit itself.
     GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     dummies.push({ ent, pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, forceLeft: 0, forceDir: { x: 0, z: 0 },
-      alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1 })
+      alive: false, tracking: false, hitFrom: { x: 0, z: 0 }, respawnIn: -1, yaw: 0 })
   }
   engine.addSystem((dt: number) => {
     const seed = getCurrentSeed()
