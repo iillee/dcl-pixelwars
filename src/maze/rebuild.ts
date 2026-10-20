@@ -143,7 +143,10 @@ function spawnTileWithGrow(p: Placed): void {
   })
   GltfContainer.create(e, {
     src: TILES[p.type].model,
-    visibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS,
+    // PHYSICS + POINTER on the same (visible) geometry: the Explorer's 3rd-person camera is only
+    // blocked when both layers sit on one mesh (docs: Colliders → Cameras and colliders). No scene
+    // pointer events or CL_POINTER raycasts use these tiles; gameplay raycasts stay CL_PHYSICS.
+    visibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS | ColliderLayer.CL_POINTER,
   })
   Tween.create(e, {
     mode: Tween.Mode.Scale({
