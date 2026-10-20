@@ -80,12 +80,18 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
     if (seen.size !== set.size) badD++
     for (const f of fp) {
       const p = g.worldPos.get(f)!
-      if (Math.abs(p[1] - c0[1]) > BURST_PAINT_MAX_DY || Math.hypot(p[0] - c0[0], p[2] - c0[2]) > R_M + 0.06) badD++
+      if (Math.hypot(p[0] - c0[0], p[2] - c0[2]) > R_M + 0.06) badD++
+      // Every cell joins the footprint through a walk edge with a ≤ MAX_DY step (ramps climb, other levels don't).
+      if (f !== id && !(g.adj.get(f) ?? []).some(n => set.has(n) && Math.abs(g.worldPos.get(n)![1] - p[1]) <= BURST_PAINT_MAX_DY)) badD++
     }
   }
-  // 37 on flat floor; ramp cells sit closer together horizontally (slope), so a disc over a ramp can hold a couple more.
-  check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS} cells: 37 on flat floor (${full} centres), ≤ 41 over ramps (max ${mx})`, BURST_PAINT_SHAPE === 'circle' && mx <= 41 && full > 0)
-  check(`default footprint: connected, same level, every cell centre within ${R_M} m (circle)`, badD === 0)
+  // Full disc on flat floor = cells whose centre is within R cells; ramp cells sit closer together
+  // horizontally (slope), so a disc over a ramp can hold ~10% more.
+  let disc = 0
+  for (let a = -10; a <= 10; a++) for (let b = -10; b <= 10; b++) if (Math.hypot(a, b) * 2 <= R_M + 0.05) disc++
+  full = [...g.nodes].filter(id => burstFootprint(g, id).length === disc).length
+  check(`default footprint = ${BURST_PAINT_SHAPE} R=${BURST_PAINT_RADIUS_CELLS} cells: ${disc} on flat floor (${full} centres), ≤ ${Math.floor(disc * 1.1)} over ramps (max ${mx})`, BURST_PAINT_SHAPE === 'circle' && mx <= disc * 1.1 && full > 0)
+  check(`default footprint: connected via ≤ ${BURST_PAINT_MAX_DY} m walk steps, every cell centre within ${R_M} m (circle)`, badD === 0)
   const sq = burstFootprint(g, [...g.nodes].find(id => burstFootprint(g, id).length === 37)!, 'square', BURST_PAINT_RADIUS_CELLS).length
   check(`square option still available (7×7 = ${sq} cells there)`, sq === 49)
 }
@@ -99,6 +105,30 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
   check('one-time paint: reported cell far from the player is ignored', burstCentre(g, id0, { x: x + 20, y, z }) !== id0)
   check('one-time paint: nothing under the player (gap / mid-air) → no centre', burstCentre(g, '', { x: x, y: y + 40, z }) === null)
   check('one-time paint: full circle (37 cells) painted in one go from that centre', burstFootprint(g, burstCentre(g, id0, P0)!).length === 37)
+}
+{
+  // Ramp: centre mid-incline. Every ramp cell inside the circle is painted (whole run, not just
+  // ±1.5 m of the centre), and nothing outside the ramp's own base..top height range is.
+  const tiles = getPlacedTilesInOrder()
+  let ok = 0, tried = 0, leaks = 0, missing = 0
+  for (const t of tiles.filter(t => t.type === 'ramp')) {
+    const pre = `${t.x},${t.z},${t.y}:`
+    const ids = [...g.nodes].filter(n => n.startsWith(pre))
+    if (!ids.length) continue
+    const ys = ids.map(n => g.worldPos.get(n)![1])
+    const lo = Math.min(...ys), hi = Math.max(...ys)
+    const mid = ids.reduce((b, n) => Math.abs(g.worldPos.get(n)![1] - (lo + hi) / 2) < Math.abs(g.worldPos.get(b)![1] - (lo + hi) / 2) ? n : b)
+    const c0 = g.worldPos.get(mid)!
+    const fp = new Set(burstFootprint(g, mid))
+    tried++
+    const R_M = BURST_PAINT_RADIUS_CELLS * 2
+    const miss = ids.filter(n => { const p = g.worldPos.get(n)!; return Math.hypot(p[0] - c0[0], p[2] - c0[2]) <= R_M + 0.05 && !fp.has(n) })
+    const leak = [...fp].filter(n => { const y = g.worldPos.get(n)![1]; return y < lo - 0.01 || y > hi + 0.01 })
+    const spans = [...fp].filter(n => n.startsWith(pre)).map(n => g.worldPos.get(n)![1])
+    if (!miss.length && !leak.length && Math.max(...spans) - Math.min(...spans) > BURST_PAINT_MAX_DY * 2) ok++
+    missing += miss.length; leaks += leak.length
+  }
+  check(`ramp: burst mid-ramp paints the full ramp run inside the circle, > ${BURST_PAINT_MAX_DY * 2} m of climb, no other level (${ok}/${tried} ramps; missing ${missing}, leaks ${leaks})`, tried > 0 && ok === tried)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
 

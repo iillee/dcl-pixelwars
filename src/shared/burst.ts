@@ -27,8 +27,9 @@ export function burstDir(origin: V3, t: V3, fx: number, fz: number): { x: number
 /**
  * Footprint cells around `center` on the walkable graph: BFS over walkable
  * adjacency that only steps through cells inside the shape (square: |dx|,|dz|
- * ≤ R cells; cross: |dx|+|dz| ≤ R cells; circle: centre distance ≤ R cells) and within BURST_PAINT_MAX_DY of the
- * centre. Because it walks adjacency, it never jumps a gap, a disconnected
+ * ≤ R cells; cross: |dx|+|dz| ≤ R cells; circle: centre distance ≤ R cells), each step within
+ * BURST_PAINT_MAX_DY of the cell it steps from (not of the centre, so a whole ramp run is
+ * included: ramp cells climb ~0.7 m each). Because it walks adjacency, it never jumps a gap, a disconnected
  * walkway or onto another level. Base lock is applied later by applyPaint.
  */
 export function burstFootprint(graph: WalkableGraph, center: string,
@@ -37,11 +38,11 @@ export function burstFootprint(graph: WalkableGraph, center: string,
   if (!c || !graph.nodes.has(center)) return []
   const lim = r * CELL_M + 0.5
   const circ = r * CELL_M + 0.05 // circle: cell centres within R cells
-  const inside = (id: string): boolean => {
-    const p = graph.worldPos.get(id)
-    if (!p) return false
+  const inside = (id: string, from: string): boolean => {
+    const p = graph.worldPos.get(id), q = graph.worldPos.get(from)
+    if (!p || !q) return false
     const dx = Math.abs(p[0] - c[0]), dz = Math.abs(p[2] - c[2])
-    if (Math.abs(p[1] - c[1]) > BURST_PAINT_MAX_DY) return false
+    if (Math.abs(p[1] - q[1]) > BURST_PAINT_MAX_DY) return false // per walk edge
     if (shape === 'circle') return Math.hypot(dx, dz) <= circ
     return shape === 'square' ? dx <= lim && dz <= lim : dx + dz <= lim
   }
@@ -54,8 +55,8 @@ export function burstFootprint(graph: WalkableGraph, center: string,
     for (const id of frontier) {
       for (const n of graph.adj.get(id) ?? []) {
         if (seen.has(n)) continue
+        if (!inside(n, id)) continue
         seen.add(n)
-        if (!inside(n)) continue
         out.push(n); nextF.push(n)
       }
     }

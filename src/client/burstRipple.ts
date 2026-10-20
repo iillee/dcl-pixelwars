@@ -15,7 +15,7 @@
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
-import { Vector3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import { cellMaterial } from '../paint'
 import {
@@ -23,16 +23,30 @@ import {
   BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
-import { buildWalkableGraph, WalkableGraph } from '../shared/mazeGraph'
-import { getPlacedTilesInOrder } from '../maze/generator'
+import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
+import { getPlacedTilesInOrder, Placed } from '../maze/generator'
+import { TILES } from '../maze/tiles'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
 
 const HIDDEN = Vector3.create(8, -60, 8)
 const CELL_M = 2
-type Slab = { ent: Entity; busy: boolean; t: number; delay: number; x: number; y: number; z: number; team: Team }
+type Slab = { ent: Entity; busy: boolean; t: number; delay: number; x: number; y: number; z: number; team: Team; rot: Quaternion }
 const pool: Slab[] = []
 let graph: WalkableGraph | null = null
 let graphSeed = -1
+const FLAT = Quaternion.Identity()
+
+/** Ramp cells: tilt the slab to the slope under it (pitch from rampSurfaceY along the ramp's
+ *  canonical +z, yaw = ramp rotation) and sit it on the sloped surface. Flat cells: unchanged. */
+function cellPose(id: string, c: [number, number, number]): { y: number; rot: Quaternion } {
+  const [tx, tz, ty] = id.split(':')[0].split(',').map(Number)
+  const t: Placed | undefined = getPlacedTilesInOrder().find(p => p.x === tx && p.z === tz && p.y === ty)
+  if (!t || !TILES[t.type].isRamp) return { y: c[1], rot: FLAT }
+  const ux = Math.sin(t.r * Math.PI / 2), uz = Math.cos(t.r * Math.PI / 2), h = 0.5
+  const rise = rampSurfaceY(t, c[0] + ux * h, c[2] + uz * h) - rampSurfaceY(t, c[0] - ux * h, c[2] - uz * h)
+  const pitch = -Math.atan2(rise, 2 * h) * 180 / Math.PI // +z up the slope
+  return { y: rampSurfaceY(t, c[0], c[2]), rot: Quaternion.fromEulerDegrees(pitch, t.r * 90, 0) }
+}
 
 function ensureGraph(): WalkableGraph | null {
   const seed = getCurrentSeed()
@@ -67,7 +81,8 @@ export function startRipple(p: V3, team: Team, cell = ''): void {
     const s = pool.find(x => !x.busy)
     if (!s) break // cap reached
     s.busy = true; s.t = 0; s.delay = (d / maxD) * BURST_TILE_RIPPLE_S
-    s.x = c[0]; s.y = c[1]; s.z = c[2]
+    const pose = cellPose(id, c)
+    s.x = c[0]; s.y = pose.y; s.z = c[2]; s.rot = pose.rot
     if (s.team !== team) { s.team = team; setColour(s) }
     // Hidden until the wave front reaches it (see the system).
   }
@@ -79,7 +94,7 @@ export function initBurstRipple(): void {
     const ent = engine.addEntity()
     Transform.create(ent, { position: HIDDEN, scale: Vector3.Zero() })
     MeshRenderer.setBox(ent) // no collider: visual only
-    const s: Slab = { ent, busy: false, t: 0, delay: 0, x: 0, y: 0, z: 0, team: Team.None }
+    const s: Slab = { ent, busy: false, t: 0, delay: 0, x: 0, y: 0, z: 0, team: Team.None, rot: FLAT }
     setColour(s)
     pool.push(s)
   }
@@ -100,7 +115,9 @@ export function initBurstRipple(): void {
         continue
       }
       // Top rests just under the floor surface, peaks BURST_TILE_LIFT above it.
-      Transform.getMutable(s.ent).position = Vector3.create(s.x, s.y - BURST_TILE_THICK / 2 + 0.02 + h * BURST_TILE_LIFT, s.z)
+      const tr = Transform.getMutable(s.ent)
+      tr.position = Vector3.create(s.x, s.y - BURST_TILE_THICK / 2 + 0.02 + h * BURST_TILE_LIFT, s.z)
+      tr.rotation = s.rot
     }
   })
 }
