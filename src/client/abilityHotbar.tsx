@@ -30,7 +30,7 @@ import { LUNGE_MODE, BOMB_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
 import { getBombHud, triggerBomb } from './paintBomb'
 
-const SLOT_BG = Color4.create(1, 1, 1, 1)
+const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
 const GOLD_BORDER = Color4.create(1.0, 0.8, 0.3, 0.95)
 const GOLD_FILL = Color4.create(1.0, 0.8, 0.3, 0.9)
@@ -68,7 +68,7 @@ function KeyHint(props: { label: string }) {
       key={`ui_pvp_key_${props.label}`}
       value={props.label}
       fontSize={14}
-      color={BLACK}
+      color={Color4.create(1, 1, 1, 0.85)}
       uiTransform={{ positionType: 'absolute', position: { top: 6, left: 10 }, width: 16, height: 16 }}
     />
   )
@@ -113,7 +113,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
         <UiEntity
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? BLACK : WHITE) : DIM }}
+          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? WHITE : DIM }}
         />
       ) : null}
       {!cooling && !props.iconSrc ? (
@@ -121,7 +121,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_glyph_${props.id}`}
           value={props.glyph ?? ''}
           fontSize={Math.round(g.icon * 0.9)}
-          color={!hud.enabled ? DIM : BLACK}
+          color={!hud.enabled ? DIM : hud.ready ? BLACK : WHITE}
           textAlign="middle-center"
           uiTransform={{ width: g.icon, height: g.icon }}
         />
@@ -131,7 +131,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_cd_${props.id}`}
           value={`${Math.ceil(hud.cooldown)}`}
           fontSize={Math.round(g.slot * 0.36)}
-          color={BLACK}
+          color={WHITE}
           textAlign="middle-center"
           uiTransform={{ positionType: 'absolute', width: '100%', height: '100%' }}
         />
@@ -234,7 +234,7 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} glyph="»" onPress={triggerLunge} g={g} />}
           {bomb.show && <Slot id="bomb" keyLabel="F" hud={bomb} iconSrc="assets/images/bomb.png" onPress={triggerBomb} g={g} />}
         </UiEntity>
       </UiEntity>
