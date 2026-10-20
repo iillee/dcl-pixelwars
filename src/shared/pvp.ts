@@ -193,7 +193,7 @@ export const LUNGE_HITBOX_H = 1.8
 /** Gap from the avatar centre to the box's near face (m). Reach = FORWARD + D = 1.7 m. */
 export const LUNGE_HITBOX_FORWARD = 0.3
 /** Show the hitbox as a translucent team-coloured box (active window + grace). */
-export const LUNGE_HITBOX_VISIBLE = true
+export const LUNGE_HITBOX_VISIBLE = false
 /** Box alpha (flashes brighter on a hit). */
 export const LUNGE_HITBOX_ALPHA = 0.25
 /** false = world-space box placed from the same per-frame numbers as the hit test

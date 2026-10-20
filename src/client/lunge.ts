@@ -120,7 +120,7 @@ const streakLive: Array<{ e: Entity; until: number }> = []
 /** Avatars currently lunging (us = '' key uses PlayerEntity). */
 const lungers = new Map<string, { left: number; accum: number }>()
 
-function spawnStreak(p: V3): void {
+function spawnStreak(p: V3, team: Team): void {
   if (streakPool.length === 0) {
     for (let i = 0; i < STREAK_POOL; i++) {
       const e = engine.addEntity()
@@ -131,6 +131,8 @@ function spawnStreak(p: V3): void {
     }
   }
   const e = streakPool[streakIdx++ % STREAK_POOL]
+  const c = teamRgb(team)
+  Material.setPbrMaterial(e, { ...STREAK_MAT, albedoColor: Color4.create(c.r, c.g, c.b, 0.5), emissiveColor: Color4.create(c.r, c.g, c.b, 1) })
   const s = 0.4 * (0.8 + Math.random() * 0.4)
   const t = Transform.getMutable(e)
   t.position = Vector3.create(p.x, p.y + 0.5 + Math.random() * 0.7, p.z)
@@ -166,8 +168,9 @@ function tickStreaks(dt: number): void {
     if (l.left <= 0) { lungers.delete(who); continue }
     const p = avatarPos(who)
     if (!p) continue
+    const team = who === '' ? localTeam() : teamOfUser(who)
     l.accum += dt
-    while (l.accum >= STREAK_INTERVAL) { l.accum -= STREAK_INTERVAL; spawnStreak(p) }
+    while (l.accum >= STREAK_INTERVAL) { l.accum -= STREAK_INTERVAL; spawnStreak(p, team) }
   }
 }
 
