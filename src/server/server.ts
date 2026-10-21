@@ -139,7 +139,30 @@ export async function setupServer(): Promise<void> {
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }
 
+  // Presence for round-on-join: last presencePing per player (clients ping every 5 s). More reliable than
+  // the roster's connected set, which any straggler message re-adds via markActive() after onLeaveScene.
+  const PRESENCE_TIMEOUT_MS = 15000
+  const lastPingAt = new Map<string, number>()
+  const presentCount = (): number => {
+    const now = Date.now(); let n = 0
+    for (const [uid, t] of lastPingAt) { if (now - t <= PRESENCE_TIMEOUT_MS) n++; else lastPingAt.delete(uid) }
+    return n
+  }
+  function startRoundIfIdle(by: string): void {
+    if (isRoundActive()) return
+    setRoundState(currentRoundIndex(), Date.now() + ROUND_INTERVAL_MS, true)
+    console.log(`[Server] round ${currentRoundIndex()} started by ${by.slice(0, 10)}`)
+    sendRoundClock()
+  }
+  room.onMessage('presencePing', (_d, context) => {
+    const from = context?.from
+    if (!from) return
+    lastPingAt.set(from, Date.now())
+    if (getTeam(from) !== null) startRoundIfIdle(from) // idle server + a joined player still here → fresh round
+  })
+
   onLeaveScene((userId: string) => {
+    lastPingAt.delete(userId)
     markInactive(userId)
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
     // instead of being rate-limited into a blank map.
@@ -175,11 +198,9 @@ export async function setupServer(): Promise<void> {
     const team = assignTeam(from)
     markActive(from) // count them as present immediately; paint activity will refresh it
     // Round-on-join: idle server → this join starts a fresh 3:00 round (maze/board already reset at the last end).
-    if (!isRoundActive()) {
-      setRoundState(currentRoundIndex(), Date.now() + ROUND_INTERVAL_MS, true)
-      console.log(`[Server] round ${currentRoundIndex()} started by join of ${from.slice(0, 10)}`)
-      sendRoundClock()
-    } else sendRoundClock(from)
+    lastPingAt.set(from, Date.now())
+    if (!isRoundActive()) startRoundIfIdle(from)
+    else sendRoundClock(from)
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     broadcastRoster('join')
@@ -618,9 +639,9 @@ export async function setupServer(): Promise<void> {
     // Round over: chain the next one if anyone is connected, else end it once and go idle until a join.
     const lastRoundIndex = currentRoundIndex()
     const idx = lastRoundIndex + 1
-    const present = connectedCount() > 0
+    const present = presentCount() > 0 // pinged within 15 s (bots never ping)
     setRoundState(idx, Date.now() + ROUND_INTERVAL_MS, present)
-    if (!present) console.log(`[Server] round ${lastRoundIndex} ended with nobody connected → idle until a join`)
+    if (!present) console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
     const c = coverage()
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
     // Personal results go out BEFORE roundReset so the client already has

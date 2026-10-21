@@ -109,6 +109,9 @@ export const Messages = {
   }),
   // Client → Server: score-bar popup wants live standings; Server → that client: same rows as roundOwners.
   requestStandings: Schemas.Map({}),
+  // Client → Server every PRESENCE_PING_S: "I'm still here". Server presence for round-on-join
+  // (rounds chain only while someone pinged recently; a ping while idle starts a round).
+  presencePing: Schemas.Map({}),
   standings: Schemas.Map({
     owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int, kos: Schemas.Int, deaths: Schemas.Int, painted: Schemas.Int })),
   }),

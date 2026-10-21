@@ -48,6 +48,14 @@ function sendDisplayName(address: string): void {
 }
 
 export function initClientHandler(): void {
+  // Presence heartbeat for the server-owned round (round-on-join).
+  let pingClock = 0
+  engine.addSystem((dt: number) => {
+    pingClock += dt
+    if (pingClock < 5) return
+    pingClock = 0
+    room.send('presencePing', {})
+  })
   wireInbound()
   wireTeamAssigned()
   wireOutbound()
