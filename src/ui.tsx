@@ -69,7 +69,7 @@ const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
-const CLOCK_RING = 3 // dark ring between the clock's light rim and its light fill
+const CLOCK_RING = 6 // dark ring between the clock's light rim and its light fill
 const SUMMARY_TITLE_FONT = 72 // older build's title size
 const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
 const SUMMARY_GAP = 32 // territory bar → tables
@@ -359,7 +359,7 @@ export const uiMenu = () => (
               <UiEntity
                 uiTransform={{
                   width: 19, height: 19,
-                  positionType: 'absolute', position: { top: 14, left: 20 },
+                  positionType: 'absolute', position: { top: 10, left: 20 },
                   justifyContent: 'center', alignItems: 'center',
                   pointerFilter: 'block',
                 }}
@@ -372,8 +372,8 @@ export const uiMenu = () => (
                   background — just the icon sitting on the panel. */}
               <UiEntity
                 uiTransform={{
-                  width: 19, height: 19,
-                  positionType: 'absolute', position: { top: 25, right: 20 },
+                  width: 21, height: 21,
+                  positionType: 'absolute', position: { top: 20, right: 19 },
                   pointerFilter: 'block',
                 }}
                 uiBackground={{

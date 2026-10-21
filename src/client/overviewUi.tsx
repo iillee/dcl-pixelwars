@@ -60,7 +60,7 @@ export function OverviewEye() {
       key="ui_overview_eye"
       uiTransform={{
         width: EYE_W, height: EYE_H,
-        positionType: 'absolute', position: { top: 41, left: 19 },
+        positionType: 'absolute', position: { top: 35, left: 19 },
         pointerFilter: 'block',
       }}
       uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? GOLD : Color4.create(0.13, 0.13, 0.15, 1) }}
