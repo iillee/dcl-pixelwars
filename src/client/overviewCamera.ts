@@ -22,7 +22,7 @@
  *   off-screen avatar hint. Painting and movement are untouched: paint reads
  *   the player position, not the camera.
  *
- * Input: desktop keys 1 (IA_ACTION_3) and 4 (IA_ACTION_6) toggle, key 3 (IA_ACTION_5) rotates
+ * Input (desktop): key 4 (IA_ACTION_6) toggles; while open 1 (IA_ACTION_3) zoom in, 2 (IA_ACTION_4) zoom out, 3 (IA_ACTION_5) rotate
  * 90°. UI: the overview button + zoom buttons in ui.tsx (also on mobile).
  */
 
@@ -92,12 +92,15 @@ export function setupOverviewCamera(): void {
     defaultTransition: { transitionMode: VirtualCamera.Transition.Speed(TRANSITION_SPEED) },
   })
   engine.addSystem((dt: number) => {
-    // Key 4 (IA_ACTION_6) toggles, same as clicking the desktop eye button; key 1 (IA_ACTION_3) still toggles too.
-    if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) || inputSystem.isTriggered(InputAction.IA_ACTION_6, PointerEventType.PET_DOWN)) {
+    // Desktop keys (one press = one click, same sound): 4 toggles; while open 1 = zoom in, 2 = zoom out, 3 = rotate.
+    // Key 2 with the overview closed stays the test "respawn dummies" (lungeDummy.ts).
+    const wasActive = active
+    if (inputSystem.isTriggered(InputAction.IA_ACTION_6, PointerEventType.PET_DOWN)) {
       playUiClick()
       toggleOverview()
     }
-    // Rotate moved from key 4 to key 3 (IA_ACTION_5, unused elsewhere) so 4 can toggle.
+    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && canOverviewZoomIn()) { playUiClick(); overviewZoomIn() }
+    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && canOverviewZoomOut()) { playUiClick(); overviewZoomOut() }
     if (active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
       playUiClick()
       rotateOverview(1)

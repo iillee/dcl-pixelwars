@@ -1,3 +1,4 @@
+import { isOverviewActive } from './overviewCamera'
 /**
  * lungeDummy.ts — renders the SHARED anvil dummies (LUNGE_TEST_DUMMY). The server owns them
  * (server/anvils.ts + shared/anvilSim.ts: spawn spots, yaw, slide sim, falls, respawns) and
@@ -279,7 +280,8 @@ export function initLungeDummy(): void {
     })
   })
   engine.addSystem((dt: number) => {
-    if (inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
+    // Key 2 = respawn dummies only while the overview is closed (open: key 2 zooms out).
+    if (!isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
     if (launchCooldown > 0) launchCooldown -= dt
     // Local sim copy for prediction: same walk graph / ramps as the server; never respawns here.
     const seed = getCurrentSeed()

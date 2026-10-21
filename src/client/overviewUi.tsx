@@ -66,7 +66,7 @@ export function TileButton(props: { id: string; onPress: () => void; children?: 
 export const TOP_BTN = SMALL
 export const TOP_GAP = 8
 
-function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void }) {
+function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void; keyLabel?: string }) {
   return (
     <UiEntity
       key={props.id}
@@ -82,6 +82,7 @@ function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: b
         uiBackground={{ color: PANEL_LIGHT }}>
         <Glyph kind={props.kind} color={props.enabled ? INK : INK_DIM} />
       </UiEntity>
+      {props.keyLabel && <KeyHint label={props.keyLabel} />}
     </UiEntity>
   )
 }
@@ -128,9 +129,9 @@ export function OverviewRow(props: { desktop?: boolean } = {}) {
     >
       {/* Mobile (grows right of the eye): rotate first, next to the eye; desktop keeps + − rotate. */}
       {!props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
-      {<SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
-      {<SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
-      {props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
+      {<SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} keyLabel={props.desktop ? '1' : undefined} />}
+      {<SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} keyLabel={props.desktop ? '2' : undefined} />}
+      {props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} keyLabel="3" />}
     </UiEntity>
   )
 }
