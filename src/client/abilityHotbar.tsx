@@ -41,9 +41,9 @@ const WHITE = Color4.White()
 const DIM = Color4.create(1, 1, 1, 0.35)
 const CHIP_BG = Color4.create(0.1, 0.1, 0.1, 0.92) // = COUNTDOWN_BG in ui.tsx
 
-const RADIUS = 18
+export const RADIUS = 18
 const RADIUS_SM = 12
-const BORDER_W = 4
+export const BORDER_W = 4
 const FILL_INSET = BORDER_W + 2
 const SLOT_MARGIN_X = 8
 
