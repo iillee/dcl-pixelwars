@@ -446,42 +446,57 @@ export const uiMenu = () => (
               handles it uniformly. */}
           <UiEntity
             uiTransform={{
-              width: 520, height: 640, borderRadius: 20,
-              padding: 24, flexDirection: 'column', alignItems: 'stretch',
+              width: 520, height: 640, borderRadius: HOTBAR_RADIUS, flexDirection: 'column', alignItems: 'stretch',
+              // Key-tile frame like the clock: light rim around a dark ring, PANEL_LIGHT fill.
+              borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
             }}
-            uiBackground={{ color: Color4.create(0.08, 0.08, 0.08, 0.98) }}
+            uiBackground={{ color: HOTBAR_TILE_BG }}
             onMouseDown={toggleLeaderboard}
           >
+            <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, padding: 20, flexDirection: 'column', alignItems: 'stretch' }}
+              uiBackground={{ color: PANEL_LIGHT }}>
             {/* Header */}
             <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Label value="★ TOP PAINTERS" fontSize={28} color={Color4.White()} textAlign="middle-left" />
+              <BoldLabel value="★ TOP PAINTERS" fontSize={28} color={SUMMARY_INK} align="middle-left" w={textW('★ TOP PAINTERS', 28)} h={48} />
               <UiEntity
                 uiTransform={{ width: 32, height: 32, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
                 onMouseDown={toggleLeaderboard}
               >
-                <Label value="✕" fontSize={22} color={Color4.White()} textAlign="middle-center" />
+                <Label value="✕" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
               </UiEntity>
             </UiEntity>
-            {/* Column headers */}
-            <UiEntity uiTransform={{ width: '100%', height: 28, margin: { top: 12 }, flexDirection: 'row', alignItems: 'center' }}>
-              <Label value="#"     fontSize={14} color={Color4.Gray()} textAlign="middle-left"  uiTransform={{ width: 40 }} />
-              <Label value="PLAYER" fontSize={14} color={Color4.Gray()} textAlign="middle-left"  uiTransform={{ width: 340 }} />
-              <Label value="CELLS"  fontSize={14} color={Color4.Gray()} textAlign="middle-right" uiTransform={{ width: 90 }} />
+            {/* Column headers (summary-table style: dim dark caps) */}
+            <UiEntity uiTransform={{ width: '100%', height: 28, margin: { top: 8 }, flexDirection: 'row', alignItems: 'center', padding: { left: 10, right: 10 } }}>
+              <Label value="#"      fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"  uiTransform={{ width: 44 }} />
+              <Label value="PLAYER" fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"  uiTransform={{ width: 306 }} />
+              <Label value="CELLS"  fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-right" uiTransform={{ width: 90 }} />
             </UiEntity>
             {/* Rows */}
             {rows.length === 0 ? (
               <UiEntity uiTransform={{ width: '100%', height: 60, margin: { top: 12 }, justifyContent: 'center', alignItems: 'center' }}>
-                <Label value="No painters yet — be the first!" fontSize={16} color={Color4.Gray()} textAlign="middle-center" />
+                <Label value="No painters yet — be the first!" fontSize={16} color={SUMMARY_DIM} textAlign="middle-center" />
               </UiEntity>
-            ) : rows.map((r, i) => (
-              <UiEntity
-                uiTransform={{ width: '100%', height: 26, margin: { top: 2 }, flexDirection: 'row', alignItems: 'center' }}
-              >
-                <Label value={`${i + 1}`}                   fontSize={16} color={i < 3 ? Color4.Yellow() : Color4.White()} textAlign="middle-left"  uiTransform={{ width: 40 }} />
-                <Label value={r.name}                       fontSize={16} color={Color4.White()} textAlign="middle-left"  uiTransform={{ width: 340 }} />
-                <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={Color4.White()} textAlign="middle-right" uiTransform={{ width: 90 }} />
-              </UiEntity>
-            ))}
+            ) : rows.map((r, i) => {
+              const self = r.userId.toLowerCase() === (getPlayer()?.userId ?? '').toLowerCase()
+              return (
+                <UiEntity
+                  uiTransform={{ width: '100%', height: 30, margin: { top: 4 }, flexDirection: 'row', alignItems: 'center', padding: { left: 10, right: 10 }, borderRadius: 10,
+                    ...(self ? { borderWidth: SUMMARY_OUTLINE * 0.75, borderColor: SUMMARY_INK } : {}) }}
+                  uiBackground={{ color: self ? Color4.White() : Color4.create(0, 0, 0, 0.05) }}
+                >
+                  {/* Rank: top 3 get a small gold chip as the only accent */}
+                  <UiEntity uiTransform={{ width: 44, height: '100%', alignItems: 'center' }}>
+                    <UiEntity uiTransform={{ width: 30, height: 22, borderRadius: 6, justifyContent: 'center', alignItems: 'center', ...(i < 3 ? { borderWidth: 2, borderColor: SUMMARY_INK } : {}) }}
+                      uiBackground={{ color: i < 3 ? SUMMARY_MVP : Color4.create(0, 0, 0, 0) }}>
+                      <Label value={`${i + 1}`} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" />
+                    </UiEntity>
+                  </UiEntity>
+                  <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" uiTransform={{ width: 306 }} />
+                  <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" uiTransform={{ width: 90 }} />
+                </UiEntity>
+              )
+            })}
+            </UiEntity>
           </UiEntity>
         </UiEntity>
       )
