@@ -200,7 +200,7 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
 
 // ─── Mid-round team lists: click the score bar to open/close (live rows via requestStandings) ───
 const STANDINGS_REFRESH_MS = 3000
-const STANDINGS_TOP_PX = BAR_TOP_PX + 40 // just under the score bar
+const STANDINGS_TOP_PX = BAR_TOP_PX // the big pill replaces the score bar, under the clock
 let standingsOpen = false
 let standingsRows: SummaryRow[] = []
 let standingsReqAt = 0
@@ -221,16 +221,36 @@ function StandingsPopup() {
   if (now - standingsReqAt > STANDINGS_REFRESH_MS) { standingsReqAt = now; room.send('requestStandings', {}) }
   const cv = canvasSize()
   const rows = standingsRows.slice().sort((x, y) => y.cells - x.cells)
-  const { k, stacked, rowCap } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, 0)
+  const { k, stacked, rowCap } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, SUMMARY_PILL_H + SUMMARY_GAP)
+  const pct = coveragePct()
+  const pw = SUMMARY_PILL_W * k, ph = SUMMARY_PILL_H * k, border = SUMMARY_OUTLINE * k, cap = SUMMARY_PILL_CAP * k
+  const innerW = pw - border * 2, innerR = (ph - border * 2) / 2
+  const redW = cap + (innerW - cap * 2) * pct.red / 100
+  const blueW = cap + (innerW - cap * 2) * pct.blue / 100
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const total = coverage().total
   return (
     <UiEntity uiTransform={{ width: '100%', positionType: 'absolute', position: { top: STANDINGS_TOP_PX, left: 0 }, flexDirection: 'row', justifyContent: 'center', pointerFilter: 'none' }}>
-      <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'center' : 'flex-start', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
+      <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
+      {/* Enlarged score bar (the round-end territory pill, live %) heading the lists; click closes back to the bar. */}
+      <UiEntity uiTransform={{ width: pw, height: ph, flexShrink: 0, borderRadius: ph / 2, padding: border, margin: { bottom: SUMMARY_GAP * k } }} uiBackground={{ color: SUMMARY_INK }}>
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: SUMMARY_UNPAINTED }}>
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', padding: { left: 18 * k } }}
+            uiBackground={{ color: BAR_RED }}>
+            <Label value={`${Math.round(pct.red)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={SUMMARY_INK} textAlign="middle-left" />
+          </UiEntity>
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', padding: { right: 18 * k } }}
+            uiBackground={{ color: BAR_BLUE }}>
+            <Label value={`${Math.round(pct.blue)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={SUMMARY_INK} textAlign="middle-right" />
+          </UiEntity>
+        </UiEntity>
+      </UiEntity>
+      <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'center' : 'flex-start' }}>
         <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
         <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
         <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
+      </UiEntity>
       </UiEntity>
     </UiEntity>
   )
@@ -385,7 +405,7 @@ export const uiMenu = () => (
               />
             </UiEntity>
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
-            {getSummaryProgress() >= 0 ? (
+            {getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()
