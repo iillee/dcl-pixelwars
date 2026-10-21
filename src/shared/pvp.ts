@@ -189,6 +189,10 @@ export const BURST_TILE_POOL = 180
 /** Dash (lunge) trail: each cell the dashing avatar crosses pops once, smaller and quicker than Burst
  *  (client/burstRipple.ts dashPop, shares the Burst slab pool; visual only, local + remote dashes). */
 export const DASH_TILE_POP = true
+/** Thin black outline on raised slabs (Burst + Dash), dcl-canvas style edge strips: 4 top edges per slab,
+ *  parented to the slab so they ride its animation for free (pooled with it, no per-frame work). */
+export const SLAB_OUTLINE = true
+export const SLAB_OUTLINE_M = 0.03 // edge thickness in metres
 export const DASH_TILE_LIFT_FRAC = 0.35 // × BURST_TILE_LIFT (0.35 m) ≈ 0.12 m
 export const DASH_TILE_UP_S = 0.07
 export const DASH_TILE_DOWN_S = 0.14

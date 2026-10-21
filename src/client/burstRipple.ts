@@ -15,13 +15,13 @@
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import { cellMaterial } from '../paint'
 import {
   BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
   BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
-  DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX,
+  SLAB_OUTLINE, SLAB_OUTLINE_M, DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX,
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
@@ -113,12 +113,31 @@ export function dashPop(who: string, p: V3, team: Team): void {
 /** Forget the trail's last cell when a dash ends, so the next dash pops its first cell again. */
 export function dashPopEnd(who: string): void { dashLastCell.delete(who) }
 
+/** dcl-canvas paint.ts updateEdges, thin: 4 black strips on the slab's top edges as children of the slab (local
+ *  unit-box space, so thickness is divided by the slab's scale to stay SLAB_OUTLINE_M in world metres). */
+const OUTLINE_MAT = { albedoColor: Color4.Black(), metallic: 0, roughness: 1 }
+function addOutline(slab: Entity): void {
+  const ex = SLAB_OUTLINE_M / BURST_TILE_SIZE, ey = SLAB_OUTLINE_M / BURST_TILE_THICK
+  const y = 0.5 - ey / 2 + 0.002 / BURST_TILE_THICK // flush with the top face, a hair proud to avoid z-fighting
+  const edges: Array<[number, number, number, number]> = [ // x, z, sx, sz (local)
+    [0, 0.5 - ex / 2 + 0.002, 1.002, ex], [0, -0.5 + ex / 2 - 0.002, 1.002, ex],
+    [0.5 - ex / 2 + 0.002, 0, ex, 1.002], [-0.5 + ex / 2 - 0.002, 0, ex, 1.002],
+  ]
+  for (const [x, z, sx, sz] of edges) {
+    const e = engine.addEntity()
+    Transform.create(e, { parent: slab, position: Vector3.create(x, y, z), scale: Vector3.create(sx, ey, sz) })
+    MeshRenderer.setBox(e)
+    Material.setPbrMaterial(e, OUTLINE_MAT)
+  }
+}
+
 export function initBurstRipple(): void {
   if (!BURST_TILE_RIPPLE) return
   for (let i = 0; i < BURST_TILE_POOL; i++) {
     const ent = engine.addEntity()
     Transform.create(ent, { position: HIDDEN, scale: Vector3.Zero() })
     MeshRenderer.setBox(ent) // no collider: visual only
+    if (SLAB_OUTLINE) addOutline(ent)
     const s: Slab = { ent, busy: false, t: 0, delay: 0, x: 0, y: 0, z: 0, team: Team.None, rot: FLAT, lift: BURST_TILE_LIFT, up: BURST_TILE_UP_S, down: BURST_TILE_DOWN_S, dash: false }
     setColour(s)
     pool.push(s)
