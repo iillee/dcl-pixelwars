@@ -180,11 +180,20 @@ export async function setupServer(): Promise<void> {
   // If sender hasn't joined the roster yet (race: paint fires before
   // teamAssigned round-trips), drop silently — client will resend on the
   // next tick as new cells accumulate in its outbox.
+  // Throttled log for messages we drop silently (≤ 1 line per sender+type per 5 s).
+  const dropLogAt = new Map<string, number>()
+  const logDrop = (from: string, type: string, why: string) => {
+    const k = from + type, now = Date.now()
+    if (now - (dropLogAt.get(k) ?? 0) < 5000) return
+    dropLogAt.set(k, now)
+    console.log(`[Server] ${type} from ${from.slice(0, 10)} dropped: ${why}`)
+  }
+
   room.onMessage('paintTick', ({ ids }, context) => {
     const from = context?.from
     if (!from) return
     const team = getTeam(from)
-    if (team === null) return  // pre-roster paint, retry on next tick
+    if (team === null) { logDrop(from, 'paintTick', 'no team (not in roster)'); return }  // pre-roster paint
     if (ids.length > MAX_IDS_PER_TICK) {
       console.log(`[Server] paintTick from ${from} dropped: ${ids.length} ids > cap ${MAX_IDS_PER_TICK}`)
       return
@@ -387,7 +396,7 @@ export async function setupServer(): Promise<void> {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
-    if (team === null || ![x, y, z].every(isFinite)) return
+    if (team === null || ![x, y, z].every(isFinite)) { logDrop(from, 'burstUse', team === null ? 'no team' : 'bad position'); return }
     const now = Date.now()
     if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)

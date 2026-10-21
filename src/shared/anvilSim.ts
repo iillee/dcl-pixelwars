@@ -160,7 +160,7 @@ export class AnvilWorld {
     this.anvils.forEach((a, i) => {
       if (a.respawnIn >= 0) { a.respawnIn -= dt; if (a.respawnIn < 0) this.respawnOne(i) }
     })
-    for (let left = dt; left > 1e-6; left -= 0.05) {
+    for (let left = Math.min(Number.isFinite(dt) ? dt : 0, 1), n = 0; left > 1e-6 && n < 40; left -= 0.05, n++) {
       const sdt = Math.min(left, 0.05)
       this.anvils.forEach((a, i) => this.step(a, i, sdt))
     }

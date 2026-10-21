@@ -670,7 +670,7 @@ export function findPath(
         if (nb === goal) {
           const path: string[] = [nb]
           let step = cur
-          while (step !== start) { path.push(step); step = parent.get(step)! }
+          while (step !== start && step !== undefined && path.length <= graph.nodes.size) { path.push(step); step = parent.get(step)! }
           path.push(start); path.reverse()
           return path
         }
@@ -742,7 +742,7 @@ export function findPath(
     if (cur.id === goal) {
       const path: string[] = [goal]
       let step = goal
-      while (step !== start) { step = parent.get(step)!; path.push(step) }
+      while (step !== start && step !== undefined && path.length <= graph.nodes.size) { step = parent.get(step)!; path.push(step) }
       path.reverse()
       return path
     }

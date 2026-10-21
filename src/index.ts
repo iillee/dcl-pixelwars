@@ -15,6 +15,8 @@
  * are imported statically by both the client and server modules.
  */
 
+// First: per-system try/catch so one throwing system can't stall the frame + comms.
+import './shared/safeSystems'
 import { isServer } from '@dcl/sdk/network'
 
 // Shared modules MUST be static imports so their component/message
