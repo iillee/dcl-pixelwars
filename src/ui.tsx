@@ -545,15 +545,17 @@ export const uiMenu = () => (
         Renders when leaderboardOpen is true. Star button in the timer
         panel toggles this + fires requestLeaderboard for a fresh snapshot. */}
     {leaderboardOpen && (() => {
-      const rows = readLeaderboard()
+      // Mobile: top 10 only (fits without scrolling), no backdrop; tapping the board or its X closes it.
+      const mob = isMobile()
+      const rows = mob ? readLeaderboard().slice(0, 10) : readLeaderboard()
       return (
         <UiEntity
           uiTransform={{
             width: '100%', height: '100%',
             positionType: 'absolute', position: { top: 0, left: 0 },
-            justifyContent: 'center', alignItems: 'center',
+            justifyContent: 'center', alignItems: 'center', pointerFilter: mob ? 'none' : 'block',
           }}
-          uiBackground={{ color: BANNER_BG }}
+          uiBackground={mob ? undefined : { color: BANNER_BG }}
           onMouseDown={toggleLeaderboard}
         >
           {/* Modal card. Any click anywhere (card, X, backdrop) closes the
@@ -595,7 +597,7 @@ export const uiMenu = () => (
             // Rows: clipped viewport + custom pill scrollbar (drag) when the board would be taller than the screen.
             (() => {
             const total = rows.length * (LB_ROW_H + 3)
-            const view = Math.min(total, Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H))
+            const view = mob ? total : Math.min(total, Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H))
             const maxOff = Math.max(0, total - view)
             lbMaxOff = maxOff
             lbThumbTravel = view - Math.max(LB_THUMB_MIN, view * view / total)
@@ -604,7 +606,7 @@ export const uiMenu = () => (
             const thumbTop = maxOff > 0 ? (lbOffset / maxOff) * (view - thumbH) : 0
             return (
             <UiEntity uiTransform={{ width: '100%', height: view, flexShrink: 0, flexDirection: 'row' }}>
-            <UiEntity uiTransform={{ flexGrow: 1, height: view, overflow: 'hidden', pointerFilter: 'block' }}>
+            <UiEntity uiTransform={{ flexGrow: 1, height: view, overflow: 'hidden', pointerFilter: mob ? 'none' : 'block' }}>
             <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', positionType: 'absolute', position: { top: -lbOffset, left: 0 } }}>
             {rows.map((r, i) => {
               const self = r.userId.toLowerCase() === (getPlayer()?.userId ?? '').toLowerCase()
