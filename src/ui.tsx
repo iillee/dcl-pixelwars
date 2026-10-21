@@ -6,10 +6,11 @@ import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismiss
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
-import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
+import { OverviewEye, OverviewEyeInline, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
-import { engine, UiCanvasInformation } from "@dcl/sdk/ecs"
+import { isMobile } from "@dcl/sdk/platform"
+import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -26,6 +27,24 @@ function toggleLeaderboard(): void {
 
 interface LbEntry { userId: string; name: string; cellsPainted: number }
 // Top painters rows: fixed height, rank / name / cells columns shared with the header row.
+// Custom scrollbar drag: grab the thumb, follow PrimaryPointerInfo screen Y (px → UI units via the canvas ratio).
+const LB_BAR_W = 10, LB_THUMB_MIN = 28
+let lbOffset = 0, lbMaxOff = 0, lbThumbTravel = 0
+let lbDrag: { y: number; off: number } | null = null
+function pointerY(): number | null {
+  const p = PrimaryPointerInfo.getOrNull(engine.RootEntity)?.screenCoordinates
+  return p ? p.y : null
+}
+function startLbDrag(): void { const y = pointerY(); if (y !== null) lbDrag = { y, off: lbOffset } }
+function lbDragSystem(): void {
+  if (!lbDrag) return
+  if (!leaderboardOpen || inputSystem.isTriggered(InputAction.IA_POINTER, PointerEventType.PET_UP)) { lbDrag = null; return }
+  const y = pointerY(); if (y === null || lbThumbTravel <= 0) return
+  const c = UiCanvasInformation.getOrNull(engine.RootEntity)
+  const pxPerUi = c && c.height > 0 ? c.height / 1080 : 1 // virtualHeight 1080
+  const dyUi = (y - lbDrag.y) / pxPerUi
+  lbOffset = Math.max(0, Math.min(lbMaxOff, lbDrag.off + dyUi * (lbMaxOff / lbThumbTravel)))
+}
 const LB_HEAD_H = 120 // title + column header + paddings + frame above/below the rows
 const LB_ROW_H = 30, LB_PAD = 10, LB_GAP = 8, LB_RANK_W = 32, LB_CELLS_W = 100, LB_OUTLINE = 2
 function readLeaderboard(): LbEntry[] {
@@ -39,6 +58,7 @@ function readLeaderboard(): LbEntry[] {
 
 export function setupUi() {
   ReactEcsRenderer.setUiRenderer(uiMenu, { virtualWidth: 1920, virtualHeight: 1080 })
+  engine.addSystem(lbDragSystem)
 }
 
 const PILL_BG      = Color4.create(0, 0, 0, 0.5)
@@ -396,7 +416,8 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center' }}>
-            {/* Top row: [overview +/-/rotate ←] eye | timer | star  mute — sides equal width so the timer stays centred. */}
+            {/* Mobile: separate eye | timer | star mute buttons. Desktop: single clock panel (star + eye left, mute right) as in 36507d7. */}
+            {isMobile() ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_SIDE_W, height: TOP_BTN, flexDirection: 'row', justifyContent: 'flex-end', margin: { right: TOP_GAP } }}>
                 <OverviewRow />
@@ -425,6 +446,54 @@ export const uiMenu = () => (
                 </TileButton>
               </UiEntity>
             </UiEntity>
+            ) : (
+            <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
+              <OverviewRow desktop />
+              <UiEntity
+                uiTransform={{
+                  width: 200, height: 68,
+                  justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
+                  // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
+                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+                }}
+                uiBackground={{ color: HOTBAR_TILE_BG }}
+              >
+                <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
+                  uiBackground={{ color: SUMMARY_CARD_BG }} />
+                <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+                {/* Star icon on the left, mirror position to the mute icon on
+                    the right. Placeholder — no handler yet; wire onMouseDown
+                    when we decide what it does (leaderboard? favorites?). */}
+                <UiEntity
+                  uiTransform={{
+                    width: 19, height: 19,
+                    positionType: 'absolute', position: { top: 10, left: 20 },
+                    justifyContent: 'center', alignItems: 'center',
+                    pointerFilter: 'block',
+                  }}
+                  onMouseDown={toggleLeaderboard}
+                >
+                  <Label value="★" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
+                </UiEntity>
+                <OverviewEyeInline />
+                {/* Mute icon docked inside the timer panel on the right. No pill
+                    background — just the icon sitting on the panel. */}
+                <UiEntity
+                  uiTransform={{
+                    width: 21, height: 21,
+                    positionType: 'absolute', position: { top: 20, right: 19 },
+                    pointerFilter: 'block',
+                  }}
+                  uiBackground={{
+                    textureMode: 'stretch',
+                    texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' },
+                    color: SUMMARY_INK,
+                  }}
+                  onMouseDown={toggleMusic}
+                />
+              </UiEntity>
+            </UiEntity>
+            )}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
@@ -498,7 +567,7 @@ export const uiMenu = () => (
               uiBackground={{ color: PANEL_LIGHT }}>
             {/* Header */}
             <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <BoldLabel value="★ TOP PAINTERS" fontSize={28} color={SUMMARY_INK} align="middle-left" w={textW('★ TOP PAINTERS', 28)} h={48} />
+              <Label value="★ TOP PAINTERS" fontSize={28} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 48 }} />
               <UiEntity
                 uiTransform={{ width: 32, height: 32, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
                 onMouseDown={toggleLeaderboard}
@@ -518,8 +587,20 @@ export const uiMenu = () => (
                 <Label value="No painters yet — be the first!" fontSize={16} color={SUMMARY_DIM} textAlign="middle-center" />
               </UiEntity>
             ) : (
-            // Rows scroll when the board would be taller than the screen (phones); header stays put.
-            <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', flexShrink: 0, overflow: 'scroll', pointerFilter: 'block', height: Math.min(rows.length * (LB_ROW_H + 3), Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H)) }}>
+            // Rows: clipped viewport + custom pill scrollbar (drag) when the board would be taller than the screen.
+            (() => {
+            const total = rows.length * (LB_ROW_H + 3)
+            const view = Math.min(total, Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H))
+            const maxOff = Math.max(0, total - view)
+            lbMaxOff = maxOff
+            lbThumbTravel = view - Math.max(LB_THUMB_MIN, view * view / total)
+            lbOffset = Math.min(lbOffset, maxOff)
+            const thumbH = Math.max(LB_THUMB_MIN, view * view / total)
+            const thumbTop = maxOff > 0 ? (lbOffset / maxOff) * (view - thumbH) : 0
+            return (
+            <UiEntity uiTransform={{ width: '100%', height: view, flexShrink: 0, flexDirection: 'row' }}>
+            <UiEntity uiTransform={{ flexGrow: 1, height: view, overflow: 'hidden', pointerFilter: 'block' }}>
+            <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', positionType: 'absolute', position: { top: -lbOffset, left: 0 } }}>
             {rows.map((r, i) => {
               const self = r.userId.toLowerCase() === (getPlayer()?.userId ?? '').toLowerCase()
               return (
@@ -541,6 +622,18 @@ export const uiMenu = () => (
               )
             })}
             </UiEntity>
+            </UiEntity>
+            {maxOff > 0 && (
+              <UiEntity uiTransform={{ width: LB_BAR_W, height: view, margin: { left: 6 }, borderRadius: LB_BAR_W / 2, pointerFilter: 'block' }}
+                uiBackground={{ color: Color4.create(0, 0, 0, 0.08) }}>
+                <UiEntity uiTransform={{ positionType: 'absolute', position: { top: thumbTop, left: 0 }, width: LB_BAR_W, height: thumbH, borderRadius: LB_BAR_W / 2, pointerFilter: 'block' }}
+                  uiBackground={{ color: SUMMARY_INK }}
+                  onMouseDown={startLbDrag} onMouseUp={() => { lbDrag = null }} />
+              </UiEntity>
+            )}
+            </UiEntity>
+            )
+            })()
             )}
             </UiEntity>
           </UiEntity>

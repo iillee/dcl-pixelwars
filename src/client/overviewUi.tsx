@@ -102,14 +102,26 @@ export function OverviewEye() {
   )
 }
 
+/** Desktop: small eye inside the clock panel under the star (absolute), as before the mobile top-button split. */
+export function OverviewEyeInline() {
+  return (
+    <UiEntity
+      key="ui_overview_eye_inline"
+      uiTransform={{ width: EYE_W, height: EYE_H, positionType: 'absolute', position: { top: 35, left: 19 }, pointerFilter: 'block' }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }}
+      onMouseDown={() => { playUiClick(); toggleOverview() }}
+    />
+  )
+}
+
 /** Overview buttons in a row popping out to the LEFT of the eye button (absolute inside the eye's slot). */
-export function OverviewRow() {
+export function OverviewRow(props: { desktop?: boolean } = {}) {
   if (!isOverviewActive()) return null
   return (
     <UiEntity
       key="ui_overview_row"
       uiTransform={{
-        positionType: 'absolute', position: { top: 0, right: SMALL + ROW_GAP },
+        positionType: 'absolute', position: props.desktop ? { top: 0, right: 200 } : { top: 0, right: SMALL + ROW_GAP },
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
