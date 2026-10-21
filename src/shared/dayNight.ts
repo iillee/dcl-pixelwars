@@ -8,7 +8,7 @@
  * agrees and late joiners land mid-cycle. Day's end equals night's start (and vice versa), so
  * there is no jump at a round boundary either.
  */
-import { ROUND_INTERVAL_MS } from './roundTiming'
+import { ROUND_INTERVAL_MS, getRoundIndex, getRoundEndMs, isRoundActive } from './roundTiming'
 
 export const DAY_NIGHT_ENABLED = true
 /** Skybox seconds in a full day. 0 = midnight, 43200 = noon. */
@@ -25,7 +25,14 @@ export function lerpSkyboxSeconds(from: number, to: number, t01: number): number
   return (from + delta * Math.min(1, Math.max(0, t01))) % SKYBOX_DAY_SEC
 }
 
-/** Skybox seconds at `nowMs` on the round clock. */
+/** Skybox seconds now on the synced (server-owned) round: parity of the round counter, progress from its end time. */
+export function skySecondsNow(): number {
+  const now = Date.now()
+  const t01 = isRoundActive() ? 1 - (getRoundEndMs() - now) / ROUND_INTERVAL_MS : 0
+  return getRoundIndex() % 2 === 0 ? lerpSkyboxSeconds(DAY_FROM_SEC, DAY_TO_SEC, t01) : lerpSkyboxSeconds(DAY_TO_SEC, DAY_FROM_SEC, t01)
+}
+
+/** Skybox seconds at `nowMs` on the UTC round clock (verify-daynight). */
 export function skySecondsAt(nowMs: number = Date.now()): number {
   const idx = Math.floor(nowMs / ROUND_INTERVAL_MS)
   const t01 = (nowMs - idx * ROUND_INTERVAL_MS) / ROUND_INTERVAL_MS

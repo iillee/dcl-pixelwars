@@ -82,6 +82,10 @@ export const Messages = {
   // the new round's counts.
   // finalTotal is server-side painted-cell count; client re-derives the
   // banner denominator from its own walkable-cell count (same math as HUD).
+  // Server → Client: the server-owned round (round-on-join). Broadcast on start / boundary / idle, and sent to
+  // each joiner (joinRoster, requestSnapshot). remainingMs is relative so client clock skew doesn't matter.
+  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean }),
+
   roundReset: Schemas.Map({
     seed: Schemas.Int,
     finalRed: Schemas.Int,

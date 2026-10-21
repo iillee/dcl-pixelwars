@@ -86,6 +86,11 @@ export function markInactive(userId: string): void {
   connected.delete(userId)
 }
 
+/** Players currently connected (joined, not left). */
+export function connectedCount(): number {
+  return connected.size
+}
+
 /** Count roster members active in the last ACTIVE_WINDOW_MS. */
 export function activeHumanCount(): number {
   const c = activeTeamCounts()

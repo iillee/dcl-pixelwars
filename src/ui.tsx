@@ -2,6 +2,7 @@ import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
+import { isRoundActive } from "./shared/roundTiming"
 import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
@@ -445,7 +446,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={formatMMSS(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                  <Label value={isRoundActive() ? formatMMSS(secs) : '--:--'} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -467,7 +468,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
-                <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+                <Label value={isRoundActive() ? formatMMSS(secs) : '--:--'} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
                 {/* Star icon on the left, mirror position to the mute icon on
                     the right. Placeholder — no handler yet; wire onMouseDown
                     when we decide what it does (leaderboard? favorites?). */}

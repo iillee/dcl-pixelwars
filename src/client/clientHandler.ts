@@ -1,3 +1,4 @@
+import { setRoundState } from '../shared/roundTiming'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -94,6 +95,10 @@ function wireInbound(): void {
 
   room.onMessage('botPositions', ({ bots }) => {
     events.emit('bots:positions', { bots })
+  })
+
+  room.onMessage('roundClock', ({ idx, remainingMs, active }) => {
+    setRoundState(idx, Date.now() + remainingMs, active)
   })
 
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {

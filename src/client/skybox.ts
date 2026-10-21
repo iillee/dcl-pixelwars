@@ -7,7 +7,7 @@
  * default time between frames. Snowdrift notes Worlds may ignore fixedTime (still honours the lock).
  */
 import { engine, SkyboxTime, TransitionMode } from '@dcl/sdk/ecs'
-import { DAY_NIGHT_ENABLED, SKYBOX_DAY_SEC, skySecondsAt } from '../shared/dayNight'
+import { DAY_NIGHT_ENABLED, SKYBOX_DAY_SEC, skySecondsNow } from '../shared/dayNight'
 
 const WRITE_INTERVAL_S = 1 / 10
 /** Sky-seconds: anything bigger is a snap (recreate) rather than an ease. */
@@ -41,12 +41,12 @@ function writeSkybox(seconds: number): void {
 export function setupSkybox(): void {
   if (installed || !DAY_NIGHT_ENABLED) return
   installed = true
-  writeSkybox(skySecondsAt())
+  writeSkybox(skySecondsNow())
   engine.addSystem((dt: number) => {
     writeClock += dt
     if (writeClock < WRITE_INTERVAL_S) return
     writeClock = 0
-    writeSkybox(skySecondsAt())
+    writeSkybox(skySecondsNow())
   })
   console.log('skybox: locked to round clock at 10 Hz')
 }

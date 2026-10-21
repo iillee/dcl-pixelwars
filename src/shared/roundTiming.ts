@@ -16,10 +16,27 @@
 export const ROUND_LENGTH_MINUTES = 3
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 
+// Round-on-join: the SERVER owns the round (counter + end time). It starts a round when a player joins
+// while idle, chains rounds while anyone is connected, and goes idle when a round ends with nobody there.
+// Clients mirror it from the 'roundClock' message (remaining ms, so local clock skew doesn't matter).
+// Readers keep calling getRoundIndex() / getRoundEndMs().
+let roundIdx = Math.floor(Date.now() / ROUND_INTERVAL_MS) // starting counter (varies the first maze seed)
+let roundEnd = 0
+let roundActive = false
+
 export function getRoundIndex(): number {
-  return Math.floor(Date.now() / ROUND_INTERVAL_MS)
+  return roundIdx
 }
 
+/** End of the running round (local ms). Idle: now, so the countdown reads 0. */
 export function getRoundEndMs(): number {
-  return (getRoundIndex() + 1) * ROUND_INTERVAL_MS
+  return roundActive ? roundEnd : Date.now()
+}
+
+export function isRoundActive(): boolean {
+  return roundActive
+}
+
+export function setRoundState(idx: number, endMs: number, active: boolean): void {
+  roundIdx = idx; roundEnd = endMs; roundActive = active
 }

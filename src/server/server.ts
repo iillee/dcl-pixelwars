@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries, connectedCount } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
@@ -31,7 +31,7 @@ import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } 
 // Round loop constants — single source of truth lives in shared/roundTiming.ts
 // so client (src/round.ts) and server share the exact same cadence. Do not
 // redefine here; edit the shared module if the cadence changes.
-import { getRoundIndex as currentRoundIndex } from '../shared/roundTiming'
+import { getRoundIndex as currentRoundIndex, getRoundEndMs, isRoundActive, setRoundState, ROUND_INTERVAL_MS } from '../shared/roundTiming'
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
@@ -133,6 +133,12 @@ export async function setupServer(): Promise<void> {
   // second player leaves (instead of waiting up to 60s for the activity
   // window to expire). markInactive() keeps the roster slot for rejoin
   // stability — only the activity timestamp is cleared.
+  /** Round-on-join state → one client (to) or everyone. */
+  function sendRoundClock(to?: string): void {
+    const msg = { idx: currentRoundIndex(), remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())), active: isRoundActive() }
+    if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
+  }
+
   onLeaveScene((userId: string) => {
     markInactive(userId)
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
@@ -168,6 +174,12 @@ export async function setupServer(): Promise<void> {
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     const team = assignTeam(from)
     markActive(from) // count them as present immediately; paint activity will refresh it
+    // Round-on-join: idle server → this join starts a fresh 3:00 round (maze/board already reset at the last end).
+    if (!isRoundActive()) {
+      setRoundState(currentRoundIndex(), Date.now() + ROUND_INTERVAL_MS, true)
+      console.log(`[Server] round ${currentRoundIndex()} started by join of ${from.slice(0, 10)}`)
+      sendRoundClock()
+    } else sendRoundClock(from)
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     broadcastRoster('join')
@@ -247,7 +259,7 @@ export async function setupServer(): Promise<void> {
     // Tick bots BEFORE draining, so any paint they generate this frame
     // rides out on the same broadcast — no extra latency and no wasted
     // "skip empty" checks.
-    tickBots(broadcastClock)
+    if (isRoundActive()) tickBots(broadcastClock) // bots idle while no round runs
     broadcastClock = 0
     const changes = drainDelta()
     if (changes.length === 0) return
@@ -549,6 +561,7 @@ export async function setupServer(): Promise<void> {
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
       room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, seed: currentRoundIndex() }, { to: [from] })
     }
+    sendRoundClock(from) // late joiners: current round + time left (or idle)
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:
@@ -590,11 +603,14 @@ export async function setupServer(): Promise<void> {
     room.send('standings', { owners: buildStandings(roundCells) }, { to: [from] })
   })
 
-  let lastRoundIndex = 0
   engine.addSystem(() => {
-    const idx = currentRoundIndex()
-    if (lastRoundIndex === 0) { lastRoundIndex = idx; return }
-    if (idx === lastRoundIndex) return
+    if (!isRoundActive() || Date.now() < getRoundEndMs()) return
+    // Round over: chain the next one if anyone is connected, else end it once and go idle until a join.
+    const lastRoundIndex = currentRoundIndex()
+    const idx = lastRoundIndex + 1
+    const present = connectedCount() > 0
+    setRoundState(idx, Date.now() + ROUND_INTERVAL_MS, present)
+    if (!present) console.log(`[Server] round ${lastRoundIndex} ended with nobody connected → idle until a join`)
     const c = coverage()
     console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
     // Personal results go out BEFORE roundReset so the client already has
@@ -632,7 +648,7 @@ export async function setupServer(): Promise<void> {
     // on I/O.
     void saveLeaderboard()
     publishLeaderboard()
-    lastRoundIndex = idx
+    sendRoundClock() // new round running, or idle
   })
 
   // Discord flush tick — low frequency; the delay is 5s so 1Hz polling
