@@ -25,6 +25,8 @@ function toggleLeaderboard(): void {
 }
 
 interface LbEntry { userId: string; name: string; cellsPainted: number }
+// Top painters rows: fixed height, rank / name / cells columns shared with the header row.
+const LB_ROW_H = 30, LB_PAD = 10, LB_GAP = 8, LB_RANK_W = 32, LB_CELLS_W = 100, LB_OUTLINE = 2
 function readLeaderboard(): LbEntry[] {
   const s = LeaderboardState.getOrNull(leaderboardStateEntity)
   if (!s || !s.json) return []
@@ -492,14 +494,14 @@ export const uiMenu = () => (
               handles it uniformly. */}
           <UiEntity
             uiTransform={{
-              width: 520, height: 640, borderRadius: HOTBAR_RADIUS, flexDirection: 'column', alignItems: 'stretch',
+              width: 520, borderRadius: HOTBAR_RADIUS, flexDirection: 'column', alignItems: 'stretch', // height hugs the rows
               // Key-tile frame like the clock: light rim around a dark ring, PANEL_LIGHT fill.
               borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
             }}
             uiBackground={{ color: HOTBAR_TILE_BG }}
             onMouseDown={toggleLeaderboard}
           >
-            <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, padding: 20, flexDirection: 'column', alignItems: 'stretch' }}
+            <UiEntity uiTransform={{ width: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, padding: { left: 14, right: 14, top: 8, bottom: 14 }, flexDirection: 'column', alignItems: 'stretch' }}
               uiBackground={{ color: PANEL_LIGHT }}>
             {/* Header */}
             <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -512,10 +514,10 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             {/* Column headers (summary-table style: dim dark caps) */}
-            <UiEntity uiTransform={{ width: '100%', height: 28, margin: { top: 8 }, flexDirection: 'row', alignItems: 'center', padding: { left: 10, right: 10 } }}>
-              <Label value="#"      fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"  uiTransform={{ width: 44 }} />
-              <Label value="PLAYER" fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"  uiTransform={{ width: 306 }} />
-              <Label value="CELLS"  fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-right" uiTransform={{ width: 90 }} />
+            <UiEntity uiTransform={{ width: '100%', height: 24, flexShrink: 0, flexDirection: 'row', alignItems: 'center', padding: { left: LB_PAD, right: LB_PAD } }}>
+              <Label value="#"      fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-center" uiTransform={{ width: LB_RANK_W, height: '100%', margin: { right: LB_GAP } }} />
+              <Label value="PLAYER" fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"   uiTransform={{ flexGrow: 1, height: '100%' }} />
+              <Label value="CELLS"  fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-right"  uiTransform={{ width: LB_CELLS_W, height: '100%' }} />
             </UiEntity>
             {/* Rows */}
             {rows.length === 0 ? (
@@ -526,19 +528,19 @@ export const uiMenu = () => (
               const self = r.userId.toLowerCase() === (getPlayer()?.userId ?? '').toLowerCase()
               return (
                 <UiEntity
-                  uiTransform={{ width: '100%', height: 30, margin: { top: 4 }, flexDirection: 'row', alignItems: 'center', padding: { left: 10, right: 10 }, borderRadius: 10,
-                    ...(self ? { borderWidth: SUMMARY_OUTLINE * 0.75, borderColor: SUMMARY_INK } : {}) }}
+                  uiTransform={{ width: '100%', height: LB_ROW_H, flexShrink: 0, margin: { top: 3 }, flexDirection: 'row', alignItems: 'center', padding: { left: LB_PAD - (self ? LB_OUTLINE : 0), right: LB_PAD - (self ? LB_OUTLINE : 0) }, borderRadius: 8,
+                    ...(self ? { borderWidth: LB_OUTLINE, borderColor: SUMMARY_INK } : {}) }}
                   uiBackground={{ color: self ? Color4.White() : Color4.create(0, 0, 0, 0.05) }}
                 >
                   {/* Rank: top 3 get a small gold chip as the only accent */}
-                  <UiEntity uiTransform={{ width: 44, height: '100%', alignItems: 'center' }}>
-                    <UiEntity uiTransform={{ width: 30, height: 22, borderRadius: 6, justifyContent: 'center', alignItems: 'center', ...(i < 3 ? { borderWidth: 2, borderColor: SUMMARY_INK } : {}) }}
+                  <UiEntity uiTransform={{ width: LB_RANK_W, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center', margin: { right: LB_GAP } }}>
+                    <UiEntity uiTransform={{ width: LB_RANK_W, height: LB_ROW_H - 8, borderRadius: 6, justifyContent: 'center', alignItems: 'center', ...(i < 3 ? { borderWidth: 2, borderColor: SUMMARY_INK } : {}) }}
                       uiBackground={{ color: i < 3 ? SUMMARY_MVP : Color4.create(0, 0, 0, 0) }}>
-                      <Label value={`${i + 1}`} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" />
+                      <Label value={`${i + 1}`} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                     </UiEntity>
                   </UiEntity>
-                  <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: 306 }} />
-                  <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" uiTransform={{ width: 90 }} />
+                  <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ flexGrow: 1, height: '100%' }} />
+                  <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: LB_CELLS_W, height: '100%', flexShrink: 0 }} />
                 </UiEntity>
               )
             })}
