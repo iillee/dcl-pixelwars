@@ -199,11 +199,13 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
 /** Mobile circles (virtual px on the 1920x1080 canvas). Native jump button estimate: centre JUMP_CX_RIGHT from the
  *  right edge, JUMP_CY_BOTTOM from the bottom, diameter JUMP_D. Tune these in-world. */
 const JUMP_CX_RIGHT = 150
-const JUMP_CY_BOTTOM = 150
+const JUMP_CY_BOTTOM = 90
 const JUMP_D = 170
 const CIRCLE_D = 140 // ability circle diameter (≈ jump)
 const CIRCLE_GAP = 12 // equal gap jump → lunge → burst
 const CIRCLE_RING = 6
+const CIRCLE_X_OFFSET = 70 // extra shift right of the jump centre line (centres 150 − 70 = 80 px from the right edge)
+const CIRCLE_ICON_FRAC = 0.72 // icon size as a fraction of the circle diameter
 const CIRCLE_READY = Color4.create(1.0, 0.78, 0.15, 1) // gold ring while ready
 const CIRCLE_INK = Color4.create(0.13, 0.13, 0.15, 1)
 
@@ -214,11 +216,11 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
   const iconCol = !hud.enabled || cooling ? Color4.create(0.13, 0.13, 0.15, 0.25) : CIRCLE_INK
   return (
     <UiEntity key={`ui_pvp_circle_${props.id}`}
-      uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
+      uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_X_OFFSET - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
         borderRadius: CIRCLE_D / 2, borderWidth: CIRCLE_RING, borderColor: ring, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
       uiBackground={{ color: PANEL_LIGHT }}
       onMouseDown={props.onPress}>
-      <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * 0.45), height: Math.round(CIRCLE_D * 0.45), pointerFilter: 'none' }}
+      <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), height: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), pointerFilter: 'none' }}
         uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />
       {cooling && <Label value={`${Math.ceil(hud.cooldown)}`} fontSize={Math.round(CIRCLE_D * 0.4)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
         uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' }} />}
