@@ -7,7 +7,7 @@ import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
 import { OverviewEye, OverviewRow } from "./client/overviewUi"
-import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT } from "./client/abilityHotbar"
+import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
 import { engine, UiCanvasInformation } from "@dcl/sdk/ecs"
 
@@ -69,7 +69,8 @@ const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
-const SUMMARY_TITLE_FONT = 64
+const CLOCK_RING = 3 // dark ring between the clock's light rim and its light fill
+const SUMMARY_TITLE_FONT = 72 // older build's title size
 const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
 const SUMMARY_GAP = 32 // territory bar → tables
 const SUMMARY_SUB_FONT = 18
@@ -253,7 +254,7 @@ function RoundSummary(p: number) {
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
   const show = a > 0
-  const titleF = fnt(SUMMARY_TITLE_FONT, k)
+  const titleF = SUMMARY_TITLE_FONT * k
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
       onMouseDown={() => dismissSummary()}>
@@ -264,8 +265,8 @@ function RoundSummary(p: number) {
         {show && (
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k } }}>
             <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: 84 * k }}>
-              {teamWord !== '' && <BoldLabel value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' ? RED_COLOR : BLUE_COLOR, a)} align="middle-center" w={textW(teamWord, titleF)} h={84 * k} margin={{ right: titleF * 0.35 }} />}
-              <BoldLabel value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} align="middle-center" w={textW(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF)} h={84 * k} />
+              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' ? RED_COLOR : BLUE_COLOR, a)} textAlign="middle-center" uiTransform={{ width: textW(teamWord, titleF), height: 84 * k, margin: { right: titleF * 0.35 } }} />}
+              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign="middle-center" uiTransform={{ width: textW(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: 84 * k }} />
             </UiEntity>
             <Label value="F I N A L     T E R R I T O R Y     C O N T R O L" fontSize={fnt(SUMMARY_SUB_FONT, k)} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" uiTransform={{ height: 26 * k }} />
           </UiEntity>
@@ -344,9 +345,13 @@ export const uiMenu = () => (
               uiTransform={{
                 width: 200, height: 68,
                 justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
+                // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
+                borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
               }}
-              uiBackground={{ color: SUMMARY_CARD_BG }}
+              uiBackground={{ color: HOTBAR_TILE_BG }}
             >
+              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
+                uiBackground={{ color: SUMMARY_CARD_BG }} />
               <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
               {/* Star icon on the left, mirror position to the mute icon on
                   the right. Placeholder — no handler yet; wire onMouseDown

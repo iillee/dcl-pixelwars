@@ -30,9 +30,9 @@ import { LUNGE_MODE, BURST_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
 import { getBurstHud, triggerBurst } from './paintBurst'
 
-const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
+export const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
-const GOLD_BORDER = Color4.create(1, 1, 1, 0.95)
+export const GOLD_BORDER = Color4.create(1, 1, 1, 0.95)
 const GOLD_FILL = Color4.create(1, 1, 1, 0.9)
 const WHITE_BORDER = Color4.create(1, 1, 1, 0.75)
 const DIM_BORDER = Color4.create(1, 1, 1, 0.3)
