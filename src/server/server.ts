@@ -561,7 +561,12 @@ export async function setupServer(): Promise<void> {
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
     // Per-painter owned cells for the summary square's shades. Top 60 keeps the message well under the 12 KB cap.
-    const owners = ownerCounts().slice(0, 60)
+    const ROUND_OWNER_NAME_MAX = 16
+    const owners = ownerCounts().slice(0, 60).map(o => {
+      const raw = o.id.startsWith('bot:') ? `Bot ${o.id.slice(4)}`
+        : leaderboardGetName(o.id) ?? (o.id.length > 10 ? `${o.id.slice(0, 6)}…${o.id.slice(-4)}` : o.id)
+      return { ...o, name: raw.length > ROUND_OWNER_NAME_MAX ? raw.slice(0, ROUND_OWNER_NAME_MAX - 1) + '…' : raw }
+    })
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })

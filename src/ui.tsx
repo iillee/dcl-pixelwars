@@ -9,6 +9,7 @@ import { Team, TEAM_RGB } from "./shared/team"
 import { OverviewEye, OverviewRow } from "./client/overviewUi"
 import { AbilityHotbar } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
+import { engine, UiCanvasInformation } from "@dcl/sdk/ecs"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -62,19 +63,43 @@ const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TE
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
 
 // Round-end summary square (the bar grown). Bar's top edge sits 10 (top) + 68 (timer) + 6 (margin) px down.
-const SUMMARY_SIZE = 360
-const SUMMARY_BORDER = 6
-const SUMMARY_RADIUS = 18
+// Wide panel (Luke's mockup): light-grey frame → dark border → red | unpainted | blue infographic.
+// Sized from the screen: SUMMARY_W_FRAC of the canvas width (clamped), height = width / SUMMARY_ASPECT.
+// Every size below is at the reference width SUMMARY_REF_W and scales with the panel.
+const SUMMARY_W_FRAC = 0.6
+const SUMMARY_W_MIN = 640
+const SUMMARY_W_MAX = 1500
+const SUMMARY_ASPECT = 2.7
+const SUMMARY_REF_W = 760
+const SUMMARY_FRAME = 12        // light-grey outer frame thickness
+const SUMMARY_FRAME_R = 44
+const SUMMARY_BORDER = 10       // dark inner border thickness
+const SUMMARY_RADIUS = 32       // dark border outer radius
 const SUMMARY_CAP = 18 // 0% side still shows this much colour, like the bar's end caps
-const SUMMARY_FONT = 64
-const SUMMARY_SIDE_GAP = 20 // px between the square and the big side percentages
+const SUMMARY_FONT = 64         // big team totals
+const SUMMARY_TITLE_FONT = 60
+const SUMMARY_BAND_FONT = 20    // name + % inside each band
+const SUMMARY_BAND_FONT_MIN = 16
+const SUMMARY_SIDE_GAP = 20     // px between the panel and the side total tags
+const SUMMARY_FRAME_COLOR = Color4.create(0.86, 0.86, 0.87, 1)
+const SUMMARY_UNPAINTED = Color4.create(0.85, 0.85, 0.86, 1)
+const SUMMARY_TEXT = Color4.create(0.15, 0.15, 0.17, 1)
+const SUMMARY_TIE_TAG = Color4.create(0.75, 0.75, 0.77, 1)
+
+/** Canvas size in UI units (falls back to 1280×720 before the renderer reports it). */
+function canvasSize(): { w: number; h: number } {
+  const c = UiCanvasInformation.getOrNull(engine.RootEntity)
+  if (!c || c.width <= 0) return { w: 1280, h: 720 }
+  const dpr = c.devicePixelRatio > 0 ? c.devicePixelRatio : 1
+  return { w: c.width / dpr, h: c.height / dpr }
+}
 const BAR_TOP_PX = 10 + 68 + 6
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 // Per-painter shades inside each team region (roundOwners). Segments narrower than this (at full size)
 // merge into one "others" shade; the local player's segment is never merged.
 const SUMMARY_MIN_SEG_PX = 8
 const SUMMARY_SHADE_STEP = 0.14   // alternate darker/lighter steps between neighbouring painters
-const SUMMARY_SELF_LIGHTEN = 0.35 // local player's segment: lightened toward white + outlined
+const SUMMARY_SELF_LIGHTEN = 0.6 // local player's band: pale (lightened toward white) + outlined
 const SUMMARY_SELF_OUTLINE = 3
 const SUMMARY_OTHERS_MIX = 0.45   // "others" shade: team colour mixed toward grey
 
@@ -85,88 +110,112 @@ function shadeAt(base: Color4, i: number): Color4 {
   return i % 2 ? mix(base, Color4.Black(), k) : mix(base, Color4.White(), k)
 }
 
-/** Painter bands for one team column of height `regionH`: full column width, stacked top→bottom, largest at the top. */
-function OwnerSegments(team: number, regionH: number, scale: number, innerR: number, fromRight: boolean) {
+/** Painter bands for one team column of height `regionH`: full column width, stacked top→bottom, largest at the top.
+ *  Label = name + share of the WHOLE map (team's bands sum to teamPct), right-aligned; hidden if the band is too short. */
+function OwnerSegments(team: number, regionH: number, scale: number, innerR: number, fromRight: boolean, teamPct: number, font: number, showText: boolean, textA: number) {
   const owners = getBanner().owners.filter(o => o.team === team && o.cells > 0)
   const sum = owners.reduce((a, o) => a + o.cells, 0)
   if (sum === 0) return null
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const base = team === 1 ? BAR_RED : BAR_BLUE
-  const segs: Array<{ h: number; color: Color4; self: boolean }> = []
-  let others = 0
+  const segs: Array<{ h: number; color: Color4; self: boolean; name: string; cells: number }> = []
+  let others = 0, othersCells = 0
   owners.forEach((o, i) => {
     const h = regionH * o.cells / sum
     const self = o.id.toLowerCase() === me
-    if (!self && h < SUMMARY_MIN_SEG_PX * scale) { others += h; return }
-    segs.push({ h, color: self ? mix(shadeAt(base, i), Color4.White(), SUMMARY_SELF_LIGHTEN) : shadeAt(base, i), self })
+    if (!self && h < SUMMARY_MIN_SEG_PX * scale) { others += h; othersCells += o.cells; return }
+    segs.push({ h, color: self ? mix(shadeAt(base, i), Color4.White(), SUMMARY_SELF_LIGHTEN) : shadeAt(base, i), self, name: o.name || 'player', cells: o.cells })
   })
-  if (others > 0) segs.push({ h: others, color: mix(base, Color4.Gray(), SUMMARY_OTHERS_MIX), self: false })
+  if (others > 0) segs.push({ h: others, color: mix(base, Color4.Gray(), SUMMARY_OTHERS_MIX), self: false, name: 'Others', cells: othersCells })
   let at = 0
   return segs.map((sg, i) => {
     const pos = { top: at, left: 0 }
     at += sg.h
     // Only the column's outer corners are rounded: top band gets the top one, bottom band the bottom one.
     const rt = i === 0 ? innerR : 0, rb = i === segs.length - 1 ? innerR : 0
+    const pct = Math.round(teamPct * sg.cells / sum)
     return (
       <UiEntity
         uiTransform={{
           positionType: 'absolute', position: pos, width: '100%', height: sg.h,
           borderRadius: fromRight ? { topLeft: 0, bottomLeft: 0, topRight: rt, bottomRight: rb } : { topLeft: rt, bottomLeft: rb, topRight: 0, bottomRight: 0 },
+          justifyContent: 'center', alignItems: 'flex-end', padding: { right: 14 * scale },
           ...(sg.self ? { borderWidth: SUMMARY_SELF_OUTLINE * scale, borderColor: Color4.White() } : {}),
         }}
         uiBackground={{ color: sg.color }}
-      />
+      >
+        {showText && sg.h >= font * 1.3 && (
+          <Label value={`${sg.name}  ${pct}%`} fontSize={font} color={Color4.create(SUMMARY_TEXT.r, SUMMARY_TEXT.g, SUMMARY_TEXT.b, textA)} textAlign="middle-right" />
+        )}
+      </UiEntity>
     )
   })
 }
 
-/** The score bar at progress p (0 = bar, 1 = square). Final round shares from the banner. */
+/** Team-coloured tag with dark text (title + side totals). */
+function SummaryTag(props: { text: string; color: Color4; font: number; w: number; h: number; pos: any; a: number }) {
+  return (
+    <UiEntity uiTransform={{ positionType: 'absolute', position: props.pos, width: props.w, height: props.h, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }}
+      uiBackground={{ color: Color4.create(props.color.r, props.color.g, props.color.b, props.a) }}>
+      <Label value={props.text} fontSize={props.font} color={Color4.create(SUMMARY_TEXT.r, SUMMARY_TEXT.g, SUMMARY_TEXT.b, props.a)} textAlign="middle-center" />
+    </UiEntity>
+  )
+}
+
+/** The score bar at progress p (0 = bar, 1 = full panel). Final round shares from the banner. */
 function RoundSummary(p: number) {
   const b = getBanner()
-  const w = lerp(BAR_W, SUMMARY_SIZE, p)
-  const h = lerp(BAR_FILL_H + BAR_BORDER * 2, SUMMARY_SIZE, p)
-  const border = lerp(BAR_BORDER, SUMMARY_BORDER, p)
-  const outerR = lerp((BAR_FILL_H + BAR_BORDER * 2) / 2, SUMMARY_RADIUS, p)
+  const cv = canvasSize()
+  const fullW = Math.max(SUMMARY_W_MIN, Math.min(SUMMARY_W_MAX, cv.w * SUMMARY_W_FRAC))
+  const k = fullW / SUMMARY_REF_W // scale for every size at full growth
+  const barH = BAR_FILL_H + BAR_BORDER * 2
+  const w = lerp(BAR_W, fullW, p)
+  const h = lerp(barH, fullW / SUMMARY_ASPECT, p)
+  const frame = SUMMARY_FRAME * k * p // light-grey frame grows in from nothing (the bar has none)
+  const border = lerp(BAR_BORDER, SUMMARY_BORDER * k, p)
+  const frameR = lerp(barH / 2, SUMMARY_FRAME_R * k, p)
+  const outerR = lerp(barH / 2, SUMMARY_RADIUS * k, p)
   const innerR = Math.max(0, outerR - border)
-  const cap = lerp(BAR_CAP, SUMMARY_CAP, p)
-  const innerW = w - border * 2
-  // Same three regions as the score bar: red | unpainted (white track) | blue, each sized by its share of the whole map.
+  const cap = lerp(BAR_CAP, SUMMARY_CAP * k, p)
+  const innerW = w - frame * 2 - border * 2
+  const innerH = h - frame * 2 - border * 2
+  // Same three regions as the score bar: red | unpainted | blue, each sized by its share of the whole map.
   const span = innerW - cap * 2
   const redW = cap + span * b.redPct / 100
   const blueW = cap + span * b.bluePct / 100
-  const font = SUMMARY_FONT * p
   const showText = p > 0.6
-  const textA = Math.min(1, (p - 0.6) / 0.4) // side labels fade in/out with the grow/shrink
+  const textA = Math.min(1, (p - 0.6) / 0.4) // all text fades in/out with the grow/shrink
+  const bandFont = Math.max(SUMMARY_BAND_FONT_MIN, SUMMARY_BAND_FONT * k)
+  const bigFont = SUMMARY_FONT * k
+  const tagW = bigFont * 2.6, tagH = bigFont * 1.4
+  const title = b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WIN!`
+  const titleColor = b.winner === 'RED' ? BAR_RED : b.winner === 'BLUE' ? BAR_BLUE : SUMMARY_TIE_TAG
+  const titleFont = SUMMARY_TITLE_FONT * k
+  const titleW = titleFont * (title.length * 0.62 + 1.2), titleH = titleFont * 1.45
+  const paleRed = mix(BAR_RED, Color4.White(), 0.45), paleBlue = mix(BAR_BLUE, Color4.White(), 0.45)
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: 'none' }}>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
       <UiEntity uiTransform={{ width: 1, height: BAR_TOP_PX * (1 - p), flexShrink: 0 }} />
-      <UiEntity uiTransform={{ width: w, height: h, flexShrink: 0, borderRadius: outerR, padding: border }} uiBackground={{ color: BAR_TRACK }}>
-        {showText && (
-          <Label value={bannerHeadline()} fontSize={96} color={bannerColor()} textAlign="middle-center"
-            uiTransform={{ positionType: 'absolute', position: { bottom: h + 16, left: (w - 1000) / 2 }, width: 1000, height: 110 }} />
-        )}
-        {showText && (
-          <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.create(BAR_RED.r, BAR_RED.g, BAR_RED.b, textA)} textAlign="middle-right"
-            uiTransform={{ positionType: 'absolute', position: { top: 0, left: -(400 + SUMMARY_SIDE_GAP) }, width: 400, height: h }} />
-        )}
-        {showText && (
-          <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.create(BAR_BLUE.r, BAR_BLUE.g, BAR_BLUE.b, textA)} textAlign="middle-left"
-            uiTransform={{ positionType: 'absolute', position: { top: 0, right: -(400 + SUMMARY_SIDE_GAP) }, width: 400, height: h }} />
-        )}
-        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: Color4.White() }}>
-          <UiEntity
-            uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
-            uiBackground={{ color: BAR_RED }}
-          >{OwnerSegments(1, h - border * 2, p, innerR, false)}</UiEntity>
-          <UiEntity
-            uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'center' }}
-            uiBackground={{ color: BAR_BLUE }}
-          >{OwnerSegments(2, h - border * 2, p, innerR, true)}</UiEntity>
+      <UiEntity uiTransform={{ width: w, height: h, flexShrink: 0, borderRadius: frameR, padding: frame }} uiBackground={{ color: p > 0 ? SUMMARY_FRAME_COLOR : BAR_TRACK }}>
+        {showText && <SummaryTag text={title} color={titleColor} font={titleFont} w={titleW} h={titleH} pos={{ bottom: h + 18 * k, left: (w - titleW) / 2 }} a={textA} />}
+        {showText && <SummaryTag text={`${Math.round(b.redPct)}%`} color={paleRed} font={bigFont} w={tagW} h={tagH} pos={{ top: (h - tagH) / 2, left: -(tagW + SUMMARY_SIDE_GAP * k) }} a={textA} />}
+        {showText && <SummaryTag text={`${Math.round(b.bluePct)}%`} color={paleBlue} font={bigFont} w={tagW} h={tagH} pos={{ top: (h - tagH) / 2, right: -(tagW + SUMMARY_SIDE_GAP * k) }} a={textA} />}
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: outerR, padding: border }} uiBackground={{ color: BAR_TRACK }}>
+          <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: p > 0.5 ? SUMMARY_UNPAINTED : Color4.White() }}>
+            <UiEntity
+              uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 } }}
+              uiBackground={{ color: BAR_RED }}
+            >{OwnerSegments(1, innerH, p * k, innerR, false, b.redPct, bandFont, showText, textA)}</UiEntity>
+            <UiEntity
+              uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR } }}
+              uiBackground={{ color: BAR_BLUE }}
+            >{OwnerSegments(2, innerH, p * k, innerR, true, b.bluePct, bandFont, showText, textA)}</UiEntity>
+          </UiEntity>
         </UiEntity>
         {showText && b.personal !== '' && (
-          <Label value={b.personal} fontSize={26} color={Color4.White()} textAlign="middle-center"
-            uiTransform={{ positionType: 'absolute', position: { top: h + 16, left: (w - 1000) / 2 }, width: 1000, height: 40 }} />
+          <Label value={b.personal} fontSize={Math.max(22, 26 * k)} color={Color4.create(1, 1, 1, textA)} textAlign="middle-center"
+            uiTransform={{ positionType: 'absolute', position: { top: h + 16 * k, left: (w - 1400) / 2 }, width: 1400, height: 40 * k }} />
         )}
       </UiEntity>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />

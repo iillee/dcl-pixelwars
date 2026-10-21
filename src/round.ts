@@ -63,7 +63,7 @@ interface BannerState {
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
   /** Owned cells per painter at round end (roundOwners). Empty if it didn't arrive. */
-  owners: Array<{ id: string; team: number; cells: number }>
+  owners: Array<{ id: string; name: string; team: number; cells: number }>
 }
 
 const banner: BannerState = {
@@ -80,7 +80,7 @@ const banner: BannerState = {
 // just before roundReset; consumed when the banner opens.
 let pendingPersonal = ''
 let pendingAtMs = 0
-let pendingOwners: Array<{ id: string; team: number; cells: number }> = []
+let pendingOwners: Array<{ id: string; name: string; team: number; cells: number }> = []
 let pendingOwnersAtMs = 0
 
 export function setRoundResult(cells: number, teamCells: number, team: number): void {

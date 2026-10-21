@@ -101,7 +101,7 @@ export const Messages = {
   // Server → Clients (broadcast), sent just before roundReset: cells each painter OWNS at round end
   // (last painter of each cell). id = player address or `bot:<id>`. Largest first.
   roundOwners: Schemas.Map({
-    owners: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int, cells: Schemas.Int })),
+    owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int })),
   }),
 
   roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
