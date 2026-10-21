@@ -574,7 +574,7 @@ export async function setupServer(): Promise<void> {
     rebuildBotGraph(idx)
     anvilsMazeChanged()
     // Round boundary is our persistence + publish cadence for the
-    // leaderboard: 5 min is frequent enough that a server crash loses at
+    // leaderboard: one round (3 min) is frequent enough that a server crash loses at
     // most one round of paint credit, infrequent enough that Storage
     // writes are cheap. Fire-and-forget — don't block round advancement
     // on I/O.

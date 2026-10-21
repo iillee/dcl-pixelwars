@@ -9,12 +9,11 @@
  * constant was duplicated in src/round.ts (client) and src/server/server.ts
  * (server), which silently drifted if only one side was edited.
  *
- * Chosen cadence: 5 minutes. Long enough to explore the 176m maze with
- * verticality, short enough that respawning won't feel punishing.
- * Splatoon Turf War for comparison runs 3 min.
+ * Chosen cadence: 3 minutes (was 5; Luke, Oct 2026). Splatoon Turf War
+ * for comparison also runs 3 min.
  */
 
-export const ROUND_LENGTH_MINUTES = 5
+export const ROUND_LENGTH_MINUTES = 3
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 
 export function getRoundIndex(): number {

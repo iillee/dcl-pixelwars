@@ -14,7 +14,7 @@
  *     since paint counts are cumulative and eventually re-earned.
  *   - No serialized mutation queue. Server is single-threaded and only
  *     mutates on paintTick / roundReset — no async races to defend.
- *   - Publish cadence: round boundary (5 min) + on-demand via
+ *   - Publish cadence: round boundary (ROUND_LENGTH_MINUTES) + on-demand via
  *     requestLeaderboard. Keeps steady-state bandwidth negligible.
  */
 
