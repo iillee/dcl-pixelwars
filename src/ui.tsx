@@ -67,7 +67,7 @@ const SUMMARY_BORDER = 6
 const SUMMARY_RADIUS = 18
 const SUMMARY_CAP = 18 // 0% side still shows this much colour, like the bar's end caps
 const SUMMARY_FONT = 64
-const SUMMARY_UNPAINTED_FONT = 22
+const SUMMARY_SIDE_GAP = 20 // px between the square and the big side percentages
 const BAR_TOP_PX = 10 + 68 + 6
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 // Per-painter shades inside each team region (roundOwners). Segments narrower than this (at full size)
@@ -85,32 +85,33 @@ function shadeAt(base: Color4, i: number): Color4 {
   return i % 2 ? mix(base, Color4.Black(), k) : mix(base, Color4.White(), k)
 }
 
-/** Painter segments for one team region of width `regionW`, largest first from the outer edge. */
-function OwnerSegments(team: number, regionW: number, scale: number, innerR: number, fromRight: boolean) {
+/** Painter bands for one team column of height `regionH`: full column width, stacked top→bottom, largest at the top. */
+function OwnerSegments(team: number, regionH: number, scale: number, innerR: number, fromRight: boolean) {
   const owners = getBanner().owners.filter(o => o.team === team && o.cells > 0)
   const sum = owners.reduce((a, o) => a + o.cells, 0)
   if (sum === 0) return null
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const base = team === 1 ? BAR_RED : BAR_BLUE
-  const segs: Array<{ w: number; color: Color4; self: boolean }> = []
+  const segs: Array<{ h: number; color: Color4; self: boolean }> = []
   let others = 0
   owners.forEach((o, i) => {
-    const w = regionW * o.cells / sum
+    const h = regionH * o.cells / sum
     const self = o.id.toLowerCase() === me
-    if (!self && w < SUMMARY_MIN_SEG_PX * scale) { others += w; return }
-    segs.push({ w, color: self ? mix(shadeAt(base, i), Color4.White(), SUMMARY_SELF_LIGHTEN) : shadeAt(base, i), self })
+    if (!self && h < SUMMARY_MIN_SEG_PX * scale) { others += h; return }
+    segs.push({ h, color: self ? mix(shadeAt(base, i), Color4.White(), SUMMARY_SELF_LIGHTEN) : shadeAt(base, i), self })
   })
-  if (others > 0) segs.push({ w: others, color: mix(base, Color4.Gray(), SUMMARY_OTHERS_MIX), self: false })
+  if (others > 0) segs.push({ h: others, color: mix(base, Color4.Gray(), SUMMARY_OTHERS_MIX), self: false })
   let at = 0
   return segs.map((sg, i) => {
-    const pos = fromRight ? { top: 0, right: at } : { top: 0, left: at }
-    at += sg.w
-    const r = i === 0 ? innerR : 0
+    const pos = { top: at, left: 0 }
+    at += sg.h
+    // Only the column's outer corners are rounded: top band gets the top one, bottom band the bottom one.
+    const rt = i === 0 ? innerR : 0, rb = i === segs.length - 1 ? innerR : 0
     return (
       <UiEntity
         uiTransform={{
-          positionType: 'absolute', position: pos, width: sg.w, height: '100%',
-          borderRadius: fromRight ? { topLeft: 0, bottomLeft: 0, topRight: r, bottomRight: r } : { topLeft: r, bottomLeft: r, topRight: 0, bottomRight: 0 },
+          positionType: 'absolute', position: pos, width: '100%', height: sg.h,
+          borderRadius: fromRight ? { topLeft: 0, bottomLeft: 0, topRight: rt, bottomRight: rb } : { topLeft: rt, bottomLeft: rb, topRight: 0, bottomRight: 0 },
           ...(sg.self ? { borderWidth: SUMMARY_SELF_OUTLINE * scale, borderColor: Color4.White() } : {}),
         }}
         uiBackground={{ color: sg.color }}
@@ -133,10 +134,9 @@ function RoundSummary(p: number) {
   const span = innerW - cap * 2
   const redW = cap + span * b.redPct / 100
   const blueW = cap + span * b.bluePct / 100
-  const unpaintedPct = Math.max(0, 100 - b.redPct - b.bluePct)
-  const midW = innerW - redW - blueW
   const font = SUMMARY_FONT * p
   const showText = p > 0.6
+  const textA = Math.min(1, (p - 0.6) / 0.4) // side labels fade in/out with the grow/shrink
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: 'none' }}>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
@@ -146,20 +146,23 @@ function RoundSummary(p: number) {
           <Label value={bannerHeadline()} fontSize={96} color={bannerColor()} textAlign="middle-center"
             uiTransform={{ positionType: 'absolute', position: { bottom: h + 16, left: (w - 1000) / 2 }, width: 1000, height: 110 }} />
         )}
+        {showText && (
+          <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.create(BAR_RED.r, BAR_RED.g, BAR_RED.b, textA)} textAlign="middle-right"
+            uiTransform={{ positionType: 'absolute', position: { top: 0, left: -(400 + SUMMARY_SIDE_GAP) }, width: 400, height: h }} />
+        )}
+        {showText && (
+          <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.create(BAR_BLUE.r, BAR_BLUE.g, BAR_BLUE.b, textA)} textAlign="middle-left"
+            uiTransform={{ positionType: 'absolute', position: { top: 0, right: -(400 + SUMMARY_SIDE_GAP) }, width: 400, height: h }} />
+        )}
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: Color4.White() }}>
           <UiEntity
             uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: BAR_RED }}
-          >{OwnerSegments(1, redW, p, innerR, false)}{showText && <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+          >{OwnerSegments(1, h - border * 2, p, innerR, false)}</UiEntity>
           <UiEntity
             uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: BAR_BLUE }}
-          >{OwnerSegments(2, blueW, p, innerR, true)}{showText && <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
-          {showText && midW >= 60 && (
-            <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: redW }, width: midW, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-              <Label value={`${unpaintedPct.toFixed(1)}%`} fontSize={SUMMARY_UNPAINTED_FONT} color={STAR_TINT} textAlign="middle-center" />
-            </UiEntity>
-          )}
+          >{OwnerSegments(2, h - border * 2, p, innerR, true)}</UiEntity>
         </UiEntity>
         {showText && b.personal !== '' && (
           <Label value={b.personal} fontSize={26} color={Color4.White()} textAlign="middle-center"
