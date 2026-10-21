@@ -125,9 +125,11 @@ export function OverviewRow(props: { desktop?: boolean } = {}) {
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
+      {/* Mobile (grows right of the eye): rotate first, next to the eye; desktop keeps + − rotate. */}
+      {!props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
       {<SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
       {<SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
-      {<SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
+      {props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
     </UiEntity>
   )
 }

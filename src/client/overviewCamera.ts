@@ -41,9 +41,10 @@ export const OV_FOV_DEG   = 24
 const SCALE_STEP    = 10
 // Desktop: 15..90 (default 55). Mobile: exactly 3 levels — one step closer than desktop's closest (15 − 10 = 5),
 // then 15 and 25; every toggle-on starts at the closest.
-const SCALE_DEFAULT = isMobile() ? 5 : 55
-const SCALE_MIN     = isMobile() ? 5 : 15
-const SCALE_MAX     = isMobile() ? 25 : 90
+// isMobile() resolves async (getExplorerInformation), so these are read live, not at module load.
+const scaleDefault = () => isMobile() ? 5 : 55
+const scaleMin     = () => isMobile() ? 5 : 15
+const scaleMax     = () => isMobile() ? 25 : 90
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
 /** 20×20 parcels → height limit 20·log2(401) ≈ 172.9 m. */
@@ -65,7 +66,8 @@ const FWD = { x: Math.sin(OV_YAW_DEG * DEG), z: Math.cos(OV_YAW_DEG * DEG) }
 let camEntity: Entity | null = null
 let lookEnt: Entity | null = null
 let active = false
-let scale = SCALE_DEFAULT
+let scale = 55
+let scaleInit = false
 const focus = { x: SCENE_SIZE / 2, y: BASE_Y, z: SCENE_SIZE / 2 }
 let camDist = scale * DIST_PER_SCALE
 let yawSlot = 0
@@ -98,6 +100,11 @@ export function setupOverviewCamera(): void {
       playUiClick()
       rotateOverview(1)
     }
+    // Mobile: start in overview once platform detection resolves, and come back after a respawn/teleport
+    // exit unless the player turned it off.
+    if (!mobileAutoDone && isMobile()) { mobileAutoDone = true; mobileWant = true }
+    if (resumeIn > 0) resumeIn -= dt
+    if (mobileWant && !active && resumeIn <= 0 && isMobile()) setActive(true)
     if (active) update(dt)
   })
 }
@@ -156,9 +163,20 @@ function maxDistance(): number {
 /** Flip between overview and the normal player camera. */
 export function toggleOverview(): void {
   if (camEntity === null) return
-  active = !active
+  setActive(!active)
+  mobileWant = active
+}
+let mobileAutoDone = false
+let mobileWant = false
+let resumeIn = 0
+/** After a forced exit (respawn / teleport), wait this long before mobile re-enters overview. */
+const MOBILE_RESUME_S = 1.0
+function setActive(on: boolean): void {
+  if (camEntity === null) return
+  active = on
+  if (!scaleInit) { scaleInit = true; scale = scaleDefault() }
   if (active) {
-    if (isMobile()) scale = SCALE_DEFAULT
+    if (isMobile()) scale = scaleDefault()
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) { focus.x = p.x; focus.y = Math.max(p.y, BASE_Y - 15); focus.z = p.z }
     camDist = Math.min(scale * DIST_PER_SCALE, maxDistance())
@@ -170,7 +188,7 @@ export function toggleOverview(): void {
 
 /** Leave overview if it's on (e.g. before movePlayerTo so its cameraTarget lands). */
 export function exitOverview(): void {
-  if (active) toggleOverview()
+  if (active) { setActive(false); resumeIn = MOBILE_RESUME_S } // mobileWant kept: mobile re-enters after the move
 }
 
 export function isOverviewActive(): boolean { return active }
@@ -186,7 +204,7 @@ export function rotateOverview(steps: number): void {
   yawT = 0
 }
 
-export function overviewZoomIn(): void { if (active) scale = Math.max(SCALE_MIN, scale - SCALE_STEP) }
-export function overviewZoomOut(): void { if (active) scale = Math.min(SCALE_MAX, scale + SCALE_STEP) }
-export function canOverviewZoomIn(): boolean { return active && scale > SCALE_MIN }
-export function canOverviewZoomOut(): boolean { return active && scale < SCALE_MAX }
+export function overviewZoomIn(): void { if (active) scale = Math.max(scaleMin(), scale - SCALE_STEP) }
+export function overviewZoomOut(): void { if (active) scale = Math.min(scaleMax(), scale + SCALE_STEP) }
+export function canOverviewZoomIn(): boolean { return active && scale > scaleMin() }
+export function canOverviewZoomOut(): boolean { return active && scale < scaleMax() }
