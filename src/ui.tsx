@@ -75,6 +75,11 @@ const BAR_W = 200
 const BAR_BORDER = 3
 const BAR_FILL_H = 16
 const BAR_INNER_W = BAR_W - BAR_BORDER * 2
+/** Mobile top row: eye | timer | star | mute; the score bar spans the whole row there. */
+const MOBILE_TIMER_W = 200
+const MOBILE_TOP_W = 68 * 3 + MOBILE_TIMER_W + 8 * 3 // = TOP_BTN * 3 + timer + TOP_GAP * 3
+const barW = () => isMobile() ? MOBILE_TOP_W : BAR_W
+const barInnerW = () => barW() - BAR_BORDER * 2
 const BAR_INNER_R = BAR_FILL_H / 2
 const BAR_CAP = BAR_FILL_H / 2 // each end always shows its team colour (rounded cap) so nothing sits outside the bar at 0%
 const STAR_SIZE = 14
@@ -92,7 +97,6 @@ const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
-const TOP_SIDE_W = 68 * 2 + 8 // two top buttons + gap (= TOP_BTN * 2 + TOP_GAP)
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
 const SUMMARY_TITLE_FONT = 72 // older build's title size
 const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
@@ -315,7 +319,7 @@ function RoundSummary(p: number) {
   const { k, stacked, rowCap } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
-  const pw = lerp(BAR_W, tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
+  const pw = lerp(barW(), tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
   const border = lerp(BAR_BORDER, SUMMARY_OUTLINE * k, p)
   const innerW = pw - border * 2, cap = lerp(BAR_CAP, SUMMARY_PILL_CAP * k, p)
   const redW = cap + (innerW - cap * 2) * b.redPct / 100
@@ -419,26 +423,27 @@ export const uiMenu = () => (
             {/* Mobile: separate eye | timer | star mute buttons. Desktop: single clock panel (star + eye left, mute right) as in 36507d7. */}
             {isMobile() ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
-              <UiEntity uiTransform={{ width: TOP_SIDE_W, height: TOP_BTN, flexDirection: 'row', justifyContent: 'flex-end', margin: { right: TOP_GAP } }}>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { right: TOP_GAP } }}>
                 <OverviewRow />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: 200, height: 68,
-                  justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
-                  // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
-                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+                  width: MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+                  // Key-tile frame: light rim, dark ring (padding), light inner panel filling the rest.
+                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
                 }}
                 uiBackground={{ color: HOTBAR_TILE_BG }}
               >
-                <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
-                  uiBackground={{ color: SUMMARY_CARD_BG }} />
-                <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+                <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
+                  uiBackground={{ color: SUMMARY_CARD_BG }}>
+                  <Label value={formatMMSS(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                </UiEntity>
               </UiEntity>
-              <UiEntity uiTransform={{ width: TOP_SIDE_W, height: TOP_BTN, flexDirection: 'row', justifyContent: 'flex-start', margin: { left: TOP_GAP } }}>
+              <UiEntity uiTransform={{ flexDirection: 'row', margin: { left: TOP_GAP } }}>
                 <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
-                  <Label value="★" fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+                  <UiEntity uiTransform={{ width: 30, height: 30, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: SUMMARY_INK }} />
                 </TileButton>
                 <TileButton id="ui_top_mute" onPress={toggleMusic}>
                   <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
@@ -496,19 +501,19 @@ export const uiMenu = () => (
             )}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {getSummaryProgress() >= 0 || standingsOpen ? (
-              <UiEntity uiTransform={{ width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
+              <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()
               // Winning star: centred in the leader's segment, only if it fits with padding; none on a tie / 0–0.
               const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
-              const leadW = lead ? BAR_INNER_W * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
+              const leadW = lead ? barInnerW() * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
               const star = lead !== null && leadW >= STAR_SIZE + STAR_PAD * 2
                 ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE, margin: lead === 'red' ? { bottom: 1 } : undefined }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />
                 : null
               return (
                 <UiEntity
                   uiTransform={{
-                    width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 },
+                    width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 },
                     borderRadius: (BAR_FILL_H + BAR_BORDER * 2) / 2, padding: BAR_BORDER,
                     pointerFilter: 'block',
                   }}
@@ -520,11 +525,11 @@ export const uiMenu = () => (
                     uiBackground={{ color: PANEL_LIGHT }}
                   >
                     {<UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: BAR_CAP + (BAR_INNER_W - BAR_CAP * 2) * pct.red / 100, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.red / 100, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_RED }}
                     >{lead === 'red' && star}</UiEntity>}
                     {<UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (BAR_INNER_W - BAR_CAP * 2) * pct.blue / 100, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.blue / 100, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_BLUE }}
                     >{lead === 'blue' && star}</UiEntity>}
                   </UiEntity>

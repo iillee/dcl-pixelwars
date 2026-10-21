@@ -196,10 +196,37 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
   )
 }
 
-/** Mobile stack (virtual px, 1920x1080 canvas): right edge inset, and bottom kept above the native jump button. */
-const MOBILE_STACK_RIGHT = 40
-const MOBILE_STACK_BOTTOM = 330
-const MOBILE_STACK_GAP = 20
+/** Mobile circles (virtual px on the 1920x1080 canvas). Native jump button estimate: centre JUMP_CX_RIGHT from the
+ *  right edge, JUMP_CY_BOTTOM from the bottom, diameter JUMP_D. Tune these in-world. */
+const JUMP_CX_RIGHT = 220
+const JUMP_CY_BOTTOM = 187
+const JUMP_D = 220
+const CIRCLE_D = 180 // ability circle diameter (≈ jump)
+const CIRCLE_GAP = 30 // equal gap jump → lunge → burst
+const CIRCLE_RING = 6
+const CIRCLE_READY = Color4.create(1.0, 0.78, 0.15, 1) // gold ring while ready
+const CIRCLE_INK = Color4.create(0.13, 0.13, 0.15, 1)
+
+function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: () => void; bottom: number }) {
+  const { hud } = props
+  const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
+  const ring = hud.ready ? CIRCLE_READY : CIRCLE_INK
+  const iconCol = !hud.enabled || cooling ? Color4.create(0.13, 0.13, 0.15, 0.25) : CIRCLE_INK
+  return (
+    <UiEntity key={`ui_pvp_circle_${props.id}`}
+      uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
+        borderRadius: CIRCLE_D / 2, borderWidth: CIRCLE_RING, borderColor: ring, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
+      uiBackground={{ color: PANEL_LIGHT }}
+      onMouseDown={props.onPress}>
+      <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * 0.45), height: Math.round(CIRCLE_D * 0.45), pointerFilter: 'none' }}
+        uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />
+      {cooling && <Label value={`${Math.ceil(hud.cooldown)}`} fontSize={Math.round(CIRCLE_D * 0.4)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
+        uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' }} />}
+      {hud.text ? <Label value={hud.text} fontSize={Math.round(CIRCLE_D * 0.14)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
+        uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(CIRCLE_D * 0.08), left: 0 }, width: '100%', height: Math.round(CIRCLE_D * 0.18), pointerFilter: 'none' }} /> : null}
+    </UiEntity>
+  )
+}
 
 function roundLabel(lunge: Hud, bomb: Hud): string {
   if (LUNGE_MODE !== 'alternate' && BURST_MODE !== 'alternate') return ''
@@ -219,26 +246,12 @@ export function AbilityHotbar() {
   // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
   // where the chip kisses the button edge. Tooltips on the outer sides.
   if (mobile) {
-    // Mobile: tiles stacked on the middle-right, above the native jump button; each label pill sits on the same
-    // (left) side of its tile, tucked under it.
-    const row = (id: string, key: string, hud: Hud, icon: string, text: string, tip: boolean, onPress: () => void) => (
-      <UiEntity key={`ui_pvp_mrow_${id}`} uiTransform={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', margin: { top: MOBILE_STACK_GAP / 2, bottom: MOBILE_STACK_GAP / 2 }, pointerFilter: 'none' }}>
-        {tip && (
-          <UiEntity key={`ui_pvp_mtip_${id}`}
-            uiTransform={{ height: g.tipH, flexDirection: 'row', alignItems: 'center', padding: { left: g.tipPadX, right: g.tipPadX + g.tuck }, margin: { right: -g.tuck - SLOT_MARGIN_X }, borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: GOLD_BORDER, pointerFilter: 'block' }}
-            uiBackground={{ color: WHITE }} onMouseDown={onPress}>
-            <Label value={text} fontSize={g.tipFont} color={BLACK} font="sans-serif" textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: 'auto', height: Math.round(g.tipFont * 1.6) }} />
-          </UiEntity>
-        )}
-        <Slot id={id} keyLabel={key} hud={hud} iconSrc={icon} onPress={onPress} g={g} />
-      </UiEntity>
-    )
+    // Mobile: circle buttons in a column on the native jump button's centre line, Lunge just above jump, Burst above it.
+    const cb = (n: number) => JUMP_CY_BOTTOM + JUMP_D / 2 + CIRCLE_GAP + n * (CIRCLE_D + CIRCLE_GAP)
     return (
       <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
-        <UiEntity key="ui_pvp_mstack" uiTransform={{ positionType: 'absolute', position: { right: MOBILE_STACK_RIGHT, bottom: MOBILE_STACK_BOTTOM }, flexDirection: 'column', alignItems: 'flex-end', pointerFilter: 'none' }}>
-          {lunge.show && row('lunge', 'E', lunge, 'assets/images/lunge_chevron.png', 'LUNGE', lungeTip, triggerLunge)}
-          {bomb.show && row('burst', 'F', bomb, 'assets/images/burst.png', 'BURST', bombTip, triggerBurst)}
-        </UiEntity>
+        {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} bottom={cb(0)} />}
+        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst.png" onPress={triggerBurst} bottom={cb(1)} />}
       </UiEntity>
     )
   }
