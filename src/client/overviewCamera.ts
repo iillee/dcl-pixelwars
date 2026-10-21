@@ -35,7 +35,7 @@ import { playUiClick } from './audio'
 
 // MARK: Tuning
 export const OV_PITCH_DEG = 35.26  // true isometric ≈ 35.26°
-export const OV_YAW_DEG   = 45     // camera sits SW looking NE; rotate steps by 90
+export const OV_YAW_DEG   = 0      // axis-aligned with the maze grid: WASD (camera-relative) walks straight along corridors; rotate steps by 90
 export const OV_FOV_DEG   = 24
 /** Zoom "view scale": frames like a 60°-FOV camera at this many metres. */
 const SCALE_DEFAULT = isMobile() ? 45 : 55
