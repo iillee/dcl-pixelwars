@@ -103,6 +103,11 @@ export const Messages = {
   roundOwners: Schemas.Map({
     owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int, kos: Schemas.Int, deaths: Schemas.Int, painted: Schemas.Int })),
   }),
+  // Client → Server: score-bar popup wants live standings; Server → that client: same rows as roundOwners.
+  requestStandings: Schemas.Map({}),
+  standings: Schemas.Map({
+    owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int, kos: Schemas.Int, deaths: Schemas.Int, painted: Schemas.Int })),
+  }),
 
   roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
 

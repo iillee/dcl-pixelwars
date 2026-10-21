@@ -557,6 +557,39 @@ export async function setupServer(): Promise<void> {
   // 3) clear paint state so the new round starts clean.
   // Order matters: broadcast BEFORE clearAll so the message we send
   // carries the ending round's counts, not zeros.
+  // Standings rows (round end: roundOwners; mid-round: requestStandings → standings).
+  function buildStandings(painted: Map<string, number>) {
+    // Per-painter owned cells for the summary square's shades. Top 60 keeps the message well under the 12 KB cap.
+    const ROUND_OWNER_NAME_MAX = 16
+    // One row per painter / roster player / bot: owned cells, KOs, deaths, cells painted this round.
+    const rows = new Map<string, { id: string; team: number; cells: number }>()
+    for (const o of ownerCounts()) {
+      const r = rows.get(o.id)
+      if (r) r.cells += o.cells; else rows.set(o.id, { id: o.id, team: o.team, cells: o.cells })
+    }
+    for (const { userId, team } of rosterEntries()) if (!rows.has(userId)) rows.set(userId, { id: userId, team, cells: 0 })
+    for (const b of getBotPositions()) if (!rows.has(`bot:${b.id}`)) rows.set(`bot:${b.id}`, { id: `bot:${b.id}`, team: b.team, cells: 0 })
+    for (const id of [...statIds(), ...painted.keys()]) if (!rows.has(id)) { const t = getTeam(id); if (t !== null) rows.set(id, { id, team: t, cells: 0 }) }
+    const owners = [...rows.values()].sort((a, b) => b.cells - a.cells).slice(0, 60).map(o => {
+      const raw = o.id.startsWith('bot:') ? `Bot ${o.id.slice(4)}`
+        : leaderboardGetName(o.id) ?? (o.id.length > 10 ? `${o.id.slice(0, 6)}…${o.id.slice(-4)}` : o.id)
+      return { ...o, name: raw.length > ROUND_OWNER_NAME_MAX ? raw.slice(0, ROUND_OWNER_NAME_MAX - 1) + '…' : raw,
+        kos: kosOf(o.id), deaths: deathsOf(o.id), painted: painted.get(o.id) ?? 0 }
+    })
+    return owners
+  }
+
+  // Live standings for the score-bar popup: addressed reply, ≤ 1 per player per second.
+  const lastStandingsAt = new Map<string, number>()
+  room.onMessage('requestStandings', (_m, context) => {
+    const from = context?.from
+    if (!from) return
+    const now = Date.now()
+    if (now - (lastStandingsAt.get(from) ?? 0) < 1000) return
+    lastStandingsAt.set(from, now)
+    room.send('standings', { owners: buildStandings(roundCells) }, { to: [from] })
+  })
+
   let lastRoundIndex = 0
   engine.addSystem(() => {
     const idx = currentRoundIndex()
@@ -579,23 +612,7 @@ export async function setupServer(): Promise<void> {
     roundCells.clear()
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
-    // Per-painter owned cells for the summary square's shades. Top 60 keeps the message well under the 12 KB cap.
-    const ROUND_OWNER_NAME_MAX = 16
-    // One row per painter / roster player / bot: owned cells, KOs, deaths, cells painted this round.
-    const rows = new Map<string, { id: string; team: number; cells: number }>()
-    for (const o of ownerCounts()) {
-      const r = rows.get(o.id)
-      if (r) r.cells += o.cells; else rows.set(o.id, { id: o.id, team: o.team, cells: o.cells })
-    }
-    for (const { userId, team } of rosterEntries()) if (!rows.has(userId)) rows.set(userId, { id: userId, team, cells: 0 })
-    for (const b of getBotPositions()) if (!rows.has(`bot:${b.id}`)) rows.set(`bot:${b.id}`, { id: `bot:${b.id}`, team: b.team, cells: 0 })
-    for (const id of [...statIds(), ...painted.keys()]) if (!rows.has(id)) { const t = getTeam(id); if (t !== null) rows.set(id, { id, team: t, cells: 0 }) }
-    const owners = [...rows.values()].sort((a, b) => b.cells - a.cells).slice(0, 60).map(o => {
-      const raw = o.id.startsWith('bot:') ? `Bot ${o.id.slice(4)}`
-        : leaderboardGetName(o.id) ?? (o.id.length > 10 ? `${o.id.slice(0, 6)}…${o.id.slice(-4)}` : o.id)
-      return { ...o, name: raw.length > ROUND_OWNER_NAME_MAX ? raw.slice(0, ROUND_OWNER_NAME_MAX - 1) + '…' : raw,
-        kos: kosOf(o.id), deaths: deathsOf(o.id), painted: painted.get(o.id) ?? 0 }
-    })
+    const owners = buildStandings(painted)
     clearRoundStats()
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)

@@ -79,7 +79,7 @@ const SUMMARY_CARD_GAP = 40
 const SUMMARY_ROW_H = 44
 const SUMMARY_ROW_FONT = 22
 const SUMMARY_HEAD_FONT = 15
-const SUMMARY_CARD_ROWS = 6 // per team (side by side); the rest fold into "+N more"
+const SUMMARY_CARD_ROWS = 10 // per team (side by side); the rest fold into "+N more"
 const SUMMARY_CARD_ROWS_SMALL = 4 // stacked / short screens
 const SUMMARY_FONT_MIN = 12 // readable floor for any summary text
 const SUMMARY_FIT = 0.94 // fraction of the canvas the layout may use
@@ -127,6 +127,24 @@ function BoldLabel(props: { value: string; fontSize: number; color: Color4; w: n
   )
 }
 
+/** Scale + arrangement for the two team tables under `top` px (unscaled) of other content.
+ *  Side by side shows up to 10 rows/team, dropping to 8/6/4 until the scale stays ≥ SUMMARY_K_READ;
+ *  stacked (phones) shows 4/team. Whatever doesn't fit folds into "+N more". Fits 94% of width AND height. */
+const SUMMARY_K_READ = 0.75
+function tablesLayout(all: SummaryRow[], cv: { w: number; h: number }, top: number): { k: number; stacked: boolean; rowCap: number } {
+  const nRed = all.filter(r => r.team === 1).length, nBlue = all.filter(r => r.team === 2).length
+  const hOf = (cap: number, n: number) => cardH(Math.max(1, Math.min(cap, n)), n > cap)
+  const sideW = Math.max(SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP, SUMMARY_PILL_W)
+  const kSideAt = (cap: number) => Math.min(cv.w * SUMMARY_FIT / sideW, cv.h * SUMMARY_FIT / (top + Math.max(hOf(cap, nRed), hOf(cap, nBlue))))
+  let sideCap = SUMMARY_CARD_ROWS_SMALL
+  for (const c of [10, 8, 6]) if (kSideAt(c) >= SUMMARY_K_READ) { sideCap = c; break }
+  const kSide = kSideAt(sideCap)
+  const stackH = top + hOf(SUMMARY_CARD_ROWS_SMALL, nRed) + hOf(SUMMARY_CARD_ROWS_SMALL, nBlue) + SUMMARY_GAP * 0.6
+  const kStack = Math.min(cv.w * SUMMARY_FIT / Math.max(SUMMARY_CARD_W, SUMMARY_PILL_W), cv.h * SUMMARY_FIT / stackH)
+  const stacked = kStack > kSide * 1.15
+  return { k: Math.min(SUMMARY_K_MAX, stacked ? kStack : kSide), stacked, rowCap: stacked ? SUMMARY_CARD_ROWS_SMALL : sideCap }
+}
+
 /** Hotbar style: light-grey panel, thick dark outline, dark caps; colour only on the team name and dots. */
 function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; cap: number }) {
   const { team, rows, total, mvp, me, k, a, cap } = props
@@ -135,7 +153,11 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
   const more = rows.length - shown.length
   const cw = SUMMARY_CARD_W * k
   const headF = fnt(SUMMARY_HEAD_FONT, k)
-  const numW = Math.max(86 * k, textW('TERRITORY', headF) + 12 * k), nameW = cw - numW * 4 - 24 * k
+  // Full headers unless they'd squeeze the name column under ~40% of the card (phones): then short ones.
+  const wide = Math.max(86 * k, textW('TERRITORY', headF) + 12 * k)
+  const compact = wide * 4 > cw * 0.6
+  const H = compact ? ['AREA', 'TILES', 'KO', 'DEATHS'] : ['TERRITORY', 'TILES', 'KOS', 'DEATHS']
+  const numW = compact ? Math.max(56 * k, textW('DEATHS', headF) + 8 * k) : wide, nameW = cw - numW * 4 - 24 * k
   const cell = (v: string, c: Color4, f: number, w: number) =>
     <Label value={v} fontSize={f} color={withA(c, a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />
   return (
@@ -143,10 +165,10 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
       uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
       <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center' }}>
         <BoldLabel value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={nameW - 10 * k} h={40 * k} margin={{ left: 10 * k }} />
-        {cell('TERRITORY', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell('TILES', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell('KOS', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell('DEATHS', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell(H[0], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell(H[1], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell(H[2], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell(H[3], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
       </UiEntity>
       {shown.length === 0 && <Label value="NO PLAYERS" fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: SUMMARY_ROW_H * k, margin: { left: 12 * k } }} />}
       {shown.map(r => {
@@ -175,24 +197,49 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
   )
 }
 
+// ─── Mid-round team lists: click the score bar to open/close (live rows via requestStandings) ───
+const STANDINGS_REFRESH_MS = 3000
+const STANDINGS_TOP_PX = BAR_TOP_PX + 40 // just under the score bar
+let standingsOpen = false
+let standingsRows: SummaryRow[] = []
+let standingsReqAt = 0
+let standingsWired = false
+function toggleStandings(): void {
+  if (!standingsWired) {
+    standingsWired = true
+    room.onMessage('standings', ({ owners }) => { standingsRows = owners })
+  }
+  standingsOpen = !standingsOpen
+  playUiClick()
+  if (standingsOpen) { standingsReqAt = Date.now(); room.send('requestStandings', {}) }
+}
+
+function StandingsPopup() {
+  if (!standingsOpen || getSummaryProgress() >= 0) return null
+  const now = Date.now()
+  if (now - standingsReqAt > STANDINGS_REFRESH_MS) { standingsReqAt = now; room.send('requestStandings', {}) }
+  const cv = canvasSize()
+  const rows = standingsRows.slice().sort((x, y) => y.cells - x.cells)
+  const { k, stacked, rowCap } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, 0)
+  const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
+  const me = (getPlayer()?.userId ?? '').toLowerCase()
+  const total = coverage().total
+  return (
+    <UiEntity uiTransform={{ width: '100%', positionType: 'absolute', position: { top: STANDINGS_TOP_PX, left: 0 }, flexDirection: 'row', justifyContent: 'center', pointerFilter: 'none' }}>
+      <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: 'center', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
+        <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
+        <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
+        <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 /** Round-end screen at progress p (0 = the score bar, 1 = full). The pill grows out of the bar; the rest fades in. */
 function RoundSummary(p: number) {
   const b = getBanner()
   const cv = canvasSize()
-  // Layout: two tables side by side, or stacked when that fits the screen (phones) at a larger scale.
-  const all = (b.owners as SummaryRow[])
-  const nRed = all.filter(r => r.team === 1).length, nBlue = all.filter(r => r.team === 2).length
-  const top = SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP
-  const hOf = (cap: number, n: number) => cardH(Math.max(1, Math.min(cap, n)), n > cap)
-  const sideCap = cv.h < 520 ? SUMMARY_CARD_ROWS_SMALL : SUMMARY_CARD_ROWS
-  const sideH = top + Math.max(hOf(sideCap, nRed), hOf(sideCap, nBlue))
-  const sideW = Math.max(SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP, SUMMARY_PILL_W)
-  const kSide = Math.min(cv.w * SUMMARY_FIT / sideW, cv.h * SUMMARY_FIT / sideH)
-  const stackH = top + hOf(SUMMARY_CARD_ROWS_SMALL, nRed) + hOf(SUMMARY_CARD_ROWS_SMALL, nBlue) + SUMMARY_GAP * 0.6
-  const kStack = Math.min(cv.w * SUMMARY_FIT / Math.max(SUMMARY_CARD_W, SUMMARY_PILL_W), cv.h * SUMMARY_FIT / stackH)
-  const stacked = kStack > kSide * 1.15
-  const k = Math.min(SUMMARY_K_MAX, stacked ? kStack : kSide)
-  const rowCap = stacked ? SUMMARY_CARD_ROWS_SMALL : sideCap
+  const { k, stacked, rowCap } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
   const pw = lerp(BAR_W, SUMMARY_PILL_W * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
@@ -348,8 +395,10 @@ export const uiMenu = () => (
                   uiTransform={{
                     width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 },
                     borderRadius: (BAR_FILL_H + BAR_BORDER * 2) / 2, padding: BAR_BORDER,
+                    pointerFilter: 'block',
                   }}
                   uiBackground={{ color: BAR_TRACK }}
+                  onMouseDown={toggleStandings}
                 >
                   <UiEntity
                     uiTransform={{ width: '100%', height: '100%', borderRadius: BAR_INNER_R }}
@@ -456,6 +505,8 @@ export const uiMenu = () => (
         {/* Headline, percentages and personal line now live in the summary square below. */}
       </UiEntity>
     )}
+
+    <StandingsPopup />
 
     {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
     {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
