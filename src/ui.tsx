@@ -109,6 +109,23 @@ type SummaryRow = { id: string; name: string; team: number; cells: number; kos: 
 
 const cardH = (n: number, more: boolean) => 24 + 40 + n * (SUMMARY_ROW_H + 6) + (more ? 28 : 0)
 const fnt = (f: number, k: number) => Math.max(SUMMARY_FONT_MIN, f * k)
+const SUMMARY_BOLD_PX = 0.035 // fake-bold offset as a fraction of the font size (DCL text has no weight)
+/** Rough single-line width of caps text (≈ 0.62 em per glyph). */
+const textW = (t: string, f: number) => t.length * f * 0.62
+
+/** Fake bold: the same label drawn 5× (centre + 4 offsets of ~3.5% of the font size) in one fixed box. */
+function BoldLabel(props: { value: string; fontSize: number; color: Color4; w: number; h: number; align: 'middle-left' | 'middle-center' | 'middle-right'; margin?: any }) {
+  const o = Math.max(1, props.fontSize * SUMMARY_BOLD_PX)
+  const offs: Array<[number, number]> = [[0, 0], [o, 0], [-o, 0], [0, o], [0, -o]]
+  return (
+    <UiEntity uiTransform={{ width: props.w, height: props.h, flexShrink: 0, margin: props.margin }}>
+      {offs.map(([x, y]) => (
+        <Label value={props.value} fontSize={props.fontSize} color={props.color} textAlign={props.align} textWrap="nowrap"
+          uiTransform={{ positionType: 'absolute', position: { left: x, top: y }, width: props.w, height: props.h }} />
+      ))}
+    </UiEntity>
+  )
+}
 
 /** Hotbar style: light-grey panel, thick dark outline, dark caps; colour only on the team name and dots. */
 function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; cap: number }) {
@@ -117,14 +134,15 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
   const shown = rows.slice(0, cap)
   const more = rows.length - shown.length
   const cw = SUMMARY_CARD_W * k
-  const numW = 86 * k, nameW = cw - numW * 4 - 24 * k
+  const headF = fnt(SUMMARY_HEAD_FONT, k)
+  const numW = Math.max(86 * k, textW('TERRITORY', headF) + 12 * k), nameW = cw - numW * 4 - 24 * k
   const cell = (v: string, c: Color4, f: number, w: number) =>
-    <Label value={v} fontSize={f} color={withA(c, a)} textAlign="middle-center" uiTransform={{ width: w, height: '100%' }} />
+    <Label value={v} fontSize={f} color={withA(c, a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />
   return (
-    <UiEntity uiTransform={{ width: cw, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k, borderWidth: SUMMARY_OUTLINE * k, borderColor: withA(SUMMARY_INK, a) }}
+    <UiEntity uiTransform={{ width: cw, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k }}
       uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
       <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center' }}>
-        <Label value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(24, k)} color={withA(inkTeam(team), a)} textAlign="middle-left" uiTransform={{ width: nameW, height: '100%', margin: { left: 10 * k } }} />
+        <BoldLabel value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={nameW - 10 * k} h={40 * k} margin={{ left: 10 * k }} />
         {cell('TERRITORY', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
         {cell('TILES', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
         {cell('KOS', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
@@ -188,6 +206,7 @@ function RoundSummary(p: number) {
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
   const show = a > 0
+  const titleF = fnt(SUMMARY_TITLE_FONT, k)
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
       onMouseDown={() => dismissSummary()}>
@@ -199,8 +218,8 @@ function RoundSummary(p: number) {
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', padding: { left: 36 * k, right: 36 * k, top: 4 * k, bottom: 8 * k }, margin: { bottom: 14 * k }, borderRadius: SUMMARY_R * k, borderWidth: SUMMARY_OUTLINE * k, borderColor: withA(SUMMARY_INK, a) }}
             uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
             <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: 84 * k }}>
-              {teamWord !== '' && <Label value={teamWord + ' '} fontSize={fnt(SUMMARY_TITLE_FONT, k)} color={withA(inkTeam(b.winner === 'RED' ? 1 : 2), a)} textAlign="middle-right" />}
-              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={fnt(SUMMARY_TITLE_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />
+              {teamWord !== '' && <BoldLabel value={teamWord} fontSize={titleF} color={withA(inkTeam(b.winner === 'RED' ? 1 : 2), a)} align="middle-center" w={textW(teamWord, titleF)} h={84 * k} margin={{ right: titleF * 0.35 }} />}
+              <BoldLabel value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(SUMMARY_INK, a)} align="middle-center" w={textW(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF)} h={84 * k} />
             </UiEntity>
             <Label value="F I N A L     T E R R I T O R Y     C O N T R O L" fontSize={fnt(SUMMARY_SUB_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-center" uiTransform={{ height: 26 * k }} />
           </UiEntity>
