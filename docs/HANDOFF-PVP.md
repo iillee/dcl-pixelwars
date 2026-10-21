@@ -181,3 +181,45 @@ Playtest closer: **"Which version would you rather play another round of, and wh
 - Predicted FX can show even when server rejects.
 - Ghost bot cannot be dashed/knocked.
 - Clients without Physics: no knockback (logged).
+
+## 8. Rounds, summary, HUD restyle, mobile (2026-10-20 evening → 10-21)
+
+Handoff for this block: [`docs/HANDOFF-UI-2026-10-21.md`](HANDOFF-UI-2026-10-21.md). Reference (what exists, where, tunables):
+
+### Robustness
+- `src/shared/safeSystems.ts` (imported first in `src/index.ts`) wraps every `engine.addSystem` in try/catch + throttled log, so one throwing system no longer aborts the frame and comms (the "frozen frame" / server-silence symptom). `shared/anvilSim.ts` substeps capped at 40 and non-finite dt dropped; `shared/mazeGraph.ts` `findPath` loops capped. Server logs dropped paintTick / burstUse / anvilHit (`logDrop`).
+
+### Rounds and sky
+- `ROUND_LENGTH_MINUTES = 3` (`src/shared/roundTiming.ts`, UTC-aligned). Day/night per round (`shared/dayNight.ts`, `client/skybox.ts`): even round = day, odd = night.
+
+### Anvils
+- Slow push: walking/running into an anvil creeps it. Client (`client/lungeDummy.ts` `checkPush`) sends `anvilPush` intent; server moves it through `AnvilWorld.push` (wall-aware, falls off edges). `ANVIL_PUSH_SPEED` 0.6 m/s, `ANVIL_PUSH_RUN_MULT` 1.5, `ANVIL_PUSH_REACH` 1.35 m, `ANVIL_PUSH_FACING` 0.5, `ANVIL_PUSH_SEND_HZ` 10, `ANVIL_PUSH_HOLD_S` 0.25 (`shared/pvp.ts`).
+
+### Overview (overhead) camera — `client/overviewCamera.ts`, `client/overviewUi.tsx`
+- `OV_YAW_DEG = 45` (axonometric; was briefly 0 in 1f32cb3, restored a30c35c). Rotate steps 90°.
+- Zoom scale: desktop 15..90 step 10, default 55. Mobile exactly 3 levels 5 / 15 / 25, starts at 5 on every toggle-on. Limits are read live (`scaleMin/Max/Default()`) because `isMobile()` resolves async.
+- Mobile auto-start: once `isMobile()` resolves, overview turns on. `exitOverview()` (respawn / round reset / teleport orbs) keeps the player's intent and mobile re-enters after `MOBILE_RESUME_S` 1.0 s unless the player turned it off with the eye.
+
+### Per-player stats (server)
+- `server/paintState.ts`: `cellPainter` map = last painter per cell (players by address, bots `bot:<id>`); `applyPaint(…, painter)` at all call sites; `ownerCounts()`.
+- `server/roundStats.ts`: KO/death rules. A fall is a death; it's a KO for whoever last hit the victim (lunge / burst / dash impact) within `KO_WINDOW_MS` 4000; an anvil launch credits whoever last touched (hit/push) that anvil within `ANVIL_CREDIT_MS` 4000. Cleared each round.
+- Messages: `roundOwners` (sent just before `roundReset`, top 60 rows: id, team, name ≤16 chars, cells owned, kos, deaths, painted) and `requestStandings` → `standings` (same rows, mid-round). Client → server: `anvilLaunched`, `playerFell`.
+
+### Round-end summary — `src/ui.tsx` (`RoundSummary`, `TeamCard`), timing `src/round.ts`
+- Score bar grows (0.4 s) into: title "TEAM WINS!" / "IT'S A TIE" (team word in team colour, WINS! white, plain labels, 72 px × scale, fit to 90% of screen width on one line, subtitle in flow with a plain-words phone fallback), territory pill (red | unpainted | blue, % labels pinned to the bar ends, integers unless equal → 1 then 2 decimals), two team tables (TERRITORY/AREA, TILES, KOS, DEATHS; MVP chip on top painter; self row outlined). Tables top-aligned, side by side or stacked on phones (`tablesLayout`), pill width = tables width. Hold `SUMMARY_HOLD_S` 10 s, click anywhere to close. No backdrop (removed everywhere: '100%' of the 1920×1080 virtual canvas doesn't reach phone edges).
+- Tunables: `SUMMARY_TITLE_FONT` 72, `SUMMARY_PILL_H` 48, `SUMMARY_PILL_FONT` 30, `SUMMARY_CARD_W` 580, `SUMMARY_CARD_GAP` 40, `SUMMARY_ROW_H` 44, `SUMMARY_CARD_ROWS` 10 / `_SMALL` 4, `SUMMARY_FONT_MIN` 12, `SUMMARY_FIT` 0.94, `SUMMARY_K_MAX` 1.6, `SUMMARY_K_READ` 0.75.
+
+### Live team lists
+- Click the score bar mid-round: it becomes the big territory pill heading the same team tables (live via `requestStandings` every `STANDINGS_REFRESH_MS` 3 s), placed under the clock; click again to close.
+
+### Light HUD style
+- One light colour `PANEL_LIGHT` (white) and key-tile frame constants exported from `client/abilityHotbar.tsx`: `RADIUS` 18, `BORDER_W` 4 (light rim `GOLD_BORDER`), `TILE_RING` 6 (dark ring `SLOT_BG`). Used by the clock, score bar fill, summary tables, top painters, overview/top buttons.
+- Desktop clock: single framed panel, star + eye column left, mute right; overview +/−/rotate pop out to the left. Mobile top row: star | mute | timer | eye (separate 68 px `TileButton`s, `MOBILE_TIMER_W` 200), overview rotate | + | − grow right of the eye, score bar spans the row (`MOBILE_TOP_W`).
+- Top painters (star): desktop all rows, custom drag scrollbar (`LB_*`, PrimaryPointerInfo drag), backdrop; mobile top 10, no scrollbar, no backdrop, tap board/✕ to close. Gold rank chips 1–3.
+
+### Mobile controls
+- Lunge/Burst as circles stacked above the native jump button (`client/abilityHotbar.tsx`): `JUMP_CX_RIGHT` 150, `JUMP_CY_BOTTOM` 90, `JUMP_D` 170, `CIRCLE_D` 140, `CIRCLE_GAP` 12, `CIRCLE_X_OFFSET` 70, `CIRCLE_RING` 6, `CIRCLE_ICON_FRAC` 0.72. Gold ring when ready, dark otherwise, seconds while cooling, no labels. Burst uses `assets/images/burst_solid.png` (hard-alpha copy of burst.png).
+- `client/touchControls.ts`: `TouchScreenControls` hides native E, F, pointer and 1–4; only joystick + jump remain.
+
+### Burst emote
+- One-shot ground punch (`BURST_EMOTE_SRC`, `BURST_EMOTE_S` 0.467): movement held `BURST_EMOTE_FREEZE_S` 0.3 s (via lunge.ts `holdForEmote`, shares its InputModifier) so running can't cancel it; `stopEmote` at the end. Looping hold pose removed.

@@ -170,6 +170,8 @@ Bottom-centre hotbar in the dcl-snowdrift style (tooltips behind slots; icons hi
 
 ---
 
+**2026-10-21:** rounds/summary/HUD/mobile work on `cursor/pvp-dash-b679` — see `docs/HANDOFF-PVP.md` §8 and `docs/HANDOFF-UI-2026-10-21.md`.
+
 ## 6. Next ideas
 
 - Art pass for the sky level: pillars / stilts under the tiles running down to water (Monument Valley, Little Island).
