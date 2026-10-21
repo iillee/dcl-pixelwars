@@ -68,6 +68,33 @@ export function pruneForNewRound(): number {
   return n
 }
 
+/**
+ * Round boundary: randomly reassign every connected roster player to RED/BLUE, sizes differing by at most 1.
+ * With >= 3 players, re-rolls (up to 20x) to avoid the exact same grouping as last round (colours swapped
+ * still counts as the same grouping). Returns the new assignments.
+ */
+let lastSplit = ''
+export function shuffleTeams(): Array<{ userId: string; team: number }> {
+  const ids = Array.from(teamOf.keys()).filter(uid => connected.has(uid))
+  const keyOf = (red: string[]): string => {
+    const r = red.slice().sort().join(','), b = ids.filter(u => !red.includes(u)).sort().join(',')
+    return r < b ? r + '|' + b : b + '|' + r
+  }
+  let red: string[] = []
+  for (let tries = 0; tries < 20; tries++) {
+    const a = ids.slice()
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t }
+    // Odd count: which side gets the extra player is random too.
+    const nRed = a.length % 2 === 0 ? a.length / 2 : (Math.random() < 0.5 ? Math.floor(a.length / 2) : Math.ceil(a.length / 2))
+    red = a.slice(0, nRed)
+    if (ids.length < 3 || keyOf(red) !== lastSplit) break
+  }
+  lastSplit = keyOf(red)
+  const out: Array<{ userId: string; team: number }> = []
+  for (const uid of ids) { const team = red.includes(uid) ? 1 : 2; teamOf.set(uid, team); out.push({ userId: uid, team }) }
+  return out
+}
+
 /** For diagnostics. */
 export function rosterSize(): number {
   return teamOf.size

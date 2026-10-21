@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries, connectedCount } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
@@ -663,12 +663,17 @@ export async function setupServer(): Promise<void> {
     clearRoundStats()
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
-    room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
-    clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is
-    // balanced against the current lobby. Active players keep their team.
+    // balanced against the current lobby.
     const pruned = pruneForNewRound()
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round boundary`)
+    // Reshuffle teams for the new round (Luke: not always the same colour / same people). Sent BEFORE
+    // roundReset so the client's round-reset teleport uses the new team's base and paint colour.
+    const shuffled = shuffleTeams()
+    for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
+    console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+    room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    clearPaintState()
     broadcastRoster('reset')
     rebuildBotGraph(idx)
     anvilsMazeChanged()
