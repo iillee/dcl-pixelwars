@@ -1,3 +1,4 @@
+import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
@@ -679,5 +680,7 @@ export const uiMenu = () => (
 
     {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
     {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
+    {/* Load splash: last child = top-most layer. */}
+    <SplashScreen />
   </UiEntity>
 )

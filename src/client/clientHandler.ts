@@ -183,6 +183,8 @@ function wireTeamAssigned(): void {
   })
 }
 let gotSnapshot = false
+/** First server snapshot received (load splash). */
+export function hasSnapshot(): boolean { return gotSnapshot }
 const SNAPSHOT_RETRY_S = 6
 
 // ─── Outbound: room.send from local systems ───────────────────────────
