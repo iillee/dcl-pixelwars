@@ -84,6 +84,10 @@ function wireInbound(): void {
     events.emit('round:result', { cells, teamCells, team: team as Team })
   })
 
+  room.onMessage('roundOwners', ({ owners }) => {
+    events.emit('round:owners', { owners })
+  })
+
   room.onMessage('teamRoster', ({ entries }) => {
     events.emit('team:roster', { entries: entries.map(e => ({ userId: e.userId, team: e.team as Team })) })
   })

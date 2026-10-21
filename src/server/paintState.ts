@@ -17,6 +17,8 @@ import { baseTeamOfCellId } from '../maze/generator'
 import { BASE_PAINT_LOCK } from '../maze/level'
 
 const cellTeam = new Map<string, number>()
+// Owner of each painted cell = its last painter (player address, or `bot:<id>`). Round summary shades.
+const cellPainter = new Map<string, string>()
 
 // Changes accumulated since the last drainDelta(). Map (not array) so
 // last-write-wins within a tick — if Red then Blue paint the same cell
@@ -31,9 +33,11 @@ const dirty = new Map<string, number>()
  * standing still on their own paint doesn't inflate their score by
  * ~90/sec (9-cell footprint × 10 Hz outbox flush).
  */
-export function applyPaint(id: string, team: number): boolean {
+export function applyPaint(id: string, team: number, painter: string): boolean {
   // Sky-mode bases are locked to their team colour: not paintable, not counted.
   if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
+  // Last painter owns the cell, even a teammate re-painting our own colour (no score credit for that).
+  cellPainter.set(id, painter)
   const prev = cellTeam.get(id)
   if (prev === team) return false
   cellTeam.set(id, team)
@@ -60,6 +64,19 @@ export function drainDelta(): Array<{ id: string; team: number }> {
  */
 export function teamOfCell(id: string): number {
   return cellTeam.get(id) ?? 0
+}
+
+/** Owned cells per painter (last painter of each painted cell), largest first. */
+export function ownerCounts(): Array<{ id: string; team: number; cells: number }> {
+  const m = new Map<string, { id: string; team: number; cells: number }>()
+  for (const [cell, team] of cellTeam) {
+    const id = cellPainter.get(cell) ?? '?'
+    const k = id + '|' + team
+    const e = m.get(k)
+    if (e) e.cells++
+    else m.set(k, { id, team, cells: 1 })
+  }
+  return [...m.values()].sort((a, b) => b.cells - a.cells)
 }
 
 /** Live coverage counters. Called by the 5s log tick. */
@@ -113,5 +130,6 @@ export function sampleEnemyCells(myTeam: number, k: number): string[] {
 /** Round reset (Step 6 will call this). */
 export function clearAll(): void {
   cellTeam.clear()
+  cellPainter.clear()
   dirty.clear()
 }

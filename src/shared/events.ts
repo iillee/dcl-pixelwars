@@ -34,6 +34,7 @@ export type Events = {
 
   // Addressed, just before round:reset: our personal result for the round.
   'round:result': { cells: number; teamCells: number; team: Team }
+  'round:owners': { owners: Array<{ id: string; team: number; cells: number }> }
 
   // Broadcast on join / leave / round reset: every active player's team.
   // Subscriber: client/nametags (red/blue plates above avatars).

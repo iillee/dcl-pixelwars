@@ -8,6 +8,7 @@ import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
 import { OverviewEye, OverviewRow } from "./client/overviewUi"
 import { AbilityHotbar } from "./client/abilityHotbar"
+import { getPlayer } from "@dcl/sdk/players"
 
 // Popup open/close state — module-local, driven by star-button clicks.
 // React-ECS re-renders every frame so a plain variable is enough.
@@ -69,6 +70,54 @@ const SUMMARY_FONT = 64
 const SUMMARY_UNPAINTED_FONT = 22
 const BAR_TOP_PX = 10 + 68 + 6
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+// Per-painter shades inside each team region (roundOwners). Segments narrower than this (at full size)
+// merge into one "others" shade; the local player's segment is never merged.
+const SUMMARY_MIN_SEG_PX = 8
+const SUMMARY_SHADE_STEP = 0.14   // alternate darker/lighter steps between neighbouring painters
+const SUMMARY_SELF_LIGHTEN = 0.35 // local player's segment: lightened toward white + outlined
+const SUMMARY_SELF_OUTLINE = 3
+const SUMMARY_OTHERS_MIX = 0.45   // "others" shade: team colour mixed toward grey
+
+const mix = (c: Color4, t: Color4, k: number) => Color4.create(lerp(c.r, t.r, k), lerp(c.g, t.g, k), lerp(c.b, t.b, k), 1)
+function shadeAt(base: Color4, i: number): Color4 {
+  if (i === 0) return base
+  const k = SUMMARY_SHADE_STEP * Math.ceil(i / 2) % 0.56
+  return i % 2 ? mix(base, Color4.Black(), k) : mix(base, Color4.White(), k)
+}
+
+/** Painter segments for one team region of width `regionW`, largest first from the outer edge. */
+function OwnerSegments(team: number, regionW: number, scale: number, innerR: number, fromRight: boolean) {
+  const owners = getBanner().owners.filter(o => o.team === team && o.cells > 0)
+  const sum = owners.reduce((a, o) => a + o.cells, 0)
+  if (sum === 0) return null
+  const me = (getPlayer()?.userId ?? '').toLowerCase()
+  const base = team === 1 ? BAR_RED : BAR_BLUE
+  const segs: Array<{ w: number; color: Color4; self: boolean }> = []
+  let others = 0
+  owners.forEach((o, i) => {
+    const w = regionW * o.cells / sum
+    const self = o.id.toLowerCase() === me
+    if (!self && w < SUMMARY_MIN_SEG_PX * scale) { others += w; return }
+    segs.push({ w, color: self ? mix(shadeAt(base, i), Color4.White(), SUMMARY_SELF_LIGHTEN) : shadeAt(base, i), self })
+  })
+  if (others > 0) segs.push({ w: others, color: mix(base, Color4.Gray(), SUMMARY_OTHERS_MIX), self: false })
+  let at = 0
+  return segs.map((sg, i) => {
+    const pos = fromRight ? { top: 0, right: at } : { top: 0, left: at }
+    at += sg.w
+    const r = i === 0 ? innerR : 0
+    return (
+      <UiEntity
+        uiTransform={{
+          positionType: 'absolute', position: pos, width: sg.w, height: '100%',
+          borderRadius: fromRight ? { topLeft: 0, bottomLeft: 0, topRight: r, bottomRight: r } : { topLeft: r, bottomLeft: r, topRight: 0, bottomRight: 0 },
+          ...(sg.self ? { borderWidth: SUMMARY_SELF_OUTLINE * scale, borderColor: Color4.White() } : {}),
+        }}
+        uiBackground={{ color: sg.color }}
+      />
+    )
+  })
+}
 
 /** The score bar at progress p (0 = bar, 1 = square). Final round shares from the banner. */
 function RoundSummary(p: number) {
@@ -101,11 +150,11 @@ function RoundSummary(p: number) {
           <UiEntity
             uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: BAR_RED }}
-          >{showText && <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+          >{OwnerSegments(1, redW, p, innerR, false)}{showText && <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
           <UiEntity
             uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: BAR_BLUE }}
-          >{showText && <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+          >{OwnerSegments(2, blueW, p, innerR, true)}{showText && <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
           {showText && midW >= 60 && (
             <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: redW }, width: midW, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
               <Label value={`${unpaintedPct.toFixed(1)}%`} fontSize={SUMMARY_UNPAINTED_FONT} color={STAR_TINT} textAlign="middle-center" />

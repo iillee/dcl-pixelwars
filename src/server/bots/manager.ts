@@ -31,7 +31,7 @@ const SOLO_HUMAN_COUNT = 1
 
 export interface ManagerDeps {
   /** Attribute paint to a team. Returns true if the cell actually flipped. */
-  applyPaint: (cellId: string, team: number) => boolean
+  applyPaint: (cellId: string, team: number, painter: string) => boolean
   /** Read paint state to power smart-target heuristics. */
   paint: PaintReader
   /** Currently-connected (or ever-connected) human count. */
@@ -186,7 +186,7 @@ export function tickBots(dtSec: number): void {
       for (let dc = -1; dc <= 1; dc++) {
         for (let dr = -1; dr <= 1; dr++) {
           const nid = `${prefix}${col + dc},${row + dr}`
-          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team)
+          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
         }
       }
     }

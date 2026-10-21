@@ -16,7 +16,7 @@ import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
-import { applyPaint, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
 import {
   loadFromStorage as loadLeaderboard,
@@ -203,7 +203,7 @@ export async function setupServer(): Promise<void> {
     // crediting all of them would inflate the leaderboard by ~90/sec.
     let gained = 0
     for (const id of ids) {
-      if (applyPaint(id, team)) gained++
+      if (applyPaint(id, team, from)) gained++
     }
     // Even if nothing changed team (walking on own paint), the paintTick
     // itself is proof the player is real — mark them active so scraper
@@ -409,7 +409,7 @@ export async function setupServer(): Promise<void> {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
     let gained = 0
-    if (graph && centre) for (const cid of burstFootprint(graph, centre)) if (applyPaint(cid, team)) gained++
+    if (graph && centre) for (const cid of burstFootprint(graph, centre)) if (applyPaint(cid, team, from)) gained++
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
@@ -496,7 +496,7 @@ export async function setupServer(): Promise<void> {
       pendingBombs.splice(i, 1)
       let gained = 0
       for (const id of bombCells(b.x, b.y, b.z)) {
-        if (applyPaint(id, b.team)) gained++
+        if (applyPaint(id, b.team, b.from)) gained++
       }
       if (gained > 0) {
         leaderboardIncrement(b.from, gained)
@@ -559,6 +559,10 @@ export async function setupServer(): Promise<void> {
     roundCells.clear()
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
+    // Per-painter owned cells for the summary square's shades. Top 60 keeps the message well under the 12 KB cap.
+    const owners = ownerCounts().slice(0, 60)
+    room.send('roundOwners', { owners })
+    console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
     // Drop team assignments of players who left, so a later rejoin is

@@ -62,6 +62,8 @@ interface BannerState {
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
+  /** Owned cells per painter at round end (roundOwners). Empty if it didn't arrive. */
+  owners: Array<{ id: string; team: number; cells: number }>
 }
 
 const banner: BannerState = {
@@ -71,12 +73,15 @@ const banner: BannerState = {
   winner: 'TIE',
   shownAtMs: 0,
   personal: '',
+  owners: [],
 }
 
 // Personal result for the round that just ended. Arrives (roundResult)
 // just before roundReset; consumed when the banner opens.
 let pendingPersonal = ''
 let pendingAtMs = 0
+let pendingOwners: Array<{ id: string; team: number; cells: number }> = []
+let pendingOwnersAtMs = 0
 
 export function setRoundResult(cells: number, teamCells: number, team: number): void {
   const teamName = team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'YOUR TEAM'
@@ -98,6 +103,8 @@ export function showRoundEndBanner(red: number, blue: number, total: number): vo
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
   pendingPersonal = ''
+  banner.owners = Date.now() - pendingOwnersAtMs < 10000 ? pendingOwners : []
+  pendingOwners = []
 }
 
 export function getBanner(): BannerState {
@@ -119,6 +126,10 @@ import { coverage } from './paint'
  * otherwise a round where only one team painted would show 100%.
  */
 export function initRoundNet(): void {
+  events.on('round:owners', ({ owners }) => {
+    pendingOwners = owners; pendingOwnersAtMs = Date.now()
+    if (banner.visible && banner.owners.length === 0) banner.owners = owners
+  })
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
   events.on('round:reset', ({ seed, finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
