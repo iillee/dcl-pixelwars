@@ -125,7 +125,7 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 // the server enforces it.
 
 /** Seconds between bursts. Keeps running through respawn. */
-export const BURST_COOLDOWN_S = 3 * LUNGE_COOLDOWN_S // ~3 dashes (5.25 s; was 12)
+export const BURST_COOLDOWN_S = 5.25 // ~3 dashes (3 x LUNGE_COOLDOWN_S 1.75 s; was 12)
 /** Server cooldown slack: accept the next burst this long after the previous one (s). */
 export const SERVER_MIN_BURST_GAP_S = BURST_COOLDOWN_S - 0.5
 /** Line of sight check (raycast attacker chest → target chest, physics colliders). */
