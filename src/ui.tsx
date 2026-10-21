@@ -268,14 +268,20 @@ function StandingsPopup() {
 /** Unscaled width of the team tables: one card when stacked, both + gap side by side (the big pill matches it). */
 const tablesW = (stacked: boolean) => stacked ? SUMMARY_CARD_W : SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP
 /** Big-pill percentages as an overlay pinned to the bar's ends, independent of segment widths, never wrapping. */
+/** Bar % labels: integers, but 1 then 2 decimals when the two sides would otherwise read the same. */
+function pctLabels(red: number, blue: number): [string, string] {
+  for (const d of [0, 1]) if (red.toFixed(d) !== blue.toFixed(d)) return [`${red.toFixed(d)}%`, `${blue.toFixed(d)}%`]
+  return [`${red.toFixed(2)}%`, `${blue.toFixed(2)}%`]
+}
 function PctOverlay(props: { red: number; blue: number; k: number; color: Color4 }) {
-  const f = fnt(SUMMARY_PILL_FONT, props.k), w = textWSafe('100%', f)
-  const lbl = (v: number, al: 'middle-left' | 'middle-right') =>
-    <Label value={`${Math.round(v)}%`} fontSize={f} color={props.color} textAlign={al} textWrap="nowrap" uiTransform={{ width: w, height: '100%', flexShrink: 0 }} />
+  const f = fnt(SUMMARY_PILL_FONT, props.k), w = textWSafe('100.00%', f)
+  const [rl, bl] = pctLabels(props.red, props.blue)
+  const lbl = (v: string, al: 'middle-left' | 'middle-right') =>
+    <Label value={v} fontSize={f} color={props.color} textAlign={al} textWrap="nowrap" uiTransform={{ width: w, height: '100%', flexShrink: 0 }} />
   return (
     <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: { left: 18 * props.k, right: 18 * props.k }, pointerFilter: 'none' }}>
-      {lbl(props.red, 'middle-left')}
-      {lbl(props.blue, 'middle-right')}
+      {lbl(rl, 'middle-left')}
+      {lbl(bl, 'middle-right')}
     </UiEntity>
   )
 }
