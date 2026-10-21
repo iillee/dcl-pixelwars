@@ -344,11 +344,12 @@ export const uiMenu = () => (
             <UiEntity
               uiTransform={{
                 width: 200, height: 68,
-                justifyContent: 'center', alignItems: 'center', borderRadius: 18,
+                justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
+                borderWidth: HOTBAR_BORDER_W, borderColor: SUMMARY_INK,
               }}
-              uiBackground={{ color: COUNTDOWN_BG }}
+              uiBackground={{ color: SUMMARY_CARD_BG }}
             >
-              <Label value={formatMMSS(secs)} fontSize={42} color={Color4.White()} textAlign="middle-center" />
+              <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
               {/* Star icon on the left, mirror position to the mute icon on
                   the right. Placeholder — no handler yet; wire onMouseDown
                   when we decide what it does (leaderboard? favorites?). */}
@@ -361,7 +362,7 @@ export const uiMenu = () => (
                 }}
                 onMouseDown={toggleLeaderboard}
               >
-                <Label value="★" fontSize={22} color={Color4.White()} textAlign="middle-center" />
+                <Label value="★" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
               </UiEntity>
               <OverviewEye />
               {/* Mute icon docked inside the timer panel on the right. No pill
@@ -375,6 +376,7 @@ export const uiMenu = () => (
                 uiBackground={{
                   textureMode: 'stretch',
                   texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' },
+                  color: SUMMARY_INK,
                 }}
                 onMouseDown={toggleMusic}
               />

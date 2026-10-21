@@ -63,7 +63,7 @@ export function OverviewEye() {
         positionType: 'absolute', position: { top: 41, left: 19 },
         pointerFilter: 'block',
       }}
-      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? GOLD : Color4.White() }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? GOLD : Color4.create(0.13, 0.13, 0.15, 1) }}
       onMouseDown={() => { playUiClick(); toggleOverview() }}
     />
   )
