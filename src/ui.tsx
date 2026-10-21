@@ -65,22 +65,24 @@ const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TE
 // ─── Round-end summary screen (Luke's reference): title, territory pill, two team cards, stats row ───
 // Sizes are at a 1280-wide reference and scale with the canvas (k), never below SUMMARY_K_MIN.
 const BAR_TOP_PX = 10 + 68 + 6 // the score bar's top edge: the pill grows out of it
-const SUMMARY_K_MIN = 0.85
 const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
-const SUMMARY_TITLE_FONT = 72
+const SUMMARY_TITLE_FONT = 64
+const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
+const SUMMARY_GAP = 32 // territory bar → tables
 const SUMMARY_SUB_FONT = 18
 const SUMMARY_PILL_FONT = 30
-const SUMMARY_CARD_W = 540
+const SUMMARY_CARD_W = 580
 const SUMMARY_CARD_GAP = 40
 const SUMMARY_ROW_H = 44
 const SUMMARY_ROW_FONT = 22
 const SUMMARY_HEAD_FONT = 15
-const SUMMARY_CARD_ROWS = 6 // per team; the rest fold into "+N more"
-const SUMMARY_TILE_W = 230
-const SUMMARY_TILE_H = 78
+const SUMMARY_CARD_ROWS = 6 // per team (side by side); the rest fold into "+N more"
+const SUMMARY_CARD_ROWS_SMALL = 4 // stacked / short screens
+const SUMMARY_FONT_MIN = 12 // readable floor for any summary text
+const SUMMARY_FIT = 0.94 // fraction of the canvas the layout may use
 // Style of the LUNGE/BURST hotbar: light-grey rounded pills, thick dark rounded-square outlines, dark caps text.
 const SUMMARY_CARD_BG = Color4.create(0.87, 0.87, 0.88, 0.97) // light-grey pill panel
 const SUMMARY_INK = Color4.create(0.13, 0.13, 0.15, 1)        // dark text + thick outlines
@@ -105,61 +107,52 @@ function canvasSize(): { w: number; h: number } {
 
 type SummaryRow = { id: string; name: string; team: number; cells: number; kos: number; deaths: number; painted: number }
 
-function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number }) {
-  const { team, rows, total, mvp, me, k, a } = props
+const cardH = (n: number, more: boolean) => 24 + 40 + n * (SUMMARY_ROW_H + 6) + (more ? 28 : 0)
+const fnt = (f: number, k: number) => Math.max(SUMMARY_FONT_MIN, f * k)
+
+/** Hotbar style: light-grey panel, thick dark outline, dark caps; colour only on the team name and dots. */
+function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; cap: number }) {
+  const { team, rows, total, mvp, me, k, a, cap } = props
   const col = team === 1 ? BAR_RED : BAR_BLUE
-  const shown = rows.slice(0, SUMMARY_CARD_ROWS)
+  const shown = rows.slice(0, cap)
   const more = rows.length - shown.length
-  const numW = 110 * k, nameW = SUMMARY_CARD_W * k - numW * 3 - 40 * k
+  const cw = SUMMARY_CARD_W * k
+  const numW = 86 * k, nameW = cw - numW * 4 - 24 * k
   const cell = (v: string, c: Color4, f: number, w: number) =>
     <Label value={v} fontSize={f} color={withA(c, a)} textAlign="middle-center" uiTransform={{ width: w, height: '100%' }} />
   return (
-    <UiEntity uiTransform={{ width: SUMMARY_CARD_W * k, flexDirection: 'column', padding: { top: 10 * k, bottom: 12 * k, left: 12 * k, right: 12 * k }, borderRadius: SUMMARY_R * k }}
+    <UiEntity uiTransform={{ width: cw, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k, borderWidth: SUMMARY_OUTLINE * k, borderColor: withA(SUMMARY_INK, a) }}
       uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
-      {/* Header strip in team colour, dark caps */}
-      <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center', borderRadius: (SUMMARY_R - 6) * k, padding: { left: 4 * k } }}
-        uiBackground={{ color: withA(col, a) }}>
-        <Label value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={24 * k} color={withA(SUMMARY_INK, a)} textAlign="middle-left" uiTransform={{ width: nameW, height: '100%', margin: { left: 8 * k } }} />
-        {cell('TERRITORY', SUMMARY_INK, SUMMARY_HEAD_FONT * k, numW)}
-        {cell('KOS', SUMMARY_INK, SUMMARY_HEAD_FONT * k, numW)}
-        {cell('DEATHS', SUMMARY_INK, SUMMARY_HEAD_FONT * k, numW)}
+      <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center' }}>
+        <Label value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(24, k)} color={withA(inkTeam(team), a)} textAlign="middle-left" uiTransform={{ width: nameW, height: '100%', margin: { left: 10 * k } }} />
+        {cell('TERRITORY', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell('TILES', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell('KOS', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+        {cell('DEATHS', SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
       </UiEntity>
-      {shown.length === 0 && <Label value="NO PLAYERS" fontSize={SUMMARY_ROW_FONT * k} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: SUMMARY_ROW_H * k, margin: { left: 12 * k } }} />}
+      {shown.length === 0 && <Label value="NO PLAYERS" fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: SUMMARY_ROW_H * k, margin: { left: 12 * k } }} />}
       {shown.map(r => {
         const self = r.id.toLowerCase() === me
         return (
           <UiEntity uiTransform={{ width: '100%', height: SUMMARY_ROW_H * k, flexDirection: 'row', alignItems: 'center', margin: { top: 6 * k }, borderRadius: 10 * k, ...(self ? { borderWidth: SUMMARY_OUTLINE * k * 0.75, borderColor: withA(SUMMARY_INK, a) } : {}) }}
-            uiBackground={{ color: self ? withA(mix(col, Color4.White(), 0.55), a) : Color4.create(0, 0, 0, 0.05 * a) }}>
+            uiBackground={{ color: self ? withA(Color4.White(), 0.9 * a) : Color4.create(0, 0, 0, 0.05 * a) }}>
             <UiEntity uiTransform={{ width: nameW, height: '100%', flexDirection: 'row', alignItems: 'center', padding: { left: 10 * k } }}>
               <UiEntity uiTransform={{ width: 14 * k, height: 14 * k, borderRadius: 7 * k, margin: { right: 10 * k }, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a) }} uiBackground={{ color: withA(col, a) }} />
-              <Label value={r.name} fontSize={SUMMARY_ROW_FONT * k} color={withA(SUMMARY_INK, a)} textAlign="middle-left" uiTransform={{ height: '100%' }} />
+              <Label value={r.name} fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" uiTransform={{ height: '100%' }} />
               {r.id === mvp && (
                 <UiEntity uiTransform={{ width: 56 * k, height: 26 * k, margin: { left: 10 * k }, borderRadius: 7 * k, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a), justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: withA(SUMMARY_MVP, a) }}>
-                  <Label value="MVP" fontSize={14 * k} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
+                  <Label value="MVP" fontSize={fnt(14, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
                 </UiEntity>
               )}
             </UiEntity>
-            {cell(`${total > 0 ? Math.round(r.cells / total * 100) : 0}%`, SUMMARY_INK, SUMMARY_ROW_FONT * k, numW)}
-            {cell(`${r.kos}`, SUMMARY_INK, SUMMARY_ROW_FONT * k, numW)}
-            {cell(`${r.deaths}`, SUMMARY_INK, SUMMARY_ROW_FONT * k, numW)}
+            {cell(`${total > 0 ? Math.round(r.cells / total * 100) : 0}%`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
+            {cell(`${r.painted}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
+            {cell(`${r.kos}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
+            {cell(`${r.deaths}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
           </UiEntity>
         )
       })}
-      {more > 0 && <Label value={`+${more} MORE`} fontSize={16 * k} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: 26 * k, margin: { left: 12 * k, top: 4 * k } }} />}
-    </UiEntity>
-  )
-}
-
-/** Hotbar-style stat tile: light-grey pill, the value in a thick dark-outlined rounded square, caps label beside it. */
-function StatTile(props: { value: string; label: string; k: number; a: number }) {
-  const { k, a } = props
-  return (
-    <UiEntity uiTransform={{ width: SUMMARY_TILE_W * k, height: SUMMARY_TILE_H * k, margin: { left: 8 * k, right: 8 * k }, flexDirection: 'row', alignItems: 'center', padding: { left: 8 * k, right: 12 * k }, borderRadius: SUMMARY_R * k }}
-      uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
-      <UiEntity uiTransform={{ width: 96 * k, height: (SUMMARY_TILE_H - 16) * k, justifyContent: 'center', alignItems: 'center', borderRadius: (SUMMARY_R - 4) * k, borderWidth: SUMMARY_OUTLINE * k, borderColor: withA(SUMMARY_INK, a) }}>
-        <Label value={props.value} fontSize={28 * k} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
-      </UiEntity>
-      <Label value={props.label} fontSize={15 * k} color={withA(SUMMARY_INK, a)} textAlign="middle-center" uiTransform={{ width: (SUMMARY_TILE_W - 120) * k, height: '100%', margin: { left: 4 * k } }} />
+      {more > 0 && <Label value={`+${more} MORE`} fontSize={fnt(16, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: 26 * k, margin: { left: 12 * k, top: 2 * k } }} />}
     </UiEntity>
   )
 }
@@ -168,7 +161,20 @@ function StatTile(props: { value: string; label: string; k: number; a: number })
 function RoundSummary(p: number) {
   const b = getBanner()
   const cv = canvasSize()
-  const k = Math.max(SUMMARY_K_MIN, Math.min(SUMMARY_K_MAX, Math.min(cv.w / 1280, cv.h / 760)))
+  // Layout: two tables side by side, or stacked when that fits the screen (phones) at a larger scale.
+  const all = (b.owners as SummaryRow[])
+  const nRed = all.filter(r => r.team === 1).length, nBlue = all.filter(r => r.team === 2).length
+  const top = SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP
+  const hOf = (cap: number, n: number) => cardH(Math.max(1, Math.min(cap, n)), n > cap)
+  const sideCap = cv.h < 520 ? SUMMARY_CARD_ROWS_SMALL : SUMMARY_CARD_ROWS
+  const sideH = top + Math.max(hOf(sideCap, nRed), hOf(sideCap, nBlue))
+  const sideW = Math.max(SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP, SUMMARY_PILL_W)
+  const kSide = Math.min(cv.w * SUMMARY_FIT / sideW, cv.h * SUMMARY_FIT / sideH)
+  const stackH = top + hOf(SUMMARY_CARD_ROWS_SMALL, nRed) + hOf(SUMMARY_CARD_ROWS_SMALL, nBlue) + SUMMARY_GAP * 0.6
+  const kStack = Math.min(cv.w * SUMMARY_FIT / Math.max(SUMMARY_CARD_W, SUMMARY_PILL_W), cv.h * SUMMARY_FIT / stackH)
+  const stacked = kStack > kSide * 1.15
+  const k = Math.min(SUMMARY_K_MAX, stacked ? kStack : kSide)
+  const rowCap = stacked ? SUMMARY_CARD_ROWS_SMALL : sideCap
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
   const pw = lerp(BAR_W, SUMMARY_PILL_W * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
@@ -180,10 +186,7 @@ function RoundSummary(p: number) {
   const rows = (b.owners as SummaryRow[]).slice().sort((x, y) => y.cells - x.cells)
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
-  const mine = rows.find(r => r.id.toLowerCase() === me)
-  const totalKos = rows.reduce((s, r) => s + r.kos, 0)
   const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
-  const teamCol = b.winner === 'RED' ? BAR_RED : BLUE_COLOR
   const show = a > 0
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
@@ -191,15 +194,15 @@ function RoundSummary(p: number) {
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
       <UiEntity uiTransform={{ width: 1, height: BAR_TOP_PX * (1 - p), flexShrink: 0 }} />
       {/* Title + subtitle on a light-grey pill (fold to nothing while the pill is still a bar) */}
-      <UiEntity uiTransform={{ width: '100%', height: 150 * k * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
+      <UiEntity uiTransform={{ width: '100%', height: SUMMARY_HEAD_H * k * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
         {show && (
-          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', padding: { left: 36 * k, right: 36 * k, top: 4 * k, bottom: 8 * k }, margin: { bottom: 12 * k }, borderRadius: SUMMARY_R * k }}
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', padding: { left: 36 * k, right: 36 * k, top: 4 * k, bottom: 8 * k }, margin: { bottom: 14 * k }, borderRadius: SUMMARY_R * k, borderWidth: SUMMARY_OUTLINE * k, borderColor: withA(SUMMARY_INK, a) }}
             uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
             <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: 84 * k }}>
-              {teamWord !== '' && <Label value={teamWord + ' '} fontSize={SUMMARY_TITLE_FONT * k} color={withA(inkTeam(b.winner === 'RED' ? 1 : 2), a)} textAlign="middle-right" />}
-              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={SUMMARY_TITLE_FONT * k} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />
+              {teamWord !== '' && <Label value={teamWord + ' '} fontSize={fnt(SUMMARY_TITLE_FONT, k)} color={withA(inkTeam(b.winner === 'RED' ? 1 : 2), a)} textAlign="middle-right" />}
+              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={fnt(SUMMARY_TITLE_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />
             </UiEntity>
-            <Label value="F I N A L     T E R R I T O R Y     C O N T R O L" fontSize={SUMMARY_SUB_FONT * k} color={withA(SUMMARY_DIM, a)} textAlign="middle-center" uiTransform={{ height: 26 * k }} />
+            <Label value="F I N A L     T E R R I T O R Y     C O N T R O L" fontSize={fnt(SUMMARY_SUB_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-center" uiTransform={{ height: 26 * k }} />
           </UiEntity>
         )}
       </UiEntity>
@@ -208,31 +211,19 @@ function RoundSummary(p: number) {
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: p > 0.5 ? SUMMARY_UNPAINTED : Color4.White() }}>
           <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', padding: { left: 18 * k } }}
             uiBackground={{ color: BAR_RED }}>
-            {show && <Label value={`${Math.round(b.redPct)}%`} fontSize={SUMMARY_PILL_FONT * k} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />}
+            {show && <Label value={`${Math.round(b.redPct)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />}
           </UiEntity>
           <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', padding: { right: 18 * k } }}
             uiBackground={{ color: BAR_BLUE }}>
-            {show && <Label value={`${Math.round(b.bluePct)}%`} fontSize={SUMMARY_PILL_FONT * k} color={withA(SUMMARY_INK, a)} textAlign="middle-right" />}
+            {show && <Label value={`${Math.round(b.bluePct)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-right" />}
           </UiEntity>
         </UiEntity>
       </UiEntity>
       {show && (
-        <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', margin: { top: 28 * k } }}>
-          <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={b.total} mvp={mvp} me={me} k={k} a={a} />
-          <UiEntity uiTransform={{ width: SUMMARY_CARD_GAP * k, height: 1 }} />
-          <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={b.total} mvp={mvp} me={me} k={k} a={a} />
-        </UiEntity>
-      )}
-      {show && (
-        <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', margin: { top: 22 * k } }}>
-          <StatTile value={`${mine?.painted ?? b.myCells}`} label="TILES PAINTED" k={k} a={a} />
-          <StatTile value={`${totalKos}`} label="TOTAL KOS" k={k} a={a} />
-          <StatTile value={formatMMSS(ROUND_LENGTH_MINUTES * 60)} label="MATCH DURATION" k={k} a={a} />
-        </UiEntity>
-      )}
-      {show && (
-        <UiEntity uiTransform={{ height: 34 * k, margin: { top: 12 * k }, padding: { left: 18 * k, right: 18 * k }, borderRadius: 17 * k, justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
-          <Label value={`NEW ROUND UNDERWAY  ·  BACK IN ${summarySecondsLeft()}s  ·  CLICK TO CLOSE`} fontSize={16 * k} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
+        <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', justifyContent: 'center', alignItems: 'center', margin: { top: SUMMARY_GAP * k } }}>
+          <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} />
+          <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
+          <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} />
         </UiEntity>
       )}
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
