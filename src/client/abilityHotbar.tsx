@@ -196,6 +196,11 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
   )
 }
 
+/** Mobile stack (virtual px, 1920x1080 canvas): right edge inset, and bottom kept above the native jump button. */
+const MOBILE_STACK_RIGHT = 40
+const MOBILE_STACK_BOTTOM = 330
+const MOBILE_STACK_GAP = 20
+
 function roundLabel(lunge: Hud, bomb: Hud): string {
   if (LUNGE_MODE !== 'alternate' && BURST_MODE !== 'alternate') return ''
   return lunge.enabled || bomb.enabled ? 'LUNGE + BURST ROUND' : 'PAINT ONLY'
@@ -213,13 +218,35 @@ export function AbilityHotbar() {
   const bombTip = bomb.show && bomb.ready
   // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
   // where the chip kisses the button edge. Tooltips on the outer sides.
+  if (mobile) {
+    // Mobile: tiles stacked on the middle-right, above the native jump button; each label pill sits on the same
+    // (left) side of its tile, tucked under it.
+    const row = (id: string, key: string, hud: Hud, icon: string, text: string, tip: boolean, onPress: () => void) => (
+      <UiEntity key={`ui_pvp_mrow_${id}`} uiTransform={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', margin: { top: MOBILE_STACK_GAP / 2, bottom: MOBILE_STACK_GAP / 2 }, pointerFilter: 'none' }}>
+        {tip && (
+          <UiEntity key={`ui_pvp_mtip_${id}`}
+            uiTransform={{ height: g.tipH, flexDirection: 'row', alignItems: 'center', padding: { left: g.tipPadX, right: g.tipPadX + g.tuck }, margin: { right: -g.tuck - SLOT_MARGIN_X }, borderRadius: RADIUS, borderWidth: g.tipBorder, borderColor: GOLD_BORDER, pointerFilter: 'block' }}
+            uiBackground={{ color: WHITE }} onMouseDown={onPress}>
+            <Label value={text} fontSize={g.tipFont} color={BLACK} font="sans-serif" textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: 'auto', height: Math.round(g.tipFont * 1.6) }} />
+          </UiEntity>
+        )}
+        <Slot id={id} keyLabel={key} hud={hud} iconSrc={icon} onPress={onPress} g={g} />
+      </UiEntity>
+    )
+    return (
+      <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
+        <UiEntity key="ui_pvp_mstack" uiTransform={{ positionType: 'absolute', position: { right: MOBILE_STACK_RIGHT, bottom: MOBILE_STACK_BOTTOM }, flexDirection: 'column', alignItems: 'flex-end', pointerFilter: 'none' }}>
+          {lunge.show && row('lunge', 'E', lunge, 'assets/images/lunge_chevron.png', 'LUNGE', lungeTip, triggerLunge)}
+          {bomb.show && row('burst', 'F', bomb, 'assets/images/burst.png', 'BURST', bombTip, triggerBurst)}
+        </UiEntity>
+      </UiEntity>
+    )
+  }
   return (
     <UiEntity
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {mobile && lungeTip && <Bridge id="lunge" side="left" g={g} />}
-      {mobile && bombTip && <Bridge id="burst" side="right" g={g} />}
       {lungeTip && <Tooltip id="lunge" side="left" text="LUNGE" onPress={triggerLunge} g={g} />}
       {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={triggerBurst} g={g} />}
       <UiEntity
