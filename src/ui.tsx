@@ -458,8 +458,8 @@ export const uiMenu = () => (
             ) : (
             <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
               <OverviewRow desktop />
-              {/* Desktop eye: its own key-tile button just right of the timer (same frame as the overview sub-buttons). */}
-              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 200 + TOP_GAP } }}>
+              {/* Desktop eye: its own key-tile button just LEFT of the timer (same frame as the overview sub-buttons). */}
+              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 200 + TOP_GAP } }}>
                 <OverviewEye />
               </UiEntity>
               <UiEntity

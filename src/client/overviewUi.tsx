@@ -122,7 +122,7 @@ export function OverviewRow(props: { desktop?: boolean } = {}) {
     <UiEntity
       key="ui_overview_row"
       uiTransform={{
-        positionType: 'absolute', position: props.desktop ? { top: 0, right: 200 } : { top: 0, left: SMALL + ROW_GAP }, // mobile: grows right of the eye
+        positionType: 'absolute', position: props.desktop ? { top: 0, right: 200 + TOP_GAP + SMALL } /* desktop: left of the eye (each button's 8 px right margin = gap) */ : { top: 0, left: SMALL + ROW_GAP }, // mobile: grows right of the eye
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
