@@ -8,7 +8,7 @@ import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismiss
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
-import { OverviewEye, OverviewEyeInline, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
+import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
@@ -458,6 +458,10 @@ export const uiMenu = () => (
             ) : (
             <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
               <OverviewRow desktop />
+              {/* Desktop eye: its own key-tile button just right of the timer (same frame as the overview sub-buttons). */}
+              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 200 + TOP_GAP } }}>
+                <OverviewEye />
+              </UiEntity>
               <UiEntity
                 uiTransform={{
                   width: 200, height: 68,
@@ -476,7 +480,7 @@ export const uiMenu = () => (
                 <UiEntity
                   uiTransform={{
                     width: 19, height: 19,
-                    positionType: 'absolute', position: { top: 10, left: 20 },
+                    positionType: 'absolute', position: { top: (68 - 19) / 2, left: 20 }, // vertically centred on the time
                     justifyContent: 'center', alignItems: 'center',
                     pointerFilter: 'block',
                   }}
@@ -484,7 +488,6 @@ export const uiMenu = () => (
                 >
                   <Label value="★" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
                 </UiEntity>
-                <OverviewEyeInline />
                 {/* Mute icon docked inside the timer panel on the right. No pill
                     background — just the icon sitting on the panel. */}
                 <UiEntity
