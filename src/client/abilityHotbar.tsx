@@ -213,7 +213,7 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
   const { hud } = props
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
   const ring = hud.ready ? CIRCLE_READY : CIRCLE_INK
-  const iconCol = !hud.enabled || cooling ? Color4.create(0.13, 0.13, 0.15, 0.25) : CIRCLE_INK
+  const iconCol = !hud.enabled || cooling ? Color4.create(0, 0, 0, 0.25) : Color4.create(0, 0, 0, 1) // solid black like Lunge
   return (
     <UiEntity key={`ui_pvp_circle_${props.id}`}
       uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_X_OFFSET - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
@@ -253,7 +253,7 @@ export function AbilityHotbar() {
     return (
       <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
         {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} bottom={cb(0)} />}
-        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst.png" onPress={triggerBurst} bottom={cb(1)} />}
+        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={triggerBurst} bottom={cb(1)} />}
       </UiEntity>
     )
   }
