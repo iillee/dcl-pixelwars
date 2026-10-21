@@ -95,6 +95,11 @@ export function shuffleTeams(): Array<{ userId: string; team: number }> {
   return out
 }
 
+/** Force a player's team (1v1 join fix). */
+export function setTeam(userId: string, team: number): void {
+  teamOf.set(userId, team)
+}
+
 /** For diagnostics. */
 export function rosterSize(): number {
   return teamOf.size
@@ -126,11 +131,11 @@ export function activeHumanCount(): number {
 
 /** Team of the single active human, or null if the active count isn't
  *  exactly 1. Used by the bot manager to pick the opposite colour. */
-export function activeSoloHumanTeam(): number | null {
+export function activeSoloHumanTeam(exclude?: string): number | null {
   const now = Date.now()
   let found: number | null = null
   for (const [uid, t] of teamOf) {
-    if (!isActive(uid, now)) continue
+    if (uid === exclude || !isActive(uid, now)) continue
     if (found !== null) return null
     found = t
   }

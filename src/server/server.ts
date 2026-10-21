@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
@@ -158,7 +158,9 @@ export async function setupServer(): Promise<void> {
     const from = context?.from
     if (!from) return
     lastPingAt.set(from, Date.now())
-    if (getTeam(from) !== null) startRoundIfIdle(from) // idle server + a joined player still here → fresh round
+    // Presence counts as activity: the bot manager's human count (60 s activity window) otherwise
+    // dropped a human who wasn't painting, kept the bot alive with 2 humans, and balanced joiners wrongly.
+    if (getTeam(from) !== null) { markActive(from); startRoundIfIdle(from) } // idle server + a joined player still here → fresh round
   })
 
   onLeaveScene((userId: string) => {
@@ -195,7 +197,11 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] joinRoster payload/from mismatch (payload=${userId}, from=${from}) — using from`)
     }
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
-    const team = assignTeam(from)
+    let team = assignTeam(from)
+    // Second human joins a solo human (+ bot): always the opposite team, so it's 1v1 and the bot retires
+    // on the next bot tick. Covers a rejoiner whose kept team matches the other human's.
+    const other = activeSoloHumanTeam(from)
+    if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
     markActive(from) // count them as present immediately; paint activity will refresh it
     // Round-on-join: idle server → this join starts a fresh 3:00 round (maze/board already reset at the last end).
     lastPingAt.set(from, Date.now())
