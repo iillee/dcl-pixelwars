@@ -113,6 +113,14 @@ const fnt = (f: number, k: number) => Math.max(SUMMARY_FONT_MIN, f * k)
 const SUMMARY_BOLD_PX = 0.035 // fake-bold offset as a fraction of the font size (DCL text has no weight)
 /** Rough single-line width of caps text (≈ 0.62 em per glyph). */
 const textW = (t: string, f: number) => t.length * f * 0.62
+/** Conservative width (wide caps + bold) used where overflow must never wrap. */
+const textWSafe = (t: string, f: number) => t.length * f * 0.8
+const TITLE_WORD_GAP = 0.3 // gap between title words, in em
+/** Round-end title font: the older 72 px look, shrunk so team word + gap + WINS! fits the given width on one line. */
+export function titleFontFor(words: string[], k: number, availW: number): number {
+  const em = words.reduce((s, w) => s + textWSafe(w, 1), 0) + (words.length - 1) * TITLE_WORD_GAP
+  return Math.min(SUMMARY_TITLE_FONT * k, availW / em)
+}
 
 /** Fake bold: the same label drawn 5× (centre + 4 offsets of ~3.5% of the font size) in one fixed box. */
 function BoldLabel(props: { value: string; fontSize: number; color: Color4; w: number; h: number; align: 'middle-left' | 'middle-center' | 'middle-right'; margin?: any }) {
@@ -179,7 +187,7 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
             uiBackground={{ color: self ? withA(Color4.White(), 0.9 * a) : Color4.create(0, 0, 0, 0.05 * a) }}>
             <UiEntity uiTransform={{ width: nameW, height: '100%', flexDirection: 'row', alignItems: 'center', padding: { left: 10 * k } }}>
               <UiEntity uiTransform={{ width: 14 * k, height: 14 * k, borderRadius: 7 * k, margin: { right: 10 * k }, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a) }} uiBackground={{ color: withA(col, a) }} />
-              <Label value={r.name} fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" uiTransform={{ height: '100%' }} />
+              <Label value={r.name} fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: '100%' }} />
               {r.id === mvp && (
                 <UiEntity uiTransform={{ width: 56 * k, height: 26 * k, margin: { left: 10 * k }, borderRadius: 7 * k, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a), justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: withA(SUMMARY_MVP, a) }}>
                   <Label value="MVP" fontSize={fnt(14, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
@@ -274,7 +282,12 @@ function RoundSummary(p: number) {
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
   const show = a > 0
-  const titleF = SUMMARY_TITLE_FONT * k
+  const titleWords = teamWord !== '' ? [teamWord, 'WINS!'] : ["IT'S A TIE"]
+  const titleF = titleFontFor(titleWords, k, cv.w * 0.9)
+  // Letter-spaced subtitle; on narrow phones where it would drop under the 12 px floor, the plain words.
+  const SUB_WIDE = 'F I N A L     T E R R I T O R Y     C O N T R O L'
+  const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : 'FINAL TERRITORY CONTROL'
+  const subF = Math.min(fnt(SUMMARY_SUB_FONT, k), cv.w * 0.9 / textWSafe(SUB, 1))
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
       onMouseDown={() => dismissSummary()}>
@@ -284,11 +297,11 @@ function RoundSummary(p: number) {
       <UiEntity uiTransform={{ width: '100%', height: SUMMARY_HEAD_H * k * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
         {show && (
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k } }}>
-            <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: 84 * k }}>
-              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' ? RED_COLOR : BLUE_COLOR, a)} textAlign="middle-center" uiTransform={{ width: textW(teamWord, titleF), height: 84 * k, margin: { right: titleF * 0.35 } }} />}
-              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign="middle-center" uiTransform={{ width: textW(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: 84 * k }} />
+            <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: titleF * 1.2, flexShrink: 0 }}>
+              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' ? RED_COLOR : BLUE_COLOR, a)} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord, titleF), height: titleF * 1.2, flexShrink: 0, margin: { right: titleF * TITLE_WORD_GAP } }} />}
+              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign={teamWord !== '' ? 'middle-left' : 'middle-center'} textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: titleF * 1.2, flexShrink: 0 }} />
             </UiEntity>
-            <Label value="F I N A L     T E R R I T O R Y     C O N T R O L" fontSize={fnt(SUMMARY_SUB_FONT, k)} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" uiTransform={{ height: 26 * k }} />
+            <Label value={SUB} fontSize={subF} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
           </UiEntity>
         )}
       </UiEntity>
@@ -511,7 +524,7 @@ export const uiMenu = () => (
                       <Label value={`${i + 1}`} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" />
                     </UiEntity>
                   </UiEntity>
-                  <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" uiTransform={{ width: 306 }} />
+                  <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: 306 }} />
                   <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" uiTransform={{ width: 90 }} />
                 </UiEntity>
               )
