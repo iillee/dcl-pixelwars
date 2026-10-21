@@ -226,7 +226,7 @@ function StandingsPopup() {
   const total = coverage().total
   return (
     <UiEntity uiTransform={{ width: '100%', positionType: 'absolute', position: { top: STANDINGS_TOP_PX, left: 0 }, flexDirection: 'row', justifyContent: 'center', pointerFilter: 'none' }}>
-      <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: 'center', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
+      <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'center' : 'flex-start', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
         <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
         <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
         <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} />
@@ -286,7 +286,7 @@ function RoundSummary(p: number) {
         </UiEntity>
       </UiEntity>
       {show && (
-        <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', justifyContent: 'center', alignItems: 'center', margin: { top: SUMMARY_GAP * k } }}>
+        <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', justifyContent: 'center', alignItems: stacked ? 'center' : 'flex-start', margin: { top: SUMMARY_GAP * k } }}>
           <TeamCard team={1} rows={rows.filter(r => r.team === 1)} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} />
           <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
           <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} />
