@@ -27,13 +27,20 @@ engine.addSystem((dt: number) => {
   alpha = Math.max(0, fadeLeft / SPLASH_FADE_S)
 })
 
+// White cover is deliberately oversized and offset beyond the HUD root: on phones the UI root is
+// inset (safe area) / scaled to the 1920x1080 virtual canvas, so '100%' of it left uncovered strips.
+const SPLASH_BLEED = 4000 // px (virtual) the cover extends past every edge of the HUD root
+
 export function SplashScreen() {
   if (alpha <= 0) return null
   return (
     <UiEntity
-      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
-      uiBackground={{ color: Color4.create(1, 1, 1, alpha) }}
+      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', pointerFilter: 'block', overflow: 'visible' }}
     >
+      <UiEntity
+        uiTransform={{ positionType: 'absolute', position: { top: -SPLASH_BLEED, left: -SPLASH_BLEED }, width: 1920 + 2 * SPLASH_BLEED, height: 1080 + 2 * SPLASH_BLEED, pointerFilter: 'block' }}
+        uiBackground={{ color: Color4.create(1, 1, 1, alpha) }}
+      />
       <Label value="pixelwars" fontSize={72} color={Color4.create(0.1, 0.1, 0.12, alpha)} textAlign="middle-center" textWrap="nowrap" />
     </UiEntity>
   )
