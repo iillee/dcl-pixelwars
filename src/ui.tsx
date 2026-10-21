@@ -6,7 +6,7 @@ import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismiss
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
-import { OverviewEye, OverviewRow } from "./client/overviewUi"
+import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
 import { engine, UiCanvasInformation } from "@dcl/sdk/ecs"
@@ -26,6 +26,7 @@ function toggleLeaderboard(): void {
 
 interface LbEntry { userId: string; name: string; cellsPainted: number }
 // Top painters rows: fixed height, rank / name / cells columns shared with the header row.
+const LB_HEAD_H = 120 // title + column header + paddings + frame above/below the rows
 const LB_ROW_H = 30, LB_PAD = 10, LB_GAP = 8, LB_RANK_W = 32, LB_CELLS_W = 100, LB_OUTLINE = 2
 function readLeaderboard(): LbEntry[] {
   const s = LeaderboardState.getOrNull(leaderboardStateEntity)
@@ -71,6 +72,7 @@ const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
+const TOP_SIDE_W = 68 * 2 + 8 // two top buttons + gap (= TOP_BTN * 2 + TOP_GAP)
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
 const SUMMARY_TITLE_FONT = 72 // older build's title size
 const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
@@ -393,50 +395,35 @@ export const uiMenu = () => (
             pointerFilter: 'none',
           }}
         >
-          <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
-            <OverviewRow />
-            <UiEntity
-              uiTransform={{
-                width: 200, height: 68,
-                justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
-                // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
-                borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
-              }}
-              uiBackground={{ color: HOTBAR_TILE_BG }}
-            >
-              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
-                uiBackground={{ color: SUMMARY_CARD_BG }} />
-              <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
-              {/* Star icon on the left, mirror position to the mute icon on
-                  the right. Placeholder — no handler yet; wire onMouseDown
-                  when we decide what it does (leaderboard? favorites?). */}
-              <UiEntity
-                uiTransform={{
-                  width: 19, height: 19,
-                  positionType: 'absolute', position: { top: 10, left: 20 },
-                  justifyContent: 'center', alignItems: 'center',
-                  pointerFilter: 'block',
-                }}
-                onMouseDown={toggleLeaderboard}
-              >
-                <Label value="★" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center' }}>
+            {/* Top row: [overview +/-/rotate ←] eye | timer | star  mute — sides equal width so the timer stays centred. */}
+            <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
+              <UiEntity uiTransform={{ width: TOP_SIDE_W, height: TOP_BTN, flexDirection: 'row', justifyContent: 'flex-end', margin: { right: TOP_GAP } }}>
+                <OverviewRow />
+                <OverviewEye />
               </UiEntity>
-              <OverviewEye />
-              {/* Mute icon docked inside the timer panel on the right. No pill
-                  background — just the icon sitting on the panel. */}
               <UiEntity
                 uiTransform={{
-                  width: 21, height: 21,
-                  positionType: 'absolute', position: { top: 20, right: 19 },
-                  pointerFilter: 'block',
+                  width: 200, height: 68,
+                  justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
+                  // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
+                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
                 }}
-                uiBackground={{
-                  textureMode: 'stretch',
-                  texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' },
-                  color: SUMMARY_INK,
-                }}
-                onMouseDown={toggleMusic}
-              />
+                uiBackground={{ color: HOTBAR_TILE_BG }}
+              >
+                <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
+                  uiBackground={{ color: SUMMARY_CARD_BG }} />
+                <Label value={formatMMSS(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+              </UiEntity>
+              <UiEntity uiTransform={{ width: TOP_SIDE_W, height: TOP_BTN, flexDirection: 'row', justifyContent: 'flex-start', margin: { left: TOP_GAP } }}>
+                <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
+                  <Label value="★" fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+                </TileButton>
+                <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
+              </UiEntity>
             </UiEntity>
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {getSummaryProgress() >= 0 || standingsOpen ? (
@@ -530,7 +517,10 @@ export const uiMenu = () => (
               <UiEntity uiTransform={{ width: '100%', height: 60, margin: { top: 12 }, justifyContent: 'center', alignItems: 'center' }}>
                 <Label value="No painters yet — be the first!" fontSize={16} color={SUMMARY_DIM} textAlign="middle-center" />
               </UiEntity>
-            ) : rows.map((r, i) => {
+            ) : (
+            // Rows scroll when the board would be taller than the screen (phones); header stays put.
+            <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', flexShrink: 0, overflow: 'scroll', pointerFilter: 'block', height: Math.min(rows.length * (LB_ROW_H + 3), Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H)) }}>
+            {rows.map((r, i) => {
               const self = r.userId.toLowerCase() === (getPlayer()?.userId ?? '').toLowerCase()
               return (
                 <UiEntity
@@ -550,6 +540,8 @@ export const uiMenu = () => (
                 </UiEntity>
               )
             })}
+            </UiEntity>
+            )}
             </UiEntity>
           </UiEntity>
         </UiEntity>
@@ -574,8 +566,8 @@ export const uiMenu = () => (
           positionType: 'absolute', position: { top: 0, left: 0 },
           justifyContent: 'center', alignItems: 'center', flexDirection: 'column',
         }}
-        uiBackground={{ color: BANNER_BG }}
       >
+        {/* No backdrop: '100%' of the 1920x1080 virtual canvas doesn't reliably reach the edges on phones. */}
         {/* Headline, percentages and personal line now live in the summary square below. */}
       </UiEntity>
     )}

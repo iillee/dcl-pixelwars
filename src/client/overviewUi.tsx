@@ -43,6 +43,28 @@ function Glyph(props: { kind: 'in' | 'out' | 'rot'; color: Color4 }) {
   )
 }
 
+/** Key-tile framed square button (light rim, dark ring, PANEL_LIGHT fill) used for the top bar buttons. */
+export function TileButton(props: { id: string; onPress: () => void; children?: any; marginRight?: number }) {
+  return (
+    <UiEntity
+      key={props.id}
+      uiTransform={{
+        width: SMALL, height: SMALL, flexShrink: 0, margin: { right: props.marginRight ?? 0 }, borderRadius: RADIUS, pointerFilter: 'block',
+        borderWidth: BORDER_W, borderColor: GOLD_BORDER, padding: TILE_RING,
+      }}
+      uiBackground={{ color: SLOT_BG }}
+      onMouseDown={props.onPress}
+    >
+      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: RADIUS - BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
+        uiBackground={{ color: PANEL_LIGHT }}>
+        {props.children}
+      </UiEntity>
+    </UiEntity>
+  )
+}
+export const TOP_BTN = SMALL
+export const TOP_GAP = 8
+
 function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void }) {
   return (
     <UiEntity
@@ -70,30 +92,24 @@ const EYE_W = 21
 const EYE_H = 14
 const ROW_GAP = 8
 
-/** Small eye under the timer's star (absolute inside the timer panel): opens/closes the row. */
+/** Eye button (left of the timer): toggles overview; amber while on. */
 export function OverviewEye() {
   return (
-    <UiEntity
-      key="ui_overview_eye"
-      uiTransform={{
-        width: EYE_W, height: EYE_H,
-        positionType: 'absolute', position: { top: 35, left: 19 },
-        pointerFilter: 'block',
-      }}
-      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }}
-      onMouseDown={() => { playUiClick(); toggleOverview() }}
-    />
+    <TileButton id="ui_overview_eye" onPress={() => { playUiClick(); toggleOverview() }}>
+      <UiEntity uiTransform={{ width: EYE_W * 1.6, height: EYE_H * 1.6, pointerFilter: 'none' }}
+        uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }} />
+    </TileButton>
   )
 }
 
-/** Overview buttons in a row popping out to the LEFT of the timer column (absolute in it). */
+/** Overview buttons in a row popping out to the LEFT of the eye button (absolute inside the eye's slot). */
 export function OverviewRow() {
   if (!isOverviewActive()) return null
   return (
     <UiEntity
       key="ui_overview_row"
       uiTransform={{
-        positionType: 'absolute', position: { top: 0, right: 200 },
+        positionType: 'absolute', position: { top: 0, right: SMALL + ROW_GAP },
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
