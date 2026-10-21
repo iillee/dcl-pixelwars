@@ -59,7 +59,7 @@ export const SKY_RAMP_WEIGHT = 3
 /** Optional cap on placed tiles (pairs are placed, so it is approximate). 0 = no cap. */
 export const SKY_MAX_TILES = 0
 
-/** Bases are locked to their team colour and can't be painted. */
-export const BASE_PAINT_LOCK = true
+/** Bases locked to their team colour (unpaintable)? Off (Luke): base cells start unpainted and can be painted/captured like any cell. */
+export const BASE_PAINT_LOCK = false
 /** Respawn at the team base when the player drops this far below the base floor. */
 export const FALL_RESPAWN_DROP = 12
