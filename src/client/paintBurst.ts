@@ -28,11 +28,12 @@ import {
   LUNGE_KNOCKBACK, burstEnabledForRound,
 } from '../shared/pvp'
 import { inBurst, burstDir, V3 } from '../shared/burst'
-import { triggerSceneEmote } from '~system/RestrictedActions'
-import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_HOLD_SRC } from '../shared/pvp'
+import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
+import { holdForEmote } from './lunge'
+import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
-let emoteHold: { left: number; x: number; z: number } | null = null
+let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId } from '../paint'
 import { initBurstRipple, startRipple } from './burstRipple'
@@ -162,8 +163,10 @@ export function triggerBurst(): void {
   sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
   showShockwave(p, team, true, cell)
   if (BURST_EMOTE_ENABLED) {
+    // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
+    holdForEmote(BURST_EMOTE_FREEZE_S)
     void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: false }).catch(() => {})
-    emoteHold = BURST_EMOTE_HOLD_SRC ? { left: BURST_EMOTE_S, x: p.x, z: p.z } : null
+    emoteLeft = BURST_EMOTE_S
   }
   // Opponent players (attacker-detected, like Lunge; server dedupes).
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
@@ -220,11 +223,9 @@ export function initPaintBurst(): void {
   knockForceEnt = engine.addEntity()
   initBurstRipple()
   engine.addSystem((dt: number) => {
-    if (!emoteHold || (emoteHold.left -= dt) > 0) return
-    const t = Transform.getOrNull(engine.PlayerEntity)
-    const still = t && Math.hypot(t.position.x - emoteHold.x, t.position.z - emoteHold.z) < 0.15
-    emoteHold = null
-    if (still) void triggerSceneEmote({ src: BURST_EMOTE_HOLD_SRC, loop: true }).catch(() => {})
+    if (emoteLeft <= 0 || (emoteLeft -= dt) > 0) return
+    emoteLeft = 0
+    void stopEmote({}).catch(() => {})
   })
   events.on('burst:fired', ({ attacker, id, team, x, y, z }) => {
     const att = attacker.toLowerCase()

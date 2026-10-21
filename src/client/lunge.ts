@@ -191,7 +191,7 @@ let lockLeft = 0
 let sparkAccum = 0
 function applyControl(): void {
   safePhysics('input modifier', () => {
-    if (lockLeft > 0) {
+    if (lockLeft > 0 || emoteLockLeft > 0) {
       InputModifier.createOrReplace(engine.PlayerEntity, {
         mode: InputModifier.Mode.Standard({ disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true }),
       })
@@ -203,6 +203,13 @@ function applyControl(): void {
       InputModifier.deleteFrom(engine.PlayerEntity)
     }
   })
+}
+/** Short movement hold so a one-shot scene emote (Burst) isn't cancelled by locomotion. Shares this module's
+ *  InputModifier so it never fights the lunge / knockback lock (applyControl owns the component). */
+let emoteLockLeft = 0
+export function holdForEmote(s: number): void {
+  emoteLockLeft = Math.max(emoteLockLeft, s)
+  applyControl()
 }
 function setReducedControl(on: boolean): void { recoveryOn = on; applyControl() }
 /** Victim lock: extend (never stack) to LUNGE_KNOCKBACK_LOCK_S from now. */
@@ -409,6 +416,7 @@ export function initLunge(): void {
   engine.addSystem((dt: number) => {
     if (cooldownLeft > 0) cooldownLeft -= dt
     lastHitAge += dt
+    if (emoteLockLeft > 0) { emoteLockLeft -= dt; if (emoteLockLeft <= 0) { emoteLockLeft = 0; applyControl() } }
     if (lockLeft > 0) {
       lockLeft -= dt
       // Dizzy sparks: a small yellow puff circling the head every 0.08 s.
