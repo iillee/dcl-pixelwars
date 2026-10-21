@@ -198,11 +198,11 @@ function Bridge(props: { id: string; side: 'left' | 'right'; g: Geo }) {
 
 /** Mobile circles (virtual px on the 1920x1080 canvas). Native jump button estimate: centre JUMP_CX_RIGHT from the
  *  right edge, JUMP_CY_BOTTOM from the bottom, diameter JUMP_D. Tune these in-world. */
-const JUMP_CX_RIGHT = 220
-const JUMP_CY_BOTTOM = 187
-const JUMP_D = 220
-const CIRCLE_D = 180 // ability circle diameter (≈ jump)
-const CIRCLE_GAP = 30 // equal gap jump → lunge → burst
+const JUMP_CX_RIGHT = 150
+const JUMP_CY_BOTTOM = 150
+const JUMP_D = 170
+const CIRCLE_D = 140 // ability circle diameter (≈ jump)
+const CIRCLE_GAP = 12 // equal gap jump → lunge → burst
 const CIRCLE_RING = 6
 const CIRCLE_READY = Color4.create(1.0, 0.78, 0.15, 1) // gold ring while ready
 const CIRCLE_INK = Color4.create(0.13, 0.13, 0.15, 1)
