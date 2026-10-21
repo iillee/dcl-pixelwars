@@ -603,6 +603,16 @@ export async function setupServer(): Promise<void> {
     room.send('standings', { owners: buildStandings(roundCells) }, { to: [from] })
   })
 
+  // Periodic roundClock rebroadcast so clients that applied a late message (mobile load stalls) re-sync.
+  const ROUND_CLOCK_RESYNC_S = 5
+  let resyncClock = 0
+  engine.addSystem((dt: number) => {
+    resyncClock += dt
+    if (resyncClock < ROUND_CLOCK_RESYNC_S) return
+    resyncClock = 0
+    if (isRoundActive()) sendRoundClock()
+  })
+
   engine.addSystem(() => {
     if (!isRoundActive() || Date.now() < getRoundEndMs()) return
     // Round over: chain the next one if anyone is connected, else end it once and go idle until a join.

@@ -1,4 +1,4 @@
-import { setRoundState } from '../shared/roundTiming'
+import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -98,7 +98,10 @@ function wireInbound(): void {
   })
 
   room.onMessage('roundClock', ({ idx, remainingMs, active }) => {
-    setRoundState(idx, Date.now() + remainingMs, active)
+    // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
+    // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
+    const end = Date.now() + remainingMs
+    if (idx !== getRoundIndex() || active !== isRoundActive() || Math.abs(end - getRoundEndMs()) > 500) setRoundState(idx, end, active)
   })
 
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
