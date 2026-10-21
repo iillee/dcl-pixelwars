@@ -51,6 +51,7 @@ import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
+import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
@@ -167,10 +168,11 @@ function tickStreaks(dt: number): void {
   }
   for (const [who, l] of lungers) {
     l.left -= dt
-    if (l.left <= 0) { lungers.delete(who); continue }
+    if (l.left <= 0) { lungers.delete(who); dashPopEnd(who); continue }
     const p = avatarPos(who)
     if (!p) continue
     const team = who === '' ? localTeam() : teamOfUser(who)
+    dashPop(who, p, team)
     l.accum += dt
     while (l.accum >= STREAK_INTERVAL) { l.accum -= STREAK_INTERVAL; spawnStreak(p, team) }
   }

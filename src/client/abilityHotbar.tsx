@@ -232,7 +232,7 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
 
 function roundLabel(lunge: Hud, bomb: Hud): string {
   if (LUNGE_MODE !== 'alternate' && BURST_MODE !== 'alternate') return ''
-  return lunge.enabled || bomb.enabled ? 'LUNGE + BURST ROUND' : 'PAINT ONLY'
+  return lunge.enabled || bomb.enabled ? 'DASH + BURST ROUND' : 'PAINT ONLY'
 }
 
 /** Render inside the full-screen UI root (src/ui.tsx). */
@@ -262,7 +262,7 @@ export function AbilityHotbar() {
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {lungeTip && <Tooltip id="lunge" side="left" text="LUNGE" onPress={triggerLunge} g={g} />}
+      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={triggerLunge} g={g} />}
       {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={triggerBurst} g={g} />}
       <UiEntity
         key="ui_pvp_row"
