@@ -11,7 +11,7 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { playUiClick } from './audio'
-import { RADIUS, BORDER_W, GOLD_BORDER, SLOT_BG, PANEL_LIGHT, TILE_RING } from './abilityHotbar'
+import { KeyHint, RADIUS, BORDER_W, GOLD_BORDER, SLOT_BG, PANEL_LIGHT, TILE_RING } from './abilityHotbar'
 import {
   isOverviewActive, toggleOverview, rotateOverview,
   overviewZoomIn, overviewZoomOut, canOverviewZoomIn, canOverviewZoomOut,
@@ -44,7 +44,7 @@ function Glyph(props: { kind: 'in' | 'out' | 'rot'; color: Color4 }) {
 }
 
 /** Key-tile framed square button (light rim, dark ring, PANEL_LIGHT fill) used for the top bar buttons. */
-export function TileButton(props: { id: string; onPress: () => void; children?: any; marginRight?: number }) {
+export function TileButton(props: { id: string; onPress: () => void; children?: any; marginRight?: number; keyLabel?: string }) {
   return (
     <UiEntity
       key={props.id}
@@ -59,6 +59,7 @@ export function TileButton(props: { id: string; onPress: () => void; children?: 
         uiBackground={{ color: PANEL_LIGHT }}>
         {props.children}
       </UiEntity>
+      {props.keyLabel && <KeyHint label={props.keyLabel} />}
     </UiEntity>
   )
 }
@@ -95,7 +96,7 @@ const ROW_GAP = 8
 /** Eye button (left of the timer): toggles overview; amber while on. */
 export function OverviewEye() {
   return (
-    <TileButton id="ui_overview_eye" onPress={() => { playUiClick(); toggleOverview() }}>
+    <TileButton id="ui_overview_eye" onPress={() => { playUiClick(); toggleOverview() }} keyLabel="4">
       <UiEntity uiTransform={{ width: EYE_W * 1.6, height: EYE_H * 1.6, pointerFilter: 'none' }}
         uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }} />
     </TileButton>

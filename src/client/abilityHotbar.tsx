@@ -65,7 +65,7 @@ const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, t
 
 type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string }
 
-function KeyHint(props: { label: string }) {
+export function KeyHint(props: { label: string }) {
   if (isMobile()) return null
   return (
     <Label

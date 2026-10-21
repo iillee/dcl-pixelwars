@@ -22,7 +22,7 @@
  *   off-screen avatar hint. Painting and movement are untouched: paint reads
  *   the player position, not the camera.
  *
- * Input: desktop key 1 (IA_ACTION_3) toggles, key 4 (IA_ACTION_6) rotates
+ * Input: desktop keys 1 (IA_ACTION_3) and 4 (IA_ACTION_6) toggle, key 3 (IA_ACTION_5) rotates
  * 90°. UI: the overview button + zoom buttons in ui.tsx (also on mobile).
  */
 
@@ -92,11 +92,13 @@ export function setupOverviewCamera(): void {
     defaultTransition: { transitionMode: VirtualCamera.Transition.Speed(TRANSITION_SPEED) },
   })
   engine.addSystem((dt: number) => {
-    if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN)) {
+    // Key 4 (IA_ACTION_6) toggles, same as clicking the desktop eye button; key 1 (IA_ACTION_3) still toggles too.
+    if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) || inputSystem.isTriggered(InputAction.IA_ACTION_6, PointerEventType.PET_DOWN)) {
       playUiClick()
       toggleOverview()
     }
-    if (active && inputSystem.isTriggered(InputAction.IA_ACTION_6, PointerEventType.PET_DOWN)) {
+    // Rotate moved from key 4 to key 3 (IA_ACTION_5, unused elsewhere) so 4 can toggle.
+    if (active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
       playUiClick()
       rotateOverview(1)
     }
