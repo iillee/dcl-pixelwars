@@ -37,6 +37,23 @@ export function formatMMSS(secs: number): string {
 
 export const BANNER_DURATION_MS = 6000
 
+// Round-end summary: the score bar grows into a centred square split red | blue, holds, shrinks back.
+export const SUMMARY_GROW_S = 0.4
+export const SUMMARY_HOLD_S = 5
+export const SUMMARY_SHRINK_S = 0.4
+
+/** 0 = normal bar, 1 = fully expanded square; -1 = summary not running. Ease-in-out. */
+export function getSummaryProgress(nowMs: number = Date.now()): number {
+  if (banner.shownAtMs === 0) return -1
+  const t = (nowMs - banner.shownAtMs) / 1000
+  const total = SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S
+  if (t < 0 || t >= total) return -1
+  const lin = t < SUMMARY_GROW_S ? t / SUMMARY_GROW_S
+    : t < SUMMARY_GROW_S + SUMMARY_HOLD_S ? 1
+    : 1 - (t - SUMMARY_GROW_S - SUMMARY_HOLD_S) / SUMMARY_SHRINK_S
+  return lin * lin * (3 - 2 * lin)
+}
+
 interface BannerState {
   visible: boolean
   redPct: number

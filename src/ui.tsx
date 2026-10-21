@@ -2,7 +2,7 @@ import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
-import { getCountdownSeconds, formatMMSS, getBanner } from "./round"
+import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
@@ -60,6 +60,61 @@ const BAR_TRACK = Color4.create(0.08, 0.08, 0.1, 0.87) // flagtag PANEL_BG_SEMI
 const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
 
+// Round-end summary square (the bar grown). Bar's top edge sits 10 (top) + 68 (timer) + 6 (margin) px down.
+const SUMMARY_SIZE = 360
+const SUMMARY_BORDER = 6
+const SUMMARY_RADIUS = 18
+const SUMMARY_CAP = 18 // 0% side still shows this much colour, like the bar's end caps
+const SUMMARY_FONT = 64
+const BAR_TOP_PX = 10 + 68 + 6
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+
+/** The score bar at progress p (0 = bar, 1 = square). Final round shares from the banner. */
+function RoundSummary(p: number) {
+  const b = getBanner()
+  const w = lerp(BAR_W, SUMMARY_SIZE, p)
+  const h = lerp(BAR_FILL_H + BAR_BORDER * 2, SUMMARY_SIZE, p)
+  const border = lerp(BAR_BORDER, SUMMARY_BORDER, p)
+  const outerR = lerp((BAR_FILL_H + BAR_BORDER * 2) / 2, SUMMARY_RADIUS, p)
+  const innerR = Math.max(0, outerR - border)
+  const cap = lerp(BAR_CAP, SUMMARY_CAP, p)
+  const innerW = w - border * 2
+  // No paint (0/0) and ties both fall out as an even split; labels still show the real numbers.
+  const sum = b.redPct + b.bluePct
+  const redShare = sum > 0 ? b.redPct / sum : 0.5
+  const redW = cap + (innerW - cap * 2) * redShare
+  const blueW = innerW - redW
+  const font = SUMMARY_FONT * p
+  const showText = p > 0.6
+  return (
+    <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: 'none' }}>
+      <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
+      <UiEntity uiTransform={{ width: 1, height: BAR_TOP_PX * (1 - p), flexShrink: 0 }} />
+      <UiEntity uiTransform={{ width: w, height: h, flexShrink: 0, borderRadius: outerR, padding: border }} uiBackground={{ color: BAR_TRACK }}>
+        {showText && (
+          <Label value={bannerHeadline()} fontSize={96} color={bannerColor()} textAlign="middle-center"
+            uiTransform={{ positionType: 'absolute', position: { bottom: h + 16, left: (w - 1000) / 2 }, width: 1000, height: 110 }} />
+        )}
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: Color4.White() }}>
+          <UiEntity
+            uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
+            uiBackground={{ color: BAR_RED }}
+          >{showText && <Label value={`${b.redPct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+          <UiEntity
+            uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'center' }}
+            uiBackground={{ color: BAR_BLUE }}
+          >{showText && <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+        </UiEntity>
+        {showText && b.personal !== '' && (
+          <Label value={b.personal} fontSize={26} color={Color4.White()} textAlign="middle-center"
+            uiTransform={{ positionType: 'absolute', position: { top: h + 16, left: (w - 1000) / 2 }, width: 1000, height: 40 }} />
+        )}
+      </UiEntity>
+      <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
+    </UiEntity>
+  )
+}
+
 /** Territory shares in %, same source and 1-decimal rounding the old text readout showed. */
 function coveragePct(): { red: number; blue: number } {
   const { red, blue, total } = coverage()
@@ -80,11 +135,6 @@ function bannerColor(): Color4 {
 function bannerHeadline(): string {
   const b = getBanner()
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
-}
-
-function bannerSubline(): string {
-  const b = getBanner()
-  return `RED ${b.redPct.toFixed(1)}%    —    BLUE ${b.bluePct.toFixed(1)}%`
 }
 
 // Full-screen UI root. Everything is a child of this so absolute-positioned
@@ -148,7 +198,9 @@ export const uiMenu = () => (
               />
             </UiEntity>
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
-            {(() => {
+            {getSummaryProgress() >= 0 ? (
+              <UiEntity uiTransform={{ width: BAR_W, height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
+            ) : (() => {
               const pct = coveragePct()
               // Winning star: centred in the leader's segment, only if it fits with padding; none on a tie / 0–0.
               const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
@@ -266,12 +318,11 @@ export const uiMenu = () => (
         }}
         uiBackground={{ color: BANNER_BG }}
       >
-        <Label value={bannerHeadline()} fontSize={96} color={bannerColor()}    textAlign="middle-center" />
-        <Label value={bannerSubline()}  fontSize={32} color={Color4.White()} textAlign="middle-center" />
-        {getBanner().personal !== '' && (
-          <Label value={getBanner().personal} fontSize={26} color={Color4.White()} textAlign="middle-center" uiTransform={{ margin: { top: 12 } }} />
-        )}
+        {/* Headline, percentages and personal line now live in the summary square below. */}
       </UiEntity>
     )}
+
+    {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
+    {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
   </UiEntity>
 )
