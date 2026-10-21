@@ -201,7 +201,9 @@ function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp:
     <UiEntity uiTransform={{ width: cw, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k }}
       uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
       <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center' }}>
-        <BoldLabel value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={nameW - 10 * k} h={40 * k} margin={{ left: 10 * k }} />
+        {isMobile()
+          ? <BoldLabel value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={nameW - 10 * k} h={40 * k} margin={{ left: 10 * k }} />
+          : <Label value={team === 1 ? 'RED TEAM' : 'BLUE TEAM'} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: nameW - 10 * k, height: 40 * k, flexShrink: 0, margin: { left: 10 * k } }} />}
         {cell(H[0], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
         {cell(H[1], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
         {cell(H[2], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
