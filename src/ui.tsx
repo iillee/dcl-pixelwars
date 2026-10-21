@@ -231,7 +231,7 @@ function StandingsPopup() {
   const rows = standingsRows.slice().sort((x, y) => y.cells - x.cells)
   const { k, stacked, rowCap } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, SUMMARY_PILL_H + SUMMARY_GAP)
   const pct = coveragePct()
-  const pw = SUMMARY_PILL_W * k, ph = SUMMARY_PILL_H * k, border = SUMMARY_OUTLINE * k, cap = SUMMARY_PILL_CAP * k
+  const pw = tablesW(stacked) * k, ph = SUMMARY_PILL_H * k, border = SUMMARY_OUTLINE * k, cap = SUMMARY_PILL_CAP * k
   const innerW = pw - border * 2, innerR = (ph - border * 2) / 2
   const redW = cap + (innerW - cap * 2) * pct.red / 100
   const blueW = cap + (innerW - cap * 2) * pct.blue / 100
@@ -244,14 +244,13 @@ function StandingsPopup() {
       {/* Enlarged score bar (the round-end territory pill, live %) heading the lists; click closes back to the bar. */}
       <UiEntity uiTransform={{ width: pw, height: ph, flexShrink: 0, borderRadius: ph / 2, padding: border, margin: { bottom: SUMMARY_GAP * k } }} uiBackground={{ color: SUMMARY_INK }}>
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: SUMMARY_UNPAINTED }}>
-          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', padding: { left: 18 * k } }}
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', }}
             uiBackground={{ color: BAR_RED }}>
-            <Label value={`${Math.round(pct.red)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={SUMMARY_INK} textAlign="middle-left" />
           </UiEntity>
-          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', padding: { right: 18 * k } }}
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', }}
             uiBackground={{ color: BAR_BLUE }}>
-            <Label value={`${Math.round(pct.blue)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={SUMMARY_INK} textAlign="middle-right" />
           </UiEntity>
+          <PctOverlay red={pct.red} blue={pct.blue} k={k} color={SUMMARY_INK} />
         </UiEntity>
       </UiEntity>
       <UiEntity uiTransform={{ flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'center' : 'flex-start' }}>
@@ -264,6 +263,21 @@ function StandingsPopup() {
   )
 }
 
+/** Unscaled width of the team tables: one card when stacked, both + gap side by side (the big pill matches it). */
+const tablesW = (stacked: boolean) => stacked ? SUMMARY_CARD_W : SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP
+/** Big-pill percentages as an overlay pinned to the bar's ends, independent of segment widths, never wrapping. */
+function PctOverlay(props: { red: number; blue: number; k: number; color: Color4 }) {
+  const f = fnt(SUMMARY_PILL_FONT, props.k), w = textWSafe('100%', f)
+  const lbl = (v: number, al: 'middle-left' | 'middle-right') =>
+    <Label value={`${Math.round(v)}%`} fontSize={f} color={props.color} textAlign={al} textWrap="nowrap" uiTransform={{ width: w, height: '100%', flexShrink: 0 }} />
+  return (
+    <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: { left: 18 * props.k, right: 18 * props.k }, pointerFilter: 'none' }}>
+      {lbl(props.red, 'middle-left')}
+      {lbl(props.blue, 'middle-right')}
+    </UiEntity>
+  )
+}
+
 /** Round-end screen at progress p (0 = the score bar, 1 = full). The pill grows out of the bar; the rest fades in. */
 function RoundSummary(p: number) {
   const b = getBanner()
@@ -271,7 +285,7 @@ function RoundSummary(p: number) {
   const { k, stacked, rowCap } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
-  const pw = lerp(BAR_W, SUMMARY_PILL_W * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
+  const pw = lerp(BAR_W, tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
   const border = lerp(BAR_BORDER, SUMMARY_OUTLINE * k, p)
   const innerW = pw - border * 2, cap = lerp(BAR_CAP, SUMMARY_PILL_CAP * k, p)
   const redW = cap + (innerW - cap * 2) * b.redPct / 100
@@ -308,14 +322,13 @@ function RoundSummary(p: number) {
       {/* Territory pill: red left | unpainted | blue right */}
       <UiEntity uiTransform={{ width: pw, height: ph, flexShrink: 0, borderRadius: ph / 2, padding: border }} uiBackground={{ color: p > 0.5 ? SUMMARY_INK : BAR_TRACK }}>
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: p > 0.5 ? SUMMARY_UNPAINTED : Color4.White() }}>
-          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', padding: { left: 18 * k } }}
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', }}
             uiBackground={{ color: BAR_RED }}>
-            {show && <Label value={`${Math.round(b.redPct)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" />}
           </UiEntity>
-          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', padding: { right: 18 * k } }}
+          <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', }}
             uiBackground={{ color: BAR_BLUE }}>
-            {show && <Label value={`${Math.round(b.bluePct)}%`} fontSize={fnt(SUMMARY_PILL_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-right" />}
           </UiEntity>
+          {show && <PctOverlay red={b.redPct} blue={b.bluePct} k={k} color={withA(SUMMARY_INK, a)} />}
         </UiEntity>
       </UiEntity>
       {show && (
