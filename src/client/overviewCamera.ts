@@ -39,11 +39,11 @@ export const OV_YAW_DEG = 45      // axis-aligned with the maze grid: WASD (came
 export const OV_FOV_DEG   = 24
 /** Zoom "view scale": frames like a 60°-FOV camera at this many metres. */
 const SCALE_STEP    = 10
-// Desktop: 15..90 (default 55). Mobile: exactly 3 levels — one step closer than desktop's closest (15 − 10 = 5),
+// Desktop: 5..90 (default 55). Mobile: exactly 3 levels — one step closer than desktop's closest (15 − 10 = 5),
 // then 15 and 25; every toggle-on starts at the closest.
 // isMobile() resolves async (getExplorerInformation), so these are read live, not at module load.
 const scaleDefault = () => isMobile() ? 5 : 55
-const scaleMin     = () => isMobile() ? 5 : 15
+const scaleMin     = () => isMobile() ? 5 : 5
 const scaleMax     = () => isMobile() ? 25 : 90
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
