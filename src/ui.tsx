@@ -66,6 +66,7 @@ const SUMMARY_BORDER = 6
 const SUMMARY_RADIUS = 18
 const SUMMARY_CAP = 18 // 0% side still shows this much colour, like the bar's end caps
 const SUMMARY_FONT = 64
+const SUMMARY_UNPAINTED_FONT = 22
 const BAR_TOP_PX = 10 + 68 + 6
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
@@ -79,11 +80,12 @@ function RoundSummary(p: number) {
   const innerR = Math.max(0, outerR - border)
   const cap = lerp(BAR_CAP, SUMMARY_CAP, p)
   const innerW = w - border * 2
-  // No paint (0/0) and ties both fall out as an even split; labels still show the real numbers.
-  const sum = b.redPct + b.bluePct
-  const redShare = sum > 0 ? b.redPct / sum : 0.5
-  const redW = cap + (innerW - cap * 2) * redShare
-  const blueW = innerW - redW
+  // Same three regions as the score bar: red | unpainted (white track) | blue, each sized by its share of the whole map.
+  const span = innerW - cap * 2
+  const redW = cap + span * b.redPct / 100
+  const blueW = cap + span * b.bluePct / 100
+  const unpaintedPct = Math.max(0, 100 - b.redPct - b.bluePct)
+  const midW = innerW - redW - blueW
   const font = SUMMARY_FONT * p
   const showText = p > 0.6
   return (
@@ -104,6 +106,11 @@ function RoundSummary(p: number) {
             uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'center' }}
             uiBackground={{ color: BAR_BLUE }}
           >{showText && <Label value={`${b.bluePct.toFixed(1)}%`} fontSize={font} color={Color4.White()} textAlign="middle-center" />}</UiEntity>
+          {showText && midW >= 60 && (
+            <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: redW }, width: midW, height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+              <Label value={`${unpaintedPct.toFixed(1)}%`} fontSize={SUMMARY_UNPAINTED_FONT} color={STAR_TINT} textAlign="middle-center" />
+            </UiEntity>
+          )}
         </UiEntity>
         {showText && b.personal !== '' && (
           <Label value={b.personal} fontSize={26} color={Color4.White()} textAlign="middle-center"
