@@ -38,10 +38,12 @@ export const OV_PITCH_DEG = 35.26  // true isometric ≈ 35.26°
 export const OV_YAW_DEG = 45      // axis-aligned with the maze grid: WASD (camera-relative) walks straight along corridors; rotate steps by 90
 export const OV_FOV_DEG   = 24
 /** Zoom "view scale": frames like a 60°-FOV camera at this many metres. */
-const SCALE_DEFAULT = isMobile() ? 45 : 55
-const SCALE_MIN     = 15
-const SCALE_MAX     = 90
 const SCALE_STEP    = 10
+// Desktop: 15..90 (default 55). Mobile: exactly 3 levels — one step closer than desktop's closest (15 − 10 = 5),
+// then 15 and 25; every toggle-on starts at the closest.
+const SCALE_DEFAULT = isMobile() ? 5 : 55
+const SCALE_MIN     = isMobile() ? 5 : 15
+const SCALE_MAX     = isMobile() ? 25 : 90
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
 /** 20×20 parcels → height limit 20·log2(401) ≈ 172.9 m. */
@@ -156,6 +158,7 @@ export function toggleOverview(): void {
   if (camEntity === null) return
   active = !active
   if (active) {
+    if (isMobile()) scale = SCALE_DEFAULT
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) { focus.x = p.x; focus.y = Math.max(p.y, BASE_Y - 15); focus.z = p.z }
     camDist = Math.min(scale * DIST_PER_SCALE, maxDistance())
