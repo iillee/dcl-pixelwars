@@ -75,7 +75,7 @@ const BAR_W = 200
 const BAR_BORDER = 3
 const BAR_FILL_H = 16
 const BAR_INNER_W = BAR_W - BAR_BORDER * 2
-/** Mobile top row: eye | timer | star | mute; the score bar spans the whole row there. */
+/** Mobile top row: star | mute | timer | eye; the score bar spans the whole row there. */
 const MOBILE_TIMER_W = 200
 const MOBILE_TOP_W = 68 * 3 + MOBILE_TIMER_W + 8 * 3 // = TOP_BTN * 3 + timer + TOP_GAP * 3
 const barW = () => isMobile() ? MOBILE_TOP_W : BAR_W
@@ -423,9 +423,15 @@ export const uiMenu = () => (
             {/* Mobile: separate eye | timer | star mute buttons. Desktop: single clock panel (star + eye left, mute right) as in 36507d7. */}
             {isMobile() ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
-              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { right: TOP_GAP } }}>
-                <OverviewRow />
-                <OverviewEye />
+              <UiEntity uiTransform={{ flexDirection: 'row', margin: { right: TOP_GAP } }}>
+                <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
+                  <UiEntity uiTransform={{ width: 30, height: 30, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: SUMMARY_INK }} />
+                </TileButton>
+                <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
               <UiEntity
                 uiTransform={{
@@ -440,15 +446,9 @@ export const uiMenu = () => (
                   <Label value={formatMMSS(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
-              <UiEntity uiTransform={{ flexDirection: 'row', margin: { left: TOP_GAP } }}>
-                <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
-                  <UiEntity uiTransform={{ width: 30, height: 30, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: SUMMARY_INK }} />
-                </TileButton>
-                <TileButton id="ui_top_mute" onPress={toggleMusic}>
-                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-                </TileButton>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
+                <OverviewRow />
+                <OverviewEye />
               </UiEntity>
             </UiEntity>
             ) : (
