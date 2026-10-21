@@ -40,6 +40,8 @@ const BLACK = Color4.create(0, 0, 0, 1)
 const WHITE = Color4.White()
 /** The one light panel colour shared by the hotbar, clock, score bar and summary tables. */
 export const PANEL_LIGHT = WHITE
+/** Dark ring between the light rim and a light fill (clock, top painters, overview buttons). */
+export const TILE_RING = 6
 const DIM = Color4.create(1, 1, 1, 0.35)
 const CHIP_BG = Color4.create(0.1, 0.1, 0.1, 0.92) // = COUNTDOWN_BG in ui.tsx
 

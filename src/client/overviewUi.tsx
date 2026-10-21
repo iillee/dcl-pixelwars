@@ -11,37 +11,54 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { playUiClick } from './audio'
+import { RADIUS, BORDER_W, GOLD_BORDER, SLOT_BG, PANEL_LIGHT, TILE_RING } from './abilityHotbar'
 import {
   isOverviewActive, toggleOverview, rotateOverview,
   overviewZoomIn, overviewZoomOut, canOverviewZoomIn, canOverviewZoomOut,
 } from './overviewCamera'
 
-const PANEL_BG = Color4.create(0.1, 0.1, 0.1, 0.92) // = COUNTDOWN_BG in ui.tsx
-const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
-const DIM = Color4.create(1, 1, 1, 0.3)
-const BTN = 72
-const SMALL = 56
+const INK = Color4.create(0.13, 0.13, 0.15, 1) // = SUMMARY_INK in ui.tsx
+const INK_DIM = Color4.create(0.13, 0.13, 0.15, 0.3)
+const EYE_ON = Color4.create(0.72, 0.45, 0.0, 1) // dark amber: "active" but readable on the light panel
+const SMALL = 68 // same height as the clock panel
+const GLYPH = 24 // +/− bar length and rotate ring diameter
+const BAR = 4    // glyph stroke
 
-function ParcelGridIcon(props: { color: Color4 }) {
-  const rows = [0, 1].map(r => (
-    <UiEntity key={`r${r}`} uiTransform={{ flexDirection: 'row', margin: { top: r === 0 ? 0 : 2 } }}>
-      {[0, 1, 2, 3].map(c => (
-        <UiEntity key={`c${r}${c}`} uiTransform={{ width: 9, height: 9, margin: { left: c === 0 ? 0 : 2 } }} uiBackground={{ color: props.color }} />
-      ))}
+/** +, − and rotate drawn as boxes so they sit exactly centred (font glyphs don't, and ⟳ is missing). */
+function Glyph(props: { kind: 'in' | 'out' | 'rot'; color: Color4 }) {
+  const c = props.color
+  if (props.kind === 'rot') {
+    return (
+      <UiEntity uiTransform={{ width: GLYPH, height: GLYPH, borderRadius: GLYPH / 2, borderWidth: BAR, borderColor: c, pointerFilter: 'none' }}>
+        {/* arrow head notch at the top-right */}
+        <UiEntity uiTransform={{ positionType: 'absolute', position: { top: -BAR - 2, right: -2 }, width: 9, height: 9 }} uiBackground={{ color: c }} />
+      </UiEntity>
+    )
+  }
+  return (
+    <UiEntity uiTransform={{ width: GLYPH, height: GLYPH, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
+      <UiEntity uiTransform={{ positionType: 'absolute', width: GLYPH, height: BAR, position: { top: (GLYPH - BAR) / 2, left: 0 } }} uiBackground={{ color: c }} />
+      {props.kind === 'in' && <UiEntity uiTransform={{ positionType: 'absolute', width: BAR, height: GLYPH, position: { top: 0, left: (GLYPH - BAR) / 2 } }} uiBackground={{ color: c }} />}
     </UiEntity>
-  ))
-  return <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center' }}>{rows}</UiEntity>
+  )
 }
 
-function SmallButton(props: { id: string; label: string; enabled: boolean; onPress: () => void }) {
+function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void }) {
   return (
     <UiEntity
       key={props.id}
-      uiTransform={{ width: SMALL, height: SMALL, margin: { right: ROW_GAP }, justifyContent: 'center', alignItems: 'center', borderRadius: 14, pointerFilter: 'block' }}
-      uiBackground={{ color: PANEL_BG }}
+      uiTransform={{
+        width: SMALL, height: SMALL, margin: { right: ROW_GAP }, borderRadius: RADIUS, pointerFilter: 'block',
+        // Hotbar key-tile frame: light rim, dark ring, PANEL_LIGHT fill.
+        borderWidth: BORDER_W, borderColor: GOLD_BORDER, padding: TILE_RING,
+      }}
+      uiBackground={{ color: SLOT_BG }}
       onMouseDown={() => { if (!props.enabled) return; playUiClick(); props.onPress() }}
     >
-      <Label value={props.label} fontSize={28} color={props.enabled ? Color4.White() : DIM} textAlign="middle-center" />
+      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: RADIUS - BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
+        uiBackground={{ color: PANEL_LIGHT }}>
+        <Glyph kind={props.kind} color={props.enabled ? INK : INK_DIM} />
+      </UiEntity>
     </UiEntity>
   )
 }
@@ -63,7 +80,7 @@ export function OverviewEye() {
         positionType: 'absolute', position: { top: 35, left: 19 },
         pointerFilter: 'block',
       }}
-      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? GOLD : Color4.create(0.13, 0.13, 0.15, 1) }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }}
       onMouseDown={() => { playUiClick(); toggleOverview() }}
     />
   )
@@ -80,9 +97,9 @@ export function OverviewRow() {
         flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
       }}
     >
-      {<SmallButton id="ov_in" label="+" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
-      {<SmallButton id="ov_out" label="−" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
-      {<SmallButton id="ov_rot" label="⟳" enabled={true} onPress={() => rotateOverview(1)} />}
+      {<SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} />}
+      {<SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} />}
+      {<SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
     </UiEntity>
   )
 }

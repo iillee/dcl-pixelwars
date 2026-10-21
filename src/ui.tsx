@@ -7,7 +7,7 @@ import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
 import { OverviewEye, OverviewRow } from "./client/overviewUi"
-import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM } from "./client/abilityHotbar"
+import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
 import { engine, UiCanvasInformation } from "@dcl/sdk/ecs"
 
@@ -69,7 +69,7 @@ const SUMMARY_K_MAX = 1.6
 const SUMMARY_PILL_W = 720
 const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
-const CLOCK_RING = 6 // dark ring between the clock's light rim and its light fill
+const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
 const SUMMARY_TITLE_FONT = 72 // older build's title size
 const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
 const SUMMARY_GAP = 32 // territory bar → tables
