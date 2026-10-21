@@ -125,7 +125,7 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 // the server enforces it.
 
 /** Seconds between bursts. Keeps running through respawn. */
-export const BURST_COOLDOWN_S = 5.25 // ~3 dashes (3 x LUNGE_COOLDOWN_S 1.75 s; was 12)
+export const BURST_COOLDOWN_S = 8
 /** Server cooldown slack: accept the next burst this long after the previous one (s). */
 export const SERVER_MIN_BURST_GAP_S = BURST_COOLDOWN_S - 0.5
 /** Line of sight check (raycast attacker chest → target chest, physics colliders). */
@@ -267,7 +267,7 @@ export const LUNGE_BRAKE = 0.7
 /** After the active window: no new lunge, run/jog/jump disabled (walk only). */
 export const LUNGE_RECOVERY_S = 0.20
 /** Press → press (s). Covers active + recovery. */
-export const LUNGE_COOLDOWN_S = 1.75
+export const LUNGE_COOLDOWN_S = 2
 
 // ─── B. Hit detection (attacker client, swept every frame) ──────────
 /** Hitbox: a box in front of the attacker, oriented along the lunge direction,
