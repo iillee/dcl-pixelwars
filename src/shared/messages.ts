@@ -101,7 +101,7 @@ export const Messages = {
   // Server → Clients (broadcast), sent just before roundReset: cells each painter OWNS at round end
   // (last painter of each cell). id = player address or `bot:<id>`. Largest first.
   roundOwners: Schemas.Map({
-    owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int })),
+    owners: Schemas.Array(Schemas.Map({ id: Schemas.String, name: Schemas.String, team: Schemas.Int, cells: Schemas.Int, kos: Schemas.Int, deaths: Schemas.Int, painted: Schemas.Int })),
   }),
 
   roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
@@ -172,6 +172,9 @@ export const Messages = {
   anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number }),
   // Client → Server: key 2, re-roll all anvils.
   anvilRespawn: Schemas.Map({ n: Schemas.Int }),
+  // Client → Server (round stats): anvil i launched me / I fell off and respawned.
+  anvilLaunched: Schemas.Map({ i: Schemas.Int }),
+  playerFell: Schemas.Map({}),
   // Client → Server: walking/running into anvil i (direction dx,dz; our position x,z). Server moves it slowly.
   anvilPush: Schemas.Map({ i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, z: Schemas.Number, run: Schemas.Int }),
   // Server → Clients: all anvils (feet pos, velocity, yaw, alive, moving, slide = hit/respawn counter).

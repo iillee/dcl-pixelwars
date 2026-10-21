@@ -35,12 +35,24 @@ export function formatMMSS(secs: number): string {
 // which overlaps the maze grow-in so the transition reads as "results →
 // new arena" rather than a dead pause.
 
-export const BANNER_DURATION_MS = 6000
 
 // Round-end summary: the score bar grows into a centred square split red | blue, holds, shrinks back.
 export const SUMMARY_GROW_S = 0.4
-export const SUMMARY_HOLD_S = 5
+export const SUMMARY_HOLD_S = 10
 export const SUMMARY_SHRINK_S = 0.4
+/** Dim backdrop + banner state live exactly as long as the summary animation. */
+export const BANNER_DURATION_MS = (SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S) * 1000
+
+/** Click on the summary: skip the rest of the hold and shrink away now. */
+export function dismissSummary(nowMs: number = Date.now()): void {
+  const holdEnd = banner.shownAtMs + (SUMMARY_GROW_S + SUMMARY_HOLD_S) * 1000
+  if (banner.shownAtMs > 0 && nowMs < holdEnd) banner.shownAtMs -= holdEnd - Math.max(nowMs, banner.shownAtMs + SUMMARY_GROW_S * 1000)
+}
+
+/** Whole seconds until the summary closes (for the "back in Ns" line). */
+export function summarySecondsLeft(nowMs: number = Date.now()): number {
+  return Math.max(0, Math.ceil((banner.shownAtMs + BANNER_DURATION_MS - nowMs) / 1000))
+}
 
 /** 0 = normal bar, 1 = fully expanded square; -1 = summary not running. Ease-in-out. */
 export function getSummaryProgress(nowMs: number = Date.now()): number {
@@ -62,8 +74,11 @@ interface BannerState {
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
+  /** Walkable cells on the map (territory % denominator) and our own cells painted this round. */
+  total: number
+  myCells: number
   /** Owned cells per painter at round end (roundOwners). Empty if it didn't arrive. */
-  owners: Array<{ id: string; name: string; team: number; cells: number }>
+  owners: Array<{ id: string; name: string; team: number; cells: number; kos: number; deaths: number; painted: number }>
 }
 
 const banner: BannerState = {
@@ -73,6 +88,8 @@ const banner: BannerState = {
   winner: 'TIE',
   shownAtMs: 0,
   personal: '',
+  total: 0,
+  myCells: 0,
   owners: [],
 }
 
@@ -80,16 +97,18 @@ const banner: BannerState = {
 // just before roundReset; consumed when the banner opens.
 let pendingPersonal = ''
 let pendingAtMs = 0
-let pendingOwners: Array<{ id: string; name: string; team: number; cells: number }> = []
+let pendingCells = 0
+let pendingOwners: Array<{ id: string; name: string; team: number; cells: number; kos: number; deaths: number; painted: number }> = []
 let pendingOwnersAtMs = 0
 
 export function setRoundResult(cells: number, teamCells: number, team: number): void {
   const teamName = team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'YOUR TEAM'
   const share = teamCells > 0 ? Math.round((cells / teamCells) * 100) : 0
+  pendingCells = cells
   pendingPersonal = `YOU PAINTED ${cells} CELLS  ·  ${share}% OF ${teamName}`
   pendingAtMs = Date.now()
   // If the banner is already up (message order flipped), show it now.
-  if (banner.visible) { banner.personal = pendingPersonal; pendingPersonal = '' }
+  if (banner.visible) { banner.personal = pendingPersonal; banner.myCells = cells; pendingPersonal = '' }
 }
 
 export function showRoundEndBanner(red: number, blue: number, total: number): void {
@@ -102,6 +121,8 @@ export function showRoundEndBanner(red: number, blue: number, total: number): vo
   banner.shownAtMs = Date.now()
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
+  banner.myCells = banner.personal ? pendingCells : 0
+  banner.total = total
   pendingPersonal = ''
   banner.owners = Date.now() - pendingOwnersAtMs < 10000 ? pendingOwners : []
   pendingOwners = []

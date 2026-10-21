@@ -10,6 +10,7 @@
  *              tile level (MIN_Y; bases+line mode has a level below the bases).
  */
 
+import { room } from '../shared/messages'
 import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'
 import { Vector3 } from '@dcl/sdk/math'
 import { isMazeReady } from '../maze/rebuild'
@@ -93,6 +94,7 @@ export function initPlayerNet(): void {
       if (!t || t.position.y >= MIN_Y - FALL_RESPAWN_DROP) return
       cooldown = 2
       teleportHome('fell')
+      room.send('playerFell', {})
     })
   }
 }

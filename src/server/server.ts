@@ -42,6 +42,7 @@ import {
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
+import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
@@ -328,6 +329,7 @@ export async function setupServer(): Promise<void> {
     hits.add(victim.userId)
     markActive(from)
     console.log(`[Server] dashImpact ${from.slice(0, 8)} → ${victim.userId.slice(0, 8)}`)
+    noteHit(from, victim.userId)
     room.send('dashImpact', { attacker: from, target: victim.userId, dx: dx / len, dz: dz / len })
   })
 
@@ -383,6 +385,7 @@ export async function setupServer(): Promise<void> {
         LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S * 1000)) return
     }
     console.log(`[Server] lungeImpact ${from.slice(0, 8)} #${id} → ${victimId.slice(0, 8)}`)
+    noteHit(from, victimId)
     room.send('lungeImpact', { attacker: from, id, target: victimId, dx: ux, dz: uz })
   })
 
@@ -441,9 +444,23 @@ export async function setupServer(): Promise<void> {
     if (len < 1e-3) return
     const verdict = (kind === 1 ? bursts : lunges).hit(from, id, `anvil:${i}`, Date.now())
     if (verdict !== 'ok') { console.log(`[Server] anvilHit ${from.slice(0, 8)} #${id} anvil ${i} rejected: ${verdict}`); return }
+    noteAnvilTouch(i, from)
     anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
   })
-  room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from) anvilsPush(context.from, i, dx, dz, x, z, run === 1) })
+  room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from) { noteAnvilTouch(i, context.from); anvilsPush(context.from, i, dx, dz, x, z, run === 1) } })
+  // Round stats (server/roundStats.ts): the victim's client reports an anvil launch and its own falls.
+  room.onMessage('anvilLaunched', ({ i }, context) => {
+    const from = context?.from
+    if (!from) return
+    const by = anvilCredit(i)
+    if (by && by !== from && getTeam(by) !== null && getTeam(by) !== getTeam(from)) noteHit(by, from)
+  })
+  room.onMessage('playerFell', (_m, context) => {
+    const from = context?.from
+    if (!from || getTeam(from) === null) return
+    const by = noteFell(from)
+    console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
+  })
   room.onMessage('anvilRespawn', (_m, context) => { if (context?.from) anvilsRespawnRequest(context.from) })
 
   room.onMessage('burstHit', ({ id, target, dx, dz }, context) => {
@@ -458,6 +475,7 @@ export async function setupServer(): Promise<void> {
     if (!victim || victim.team === attackerTeam || victim.userId === from) return
     const verdict = bursts.hit(from, id, victim.userId, Date.now())
     if (verdict !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`); return }
+    noteHit(from, victim.userId)
     room.send('burstImpact', { attacker: from, id, target: victim.userId, dx: dx / len, dz: dz / len })
   })
 
@@ -557,16 +575,28 @@ export async function setupServer(): Promise<void> {
     for (const { userId, team } of rosterEntries()) {
       room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
     }
+    const painted = new Map(roundCells)
     roundCells.clear()
     // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
     // Per-painter owned cells for the summary square's shades. Top 60 keeps the message well under the 12 KB cap.
     const ROUND_OWNER_NAME_MAX = 16
-    const owners = ownerCounts().slice(0, 60).map(o => {
+    // One row per painter / roster player / bot: owned cells, KOs, deaths, cells painted this round.
+    const rows = new Map<string, { id: string; team: number; cells: number }>()
+    for (const o of ownerCounts()) {
+      const r = rows.get(o.id)
+      if (r) r.cells += o.cells; else rows.set(o.id, { id: o.id, team: o.team, cells: o.cells })
+    }
+    for (const { userId, team } of rosterEntries()) if (!rows.has(userId)) rows.set(userId, { id: userId, team, cells: 0 })
+    for (const b of getBotPositions()) if (!rows.has(`bot:${b.id}`)) rows.set(`bot:${b.id}`, { id: `bot:${b.id}`, team: b.team, cells: 0 })
+    for (const id of [...statIds(), ...painted.keys()]) if (!rows.has(id)) { const t = getTeam(id); if (t !== null) rows.set(id, { id, team: t, cells: 0 }) }
+    const owners = [...rows.values()].sort((a, b) => b.cells - a.cells).slice(0, 60).map(o => {
       const raw = o.id.startsWith('bot:') ? `Bot ${o.id.slice(4)}`
         : leaderboardGetName(o.id) ?? (o.id.length > 10 ? `${o.id.slice(0, 6)}…${o.id.slice(-4)}` : o.id)
-      return { ...o, name: raw.length > ROUND_OWNER_NAME_MAX ? raw.slice(0, ROUND_OWNER_NAME_MAX - 1) + '…' : raw }
+      return { ...o, name: raw.length > ROUND_OWNER_NAME_MAX ? raw.slice(0, ROUND_OWNER_NAME_MAX - 1) + '…' : raw,
+        kos: kosOf(o.id), deaths: deathsOf(o.id), painted: painted.get(o.id) ?? 0 }
     })
+    clearRoundStats()
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
     room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })

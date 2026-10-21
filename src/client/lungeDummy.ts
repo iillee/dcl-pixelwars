@@ -190,6 +190,7 @@ function checkLaunch(d: Dummy, i: number, dt: number): void {
   startKnockLock()
   safePhysics('anvil launch', () => Physics.applyImpulseToPlayer(Vector3.create(ux * ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, uz * ANVIL_LAUNCH_IMPULSE)))
   playDashHitSfx()
+  room.send('anvilLaunched', { i })
   console.log(`[Dummy ${i}] launched the player at ${speed.toFixed(1)} m/s`)
 }
 
