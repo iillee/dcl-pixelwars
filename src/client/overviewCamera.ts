@@ -102,7 +102,7 @@ export function setupOverviewCamera(): void {
     }
     // Mobile: start in overview once platform detection resolves, and come back after a respawn/teleport
     // exit unless the player turned it off.
-    if (!mobileAutoDone && isMobile()) { mobileAutoDone = true; mobileWant = true }
+    // Mobile starts in the regular view (Luke); the overview returns after a respawn only if the player opened it (mobileWant).
     if (resumeIn > 0) resumeIn -= dt
     if (mobileWant && !active && resumeIn <= 0 && isMobile()) setActive(true)
     if (active) update(dt)
@@ -166,7 +166,6 @@ export function toggleOverview(): void {
   setActive(!active)
   mobileWant = active
 }
-let mobileAutoDone = false
 let mobileWant = false
 let resumeIn = 0
 /** After a forced exit (respawn / teleport), wait this long before mobile re-enters overview. */
