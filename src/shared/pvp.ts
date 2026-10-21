@@ -348,6 +348,14 @@ export const LUNGE_DUMMY_UNIT = 0.25
 /** Dummy gravity (m/s²) and ground friction (m/s² of horizontal deceleration). */
 export const LUNGE_DUMMY_GRAVITY = 20
 export const LUNGE_DUMMY_FRICTION = 14
+/** Slow push: walking/running into an anvil creeps it along the push direction (server-moved;
+ *  client sends anvilPush intent at ANVIL_PUSH_SEND_HZ while in contact, server holds each for HOLD_S). */
+export const ANVIL_PUSH_SPEED = 0.6 // m/s walking
+export const ANVIL_PUSH_RUN_MULT = 1.5 // running → 0.9 m/s
+export const ANVIL_PUSH_REACH = 1.35 // m, horizontal player↔anvil centre distance that counts as contact
+export const ANVIL_PUSH_FACING = 0.5 // cos of max angle between avatar facing and the direction to the anvil
+export const ANVIL_PUSH_SEND_HZ = 10
+export const ANVIL_PUSH_HOLD_S = 0.25
 
 // ─── Server validation ──────────────────────────────────────────────
 /** Next lunge start accepted no sooner than this (s). */

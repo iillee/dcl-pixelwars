@@ -172,6 +172,8 @@ export const Messages = {
   anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number }),
   // Client → Server: key 2, re-roll all anvils.
   anvilRespawn: Schemas.Map({ n: Schemas.Int }),
+  // Client → Server: walking/running into anvil i (direction dx,dz; our position x,z). Server moves it slowly.
+  anvilPush: Schemas.Map({ i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, z: Schemas.Number, run: Schemas.Int }),
   // Server → Clients: all anvils (feet pos, velocity, yaw, alive, moving, slide = hit/respawn counter).
   anvilState: Schemas.Map({ a: Schemas.Array(Schemas.Map({
     x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, vx: Schemas.Number, vy: Schemas.Number, vz: Schemas.Number,

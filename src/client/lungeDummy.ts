@@ -19,6 +19,7 @@ import {
   ANVIL_LAUNCH_ENABLED, ANVIL_LAUNCH_MIN_SPEED, ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, ANVIL_LAUNCH_COOLDOWN_S,
   ANVIL_PREDICT_ENABLED, ANVIL_PREDICT_TIMEOUT_S, ANVIL_PREDICT_CLOSE_M, ANVIL_BLEND_S, ANVIL_BLEND_FAR_S, ANVIL_SNAP_M, ANVIL_PREDICT_CONFIRMED_MAX_S,
   BURST_KNOCKBACK, LUNGE_KNOCKBACK,
+  ANVIL_PUSH_REACH, ANVIL_PUSH_FACING, ANVIL_PUSH_SEND_HZ,
 } from '../shared/pvp'
 import { AnvilWorld } from '../shared/anvilSim'
 import { buildWalkableGraph } from '../shared/mazeGraph'
@@ -192,6 +193,30 @@ function checkLaunch(d: Dummy, i: number, dt: number): void {
   console.log(`[Dummy ${i}] launched the player at ${speed.toFixed(1)} m/s`)
 }
 
+/** Slow push: holding a move key while facing into an anvil we touch → anvilPush intent (server moves it). */
+let pushClock = 0
+const MOVE_KEYS = [InputAction.IA_FORWARD, InputAction.IA_BACKWARD, InputAction.IA_LEFT, InputAction.IA_RIGHT]
+function checkPush(dt: number): void {
+  pushClock += dt
+  if (pushClock < 1 / ANVIL_PUSH_SEND_HZ) return
+  pushClock = 0
+  if (!MOVE_KEYS.some(k => inputSystem.isPressed(k))) return
+  const t = Transform.getOrNull(engine.PlayerEntity)
+  if (!t) return
+  const f = Vector3.rotate(Vector3.Forward(), t.rotation)
+  const fl = Math.hypot(f.x, f.z)
+  if (fl < 1e-3) return
+  const fx = f.x / fl, fz = f.z / fl
+  dummies.forEach((d, i) => {
+    if (!d.alive || d.predicted) return
+    const dx = d.pos.x - t.position.x, dz = d.pos.z - t.position.z, dy = t.position.y - d.pos.y
+    const dist = Math.hypot(dx, dz)
+    if (dist > ANVIL_PUSH_REACH || dist < 1e-3 || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
+    if ((fx * dx + fz * dz) / dist < ANVIL_PUSH_FACING) return
+    room.send('anvilPush', { i, dx: fx, dz: fz, x: t.position.x, z: t.position.z, run: inputSystem.isPressed(InputAction.IA_WALK) ? 0 : 1 })
+  })
+}
+
 function render(d: Dummy, i: number, dt: number): void {
   const tr = Transform.getMutable(d.ent)
   d.age += dt
@@ -270,5 +295,6 @@ export function initLungeDummy(): void {
       render(d, i, dt)
       checkLaunch(d, i, dt)
     })
+    checkPush(dt)
   })
 }

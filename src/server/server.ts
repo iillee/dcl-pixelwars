@@ -42,7 +42,7 @@ import {
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
-import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest } from './anvils'
+import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 
@@ -443,6 +443,7 @@ export async function setupServer(): Promise<void> {
     if (verdict !== 'ok') { console.log(`[Server] anvilHit ${from.slice(0, 8)} #${id} anvil ${i} rejected: ${verdict}`); return }
     anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
   })
+  room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from) anvilsPush(context.from, i, dx, dz, x, z, run === 1) })
   room.onMessage('anvilRespawn', (_m, context) => { if (context?.from) anvilsRespawnRequest(context.from) })
 
   room.onMessage('burstHit', ({ id, target, dx, dz }, context) => {
