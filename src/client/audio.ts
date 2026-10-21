@@ -15,6 +15,7 @@
  */
 
 import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
+import { events } from '../shared/events'
 
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
@@ -40,6 +41,7 @@ export function initAudio(): void {
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   initLungeSfx()
   initBurstSfx()
+  initFlagtagSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
@@ -177,4 +179,31 @@ function initBurstSfx(): void {
 export function playBurstSfx(): void {
   if (!burstSfxEnt) return
   AudioSource.createOrReplace(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
+}
+
+/** flagtag sounds (copied verbatim from flagtag/assets/sounds): death.mp3 on the local fall-respawn
+ *  (flagtag: global, volume 1) and trumpets.mp3 at round end for every client (flagtag: global, volume 0.8).
+ *  Camera-parented 2D sources, preloaded so the first play isn't late. */
+const DEATH_SRC = 'assets/sounds/death.mp3'
+const TRUMPET_SRC = 'assets/sounds/trumpets.mp3'
+let deathSfxEnt: Entity | null = null
+let trumpetSfxEnt: Entity | null = null
+function initFlagtagSfx(): void {
+  const pre = engine.addEntity()
+  AssetLoad.create(pre, { assets: [DEATH_SRC, TRUMPET_SRC] })
+  deathSfxEnt = engine.addEntity()
+  Transform.create(deathSfxEnt, { parent: engine.CameraEntity })
+  AudioSource.create(deathSfxEnt, { audioClipUrl: DEATH_SRC, playing: false, loop: false, volume: 1, global: true })
+  trumpetSfxEnt = engine.addEntity()
+  Transform.create(trumpetSfxEnt, { parent: engine.CameraEntity })
+  AudioSource.create(trumpetSfxEnt, { audioClipUrl: TRUMPET_SRC, playing: false, loop: false, volume: 0.8, global: true })
+  events.on('round:reset', () => playTrumpetSfx())
+}
+export function playDeathSfx(): void {
+  if (!deathSfxEnt) return
+  AudioSource.createOrReplace(deathSfxEnt, { audioClipUrl: DEATH_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
+}
+export function playTrumpetSfx(): void {
+  if (!trumpetSfxEnt) return
+  AudioSource.createOrReplace(trumpetSfxEnt, { audioClipUrl: TRUMPET_SRC, playing: true, loop: false, volume: 0.8, global: true, currentTime: 0 })
 }

@@ -17,6 +17,7 @@ import { isMazeReady } from '../maze/rebuild'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
+import { playDeathSfx } from './audio'
 import { Team } from '../shared/team'
 import { MIN_Y, baseSpawn } from '../maze/generator'
 import { IS_SKY, FALL_RESPAWN_DROP } from '../maze/level'
@@ -94,6 +95,7 @@ export function initPlayerNet(): void {
       if (!t || t.position.y >= MIN_Y - FALL_RESPAWN_DROP) return
       cooldown = 2
       teleportHome('fell')
+      playDeathSfx()
       room.send('playerFell', {})
     })
   }
