@@ -16,6 +16,13 @@
 export const ROUND_LENGTH_MINUTES = 3
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 
+// Round-end summary animation (must match client RoundSummary timing).
+// Server waits this long after roundEnded before opening the mode vote.
+export const SUMMARY_GROW_S = 0.4
+export const SUMMARY_HOLD_S = 10
+export const SUMMARY_SHRINK_S = 0.4
+export const SUMMARY_MS = (SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S) * 1000
+
 // Round-on-join: the SERVER owns the round (counter + end time). It starts a round when a player joins
 // while idle, chains rounds while anyone is connected, and goes idle when a round ends with nobody there.
 // Clients mirror it from the 'roundClock' message (remaining ms, so local clock skew doesn't matter).

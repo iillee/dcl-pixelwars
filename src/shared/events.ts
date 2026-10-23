@@ -60,16 +60,25 @@ export type Events = {
     total: number
   }
 
-  // UTC round boundary crossed. Server has already zeroed its paint state
-  // and rolled the new seed. Subscribers: HUD (banner), paint (clear),
-  // maze (rebuild via SeedHolder), player (teleport to center), and
-  // eventually audio (fanfare).
+  // Round ended (scores only). Subscriber: round.ts banner. Maze stays until round:reset.
+  'round:ended': {
+    finalRed: number
+    finalBlue: number
+    finalTotal: number
+  }
+
+  // After mode vote locks: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
   'round:reset': {
     seed: number
     finalRed: number
     finalBlue: number
     finalTotal: number
   }
+
+  // Mode vote (splash). Subscribers: client/splash + modeVote state.
+  'mode:voteOpen': { remainingMs: number; pixelwars: number; ooze: number }
+  'mode:voteTally': { pixelwars: number; ooze: number }
+  'mode:voteLocked': { mode: number; wanted: number; fallback: boolean }
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
   // Subscriber: client/botVisual renders one box per entry.

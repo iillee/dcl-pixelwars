@@ -13,11 +13,14 @@
 export {
   ROUND_LENGTH_MINUTES,
   ROUND_INTERVAL_MS,
+  SUMMARY_GROW_S,
+  SUMMARY_HOLD_S,
+  SUMMARY_SHRINK_S,
   getRoundIndex,
   getRoundEndMs,
 } from './shared/roundTiming'
 
-import { getRoundEndMs } from './shared/roundTiming'
+import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -36,10 +39,7 @@ export function formatMMSS(secs: number): string {
 // new arena" rather than a dead pause.
 
 
-// Round-end summary: the score bar grows into a centred square split red | blue, holds, shrinks back.
-export const SUMMARY_GROW_S = 0.4
-export const SUMMARY_HOLD_S = 10
-export const SUMMARY_SHRINK_S = 0.4
+// Round-end summary timing lives in shared/roundTiming (server waits the same SUMMARY_MS).
 /** Dim backdrop + banner state live exactly as long as the summary animation. */
 export const BANNER_DURATION_MS = (SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S) * 1000
 
@@ -152,12 +152,16 @@ export function initRoundNet(): void {
     if (banner.visible && banner.owners.length === 0) banner.owners = owners
   })
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
-  events.on('round:reset', ({ seed, finalRed, finalBlue, finalTotal }) => {
+  // Scores arrive on round:ended (before the mode-vote splash). round:reset only rebuilds the maze.
+  events.on('round:ended', ({ finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
     console.log(
-      `[Client] roundReset seed=${seed} final red=${finalRed} blue=${finalBlue} ` +
+      `[Client] roundEnded final red=${finalRed} blue=${finalBlue} ` +
       `serverTotal=${finalTotal} localTotal=${localTotal}`
     )
     showRoundEndBanner(finalRed, finalBlue, localTotal)
+  })
+  events.on('round:reset', ({ seed }) => {
+    console.log(`[Client] roundReset seed=${seed} (maze rebuild after mode vote)`)
   })
 }

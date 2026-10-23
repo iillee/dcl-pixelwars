@@ -474,20 +474,20 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <Label value={isRoundActive() ? formatMMSS(secs) : '--:--'} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
-                {/* Star icon on the left, mirror position to the mute icon on
-                    the right. Placeholder — no handler yet; wire onMouseDown
-                    when we decide what it does (leaderboard? favorites?). */}
+                {/* Star icon on the left, mirror of mute on the right (same size/top). */}
                 <UiEntity
                   uiTransform={{
-                    width: 19, height: 19,
-                    positionType: 'absolute', position: { top: (68 - 19) / 2, left: 20 }, // vertically centred on the time
-                    justifyContent: 'center', alignItems: 'center',
+                    width: 21, height: 21,
+                    positionType: 'absolute', position: { top: 20, left: 19 },
                     pointerFilter: 'block',
                   }}
+                  uiBackground={{
+                    textureMode: 'stretch',
+                    texture: { src: STAR_SRC },
+                    color: SUMMARY_INK,
+                  }}
                   onMouseDown={toggleLeaderboard}
-                >
-                  <Label value="★" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
-                </UiEntity>
+                />
                 {/* Mute icon docked inside the timer panel on the right. No pill
                     background — just the icon sitting on the panel. */}
                 <UiEntity

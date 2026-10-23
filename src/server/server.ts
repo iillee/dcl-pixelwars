@@ -31,7 +31,8 @@ import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } 
 // Round loop constants — single source of truth lives in shared/roundTiming.ts
 // so client (src/round.ts) and server share the exact same cadence. Do not
 // redefine here; edit the shared module if the cadence changes.
-import { getRoundIndex as currentRoundIndex, getRoundEndMs, isRoundActive, setRoundState, ROUND_INTERVAL_MS } from '../shared/roundTiming'
+import { getRoundIndex as currentRoundIndex, getRoundEndMs, isRoundActive, setRoundState, ROUND_INTERVAL_MS, SUMMARY_MS } from '../shared/roundTiming'
+import { GameMode, GameModeId, MODE_VOTE_MS, resolveModeVote } from '../shared/gameMode'
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
@@ -133,9 +134,17 @@ export async function setupServer(): Promise<void> {
   // second player leaves (instead of waiting up to 60s for the activity
   // window to expire). markInactive() keeps the roster slot for rejoin
   // stability — only the activity timestamp is cleared.
+  /** Current game mode for the live / next round (0 Pixelwars, 1 Ooze). */
+  let currentMode: GameModeId = GameMode.Pixelwars
+
   /** Round-on-join state → one client (to) or everyone. */
   function sendRoundClock(to?: string): void {
-    const msg = { idx: currentRoundIndex(), remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())), active: isRoundActive() }
+    const msg = {
+      idx: currentRoundIndex(),
+      remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())),
+      active: isRoundActive(),
+      mode: currentMode,
+    }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }
 
@@ -148,24 +157,138 @@ export async function setupServer(): Promise<void> {
     for (const [uid, t] of lastPingAt) { if (now - t <= PRESENCE_TIMEOUT_MS) n++; else lastPingAt.delete(uid) }
     return n
   }
-  function startRoundIfIdle(by: string): void {
-    if (isRoundActive()) return
-    setRoundState(currentRoundIndex(), Date.now() + ROUND_INTERVAL_MS, true)
-    console.log(`[Server] round ${currentRoundIndex()} started by ${by.slice(0, 10)}`)
+  const presentIds = (): string[] => {
+    const now = Date.now(); const ids: string[] = []
+    for (const [uid, t] of lastPingAt) { if (now - t <= PRESENCE_TIMEOUT_MS) ids.push(uid); else lastPingAt.delete(uid) }
+    return ids
+  }
+
+  // ─── Mode vote / intermission ───────────────────────────────────────
+  // Phases after a round ends (or on cold start while idle):
+  //   summaryWait → voting → (lock) → playing
+  // Mid-round joiners never enter a vote; they get roundClock with the live mode.
+  type IntermissionPhase = 'idle' | 'summaryWait' | 'voting'
+  let intermission: IntermissionPhase = 'idle'
+  let summaryEndsAt = 0
+  let voteEndsAt = 0
+  const modeVotes = new Map<string, GameModeId>() // last vote per player
+  // Scores held from round end until roundReset (after vote).
+  let pendingFinal = { red: 0, blue: 0, total: 0 }
+  let pendingNextIdx = 0
+
+  function tallyVotes(): { pixelwars: number; ooze: number } {
+    let pixelwars = 0, ooze = 0
+    for (const m of modeVotes.values()) {
+      if (m === GameMode.Ooze) ooze++; else pixelwars++
+    }
+    return { pixelwars, ooze }
+  }
+
+  function sendVoteOpen(to?: string): void {
+    const t = tallyVotes()
+    const msg = { remainingMs: Math.max(0, Math.round(voteEndsAt - Date.now())), pixelwars: t.pixelwars, ooze: t.ooze }
+    if (to) room.send('modeVoteOpen', msg, { to: [to] }); else room.send('modeVoteOpen', msg)
+  }
+
+  function sendVoteTally(): void {
+    const t = tallyVotes()
+    room.send('modeVoteTally', { pixelwars: t.pixelwars, ooze: t.ooze })
+  }
+
+  /** True when every currently-present player has cast a vote (and at least one is present). */
+  function allPresentVoted(): boolean {
+    const ids = presentIds()
+    if (ids.length === 0) return false
+    for (const id of ids) if (!modeVotes.has(id)) return false
+    return true
+  }
+
+  function beginVote(why: string): void {
+    intermission = 'voting'
+    voteEndsAt = Date.now() + MODE_VOTE_MS
+    modeVotes.clear()
+    console.log(`[Server] mode vote open (${why}) for ${MODE_VOTE_MS / 1000}s`)
+    sendVoteOpen()
+  }
+
+  function lockVoteAndStart(why: string): void {
+    const t = tallyVotes()
+    const resolved = resolveModeVote(t.pixelwars, t.ooze, currentMode)
+    currentMode = resolved.mode
+    intermission = 'idle'
+    modeVotes.clear()
+    room.send('modeVoteLocked', { mode: resolved.mode, wanted: resolved.wanted, fallback: resolved.fallback })
+    console.log(
+      `[Server] mode vote locked (${why}): pw=${t.pixelwars} ooze=${t.ooze} → ` +
+      `${resolved.mode === GameMode.Ooze ? 'OOZE' : 'PIXELWARS'}` +
+      (resolved.fallback ? ' (Ooze fallback → Pixelwars)' : ''),
+    )
+    startNextRoundAfterVote()
+  }
+
+  /** After vote: reshuffle teams, roundReset (maze), start clock. Used for both cold-start and between-rounds. */
+  function startNextRoundAfterVote(): void {
+    // Between rounds: pendingNextIdx = last+1. Cold start: set to currentRoundIndex() when vote opened.
+    const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
+    const c = pendingFinal
+    const pruned = pruneForNewRound()
+    if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round start`)
+    const shuffled = shuffleTeams()
+    for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
+    console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    clearPaintState()
+    broadcastRoster('reset')
+    rebuildBotGraph(seed)
+    anvilsMazeChanged()
+    void saveLeaderboard()
+    publishLeaderboard()
+    setRoundState(seed, Date.now() + ROUND_INTERVAL_MS, true)
+    pendingNextIdx = 0
+    pendingFinal = { red: 0, blue: 0, total: 0 }
+    console.log(`[Server] round ${seed} started (mode=${currentMode === GameMode.Ooze ? 'OOZE' : 'PIXELWARS'})`)
     sendRoundClock()
   }
+
+  /** Idle server + someone present: open a mode vote instead of starting immediately. */
+  function ensureIdleVote(by: string): void {
+    if (isRoundActive()) return
+    if (intermission === 'voting' || intermission === 'summaryWait') return
+    pendingNextIdx = currentRoundIndex() // keep current seed index for cold start
+    pendingFinal = { red: 0, blue: 0, total: 0 }
+    beginVote(`idle join by ${by.slice(0, 10)}`)
+  }
+
   room.onMessage('presencePing', (_d, context) => {
     const from = context?.from
     if (!from) return
     lastPingAt.set(from, Date.now())
     // Presence counts as activity: the bot manager's human count (60 s activity window) otherwise
     // dropped a human who wasn't painting, kept the bot alive with 2 humans, and balanced joiners wrongly.
-    if (getTeam(from) !== null) { markActive(from); startRoundIfIdle(from) } // idle server + a joined player still here → fresh round
+    if (getTeam(from) !== null) {
+      markActive(from)
+      // Idle + no vote yet → open mode vote (do not start a round mid-splash).
+      if (!isRoundActive() && intermission === 'idle') ensureIdleVote(from)
+    }
+  })
+
+  room.onMessage('modeVote', ({ mode }, context) => {
+    const from = context?.from
+    if (!from || intermission !== 'voting') return
+    const m = mode === GameMode.Ooze ? GameMode.Ooze : GameMode.Pixelwars
+    modeVotes.set(from, m)
+    sendVoteTally()
+    console.log(`[Server] modeVote ${from.slice(0, 10)} → ${m === GameMode.Ooze ? 'OOZE' : 'PIXELWARS'} (${modeVotes.size} ballot(s))`)
+    // Early lock: every connected (present) player has voted — don't wait out the 10s max.
+    if (allPresentVoted()) lockVoteAndStart('all present voted')
   })
 
   onLeaveScene((userId: string) => {
     lastPingAt.delete(userId)
+    modeVotes.delete(userId)
     markInactive(userId)
+    // If they were the last holdout in an open vote, lock early for everyone still here.
+    if (intermission === 'voting' && allPresentVoted()) lockVoteAndStart('last holdout left')
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
     // instead of being rate-limited into a blank map.
     lastSnapshotAt.delete(userId)
@@ -203,10 +326,20 @@ export async function setupServer(): Promise<void> {
     const other = activeSoloHumanTeam(from)
     if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
     markActive(from) // count them as present immediately; paint activity will refresh it
-    // Round-on-join: idle server → this join starts a fresh 3:00 round (maze/board already reset at the last end).
+    // Round-on-join: live round → join as-is (no vote). Idle → mode vote splash. Mid-vote → catch up.
     lastPingAt.set(from, Date.now())
-    if (!isRoundActive()) startRoundIfIdle(from)
-    else sendRoundClock(from)
+    if (isRoundActive()) {
+      sendRoundClock(from)
+    } else if (intermission === 'voting') {
+      sendRoundClock(from)
+      sendVoteOpen(from)
+    } else if (intermission === 'summaryWait') {
+      sendRoundClock(from)
+      // Summary still up; they'll get modeVoteOpen when the vote opens.
+    } else {
+      ensureIdleVote(from)
+      sendRoundClock(from)
+    }
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     broadcastRoster('join')
@@ -232,6 +365,7 @@ export async function setupServer(): Promise<void> {
   room.onMessage('paintTick', ({ ids }, context) => {
     const from = context?.from
     if (!from) return
+    if (!isRoundActive()) { logDrop(from, 'paintTick', 'round inactive (intermission/idle)'); return }
     const team = getTeam(from)
     if (team === null) { logDrop(from, 'paintTick', 'no team (not in roster)'); return }  // pre-roster paint
     if (ids.length > MAX_IDS_PER_TICK) {
@@ -640,19 +774,46 @@ export async function setupServer(): Promise<void> {
     if (isRoundActive()) sendRoundClock()
   })
 
+  // Round end → summary (client) → mode vote splash → lock → roundReset / next round.
   engine.addSystem(() => {
-    if (!isRoundActive() || Date.now() < getRoundEndMs()) return
-    // Round over: chain the next one if anyone is connected, else end it once and go idle until a join.
+    const now = Date.now()
+
+    // ── Intermission: summary wait → open vote ──
+    if (intermission === 'summaryWait' && now >= summaryEndsAt) {
+      if (presentCount() === 0) {
+        intermission = 'idle'
+        console.log('[Server] summary done, nobody present → idle (no vote)')
+        sendRoundClock()
+        return
+      }
+      beginVote('after summary')
+      return
+    }
+
+    // ── Intermission: vote max 10s, or earlier if everyone voted (handled in modeVote) ──
+    if (intermission === 'voting' && now >= voteEndsAt) {
+      if (presentCount() === 0) {
+        intermission = 'idle'
+        modeVotes.clear()
+        console.log('[Server] vote timed out, nobody present → idle')
+        sendRoundClock()
+        return
+      }
+      lockVoteAndStart('timer 10s')
+      return
+    }
+
+    if (!isRoundActive() || now < getRoundEndMs()) return
+    if (intermission !== 'idle') return // already ending
+
+    // Round timer hit zero.
     const lastRoundIndex = currentRoundIndex()
     const idx = lastRoundIndex + 1
-    const present = presentCount() > 0 // pinged within 15 s (bots never ping)
-    setRoundState(idx, Date.now() + ROUND_INTERVAL_MS, present)
-    if (!present) console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
+    const present = presentCount() > 0
     const c = coverage()
-    console.log(`[Server] round boundary: ${lastRoundIndex} → ${idx} (final red=${c.red} blue=${c.blue} total=${c.total})`)
-    // Personal results go out BEFORE roundReset so the client already has
-    // its line when the banner opens. teamCells = sum of every teammate's
-    // contribution this round, so shares within a team add up to 100%.
+    console.log(`[Server] round ${lastRoundIndex} ended (final red=${c.red} blue=${c.blue} total=${c.total}) present=${present}`)
+
+    // Personal results + owners BEFORE summary UI.
     const teamCells: Record<number, number> = { 1: 0, 2: 0 }
     for (const [uid, n] of roundCells) {
       const t = getTeam(uid)
@@ -663,34 +824,33 @@ export async function setupServer(): Promise<void> {
     }
     const painted = new Map(roundCells)
     roundCells.clear()
-    // A bomb armed in the old round would paint stale cell ids.
     pendingBombs.length = 0
     const owners = buildStandings(painted)
     clearRoundStats()
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
-    // Drop team assignments of players who left, so a later rejoin is
-    // balanced against the current lobby.
-    const pruned = pruneForNewRound()
-    if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round boundary`)
-    // Reshuffle teams for the new round (Luke: not always the same colour / same people). Sent BEFORE
-    // roundReset so the client's round-reset teleport uses the new team's base and paint colour.
-    const shuffled = shuffleTeams()
-    for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
-    console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
-    room.send('roundReset', { seed: idx, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
-    clearPaintState()
-    broadcastRoster('reset')
-    rebuildBotGraph(idx)
-    anvilsMazeChanged()
-    // Round boundary is our persistence + publish cadence for the
-    // leaderboard: one round (3 min) is frequent enough that a server crash loses at
-    // most one round of paint credit, infrequent enough that Storage
-    // writes are cheap. Fire-and-forget — don't block round advancement
-    // on I/O.
-    void saveLeaderboard()
-    publishLeaderboard()
-    sendRoundClock() // new round running, or idle
+
+    // Freeze the round clock (inactive) while summary + vote run. Maze/paint stay until vote locks.
+    setRoundState(lastRoundIndex, now, false)
+    pendingNextIdx = idx
+    pendingFinal = { red: c.red, blue: c.blue, total: c.total }
+    room.send('roundEnded', { finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    sendRoundClock()
+
+    if (!present) {
+      intermission = 'idle'
+      console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
+      // Still clear board so the next cold-start is clean.
+      clearPaintState()
+      void saveLeaderboard()
+      publishLeaderboard()
+      return
+    }
+
+    // Wait for the client summary animation, then open the mode-vote splash (10s max).
+    intermission = 'summaryWait'
+    summaryEndsAt = now + SUMMARY_MS
+    console.log(`[Server] summary wait ${SUMMARY_MS / 1000}s → then mode vote`)
   })
 
   // Discord flush tick — low frequency; the delay is 5s so 1Hz polling
@@ -703,5 +863,5 @@ export async function setupServer(): Promise<void> {
     flushPendingJoins()
   })
 
-  console.log('[Server] ✅ Ready — listening for joinRoster, paintTick, requestSnapshot; broadcasting paintDelta at 5Hz + roundReset on UTC boundaries.')
+  console.log('[Server] ✅ Ready — joinRoster, paintTick, modeVote; paintDelta 5Hz; roundEnded → vote → roundReset.')
 }

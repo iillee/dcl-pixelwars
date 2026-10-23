@@ -27,11 +27,11 @@ import { syncEntity } from '@dcl/sdk/network'
 import { SeedHolder, seedHolder, LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { setupUi } from '../ui'
 import { setupOverviewCamera } from './overviewCamera'
-import { setupSkybox } from './skybox'
 import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
+import { initModeVoteNet } from './modeVote'
 import { initAudio } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
@@ -98,7 +98,6 @@ export async function setupClient(): Promise<void> {
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
   setupOverviewCamera()
-  setupSkybox()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
   // decorative lever entity from an earlier iteration where pulling it
@@ -138,6 +137,7 @@ export async function setupClient(): Promise<void> {
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.
   initClientHandler()
+  initModeVoteNet()
 
   // Register the SeedHolder for cross-client sync. Doing this inside
   // setupClient() (not at module top) ensures the networking layer is

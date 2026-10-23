@@ -84,7 +84,23 @@ export const Messages = {
   // banner denominator from its own walkable-cell count (same math as HUD).
   // Server → Client: the server-owned round (round-on-join). Broadcast on start / boundary / idle, and sent to
   // each joiner (joinRoster, requestSnapshot). remainingMs is relative so client clock skew doesn't matter.
-  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean }),
+  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean, mode: Schemas.Int }),
+
+  // Between-rounds (and cold-start) mode vote. mode: 0 = Pixelwars, 1 = Black Ooze.
+  // Client → Server: cast / change one vote. Server keeps last vote per player.
+  modeVote: Schemas.Map({ mode: Schemas.Int }),
+  // Server → Clients: vote window open (remainingMs from send time). Also resent on join mid-vote.
+  modeVoteOpen: Schemas.Map({ remainingMs: Schemas.Int, pixelwars: Schemas.Int, ooze: Schemas.Int }),
+  // Server → Clients: live tally after each accepted vote.
+  modeVoteTally: Schemas.Map({ pixelwars: Schemas.Int, ooze: Schemas.Int }),
+  // Server → Clients: vote locked. fallback=true means Ooze won but isn't ready → Pixelwars.
+  modeVoteLocked: Schemas.Map({ mode: Schemas.Int, wanted: Schemas.Int, fallback: Schemas.Boolean }),
+  // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after the vote.
+  roundEnded: Schemas.Map({
+    finalRed: Schemas.Int,
+    finalBlue: Schemas.Int,
+    finalTotal: Schemas.Int,
+  }),
 
   roundReset: Schemas.Map({
     seed: Schemas.Int,
