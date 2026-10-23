@@ -257,9 +257,14 @@ export async function setupServer(): Promise<void> {
     } else if (intermission === 'summaryWait') {
       sendRoundClock(from)
     } else {
+      // startNextRound() reshuffles roster teams. Re-read after so we never
+      // echo the pre-shuffle assignTeam value (that desync made the client
+      // teleport to the wrong base - stacking on the opposite-team ghost -
+      // and optimistic local paint used the other colour vs server applyPaint).
       ensureRoundStarted(from)
       sendRoundClock(from)
     }
+    team = getTeam(from) ?? team
     console.log(`[Server] joinRoster ${from} → team ${team === 1 ? 'RED' : 'BLUE'} (roster size ${rosterSize()}, active ${activeHumanCount()})`)
     room.send('teamAssigned', { team }, { to: [from] })
     broadcastRoster('join')
