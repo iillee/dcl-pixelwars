@@ -7,8 +7,8 @@
  *   - sky:     each player goes to their TEAM BASE once the server has
  *              assigned a team (teamAssigned), at each round reset, and
  *              whenever a fall rescue finishes (client/fallRescue.ts). Crossing
- *              the fall line does not teleport: the rescue locks input, shows
- *              a placeholder floater, then calls teleportHome('fell').
+ *              the fall line catches them under the arena, then teleportHome('fell')
+ *              after the floater beat.
  */
 
 import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'

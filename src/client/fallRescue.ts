@@ -1,32 +1,38 @@
 /**
  * fallRescue.ts — Lakitu-style fall pickup (slice 1).
  *
- * Crossing the sky fall line no longer teleports home. The local player is
- * locked, a placeholder floater hangs on them, and after the beat below they
- * are moved to the team base once. No continuous avatar drag: the body keeps
- * falling, the floater is local VFX at the player, then one movePlayerTo.
+ * Crossing the sky fall line catches the player immediately. movePlayerTo parks
+ * them at a hold just under the fall line (same XZ as the trip, far above the
+ * ground). They stay there for the floater beat — if Explorer gravity pulls
+ * them down, the hold is re-applied — then one teleport to the team base.
+ * The body does not freefall for the pickup.
  *
  * Beat (Luke: tweak FALL_RESCUE):
- *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh
- *   grab           floater swoops in
- *   carry          floater hangs; still locked
+ *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
+ *                  movePlayerTo the hold (holdFallLine so it does not re-trip)
+ *   grab           floater swoops in at the hold
+ *   carry          floater hangs; still locked; re-assert the hold if they slip
  *   drop           movePlayerTo team base, player:respawned (knock immunity starts here)
- *   peel           floater rises off and despawns, once the teleport has landed
+ *   peel           floater rises off and despawns, once the base teleport has landed
  *   land           walk only, abilities still off, then normal play
  *
  * Trip → drop = GRAB_S + CARRY_S (target 3.0–3.5s). Land lock is after that.
  * Round reset / team / initial teleports call cancelFallRescue via teleportHome
- * and do not wait out a pickup.
+ * and do not wait out a pickup. player:respawned fires only on the base drop.
  */
 
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
+import { movePlayerTo } from '~system/RestrictedActions'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
-import { MIN_Y } from '../maze/generator'
+import { baseSpawn, MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP, IS_SKY } from '../maze/level'
+import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
+import { localTeam } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
+import { exitOverview } from './overviewCamera'
 
 /** Pickup timings and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -48,6 +54,12 @@ export const FALL_RESCUE = {
   APPROACH_EXTRA_Y: 4.5,
   /** How far the floater climbs while it peels off. */
   PEEL_RISE: 2.2,
+  /** Catch is this far below the fall line (MIN_Y - FALL_RESPAWN_DROP). ~2 m → y≈64, under the arena, not the ground. */
+  HOLD_BELOW_LINE: 2,
+  /** Re-apply the hold if they drop this far under it (Explorer gravity). */
+  HOLD_SLIP: 1.25,
+  /** Minimum gap between hold teleports while grabbed. */
+  REHOLD_S: 0.35,
 }
 
 const CLOUD_MAT = {
@@ -79,8 +91,34 @@ let floater: Floater | null = null
 /** False from a home teleport until we're above the fall line again (or REARM_S). */
 let rearm = true
 let rearmLeft = 0
+/** Catch point for this pickup. Null once we drop or cancel. */
+let holdPos: { x: number; y: number; z: number } | null = null
+let reholdLeft = 0
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
+function holdHeight(): number { return fallLine() - FALL_RESCUE.HOLD_BELOW_LINE }
+
+/** Camera / body aim: team base, level with the hold so the view doesn't tip into the void. */
+function catchLook(hold: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  let dx = base.x - hold.x
+  let dz = base.z - hold.z
+  if (dx * dx + dz * dz < 4) {
+    dx = SCENE_SIZE / 2 - hold.x
+    dz = SCENE_SIZE / 2 - hold.z
+  }
+  const len = Math.hypot(dx, dz) || 1
+  return { x: hold.x + (dx / len) * 8, y: hold.y, z: hold.z + (dz / len) * 8 }
+}
+
+function moveToHold(): void {
+  if (!holdPos) return
+  holdFallLine()
+  exitOverview()
+  const look = catchLook(holdPos)
+  movePlayerTo({ newRelativePosition: holdPos, cameraTarget: look, avatarTarget: look }).catch(() => {})
+  reholdLeft = FALL_RESCUE.REHOLD_S
+}
 
 function playerPos(): { x: number; y: number; z: number } | null {
   const t = Transform.getOrNull(engine.PlayerEntity)
@@ -128,19 +166,24 @@ function spawnFloater(p: { x: number; y: number; z: number }): void {
 
 function begin(y: number): void {
   const line = fallLine()
+  const p = playerPos()
   phase = 'grab'
   phaseLeft = FALL_RESCUE.GRAB_S
   // Interrupt first: cancelling a lunge rewrites InputModifier, then the freeze wins.
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
   playFallRescueSfx()
-  const p = playerPos()
-  if (p) spawnFloater(p)
+  if (p) {
+    holdPos = { x: p.x, y: holdHeight(), z: p.z }
+    moveToHold()
+    spawnFloater(holdPos)
+  }
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
-  console.log(`[FallRescue] trip y=${y.toFixed(1)} line=${line.toFixed(1)} pickup ${(FALL_RESCUE.GRAB_S + FALL_RESCUE.CARRY_S).toFixed(2)}s`)
+  console.log(`[FallRescue] trip y=${y.toFixed(1)} line=${line.toFixed(1)} hold=${holdHeight().toFixed(1)} pickup ${(FALL_RESCUE.GRAB_S + FALL_RESCUE.CARRY_S).toFixed(2)}s`)
 }
 
 function drop(): void {
+  holdPos = null
   phase = 'land'
   phaseLeft = FALL_RESCUE.LAND_LOCK_S
   setFallMoveLock('walk')
@@ -169,9 +212,21 @@ function tickPhase(dt: number): void {
   }
 }
 
+function tickHold(dt: number): void {
+  if ((phase !== 'grab' && phase !== 'carry') || !holdPos) return
+  reholdLeft -= dt
+  if (reholdLeft > 0) return
+  const p = playerPos()
+  if (!p || p.y >= holdPos.y - FALL_RESCUE.HOLD_SLIP) return
+  console.log(`[FallRescue] rehold y=${p.y.toFixed(1)} → ${holdPos.y.toFixed(1)}`)
+  moveToHold()
+}
+
 function tickFloater(dt: number, line: number): void {
   if (!floater) return
-  const p = playerPos()
+  // During the catch the cloud stays on the hold, even if the body lags a frame.
+  const parked = (floater.mode === 'in' || floater.mode === 'hang') && holdPos ? holdPos : null
+  const p = parked ?? playerPos()
   if (!p) { despawnFloater(); return }
   floater.bob += dt
   const bob = Math.sin(floater.bob * 3.2) * 0.1
@@ -184,7 +239,8 @@ function tickFloater(dt: number, line: number): void {
     placeFloater(p, FALL_RESCUE.HANG_Y + bob, 1)
     if (floater.mode === 'wait') {
       floater.waitLeft -= dt
-      if (p.y >= line || floater.waitLeft <= 0) {
+      const liveY = playerPos()?.y
+      if ((liveY !== undefined && liveY >= line) || floater.waitLeft <= 0) {
         floater.mode = 'peel'
         floater.peelLeft = FALL_RESCUE.PEEL_S
       }
@@ -207,6 +263,7 @@ function tick(dt: number): void {
     if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
   }
   if (phase !== 'idle') tickPhase(step)
+  tickHold(step)
   tickFloater(step, line)
   if (phase !== 'idle' || !rearm || !isMazeReady()) return
   const y = playerPos()?.y
@@ -226,6 +283,7 @@ export function cancelFallRescue(why: string): void {
   console.log(`[FallRescue] cancel (${why})`)
   phase = 'idle'
   phaseLeft = 0
+  holdPos = null
   despawnFloater()
   setFallMoveLock('open')
 }
