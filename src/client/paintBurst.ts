@@ -5,8 +5,8 @@
  * Cooldown: BURST_COOLDOWN_S timer (like Lunge), enforced by the server too.
  *
  * Use (F / the hotbar slot on mobile): start the cooldown and fire one shockwave at our feet:
- *   - opponents within BURST_RADIUS (horizontal, ≤ BURST_HIT_MAX_DY up/down) with clear line of sight (raycast,
- *     BURST_LOS) → burstHit → server dedupes → burstImpact → the victim's own
+ *   - opponents within BURST_RADIUS (horizontal, ≤ BURST_HIT_MAX_DY up/down) → burstHit immediately
+ *     (BURST_LOS off for lag; was 0-300 ms raycast wait) → server dedupes → burstImpact → the victim's own
  *     client knocks itself outward (ImpactGate: dedupe + stale; respawn-immune).
  *   - local test dummies are knocked directly; ghost bots are shoved server-side.
  * One-time paint: burstUse carries our current cell and the server paints the
@@ -160,8 +160,9 @@ export function triggerBurst(): void {
   const id = burstId
   cooldownLeft = BURST_COOLDOWN_S
   const cell = getCurrentCellId() ?? ''
-  sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
+  // Feedback on the input frame before any network work (same rule as Lunge).
   showShockwave(p, team, true, cell)
+  sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z)
   if (BURST_EMOTE_ENABLED) {
     // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
     holdForEmote(BURST_EMOTE_FREEZE_S)
@@ -177,7 +178,12 @@ export function triggerBurst(): void {
     if (!inBurst(p, tp)) continue
     const addr = pid.address.toLowerCase()
     const k = burstDir(p, tp, f.x, f.z)
-    losThen(p, tp, () => sendBurstHit(id, addr, k.x, k.z))
+    losThen(p, tp, () => {
+      // Optimistic connect: attacker hears/sees the hit now; victim knock still waits on burstImpact.
+      sendBurstHit(id, addr, k.x, k.z)
+      playDashHitSfx()
+      playAt(tp)
+    })
   }
   // Local test dummies.
   for (const d of getDummyTargets()) {

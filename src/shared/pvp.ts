@@ -128,8 +128,8 @@ export function bombEnabledForRound(roundIndex: number): boolean {
 export const BURST_COOLDOWN_S = 8
 /** Server cooldown slack: accept the next burst this long after the previous one (s). */
 export const SERVER_MIN_BURST_GAP_S = BURST_COOLDOWN_S - 0.5
-/** Line of sight check (raycast attacker chest → target chest, physics colliders). */
-export const BURST_LOS = true
+/** Line of sight check OFF for V1 lag pass 2026-10-23 (was: raycast attacker chest → target chest, physics colliders). */
+export const BURST_LOS = false
 /** Chest height for the LOS ray (m above feet). */
 export const BURST_LOS_HEIGHT = 1.0
 /** No raycast answer within this time → treat as clear (s). */
@@ -147,8 +147,8 @@ export const BURST_EMOTE_ENABLED = true
 export const BURST_EMOTE_SRC = 'assets/emotes/burst_groundpunch_emote.glb'
 export const BURST_EMOTE_S = 0.467
 export const BURST_EMOTE_FREEZE_S = 0.3
-/** Victim drops an impact this long after it saw the burst fire (ms). */
-export const BURST_IMPACT_MAX_AGE_MS = 600
+/** Victim drops an impact this long after it saw the burst fire (ms). Was 600; widened for high-RTT. */
+export const BURST_IMPACT_MAX_AGE_MS = 900
 /** Ghost bots inside the radius: server-side shove (cells) + stun. */
 export const BURST_BOT_SHOVE = 4
 export const BURST_BOT_STUN_S = 1.0
@@ -316,8 +316,8 @@ export const LUNGE_KNOCK_FORCE_S = 0.35
  *  so they can't steer against the push. A second hit extends it (no stacking). */
 export const LUNGE_KNOCKBACK_LOCK = true
 export const LUNGE_KNOCKBACK_LOCK_S = 0.3
-/** Victim drops an impact older than this vs when it saw that lunge start (ms). */
-export const LUNGE_IMPACT_MAX_AGE_MS = 400
+/** Victim drops an impact older than this vs when it saw that lunge start (ms). Was 400; too tight for DCL RTT. */
+export const LUNGE_IMPACT_MAX_AGE_MS = 800
 
 // ─── Ghost bot (server-shoved; it walks a graph and can't fall) ─────
 export const LUNGE_BOT_SHOVE = 6

@@ -506,6 +506,8 @@ export async function setupServer(): Promise<void> {
     lastBurstAt.set(from, now)
     markActive(from)
     bursts.start(from, id, now)
+    // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
+    room.send('burstFired', { attacker: from, id, team, x, y, z })
     // Paint the footprint once (same score credit as normal paint).
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
@@ -519,7 +521,6 @@ export async function setupServer(): Promise<void> {
     const fp = graph && centre ? burstFootprint(graph, centre) : []
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
     console.log(`[Server] burst ${from.slice(0, 8)} #${id} painted ${gained} cells | cell=${cell || '(none)'} centre=${centre ?? 'null'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
-    room.send('burstFired', { attacker: from, id, team, x, y, z })
     for (const b of getBotPositions()) {
       if (b.team === team || !inBurst({ x, y, z }, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
       let dx = b.x - x, dz = b.z - z
