@@ -5,7 +5,7 @@
 import {
   BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
   SERVER_BURST_HIT_WINDOW_S,
-  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE, AIR_SPIKE_MIN_DROP,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE,
 } from './pvp'
 import type { WalkableGraph } from './mazeGraph'
 
@@ -23,26 +23,6 @@ export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS): boolean {
 export function inAirSpike(origin: V3, t: V3, radius = AIR_SPIKE_RADIUS, depth = AIR_SPIKE_DEPTH, minAbove = AIR_SPIKE_MIN_ABOVE): boolean {
   const drop = origin.y - t.y
   return Math.hypot(t.x - origin.x, t.z - origin.z) <= radius && drop >= minAbove && drop <= depth
-}
-
-/** First walkable cell the spike meets under `p`: within the cylinder radius, between
- *  AIR_SPIKE_MIN_DROP and `depth` below the attacker. Higher surfaces win; ties go to the
- *  closer cell. Null when the ground is out of reach (no paint). */
-export function airSpikeLanding(graph: WalkableGraph, p: V3, depth = AIR_SPIKE_DEPTH, radius = AIR_SPIKE_RADIUS): string | null {
-  let best: string | null = null
-  let bestDrop = Infinity
-  let bestD = Infinity
-  for (const [id, q] of graph.worldPos) {
-    if (!graph.nodes.has(id)) continue
-    const drop = p.y - q[1]
-    if (drop < AIR_SPIKE_MIN_DROP || drop > depth) continue
-    const d = Math.hypot(q[0] - p.x, q[2] - p.z)
-    if (d > radius) continue
-    if (drop < bestDrop - 0.05 || (Math.abs(drop - bestDrop) <= 0.05 && d < bestD)) {
-      best = id; bestDrop = drop; bestD = d
-    }
-  }
-  return best
 }
 
 /** Outward horizontal unit direction (fallback = facing when on top of each other). */
@@ -111,7 +91,7 @@ export function burstCentre(graph: WalkableGraph, cell: string, p: V3): string |
 /** Server: one live burst per attacker; each target accepted once, within the hit window. */
 export class BurstLedger {
   private last = new Map<string, { id: number; at: number; hits: Set<string>; air: number }>()
-  /** `air`: 0 ground radial, 1 airborne combat/whiff (no paint), 2 airborne miss that paints a cross. */
+  /** `air`: 0 ground radial, 1 airborne spike (no paint). */
   start(from: string, id: number, now: number, air = 0): void {
     this.last.set(from, { id, at: now, hits: new Set(), air })
   }

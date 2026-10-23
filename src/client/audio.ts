@@ -185,7 +185,7 @@ export function playBurstSfx(): void {
 }
 
 /** Aerial Burst cues. Distinct from the grounded shockwave (burst_impact.wav).
- *  Dive = press, hit = player connect, stamp = the cross actually paints. */
+ *  Dive = press, hit = player connect, stamp = feet meet the floor (no paint). */
 export const AIR_DIVE_SRC = 'assets/sounds/air_spike_dive.wav'
 export const AIR_HIT_SRC = 'assets/sounds/air_spike_hit.wav'
 export const AIR_STAMP_SRC = 'assets/sounds/air_spike_stamp.wav'

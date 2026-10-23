@@ -178,11 +178,10 @@ export const Messages = {
 
   // Paint Burst (shared/pvp.ts BURST_*, client/paintBurst.ts, shared/burst.ts).
   // Client → Server: burst at (x, y, z) on `cell`, facing (fx, fz).
-  // air: 0 grounded radial (server paints the circle), 1 airborne spike with no paint,
-  // 2 airborne miss that should paint the 5-tile cross where the spike meets the ground.
+  // air: 0 grounded radial (server paints the circle), non-zero airborne spike (no paint).
   // Server checks the shared cooldown and rebroadcasts burstFired.
   burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int }),
-  // air matches burstUse after the server resolves a landing. lx/ly/lz is the cross centre (0 when none).
+  // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),

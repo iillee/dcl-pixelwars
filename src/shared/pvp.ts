@@ -166,14 +166,12 @@ export const BURST_RADIUS = BURST_PAINT_RADIUS_CELLS * 2 + 1
 /** …and within this height (a full R-cell ramp run climbs ~3.5 m; a level is ~5.4 m). */
 export const BURST_HIT_MAX_DY = 3.5
 /** Aerial Burst (same F charge). Only when the press is airborne — grounded Burst stays the radial
- *  blast. Cylinder straight down: a player in it is a combat spike (no paint); a miss that reaches
- *  walkable ground paints a 5-tile cross (centre + N/E/S/W). Sideways air at the same height does
- *  not connect (AIR_SPIKE_MIN_ABOVE). */
+ *  blast. Cylinder straight down: a player in it is a combat spike (no paint). An air miss does not
+ *  paint; landing still paints through normal movement. Sideways air at the same height does not
+ *  connect (AIR_SPIKE_MIN_ABOVE). */
 export const AIR_SPIKE_RADIUS = 2 // m, horizontal feet-to-feet
 export const AIR_SPIKE_DEPTH = 5.5 // m, how far below the attacker the spike reaches
 export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this far above the victim
-export const AIR_SPIKE_MIN_DROP = 0.2 // m, ground cell must sit at least this far below the attacker
-export const AIR_SPIKE_CROSS_R = 1 // cells; cross |dx|+|dz| ≤ 1 → centre + N/E/S/W
 /** Victim spike: strong downward impulse, small outward impulse, short downward carry. */
 export const AIR_SPIKE_DOWN = 110
 export const AIR_SPIKE_OUT = 18
@@ -188,17 +186,18 @@ export const AIR_SPIKE_DIVE_IMPULSE = 48
 export const AIR_SPIKE_DIVE_FORWARD = 8
 export const AIR_SPIKE_DIVE_FORCE = 70
 export const AIR_SPIKE_DIVE_FORCE_S = 0.22
-/** Downward crescent (lunge_slash.png, crown leading down). Two crossed planes so it isn't edge-on. */
-export const AIR_SPIKE_ARC_W = 1.7 // m, horizontal, tips pinch in the texture
-export const AIR_SPIKE_ARC_H = 3.2 // m, vertical reach of one crescent
-export const AIR_SPIKE_ARC_DROP = 4.2 // m the crescent travels down from the chest
-export const AIR_SPIKE_ARC_S = 0.32
-export const AIR_SPIKE_ARC_ALPHA = 0.92
-export const AIR_SPIKE_ARC_CHEST = 1.35 // m above feet where the arc starts
-/** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav. */
+/** Dive trail: team spheres (same family as the ground Burst motes) falling down the commit.
+ *  Not the Lunge crescent. */
+export const AIR_SPIKE_TRAIL_N = 6
+export const AIR_SPIKE_TRAIL_DROP = 4.2 // m
+export const AIR_SPIKE_TRAIL_S = 0.4
+export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
+/** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
+ *  Stamp is the dive meeting the floor (no paint). It is dropped if contact is later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
 export const AIR_SPIKE_STAMP_VOL = 0.92
+export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Expanding ring, particles, aura. */
@@ -271,10 +270,10 @@ export const LUNGE_SLASH_WIDTH = 3.0
 export const LUNGE_SLASH_DEPTH_FRAC = 1
 /** Height above the attacker's feet (m) — chest band. */
 export const LUNGE_SLASH_HEIGHT = 1.15 // was 1.1
-/** Shrink + fade after the active window + hold (s). Was 0.12 (too fast to read). */
-export const LUNGE_SLASH_FADE_S = 0.24
-/** Full-size hold after the active window, before the fade (s). 0 = old behaviour. */
-export const LUNGE_SLASH_HOLD_S = 0.30
+/** Shrink + fade after the active window + hold (s). Was 0.24; 0.12 was too fast to read. */
+export const LUNGE_SLASH_FADE_S = 0.18
+/** Full-size hold after the active window, before the fade (s). Was 0.30. Still well above a blink. */
+export const LUNGE_SLASH_HOLD_S = 0.18
 /** Peak opacity. */
 export const LUNGE_SLASH_ALPHA = 0.92 // was 0.85
 /** Intro (visual only; the hitbox is live from frame 0): 'grow' = scale up from the

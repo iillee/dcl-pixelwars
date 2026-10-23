@@ -24,7 +24,7 @@ import {
   SLAB_OUTLINE, SLAB_OUTLINE_M, DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX, DASH_TILE_INNER_LAG_S,
   DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
-import { burstFootprint, burstCentre, airSpikeLanding, V3 } from '../shared/burst'
+import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
@@ -65,25 +65,29 @@ function setColour(s: Slab): void {
   Material.setPbrMaterial(s.ent, cellMaterial(s.team))
 }
 
-/** Walkable cell the air spike meets under `p`, or null when the ground is out of reach. */
-export function airLanding(p: V3): { id: string; x: number; y: number; z: number } | null {
+/** Feet are about on a walkable cell (air-dive landing thump). Not a paint query.
+ *  Node Y sits ~0.05 m above the walkable surface, so a standing avatar reads as a small negative drop. */
+export function nearGround(p: V3): boolean {
   const g = ensureGraph()
-  if (!g) return null
-  const id = airSpikeLanding(g, p)
-  if (!id) return null
-  const c = g.worldPos.get(id)!
-  return { id, x: c[0], y: c[1], z: c[2] }
+  if (!g) return false
+  let best = Infinity
+  for (const [id, q] of g.worldPos) {
+    if (!g.nodes.has(id)) continue
+    if (Math.hypot(q[0] - p.x, q[2] - p.z) > 1.6) continue
+    const drop = p.y - q[1]
+    if (drop < best) best = drop
+  }
+  return best < 0.5 && best > -0.7
 }
 
-/** Start the ripple for a burst fired at feet position `p` by `team`.
- *  Default shape/size is the grounded circle. Pass 'cross' + radius 1 for the air-spike landing. */
-export function startRipple(p: V3, team: Team, cell = '', shape?: 'circle' | 'square' | 'cross', radiusCells?: number): void {
+/** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
+export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
   const g = ensureGraph()
   if (!g) return
   const centre = burstCentre(g, cell, p)
   if (!centre) return
-  const cells = shape ? burstFootprint(g, centre, shape, radiusCells ?? 1) : burstFootprint(g, centre)
+  const cells = burstFootprint(g, centre)
   const c0 = g.worldPos.get(centre)!
   let maxD = CELL_M
   for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }

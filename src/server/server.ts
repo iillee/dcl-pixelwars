@@ -38,10 +38,10 @@ import {
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
-  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_CROSS_R, AIR_SPIKE_BOT_SHOVE,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_BOT_SHOVE,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
-import { BurstLedger, burstFootprint, burstCentre, inBurst, inAirSpike, airSpikeLanding } from '../shared/burst'
+import { BurstLedger, burstFootprint, burstCentre, inBurst, inAirSpike } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
@@ -490,8 +490,7 @@ export async function setupServer(): Promise<void> {
 
   // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
   // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S), shared by ground and air.
-  // air 0: radial paint + radial bot shove. air 1: spike, no paint. air 2: miss that
-  // paints a 5-tile cross where the cylinder meets the ground (server recomputes the cell).
+  // air 0: radial paint + radial bot shove. any other air value: spike, no paint.
   // burstHit: attacker client found a player; accepted once per (attacker, burst id, target).
   room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air }, context) => {
     const from = context?.from
@@ -503,51 +502,28 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
-    const mode = air === 2 ? 2 : air === 1 ? 1 : 0
+    const airborne = air !== 0
     lastBurstAt.set(from, now)
     markActive(from)
-    bursts.start(from, id, now, mode)
+    bursts.start(from, id, now, airborne ? 1 : 0)
     const graph = getWalkableGraph()
     const origin = { x, y, z }
-    // Air: a bot already in the cylinder is a combat connect, so the cross does not paint.
-    let spikedBot = false
-    if (mode !== 0) {
-      for (const b of getBotPositions()) {
-        if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
-        spikedBot = true
-        break
-      }
-    }
-    let firedAir = mode === 0 ? 0 : (mode === 2 && !spikedBot ? 2 : 1)
-    let lx = 0, ly = 0, lz = 0
-    let land: string | null = null
-    if (firedAir === 2 && graph) {
-      land = airSpikeLanding(graph, origin)
-      if (!land) firedAir = 1
-      else {
-        const c = graph.worldPos.get(land)!
-        lx = c[0]; ly = c[1]; lz = c[2]
-      }
-    }
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
-    room.send('burstFired', { attacker: from, id, team, x, y, z, air: firedAir, lx, ly, lz })
+    room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
     let gained = 0
     let fp: string[] = []
-    if (mode === 0) {
+    if (!airborne) {
       const centre = graph ? burstCentre(graph, cell, origin) : null
       fp = graph && centre ? burstFootprint(graph, centre) : []
       if (graph && centre) for (const cid of fp) if (applyPaint(cid, team, from)) gained++
-    } else if (firedAir === 2 && graph && land) {
-      fp = burstFootprint(graph, land, 'cross', AIR_SPIKE_CROSS_R)
-      for (const cid of fp) if (applyPaint(cid, team, from)) gained++
     }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
     }
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
-    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${firedAir} painted ${gained} cells | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
-    if (mode === 0) {
+    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} painted ${gained} cells | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
+    if (!airborne) {
       for (const b of getBotPositions()) {
         if (b.team === team || !inBurst(origin, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
         let dx = b.x - x, dz = b.z - z

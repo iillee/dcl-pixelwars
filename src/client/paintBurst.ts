@@ -10,16 +10,15 @@
  *     Server paints the radial footprint once.
  *   Airborne: downward spike. The attacker commits into a short dive. A player in
  *     the cylinder (clearly below, ~2 m across, ~5.5 m down) is a combat hit —
- *     strong downward knock, small outward, brief control lock, no paint. A miss
- *     that reaches the ground paints a 5-tile cross and bumps those tiles.
- *     No radial blast in the air. Ground Burst does not dive.
+ *     strong downward knock, small outward, brief control lock, no paint. An air
+ *     miss does not paint. No radial blast in the air. Ground Burst does not dive.
  * Local test dummies are knocked directly; ghost bots are shoved server-side.
  */
 import {
   engine, Entity, InputAction, Material, MaterialTransparencyMode, MeshRenderer, Transform, AudioSource,
   inputSystem, PointerEventType, Physics, PlayerIdentityData, raycastSystem, RaycastQueryType, ColliderLayer,
 } from '@dcl/sdk/ecs'
-import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
+import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
@@ -27,10 +26,10 @@ import {
   BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
-  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_CROSS_R,
+  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S,
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
-  AIR_SPIKE_ARC_W, AIR_SPIKE_ARC_H, AIR_SPIKE_ARC_DROP, AIR_SPIKE_ARC_S, AIR_SPIKE_ARC_ALPHA, AIR_SPIKE_ARC_CHEST,
-  AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL,
+  AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
+  AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_STAMP_WINDOW_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, V3 } from '../shared/burst'
@@ -42,7 +41,7 @@ import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE
 let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId, isPlayerGrounded } from '../paint'
-import { initBurstRipple, startRipple, airLanding } from './burstRipple'
+import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirDiveSfx, playAirHitSfx, playAirStampSfx,
   BURST_SFX_SRC, AIR_DIVE_SRC, AIR_HIT_SRC, AIR_STAMP_SRC,
@@ -107,45 +106,61 @@ function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   })
 }
 
-const ARC_TEX = 'assets/images/lunge_slash.png'
-
-function arcMat(e: Entity, rgb: { r: number; g: number; b: number }, alpha: number): void {
-  Material.setPbrMaterial(e, {
-    texture: Material.Texture.Common({ src: ARC_TEX }),
-    emissiveTexture: Material.Texture.Common({ src: ARC_TEX }),
-    albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, alpha),
-    emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
-    emissiveIntensity: 3.4,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-    castShadows: false,
-  })
-}
-
-/** Vertical crescent (same pointed half-moon as Lunge) shot down the dive.
- *  Two crossed planes so attackers and spectators both see a face. Not a hit volume. */
-function showAirStreak(p: V3, team: Team, fx: number, fz: number): void {
+/** Team motes falling down the dive, same sphere family as the ground Burst puff.
+ *  Staggered so they read as a trail. Not a slash plane. */
+function showAirTrail(p: V3, team: Team, fx: number, fz: number): void {
   const rgb = rgbOf(team)
   const fl = Math.hypot(fx, fz) || 1
   const ux = fx / fl, uz = fz / fl
-  const yaw = Math.atan2(ux, uz) * 180 / Math.PI
-  const from = Vector3.create(p.x + ux * 0.35, p.y + AIR_SPIKE_ARC_CHEST, p.z + uz * 0.35)
-  const to = Vector3.create(from.x, from.y - AIR_SPIKE_ARC_DROP, from.z)
-  const easeIn = (u: number) => u * u
-  for (const extra of [0, 90]) {
-    const rot = Quaternion.multiply(
-      Quaternion.fromEulerDegrees(0, yaw + extra, 0),
-      Quaternion.fromEulerDegrees(180, 0, 0), // texture crown (image top) points down
-    )
-    addFx(AIR_SPIKE_ARC_S, e => {
-      Transform.create(e, { position: from, rotation: rot, scale: Vector3.create(AIR_SPIKE_ARC_W, AIR_SPIKE_ARC_H, 1) })
-      MeshRenderer.setPlane(e)
-      arcMat(e, rgb, AIR_SPIKE_ARC_ALPHA)
+  const from = Vector3.create(p.x + ux * 0.25, p.y + 1.2, p.z + uz * 0.25)
+  const to = Vector3.create(from.x, from.y - AIR_SPIKE_TRAIL_DROP, from.z)
+  for (let i = 0; i < AIR_SPIKE_TRAIL_N; i++) {
+    const lag = (i / AIR_SPIKE_TRAIL_N) * 0.45
+    const side = (i - (AIR_SPIKE_TRAIL_N - 1) / 2) * 0.14
+    const start = Vector3.create(from.x + uz * side, from.y, from.z - ux * side)
+    const end = Vector3.create(to.x + uz * side, to.y, to.z - ux * side)
+    const size = AIR_SPIKE_TRAIL_SIZE * (0.75 + (i % 3) * 0.12)
+    addFx(AIR_SPIKE_TRAIL_S, e => {
+      Transform.create(e, { position: start, scale: Vector3.create(size, size, size) })
+      MeshRenderer.setSphere(e)
+      glow(e, rgb, 0.9, 3)
     }, (e, u) => {
+      const k = Math.min(1, Math.max(0, (u - lag) / (1 - lag)))
       const tr = Transform.getMutable(e)
-      tr.position = Vector3.lerp(from, to, easeIn(u))
-      const a = AIR_SPIKE_ARC_ALPHA * (u < 0.72 ? 1 : (1 - u) / 0.28)
-      arcMat(e, rgb, Math.max(0, a))
+      tr.position = Vector3.lerp(start, end, k * k)
+      const s = size * (1 - k)
+      tr.scale = Vector3.create(s, s, s)
+      glow(e, rgb, 0.9 * (1 - k), 3)
     })
+  }
+}
+
+/** One landing thump per dive, when feet meet the floor. No paint.
+ *  The first few frames are skipped so a low hop does not thump on the press. */
+const STAMP_ARM_S = 0.08
+const stampWatch: Array<{ who: string; left: number }> = []
+function armLandingStamp(who: string): void {
+  const i = stampWatch.findIndex(s => s.who === who)
+  const row = { who, left: AIR_SPIKE_STAMP_WINDOW_S }
+  if (i >= 0) stampWatch[i] = row
+  else stampWatch.push(row)
+}
+function tickStamps(dt: number): void {
+  for (let i = stampWatch.length - 1; i >= 0; i--) {
+    const s = stampWatch[i]
+    s.left -= dt
+    const elapsed = AIR_SPIKE_STAMP_WINDOW_S - s.left
+    if (elapsed < STAMP_ARM_S) continue
+    const live = s.who === '' ? Transform.getOrNull(engine.PlayerEntity)?.position : null
+    const pos: V3 | null = s.who === ''
+      ? (live ? { x: live.x, y: live.y, z: live.z } : null)
+      : posOf(s.who)
+    const landed = s.who === '' ? isPlayerGrounded() : !!(pos && nearGround(pos))
+    if (landed) {
+      if (s.who === '') playAirStampSfx()
+      else if (pos) playPositional(pos, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)
+      stampWatch.splice(i, 1)
+    } else if (s.left <= 0) stampWatch.splice(i, 1)
   }
 }
 
@@ -316,17 +331,18 @@ export function triggerBurst(): void {
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
-/** Airborne F: downward spike. Player/bot in the cylinder → combat, no paint.
- *  Otherwise the landing cross, if the ground is inside the cylinder. Same cooldown. */
+/** Airborne F: downward spike. A player or bot in the cylinder is combat.
+ *  Hit or miss: no paint. The landing thump waits until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
   commitAirDive(fx, fz)
   playAirDiveSfx()
-  showAirStreak(p, team, fx, fz)
+  showAirTrail(p, team, fx, fz)
+  armLandingStamp('')
+  sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
+  knockAirAnvils(p, fx, fz, id)
   const hits = airPlayerHits(p, team, fx, fz)
   const bot = airBotBelow(p, team)
   if (hits.length > 0 || bot) {
-    sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
-    knockAirAnvils(p, fx, fz, id)
     if (hits.length === 0) playAirHitSfx()
     for (const h of hits) {
       sendBurstHit(id, h.addr, h.k.x, h.k.z)
@@ -336,18 +352,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
     console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} pos=${p.y.toFixed(2)}`)
     return
   }
-  const land = airLanding(p)
-  if (land) {
-    sendBurstUse(id, land.id, p.x, p.y, p.z, fx, fz, 2)
-    knockAirAnvils(p, fx, fz, id)
-    startRipple({ x: land.x, y: land.y, z: land.z }, team, land.id, 'cross', AIR_SPIKE_CROSS_R)
-    playAirStampSfx()
-    console.log(`[Burst] #${id} air spike miss → cross ${land.id}`)
-    return
-  }
-  sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
-  knockAirAnvils(p, fx, fz, id)
-  console.log(`[Burst] #${id} air spike whiff (ground out of reach) pos=${p.y.toFixed(2)}`)
+  console.log(`[Burst] #${id} air spike miss (no paint) pos=${p.y.toFixed(2)}`)
 }
 
 /** Victim impulse (confirmed Impact or speculative). Marks ImpactGate applied. */
@@ -428,7 +433,7 @@ export function initPaintBurst(): void {
     emoteLeft = 0
     void stopEmote({}).catch(() => {})
   })
-  events.on('burst:fired', ({ attacker, id, team, x, y, z, air, lx, ly, lz }) => {
+  events.on('burst:fired', ({ attacker, id, team, x, y, z, air }) => {
     const att = attacker.toLowerCase()
     gate.sawStart(att, id, Date.now())
     let faceX = 0, faceZ = 1
@@ -442,18 +447,15 @@ export function initPaintBurst(): void {
     }
     if (att !== myAddress()) {
       if (air) {
-        showAirStreak({ x, y, z }, team, faceX, faceZ)
+        showAirTrail({ x, y, z }, team, faceX, faceZ)
         playPositional({ x, y, z }, AIR_DIVE_SRC, AIR_SPIKE_DIVE_VOL)
-        if (air === 2) {
-          startRipple({ x: lx, y: ly, z: lz }, team, '', 'cross', AIR_SPIKE_CROSS_R)
-          playPositional({ x: lx, y: ly, z: lz }, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)
-        }
+        armLandingStamp(att)
       } else showShockwave({ x, y, z }, team, false)
     }
     // Victim anticipation: if we're already in the volume, knock now
     // (Impact arrives ~same RTT; this wins when Fired is processed before Impact).
     // Air uses the downward cylinder and the spike impulse, never the radial lift.
-    if (!VICTIM_SPECULATIVE_KNOCK || air === 2) return
+    if (!VICTIM_SPECULATIVE_KNOCK) return
     const my = localTeam()
     if (my === Team.None || team === my) return
     if (isKnockbackImmune() || !isBurstEnabledNow()) return
@@ -471,6 +473,7 @@ export function initPaintBurst(): void {
   engine.addSystem((dt: number) => {
     if (cooldownLeft > 0) cooldownLeft -= dt
     if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) triggerBurst()
+    tickStamps(dt)
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]
       f.t += dt

@@ -6,8 +6,8 @@
  * paint centre resolution (burstUse cell → footprint). Feel, LOS raycast
  * and networking need an Explorer playtest.
  */
-import { BurstLedger, inBurst, inAirSpike, airSpikeLanding, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
-import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE, AIR_SPIKE_CROSS_R } from '../src/shared/pvp'
+import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
+import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
 import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
 import { worldToCellId } from '../src/paint'
@@ -201,29 +201,7 @@ check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).le
   check('air spike: clearly below the gate is a hit', inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_MIN_ABOVE - 0.05)))
   check('air spike: outside the horizontal radius is not a hit', !inAirSpike(up, P(AIR_SPIKE_RADIUS + 0.2, 0, 3)))
   check('air spike: deeper than the cylinder is not a hit', !inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_DEPTH - 0.3)))
-  let spot: string | null = null
-  for (const id of g.nodes) {
-    const c = g.worldPos.get(id)!
-    let blocked = false
-    for (const [oid, q] of g.worldPos) {
-      if (oid === id) continue
-      if (Math.hypot(q[0] - c[0], q[2] - c[2]) > AIR_SPIKE_RADIUS) continue
-      if (q[1] > c[1] + 0.05) blocked = true
-    }
-    if (!blocked && burstFootprint(g, id, 'cross', AIR_SPIKE_CROSS_R).length === 5) { spot = id; break }
-  }
-  check('air spike: found an open 5-tile cross to land on', spot !== null)
-  if (spot) {
-    const [x, y, z] = g.worldPos.get(spot)!
-    const hover = { x, y: y + 3, z }
-    const land = airSpikeLanding(g, hover)
-    const cross = land ? burstFootprint(g, land, 'cross', AIR_SPIKE_CROSS_R) : []
-    check('air spike miss lands on that cell', land === spot)
-    check('air spike miss paints the 5-tile cross and not the radial disc', cross.length === 5 && cross.includes(spot) && cross.length < 10)
-    check('air spike: ground beyond reach does not paint', airSpikeLanding(g, { x, y: y + 40, z }) === null)
-    const above = airSpikeLanding(g, { x, y: y - 4, z })
-    check('air spike: a cell above the attacker is not the landing', above !== spot)
-  }
+  // An air miss does not paint. Landing colour comes from normal movement only.
   const led = new BurstLedger()
   led.start('a', 7, 0, 1)
   check('air and ground share one ledger; spike mode is remembered', led.mode('a', 7) === 1 && led.hit('a', 7, 'b', 10) === 'ok')
