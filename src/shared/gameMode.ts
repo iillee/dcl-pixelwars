@@ -26,14 +26,20 @@ export const MODE_SUB: Record<GameModeId, string> = {
   [GameMode.Ooze]: 'PVE ERADICATION',
 }
 
+/** Longer blurbs for the mode-confirm splash step. */
+export const MODE_DESC: Record<GameModeId, string> = {
+  [GameMode.Pixelwars]: 'Team paint PvP. Cover the maze in your colour before time runs out.',
+  [GameMode.Ooze]: 'Paint to eradicate the spreading black. Clear every corrupted tile to win.',
+}
+
 /** Vote window after the round-end summary closes (Luke: 10 s MAX).
  * Server ends early once every present player has voted.
  */
 export const MODE_VOTE_MS = 10_000
 
 // ─── Corruption (Ooze) cadence / budget ───────────────────────────────
-/** Growth pulse interval (~8–12s band; 10s centre). */
-export const CORRUPTION_PULSE_MS = 10_000
+/** Growth pulse interval (~6–7s; was 10s). */
+export const CORRUPTION_PULSE_MS = 6_500
 /** Outbreak every N pulses (telegraphed burst, not constant spam). */
 export const CORRUPTION_OUTBREAK_EVERY = 3
 /** Visible warning before an outbreak converts cells. */
@@ -48,11 +54,11 @@ export const CORRUPTION_OUTBREAK_BLOB = 8
 /**
  * Shared expansion budget per pulse — sublinear in player count so solo
  * stays fair and a full lobby doesn't instantly flood the map.
- *   budget = 6 + 4 * sqrt(n)   (n = present humans, min 1)
+ *   budget = 10 + 5 * sqrt(n)   (n = present humans, min 1; was 6+4*sqrt)
  */
 export function corruptionPulseBudget(playerCount: number): number {
   const n = Math.max(1, playerCount)
-  return Math.max(4, Math.round(6 + 4 * Math.sqrt(n)))
+  return Math.max(6, Math.round(10 + 5 * Math.sqrt(n)))
 }
 
 /**
