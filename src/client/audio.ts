@@ -44,6 +44,7 @@ export function initAudio(): void {
   initBurstSfx()
   initAirSpikeSfx()
   initFlagtagSfx()
+  initRescueSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
@@ -219,8 +220,8 @@ export function playAirStampSfx(): void {
   playGlobal(airStampEnt, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)
 }
 
-/** flagtag sounds (copied verbatim from flagtag/assets/sounds): death.mp3 on the local fall-respawn
- *  (flagtag: global, volume 1) and trumpets.mp3 when the round ends / summary starts (round:ended), for every client (flagtag: global, volume 0.8).
+/** flagtag sounds (copied verbatim from flagtag/assets/sounds): death.mp3 is the old instant-fall cue
+ *  (kept, unused by the rescue) and trumpets.mp3 when the round ends / summary starts (round:ended), for every client (flagtag: global, volume 0.8).
  *  Camera-parented 2D sources, preloaded so the first play isn't late. */
 const DEATH_SRC = 'assets/sounds/death.mp3'
 const TRUMPET_SRC = 'assets/sounds/trumpets.mp3'
@@ -244,4 +245,20 @@ export function playDeathSfx(): void {
 export function playTrumpetSfx(): void {
   if (!trumpetSfxEnt) return
   AudioSource.createOrReplace(trumpetSfxEnt, { audioClipUrl: TRUMPET_SRC, playing: true, loop: false, volume: 0.8, global: true, currentTime: 0 })
+}
+
+/** Fall-rescue trip: swoosh, quieter than the old death sting. Preloaded so the first fall isn't late. */
+const RESCUE_SRC = DASH_SRC
+const RESCUE_VOL = 0.45
+let rescueSfxEnt: Entity | null = null
+function initRescueSfx(): void {
+  const pre = engine.addEntity()
+  AssetLoad.create(pre, { assets: [RESCUE_SRC] })
+  rescueSfxEnt = engine.addEntity()
+  Transform.create(rescueSfxEnt, { parent: engine.CameraEntity })
+  AudioSource.create(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: false, loop: false, volume: RESCUE_VOL, global: true })
+}
+export function playFallRescueSfx(): void {
+  if (!rescueSfxEnt) return
+  AudioSource.createOrReplace(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: true, loop: false, volume: RESCUE_VOL, global: true, currentTime: 0 })
 }

@@ -97,7 +97,8 @@ export type Events = {
   'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
   'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }
 
-  // Local: client/player teleported us home (spawn, round reset, fall).
+  // Local: client/player teleported us home (spawn, round reset, fall-rescue drop).
+  // The fall rescue emits this on the base drop, not when the fall line is crossed.
   // Subscriber: client/knockback (brief knockback immunity).
   'player:respawned': { why: string }
 }
