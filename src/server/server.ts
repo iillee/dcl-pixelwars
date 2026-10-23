@@ -280,13 +280,6 @@ export async function setupServer(): Promise<void> {
   room.onMessage('modeVote', ({ mode }, context) => {
     const from = context?.from
     if (!from || intermission !== 'voting') return
-    // mode < 0 = clear ballot (confirm-step Back). Stops early-lock until they vote again.
-    if (mode < 0) {
-      modeVotes.delete(from)
-      sendVoteTally()
-      console.log(`[Server] modeVote ${from.slice(0, 10)} → CLEARED (${modeVotes.size} ballot(s))`)
-      return
-    }
     const m = mode === GameMode.Ooze ? GameMode.Ooze : GameMode.Pixelwars
     modeVotes.set(from, m)
     sendVoteTally()

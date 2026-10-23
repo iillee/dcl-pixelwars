@@ -182,7 +182,7 @@ export function playBurstSfx(): void {
 }
 
 /** flagtag sounds (copied verbatim from flagtag/assets/sounds): death.mp3 on the local fall-respawn
- *  (flagtag: global, volume 1) and trumpets.mp3 at round end for every client (flagtag: global, volume 0.8).
+ *  (flagtag: global, volume 1) and trumpets.mp3 when the round ends / summary starts (round:ended), for every client (flagtag: global, volume 0.8).
  *  Camera-parented 2D sources, preloaded so the first play isn't late. */
 const DEATH_SRC = 'assets/sounds/death.mp3'
 const TRUMPET_SRC = 'assets/sounds/trumpets.mp3'
@@ -197,7 +197,7 @@ function initFlagtagSfx(): void {
   trumpetSfxEnt = engine.addEntity()
   Transform.create(trumpetSfxEnt, { parent: engine.CameraEntity })
   AudioSource.create(trumpetSfxEnt, { audioClipUrl: TRUMPET_SRC, playing: false, loop: false, volume: 0.8, global: true })
-  events.on('round:reset', () => playTrumpetSfx())
+  events.on('round:ended', () => playTrumpetSfx())
 }
 export function playDeathSfx(): void {
   if (!deathSfxEnt) return

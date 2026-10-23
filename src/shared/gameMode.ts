@@ -26,11 +26,6 @@ export const MODE_SUB: Record<GameModeId, string> = {
   [GameMode.Ooze]: 'PVE ERADICATION',
 }
 
-/** Longer blurbs for the mode-confirm splash step. */
-export const MODE_DESC: Record<GameModeId, string> = {
-  [GameMode.Pixelwars]: 'Team paint PvP. Cover the maze in your colour before time runs out.',
-  [GameMode.Ooze]: 'Paint to eradicate the spreading black. Clear every corrupted tile to win.',
-}
 
 /** Vote window after the round-end summary closes (Luke: 10 s MAX).
  * Server ends early once every present player has voted.

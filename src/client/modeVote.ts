@@ -100,15 +100,6 @@ export function castModeVote(mode: GameModeId): void {
   console.log(`[Client] → modeVote ${mode === GameMode.Ooze ? 'OOZE' : 'PIXELWARS'}`)
 }
 
-/** Confirm-step Back: drop our ballot so early-lock waits and they can re-pick. */
-export function clearModeVote(): void {
-  if (!isModeVoting()) return
-  if (myVote === null) return
-  playUiClick()
-  myVote = null
-  room.send('modeVote', { mode: -1 })
-  console.log('[Client] → modeVote CLEARED')
-}
 
 /** For splash auto-fade: treat an active vote (or brief lock banner) as "not ready to hide". */
 export function modePickBlocksSplashFade(): boolean {
