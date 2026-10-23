@@ -3,7 +3,9 @@
  *
  * A flat, horizontal crescent (assets/images/lunge_slash.png: white alpha
  * half-ring, tinted with the attacker's team colour, emissive) lying at
- * LUNGE_SLASH_HEIGHT above the attacker's feet. The plane is
+ * LUNGE_SLASH_HEIGHT above the attacker's feet. The texture's left and right
+ * arms pinch to a point: stroke width and alpha both fall to 0 at the tips
+ * (the crown of the arc is unchanged). The plane is
  * LUNGE_SLASH_WIDTH wide and LUNGE_SLASH_DEPTH_FRAC deep, centred
  * LUNGE_SLASH_FORWARD ahead, so the arc's forward tip sits on the hitbox's
  * far face (LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D). It follows the attacker for the

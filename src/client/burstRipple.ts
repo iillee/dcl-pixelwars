@@ -22,6 +22,7 @@ import {
   BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
   BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
   SLAB_OUTLINE, SLAB_OUTLINE_M, DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX, DASH_TILE_INNER_LAG_S,
+  DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
@@ -104,9 +105,10 @@ function cellNear(g: WalkableGraph, x: number, y: number, z: number, r: number):
   }
   return best
 }
-/** Dash pop over the same 3×3 swath the player paints (paint.ts OFFSETS, ±1 cell around the avatar). Each time the
- *  dasher enters a new cell the not-yet-popped swath cells pop: the two edge columns (sideways of the movement)
- *  first, the centre column DASH_TILE_INNER_LAG_S later. Visual only; capped at DASH_TILE_MAX live slabs. */
+/** Dash pop over the 3×3 the player paints, plus DASH_TILE_AHEAD cells straight ahead so the bump
+ *  reaches the front paint the lunge leaves in front of the entered cell. Side columns first, the
+ *  centre column DASH_TILE_INNER_LAG_S later; the forward row uses DASH_TILE_AHEAD_DELAY_S so it
+ *  leads. Visual only; capped at DASH_TILE_MAX live slabs. */
 export function dashPop(who: string, p: V3, team: Team): void {
   if (!DASH_TILE_POP || pool.length === 0 || team === Team.None) return
   const g = ensureGraph()
@@ -122,24 +124,40 @@ export function dashPop(who: string, p: V3, team: Team): void {
   dashLastCell.set(who, { id: centre, x: c0[0], z: c0[2] })
   let popped = dashPopped.get(who)
   if (!popped) { popped = new Set(); dashPopped.set(who, popped) }
+  const seen = popped
   let live = pool.filter(x => x.busy && x.dash).length
-  for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+  const queue = (x: number, z: number, delay: number, reach: number) => {
     if (live >= DASH_TILE_MAX) return
-    const id = cellNear(g, c0[0] + ox * CELL_M, c0[1], c0[2] + oz * CELL_M, CELL_M * 0.55)
-    if (!id || popped.has(id)) continue
-    const s = pool.find(x => !x.busy)
+    const id = cellNear(g, x, c0[1], z, reach)
+    if (!id || seen.has(id)) return
+    const s = pool.find(sl => !sl.busy)
     if (!s) return
-    popped.add(id)
+    seen.add(id)
     const c = g.worldPos.get(id)!
-    const lateral = Math.abs((c[0] - c0[0]) * dz - (c[2] - c0[2]) * dx) // distance sideways of the movement
-    const edge = (dx === 0 && dz === 0) || lateral > CELL_M * 0.5
     const pose = cellPose(id, c)
     s.busy = true; s.t = 0; s.dash = true
-    s.delay = DASH_TILE_DELAY_S + (edge ? 0 : DASH_TILE_INNER_LAG_S)
+    s.delay = delay
     s.lift = BURST_TILE_LIFT * DASH_TILE_LIFT_FRAC; s.up = DASH_TILE_UP_S; s.down = DASH_TILE_DOWN_S
     s.x = c[0]; s.y = pose.y; s.z = c[2]; s.rot = pose.rot
     if (s.team !== team) { s.team = team; setColour(s) }
     live++
+  }
+  for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+    const x = c0[0] + ox * CELL_M, z = c0[2] + oz * CELL_M
+    const along = (x - c0[0]) * dx + (z - c0[2]) * dz
+    const lateral = Math.abs((x - c0[0]) * dz - (z - c0[2]) * dx)
+    const edge = (dx === 0 && dz === 0) || lateral > CELL_M * 0.5
+    // Front row leads. Side columns next. The column under / behind the avatar lags.
+    const delay = along > CELL_M * 0.5 ? DASH_TILE_AHEAD_DELAY_S
+      : DASH_TILE_DELAY_S + (edge ? 0 : DASH_TILE_INNER_LAG_S)
+    queue(x, z, delay, CELL_M * 0.55)
+  }
+  // One extra cell past the 3×3, along travel, so the bump covers the paint in front.
+  if (dx !== 0 || dz !== 0) {
+    for (let step = 2; step <= DASH_TILE_AHEAD; step++) {
+      queue(c0[0] + dx * step * CELL_M, c0[2] + dz * step * CELL_M,
+        DASH_TILE_AHEAD_DELAY_S + (step - 1) * DASH_TILE_AHEAD_STEP_S, CELL_M * 0.9)
+    }
   }
 }
 /** Forget the dasher's trail when a dash ends, so the next dash pops its swath again. */

@@ -186,19 +186,27 @@ export const BURST_TILE_SIZE = 1.9
 export const BURST_TILE_THICK = 0.3
 /** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
 export const BURST_TILE_POOL = 180
-/** Dash (lunge) trail: the 3×3 paint swath around the dashing avatar pops (edges first), once per cell, smaller and quicker than Burst
- *  (client/burstRipple.ts dashPop, shares the Burst slab pool; visual only, local + remote dashes). */
+/** Dash (lunge) trail: the 3×3 paint swath around the dashing avatar pops (edges first), plus cells
+ *  straight ahead (DASH_TILE_AHEAD) so the bump reaches the front paint. Smaller than Burst, but the
+ *  rise/settle is long enough that the forward tiles are still in the wave (client/burstRipple.ts dashPop). */
 export const DASH_TILE_POP = true
 /** Thin black outline on raised slabs (Burst + Dash), dcl-canvas style edge strips: 4 top edges per slab,
  *  parented to the slab so they ride its animation for free (pooled with it, no per-frame work). */
 export const SLAB_OUTLINE = true
 export const SLAB_OUTLINE_M = 0.03 // edge thickness in metres
 export const DASH_TILE_LIFT_FRAC = 0.35 // × BURST_TILE_LIFT (0.35 m) ≈ 0.12 m
-export const DASH_TILE_UP_S = 0.07
-export const DASH_TILE_DOWN_S = 0.14
+export const DASH_TILE_UP_S = 0.12 // was 0.07 — the rise stays readable while the lunge runs ahead
+export const DASH_TILE_DOWN_S = 0.30 // was 0.14 — settle lasts long enough to still be up at the front paint
 export const DASH_TILE_DELAY_S = 0.03 // after the avatar enters the cell (trails just behind)
 export const DASH_TILE_MAX = 60 // live dash slabs at once (all dashers; shares Burst's 180-slab pool)
 export const DASH_TILE_INNER_LAG_S = 0.06 // centre column pops this long after the swath's edge tiles // ≥ 2 × 49: two overlapping full 7×7 bursts
+/** Cells straight ahead of the entered cell that bump. 1 was only the 3×3 front row;
+ *  2 covers the paint footprint that sits another cell in front while the lunge outruns that row. */
+export const DASH_TILE_AHEAD = 2
+/** Front-row delay (s). Shorter than the centre-column lag so the wave reaches the paint ahead. */
+export const DASH_TILE_AHEAD_DELAY_S = 0.02
+/** Extra delay (s) per cell past the first one ahead, so the bump travels forward instead of stopping short. */
+export const DASH_TILE_AHEAD_STEP_S = 0.08
 
 /** Is Paint Burst live for this UTC round index? */
 export function burstEnabledForRound(roundIndex: number): boolean {
