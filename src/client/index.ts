@@ -31,7 +31,6 @@ import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
-import { initModeVoteNet } from './modeVote'
 import { initAudio } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
@@ -137,7 +136,6 @@ export async function setupClient(): Promise<void> {
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.
   initClientHandler()
-  initModeVoteNet()
 
   // Register the SeedHolder for cross-client sync. Doing this inside
   // setupClient() (not at module top) ensures the networking layer is

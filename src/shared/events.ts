@@ -67,7 +67,7 @@ export type Events = {
     finalTotal: number
   }
 
-  // After mode vote locks: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
+  // After summary wait: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
   'round:reset': {
     seed: number
     finalRed: number
@@ -75,10 +75,6 @@ export type Events = {
     finalTotal: number
   }
 
-  // Mode vote (splash). Subscribers: client/splash + modeVote state.
-  'mode:voteOpen': { remainingMs: number; pixelwars: number; ooze: number }
-  'mode:voteTally': { pixelwars: number; ooze: number }
-  'mode:voteLocked': { mode: number; wanted: number; fallback: boolean }
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
   // Subscriber: client/botVisual renders one box per entry.

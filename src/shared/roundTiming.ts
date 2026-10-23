@@ -17,7 +17,7 @@ export const ROUND_LENGTH_MINUTES = 3
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 
 // Round-end summary animation (must match client RoundSummary timing).
-// Server waits this long after roundEnded before opening the mode vote.
+// Server waits this long after roundEnded before roundReset / next round.
 export const SUMMARY_GROW_S = 0.4
 export const SUMMARY_HOLD_S = 10
 export const SUMMARY_SHRINK_S = 0.4

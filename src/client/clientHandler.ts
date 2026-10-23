@@ -1,6 +1,4 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
-import { setCurrentGameMode } from './modeVote'
-import { GameModeId } from '../shared/gameMode'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -107,12 +105,11 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, mode }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active }) => {
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
     if (idx !== getRoundIndex() || active !== isRoundActive() || Math.abs(end - getRoundEndMs()) > 500) setRoundState(idx, end, active)
-    if (typeof mode === 'number') setCurrentGameMode(mode as GameModeId)
   })
 
   room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal }) => {
@@ -123,16 +120,6 @@ function wireInbound(): void {
     events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
   })
 
-  room.onMessage('modeVoteOpen', ({ remainingMs, pixelwars, ooze }) => {
-    events.emit('mode:voteOpen', { remainingMs, pixelwars, ooze })
-  })
-  room.onMessage('modeVoteTally', ({ pixelwars, ooze }) => {
-    events.emit('mode:voteTally', { pixelwars, ooze })
-  })
-  room.onMessage('modeVoteLocked', ({ mode, wanted, fallback }) => {
-    setCurrentGameMode(mode as GameModeId)
-    events.emit('mode:voteLocked', { mode, wanted, fallback })
-  })
 
   room.onMessage('dashImpact', ({ attacker, target, dx, dz }) => {
     events.emit('dash:impact', { attacker, target, dx, dz })

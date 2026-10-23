@@ -152,7 +152,7 @@ export function initRoundNet(): void {
     if (banner.visible && banner.owners.length === 0) banner.owners = owners
   })
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
-  // Scores arrive on round:ended (before the mode-vote splash). round:reset only rebuilds the maze.
+  // Scores arrive on round:ended (summary). round:reset rebuilds the maze after the summary wait.
   events.on('round:ended', ({ finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
     console.log(
@@ -162,6 +162,6 @@ export function initRoundNet(): void {
     showRoundEndBanner(finalRed, finalBlue, localTotal)
   })
   events.on('round:reset', ({ seed }) => {
-    console.log(`[Client] roundReset seed=${seed} (maze rebuild after mode vote)`)
+    console.log(`[Client] roundReset seed=${seed} (maze rebuild after summary)`)
   })
 }
