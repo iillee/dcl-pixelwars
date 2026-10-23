@@ -8,6 +8,7 @@ import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismiss
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
+import { getCurrentGameMode, GameMode } from "./client/modeVote"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
@@ -91,6 +92,10 @@ const STAR_TINT = Color4.create(0.33, 0.33, 0.34, 1) // matches the bar track's 
 const BAR_TRACK = Color4.create(0.08, 0.08, 0.1, 0.87) // flagtag PANEL_BG_SEMI
 const BAR_RED   = Color4.create(TEAM_RGB[Team.Red].r,  TEAM_RGB[Team.Red].g,  TEAM_RGB[Team.Red].b,  1)
 const BAR_BLUE  = Color4.create(TEAM_RGB[Team.Blue].r, TEAM_RGB[Team.Blue].g, TEAM_RGB[Team.Blue].b, 1)
+// Corruption mode: second bar/summary fill = near-black (matches Team.Corruption tiles).
+const BAR_CORRUPTION = Color4.create(TEAM_RGB[Team.Corruption].r, TEAM_RGB[Team.Corruption].g, TEAM_RGB[Team.Corruption].b, 1)
+/** Right-hand territory colour: blue in Pixelwars, black in Corruption. */
+const barSecond = () => getCurrentGameMode() === GameMode.Ooze ? BAR_CORRUPTION : BAR_BLUE
 
 // ─── Round-end summary screen (Luke's reference): title, territory pill, two team cards, stats row ───
 // Sizes are at a 1280-wide reference and scale with the canvas (k), never below SUMMARY_K_MIN.
@@ -280,7 +285,7 @@ function StandingsPopup() {
             uiBackground={{ color: BAR_RED }}>
           </UiEntity>
           <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', }}
-            uiBackground={{ color: BAR_BLUE }}>
+            uiBackground={{ color: barSecond() }}>
           </UiEntity>
           <PctOverlay red={pct.red} blue={pct.blue} k={k} color={SUMMARY_INK} />
         </UiEntity>
@@ -350,7 +355,7 @@ function RoundSummary(p: number) {
         {show && (
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k } }}>
             <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: titleF * 1.2, flexShrink: 0 }}>
-              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' || b.winner === 'CLEARED' ? RED_COLOR : b.winner === 'OVERRUN' ? Color4.create(0.45,0.12,0.55,1) : BLUE_COLOR, a)} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord, titleF), height: titleF * 1.2, flexShrink: 0, margin: { right: titleF * TITLE_WORD_GAP } }} />}
+              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' || b.winner === 'CLEARED' ? RED_COLOR : b.winner === 'OVERRUN' ? BAR_CORRUPTION : BLUE_COLOR, a)} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord, titleF), height: titleF * 1.2, flexShrink: 0, margin: { right: titleF * TITLE_WORD_GAP } }} />}
               <Label value={b.winner === 'CLEARED' ? 'CLEARED!' : b.winner === 'OVERRUN' ? 'UP!' : teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign={teamWord !== '' ? 'middle-left' : 'middle-center'} textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: titleF * 1.2, flexShrink: 0 }} />
             </UiEntity>
             <Label value={SUB} fontSize={subF} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
@@ -364,7 +369,7 @@ function RoundSummary(p: number) {
             uiBackground={{ color: BAR_RED }}>
           </UiEntity>
           <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: blueW, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: innerR, bottomRight: innerR }, justifyContent: 'center', alignItems: 'flex-end', }}
-            uiBackground={{ color: BAR_BLUE }}>
+            uiBackground={{ color: barSecond() }}>
           </UiEntity>
           {show && <PctOverlay red={b.redPct} blue={b.bluePct} k={k} color={withA(SUMMARY_INK, a)} />}
         </UiEntity>
@@ -394,7 +399,8 @@ function coveragePct(): { red: number; blue: number } {
 function bannerColor(): Color4 {
   const b = getBanner()
   if (b.winner === 'RED' || b.winner === 'CLEARED')  return RED_COLOR
-  if (b.winner === 'BLUE' || b.winner === 'OVERRUN') return Color4.create(0.35, 0.1, 0.45, 1)
+  if (b.winner === 'BLUE') return BLUE_COLOR
+  if (b.winner === 'OVERRUN') return BAR_CORRUPTION
   return Color4.White()
 }
 
@@ -539,7 +545,7 @@ export const uiMenu = () => (
                     >{lead === 'red' && star}</UiEntity>}
                     {<UiEntity
                       uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.blue / 100, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
-                      uiBackground={{ color: BAR_BLUE }}
+                      uiBackground={{ color: barSecond() }}
                     >{lead === 'blue' && star}</UiEntity>}
                   </UiEntity>
                 </UiEntity>
