@@ -272,12 +272,9 @@ export const LUNGE_STICK_FORCE = 120
  *  extra, so run momentum survives and a lunge into a wall doesn't bounce back. */
 export const LUNGE_BRAKE = 0.7
 /** After the active window: no new lunge, run/jog/jump disabled (walk only).
- *  Intentional brace, not a bug — the HUD + feet disc (LUNGE_RECOVERY_FX_S) mark it.
- *  Short on purpose; lengthen only if the brace still reads as a silent hitch. */
+ *  Intentional brace — amber LOCK on the desktop slot, amber tint on mobile, plus a click.
+ *  No world mesh. Short on purpose. */
 export const LUNGE_RECOVERY_S = 0.20
-/** How long the recovery brace (gold feet disc + click + amber slot) stays up (s).
- *  Longer than the control lock so the explanation outlives the hitch. */
-export const LUNGE_RECOVERY_FX_S = 0.42
 /** Press → press (s). Covers active + recovery. */
 export const LUNGE_COOLDOWN_S = 2
 
@@ -294,14 +291,9 @@ export const LUNGE_HITBOX_D = 1.4
 export const LUNGE_HITBOX_H = 1.8
 /** Gap from the avatar centre to the box's near face (m). Reach = FORWARD + D = 1.7 m. */
 export const LUNGE_HITBOX_FORWARD = 0.3
-/** Show the hitbox as a translucent team-coloured box for the whole active window + grace
- *  (debug). Off in play: the press flash below is the telegraph. */
+/** Debug only: translucent team box for the active window + grace. Off in play.
+ *  No press flash — the crescent is the telegraph. */
 export const LUNGE_HITBOX_VISIBLE = false
-/** Seconds the hit volume flashes on press (local + remote), then fades. 0 = off.
- *  Shows push range without leaving a debug box up for the whole charge. */
-export const LUNGE_HITBOX_FLASH_S = 0.26
-/** Peak alpha of that press flash (eases to 0). */
-export const LUNGE_HITBOX_FLASH_ALPHA = 0.5
 /** Box alpha when LUNGE_HITBOX_VISIBLE is on (flashes brighter on a hit). */
 export const LUNGE_HITBOX_ALPHA = 0.25
 /** false = world-space box placed from the same per-frame numbers as the hit test

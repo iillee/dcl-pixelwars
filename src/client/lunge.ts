@@ -20,12 +20,13 @@
  *    knockback and drops it if it arrives > LUNGE_IMPACT_MAX_AGE_MS after
  *    it saw that lunge start, or twice.
  * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.wav, preloaded) + upper-body 'punch' emote (LUNGE_EMOTE)
- *    + slash crescent (held readable) + a short hit-volume flash; active =
+ *    + slash crescent (held readable). No hit-volume mesh. Active =
  *    streak behind the avatar (shown on remote avatars too via
  *    lungeStarted); hit = big team pop + white core + impact boom at contact, attacker
  *    brakes on the spot (hit-stop stand-in); miss = grey dust ahead of the feet,
- *    no boom. Recovery (walk only) is marked: gold feet disc + click + amber LOCK
- *    on the slot. Pressing during cooldown does nothing.
+ *    no boom. Recovery (walk only) is UI + a click: amber LOCK on the desktop
+ *    slot, amber tint on the mobile slot. No disc, sphere, or hitbox mesh.
+ *    Pressing during cooldown does nothing.
  * Debug (LUNGE_DEBUG): hitbox spheres per frame, direction dots, hit and
  * knockback markers, state log.
  */
@@ -42,7 +43,7 @@ import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE, LUNGE_STICK_FORCE,
-  LUNGE_RECOVERY_S, LUNGE_RECOVERY_FX_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
+  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
@@ -87,29 +88,36 @@ let lastHitBy = ''
 let lastHitAge = 999
 
 // ─── FX (pooled-free: few entities, removed after life) ─────────────
-type Fx = { ent: Entity; t: number; dur: number; life: number; from: number; to: number; flat: boolean; follow?: { who: string; off: V3 } }
+type Fx = { ent: Entity; t: number; dur: number; life: number; from: number; to: number; follow?: { who: string; off: V3 } }
 const fx: Fx[] = []
 
 function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number, life: number, from: number, to: number,
-  alpha: number, sound?: { src: string; vol: number }, follow?: { who: string; off: V3 }, flat = false): void {
+  alpha: number, sound?: { src: string; vol: number }, follow?: { who: string; off: V3 }): void {
   const ent = engine.addEntity()
-  const sy = flat ? from * 0.12 : from
-  Transform.create(ent, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(from, sy, from) })
+  Transform.create(ent, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(from, from, from) })
   MeshRenderer.setSphere(ent)
   Material.setPbrMaterial(ent, {
     albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, alpha),
     emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
-    emissiveIntensity: flat ? 2 : 4,
+    emissiveIntensity: 4,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
   })
   if (sound) AudioSource.create(ent, { audioClipUrl: sound.src, playing: true, loop: false, volume: sound.vol, global: false })
-  fx.push({ ent, t: 0, dur, life, from, to, flat, follow })
+  fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
 const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const WHITE = { r: 1, g: 1, b: 1 }
-const BRACE = { r: 1, g: 0.72, b: 0.15 } // recovery lock — not team red/blue, not miss grey
 const RECOVERY_CLICK = 'assets/sounds/click.wav'
+let recoveryClickEnt: Entity = 0 as Entity
+
+/** Walk-only brace. Sound only — the slot UI carries the visual. */
+function playRecoveryClick(): void {
+  if (!recoveryClickEnt) return
+  AudioSource.createOrReplace(recoveryClickEnt, {
+    audioClipUrl: RECOVERY_CLICK, playing: true, loop: false, volume: 0.45, global: true, currentTime: 0,
+  })
+}
 
 function impactFx(p: V3, team: Team, withSound: boolean): void {
   // Chest-height team burst + white core + boom. Miss dust never uses these.
@@ -127,13 +135,6 @@ function missDust(p: V3): void {
   ahead(0, LUNGE_MISS_DUST_TO, 0.28)
   ahead(0.45, 0.7, 0.24)
   ahead(-0.45, 0.7, 0.24)
-}
-
-/** Attacker brace at the end of the charge. Marks the walk-only lock (local only). */
-function recoveryFx(p: V3): void {
-  spawnFx({ x: p.x, y: p.y + 0.06, z: p.z }, BRACE, LUNGE_RECOVERY_FX_S, LUNGE_RECOVERY_FX_S, 0.4, 1.8, 0.7,
-    { src: RECOVERY_CLICK, vol: 0.45 }, undefined, true)
-  spawnFx({ x: p.x, y: p.y + 0.85, z: p.z }, BRACE, 0.22, 0.22, 0.12, 0.4, 0.85)
 }
 
 // Streak (dash.ts wind trail, short + dense). Also drawn on remote avatars.
@@ -319,10 +320,8 @@ function endActive(): void {
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   const travelled = p ? Math.hypot(p.x - startPos.x, p.z - startPos.z) : 0
   console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE}) hit=${hitAny} brake=${frac.toFixed(2)} run=${baseSpeed.toFixed(1)} peak=${peakSpeed.toFixed(1)}`)
-  if (p) {
-    if (!hitAny) missDust(p) // grey, ahead — distinct from the brace under the feet and from a hit pop
-    recoveryFx(p)
-  }
+  if (p && !hitAny) missDust(p) // grey dust ahead; a hit is the chest pop + boom
+  playRecoveryClick()
   state = 'recovery'; stateLeft = LUNGE_RECOVERY_S
   dbgLog(`#${lungeId} → recovery`)
 }
@@ -479,6 +478,8 @@ export function initLunge(): void {
   initKnockbackState()
   knockForceEnt = engine.addEntity()
   stickForceEnt = engine.addEntity()
+  recoveryClickEnt = engine.addEntity()
+  Transform.create(recoveryClickEnt, { parent: engine.CameraEntity })
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   initLungeHitbox(avatarPos)
   events.on('lunge:started', ({ attacker, id, dx, dz, x, y, z }) => onStarted(attacker, id, dx, dz, x, y, z))
@@ -553,7 +554,7 @@ export function initLunge(): void {
       if (f.t >= f.dur) { if (MeshRenderer.has(f.ent)) MeshRenderer.deleteFrom(f.ent); continue }
       const s = f.from + (f.to - f.from) * (f.t / f.dur)
       const tr = Transform.getMutable(f.ent)
-      tr.scale = Vector3.create(s, f.flat ? s * 0.12 : s, s)
+      tr.scale = Vector3.create(s, s, s)
     }
   })
 }
