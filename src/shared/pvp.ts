@@ -165,6 +165,22 @@ export const BURST_PAINT_MAX_DY = 1.5
 export const BURST_RADIUS = BURST_PAINT_RADIUS_CELLS * 2 + 1
 /** …and within this height (a full R-cell ramp run climbs ~3.5 m; a level is ~5.4 m). */
 export const BURST_HIT_MAX_DY = 3.5
+/** Aerial Burst (same F charge). Only when the press is airborne — grounded Burst stays the radial
+ *  blast. Cylinder straight down: a player in it is a combat spike (no paint); a miss that reaches
+ *  walkable ground paints a 5-tile cross (centre + N/E/S/W). Sideways air at the same height does
+ *  not connect (AIR_SPIKE_MIN_ABOVE). */
+export const AIR_SPIKE_RADIUS = 2 // m, horizontal feet-to-feet
+export const AIR_SPIKE_DEPTH = 5.5 // m, how far below the attacker the spike reaches
+export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this far above the victim
+export const AIR_SPIKE_MIN_DROP = 0.2 // m, ground cell must sit at least this far below the attacker
+export const AIR_SPIKE_CROSS_R = 1 // cells; cross |dx|+|dz| ≤ 1 → centre + N/E/S/W
+/** Victim spike: strong downward impulse, small outward impulse, short downward carry. */
+export const AIR_SPIKE_DOWN = 110
+export const AIR_SPIKE_OUT = 18
+export const AIR_SPIKE_FORCE = 40
+export const AIR_SPIKE_FORCE_S = 0.28
+/** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
+export const AIR_SPIKE_BOT_SHOVE = 2
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Expanding ring, particles, aura. */

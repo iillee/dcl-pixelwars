@@ -38,9 +38,10 @@ import {
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_CROSS_R, AIR_SPIKE_BOT_SHOVE,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
-import { BurstLedger, burstFootprint, burstCentre, inBurst } from '../shared/burst'
+import { BurstLedger, burstFootprint, burstCentre, inBurst, inAirSpike, airSpikeLanding } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
@@ -488,12 +489,11 @@ export async function setupServer(): Promise<void> {
   })
 
   // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
-  // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S),
-  // rebroadcast burstFired; opponent ghost bots in range are shoved here.
-  // burstHit: attacker client found a player in range + LOS; accepted once
-  // per (attacker, burst id, target) within SERVER_BURST_HIT_WINDOW_S.
-  // One-time paint: burstUse paints the whole footprint around the player's cell immediately.
-  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz }, context) => {
+  // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S), shared by ground and air.
+  // air 0: radial paint + radial bot shove. air 1: spike, no paint. air 2: miss that
+  // paints a 5-tile cross where the cylinder meets the ground (server recomputes the cell).
+  // burstHit: attacker client found a player; accepted once per (attacker, burst id, target).
+  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air }, context) => {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
@@ -503,33 +503,73 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
+    const mode = air === 2 ? 2 : air === 1 ? 1 : 0
     lastBurstAt.set(from, now)
     markActive(from)
-    bursts.start(from, id, now)
-    // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
-    room.send('burstFired', { attacker: from, id, team, x, y, z })
-    // Paint the footprint once (same score credit as normal paint).
+    bursts.start(from, id, now, mode)
     const graph = getWalkableGraph()
-    const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
+    const origin = { x, y, z }
+    // Air: a bot already in the cylinder is a combat connect, so the cross does not paint.
+    let spikedBot = false
+    if (mode !== 0) {
+      for (const b of getBotPositions()) {
+        if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
+        spikedBot = true
+        break
+      }
+    }
+    let firedAir = mode === 0 ? 0 : (mode === 2 && !spikedBot ? 2 : 1)
+    let lx = 0, ly = 0, lz = 0
+    let land: string | null = null
+    if (firedAir === 2 && graph) {
+      land = airSpikeLanding(graph, origin)
+      if (!land) firedAir = 1
+      else {
+        const c = graph.worldPos.get(land)!
+        lx = c[0]; ly = c[1]; lz = c[2]
+      }
+    }
+    // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
+    room.send('burstFired', { attacker: from, id, team, x, y, z, air: firedAir, lx, ly, lz })
     let gained = 0
-    if (graph && centre) for (const cid of burstFootprint(graph, centre)) if (applyPaint(cid, team, from)) gained++
+    let fp: string[] = []
+    if (mode === 0) {
+      const centre = graph ? burstCentre(graph, cell, origin) : null
+      fp = graph && centre ? burstFootprint(graph, centre) : []
+      if (graph && centre) for (const cid of fp) if (applyPaint(cid, team, from)) gained++
+    } else if (firedAir === 2 && graph && land) {
+      fp = burstFootprint(graph, land, 'cross', AIR_SPIKE_CROSS_R)
+      for (const cid of fp) if (applyPaint(cid, team, from)) gained++
+    }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
     }
-    // TEMP (ramp paint debug): reported cell vs resolved centre, footprint size, ramp cells in it.
-    const fp = graph && centre ? burstFootprint(graph, centre) : []
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
-    console.log(`[Server] burst ${from.slice(0, 8)} #${id} painted ${gained} cells | cell=${cell || '(none)'} centre=${centre ?? 'null'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
-    for (const b of getBotPositions()) {
-      if (b.team === team || !inBurst({ x, y, z }, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
-      let dx = b.x - x, dz = b.z - z
-      const l = Math.hypot(dx, dz)
-      if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
-      const dl = Math.hypot(dx, dz) || 1
-      if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
-        bursts.hit(from, id, `bot:${b.id}`, now)
-        room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl })
+    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${firedAir} painted ${gained} cells | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
+    if (mode === 0) {
+      for (const b of getBotPositions()) {
+        if (b.team === team || !inBurst(origin, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
+        let dx = b.x - x, dz = b.z - z
+        const l = Math.hypot(dx, dz)
+        if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
+        const dl = Math.hypot(dx, dz) || 1
+        if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+          bursts.hit(from, id, `bot:${b.id}`, now)
+          room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl, air: 0 })
+        }
+      }
+    } else {
+      for (const b of getBotPositions()) {
+        if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
+        let dx = b.x - x, dz = b.z - z
+        const l = Math.hypot(dx, dz)
+        if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
+        const dl = Math.hypot(dx, dz) || 1
+        if (punchBot(b.id, x, y, z, dx / dl, dz / dl, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, AIR_SPIKE_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+          bursts.hit(from, id, `bot:${b.id}`, now)
+          room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl, air: 1 })
+        }
       }
     }
   })
@@ -575,7 +615,8 @@ export async function setupServer(): Promise<void> {
     const verdict = bursts.hit(from, id, victim.userId, Date.now())
     if (verdict !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`); return }
     noteHit(from, victim.userId)
-    room.send('burstImpact', { attacker: from, id, target: victim.userId, dx: dx / len, dz: dz / len })
+    const spike = bursts.mode(from, id) !== 0
+    room.send('burstImpact', { attacker: from, id, target: victim.userId, dx: dx / len, dz: dz / len, air: spike ? 1 : 0 })
   })
 
   // Paint Bomb (shared/pvp.ts). Position is the bomber's own report (the

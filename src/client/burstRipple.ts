@@ -24,7 +24,7 @@ import {
   SLAB_OUTLINE, SLAB_OUTLINE_M, DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX, DASH_TILE_INNER_LAG_S,
   DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
-import { burstFootprint, burstCentre, V3 } from '../shared/burst'
+import { burstFootprint, burstCentre, airSpikeLanding, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
@@ -65,15 +65,25 @@ function setColour(s: Slab): void {
   Material.setPbrMaterial(s.ent, cellMaterial(s.team))
 }
 
-/** Start the ripple for a burst fired at feet position `p` by `team`. */
-export function startRipple(p: V3, team: Team, cell = ''): void {
+/** Walkable cell the air spike meets under `p`, or null when the ground is out of reach. */
+export function airLanding(p: V3): { id: string; x: number; y: number; z: number } | null {
+  const g = ensureGraph()
+  if (!g) return null
+  const id = airSpikeLanding(g, p)
+  if (!id) return null
+  const c = g.worldPos.get(id)!
+  return { id, x: c[0], y: c[1], z: c[2] }
+}
+
+/** Start the ripple for a burst fired at feet position `p` by `team`.
+ *  Default shape/size is the grounded circle. Pass 'cross' + radius 1 for the air-spike landing. */
+export function startRipple(p: V3, team: Team, cell = '', shape?: 'circle' | 'square' | 'cross', radiusCells?: number): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
   const g = ensureGraph()
   if (!g) return
   const centre = burstCentre(g, cell, p)
   if (!centre) return
-  // Same cells the server paints (default shape/size), so the ripple covers the whole 7×7.
-  const cells = burstFootprint(g, centre)
+  const cells = shape ? burstFootprint(g, centre, shape, radiusCells ?? 1) : burstFootprint(g, centre)
   const c0 = g.worldPos.get(centre)!
   let maxD = CELL_M
   for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }

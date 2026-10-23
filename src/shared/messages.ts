@@ -177,14 +177,18 @@ export const Messages = {
   lungeImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
   // Paint Burst (shared/pvp.ts BURST_*, client/paintBurst.ts, shared/burst.ts).
-  // Client → Server: burst at (x, y, z) on `cell`, facing (fx, fz). Server checks the cooldown, paints the
-  // footprint once and rebroadcasts burstFired.
-  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number }),
-  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Client → Server: burst at (x, y, z) on `cell`, facing (fx, fz).
+  // air: 0 grounded radial (server paints the circle), 1 airborne spike with no paint,
+  // 2 airborne miss that should paint the 5-tile cross where the spike meets the ground.
+  // Server checks the shared cooldown and rebroadcasts burstFired.
+  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int }),
+  // air matches burstUse after the server resolves a landing. lx/ly/lz is the cross centre (0 when none).
+  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.
-  burstImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+  // air 1 = downward spike (ImpactGate still dedupes against speculative knock).
+  burstImpact: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, air: Schemas.Int }),
 
   // Shared anvil dummies (server/anvils.ts owns them; shared/anvilSim.ts).
   // Client → Server: lunge (kind 0) or burst (kind 1) `id` hit anvil `i`, knock direction (dx, dz).

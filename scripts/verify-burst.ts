@@ -6,8 +6,8 @@
  * paint centre resolution (burstUse cell → footprint). Feel, LOS raycast
  * and networking need an Explorer playtest.
  */
-import { BurstLedger, inBurst, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
-import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S } from '../src/shared/pvp'
+import { BurstLedger, inBurst, inAirSpike, airSpikeLanding, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
+import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE, AIR_SPIKE_CROSS_R } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
 import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
 import { worldToCellId } from '../src/paint'
@@ -21,7 +21,7 @@ function check(name: string, ok: boolean): void {
 const P = (x: number, z: number, y = 0) => ({ x, y, z })
 
 // Cooldown (timer, server-enforced; no paint quota).
-check(`cooldown ${BURST_COOLDOWN_S} s, server gap ${SERVER_MIN_BURST_GAP_S} s (slack, < cooldown)`, BURST_COOLDOWN_S === 12 && SERVER_MIN_BURST_GAP_S < BURST_COOLDOWN_S && SERVER_MIN_BURST_GAP_S > BURST_COOLDOWN_S - 1)
+check(`cooldown ${BURST_COOLDOWN_S} s, server gap ${SERVER_MIN_BURST_GAP_S} s (slack, < cooldown)`, BURST_COOLDOWN_S === 8 && SERVER_MIN_BURST_GAP_S < BURST_COOLDOWN_S && SERVER_MIN_BURST_GAP_S > BURST_COOLDOWN_S - 1)
 
 // Radius / direction.
 check(`opponent ${BURST_RADIUS - 0.1} m away is hit`, inBurst(P(0, 0), P(BURST_RADIUS - 0.1, 0)))
@@ -192,6 +192,44 @@ check('footprints stay on walkable, connected cells of the same level (no gaps /
   for (const r of [0, 1, 2, 3]) check(`ramp r=${r}: player on the slope → reported cell + ramp cells in the circle painted (${per[r].n - per[r].bad}/${per[r].n})`, per[r].n > 0 && per[r].bad === 0)
 }
 check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).length === 0)
+{
+  // Aerial spike: cylinder under the attacker, not the radial shockwave.
+  const up = P(0, 0, 6)
+  check('air spike: player 2 m below and 1 m aside is inside the cylinder', inAirSpike(up, P(1, 0, 4)))
+  check('air spike: same height beside the attacker is not a hit', !inAirSpike(up, P(1.2, 0, 6)))
+  check('air spike: just under the above-gate is not a hit', !inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_MIN_ABOVE + 0.05)))
+  check('air spike: clearly below the gate is a hit', inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_MIN_ABOVE - 0.05)))
+  check('air spike: outside the horizontal radius is not a hit', !inAirSpike(up, P(AIR_SPIKE_RADIUS + 0.2, 0, 3)))
+  check('air spike: deeper than the cylinder is not a hit', !inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_DEPTH - 0.3)))
+  let spot: string | null = null
+  for (const id of g.nodes) {
+    const c = g.worldPos.get(id)!
+    let blocked = false
+    for (const [oid, q] of g.worldPos) {
+      if (oid === id) continue
+      if (Math.hypot(q[0] - c[0], q[2] - c[2]) > AIR_SPIKE_RADIUS) continue
+      if (q[1] > c[1] + 0.05) blocked = true
+    }
+    if (!blocked && burstFootprint(g, id, 'cross', AIR_SPIKE_CROSS_R).length === 5) { spot = id; break }
+  }
+  check('air spike: found an open 5-tile cross to land on', spot !== null)
+  if (spot) {
+    const [x, y, z] = g.worldPos.get(spot)!
+    const hover = { x, y: y + 3, z }
+    const land = airSpikeLanding(g, hover)
+    const cross = land ? burstFootprint(g, land, 'cross', AIR_SPIKE_CROSS_R) : []
+    check('air spike miss lands on that cell', land === spot)
+    check('air spike miss paints the 5-tile cross and not the radial disc', cross.length === 5 && cross.includes(spot) && cross.length < 10)
+    check('air spike: ground beyond reach does not paint', airSpikeLanding(g, { x, y: y + 40, z }) === null)
+    const above = airSpikeLanding(g, { x, y: y - 4, z })
+    check('air spike: a cell above the attacker is not the landing', above !== spot)
+  }
+  const led = new BurstLedger()
+  led.start('a', 7, 0, 1)
+  check('air and ground share one ledger; spike mode is remembered', led.mode('a', 7) === 1 && led.hit('a', 7, 'b', 10) === 'ok')
+  led.start('a', 8, 20, 0)
+  check('a later grounded burst is radial mode on the same attacker', led.mode('a', 8) === 0 && led.mode('a', 7) === 0)
+}
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }
 console.log('✓ all burst checks passed')
