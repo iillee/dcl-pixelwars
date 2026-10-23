@@ -25,7 +25,7 @@ import {
   BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
-  LUNGE_KNOCKBACK, burstEnabledForRound,
+  LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, burstDir, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
@@ -195,6 +195,22 @@ export function triggerBurst(): void {
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
+/** Victim impulse (confirmed Impact or speculative). Marks ImpactGate applied. */
+function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: string): boolean {
+  const verdict = gate.accept(att, id, Date.now())
+  if (verdict !== 'ok' || isKnockbackImmune() || !isBurstEnabledNow()) {
+    console.log(`[Burst] ${why} #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
+    return false
+  }
+  safePhysics('burst knockback', () => {
+    Physics.applyImpulseToPlayer(Vector3.create(dx * BURST_KNOCKBACK, BURST_KNOCK_LIFT, dz * BURST_KNOCKBACK))
+    if (BURST_KNOCK_FORCE > 0) Physics.applyForceToPlayerForDuration(knockForceEnt, BURST_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), BURST_KNOCK_FORCE)
+  })
+  playDashHitSfx()
+  console.log(`[Burst] ${why} by ${att.slice(0, 8)} #${id}`)
+  return true
+}
+
 function onImpact(attacker: string, id: number, target: string, dx: number, dz: number): void {
   const me = myAddress()
   const att = attacker.toLowerCase(), tgt = target.toLowerCase()
@@ -204,17 +220,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     return
   }
   if (!me || tgt !== me) return
-  const verdict = gate.accept(att, id, Date.now())
-  if (verdict !== 'ok' || isKnockbackImmune() || !isBurstEnabledNow()) {
-    console.log(`[Burst] impact #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
-    return
-  }
-  safePhysics('burst knockback', () => {
-    Physics.applyImpulseToPlayer(Vector3.create(dx * BURST_KNOCKBACK, BURST_KNOCK_LIFT, dz * BURST_KNOCKBACK))
-    if (BURST_KNOCK_FORCE > 0) Physics.applyForceToPlayerForDuration(knockForceEnt, BURST_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), BURST_KNOCK_FORCE)
-  })
-  playDashHitSfx()
-  console.log(`[Burst] knocked by ${att.slice(0, 8)} #${id}`)
+  applyVictimKnock(att, id, dx, dz, 'knocked')
 }
 function playAt(p: V3): void {
   addFx(0.6, e => {
@@ -238,6 +244,29 @@ export function initPaintBurst(): void {
     gate.sawStart(att, id, Date.now())
     if (att === myAddress()) return // shown at the press
     showShockwave({ x, y, z }, team, false)
+    // Victim anticipation: if we're already in the shockwave radius, knock now
+    // (Impact arrives ~same RTT; this wins when Fired is processed before Impact).
+    if (!VICTIM_SPECULATIVE_KNOCK) return
+    const my = localTeam()
+    if (my === Team.None || team === my) return
+    if (isKnockbackImmune() || !isBurstEnabledNow()) return
+    const tp = Transform.getOrNull(engine.PlayerEntity)?.position
+    if (!tp) return
+    const origin: V3 = { x, y, z }
+    const me: V3 = { x: tp.x, y: tp.y, z: tp.z }
+    if (!inBurst(origin, me)) return
+    // Facing only matters when stacked on the origin; prefer attacker avatar facing.
+    let fx = 0, fz = 1
+    for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
+      if (entity === engine.PlayerEntity) continue
+      if (pid.address.toLowerCase() !== att) continue
+      const f = Vector3.rotate(Vector3.Forward(), tr.rotation)
+      const fl = Math.hypot(f.x, f.z)
+      if (fl > 1e-3) { fx = f.x / fl; fz = f.z / fl }
+      break
+    }
+    const k = burstDir(origin, me, fx, fz)
+    applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
 

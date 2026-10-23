@@ -43,6 +43,7 @@ import {
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
+  VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
 import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
@@ -74,6 +75,9 @@ let baseSpeed = 0 // forward speed at the press (run momentum), kept by the brak
 const lastVel = { x: 0, z: 0 }
 const hitThis = new Set<string>()
 const gate = new ImpactGate(LUNGE_IMPACT_MAX_AGE_MS)
+// Victim anticipation: remote lunges we may already be inside of. Key = attacker#id.
+type PendingVictimLunge = { att: string; id: number; dx: number; dz: number; start: V3; left: number; prevAtt: V3 | null }
+const pendingVictim = new Map<string, PendingVictimLunge>()
 let knockForceEnt: Entity = 0 as Entity
 let stickForceEnt: Entity = 0 as Entity
 let lastHitBy = ''
@@ -335,7 +339,7 @@ function checkHits(a0: V3, a1: V3): void {
 }
 
 // ─── Network events ─────────────────────────────────────────────────
-function onStarted(attacker: string, id: number, dx: number, dz: number): void {
+function onStarted(attacker: string, id: number, dx: number, dz: number, x: number, y: number, z: number): void {
   const att = attacker.toLowerCase()
   gate.sawStart(att, id, Date.now())
   if (att === myAddress()) return
@@ -347,6 +351,66 @@ function onStarted(attacker: string, id: number, dx: number, dz: number): void {
   // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
   if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(teamOfUser(att)), 0.08, 0.7, 0.5, 1.1, 0.5,
     { src: pickLungeSrc(), vol: 0.9 }, { who: att, off: { x: 0, y: 1.1, z: 0 } })
+  // Victim anticipation: if we may be (or enter) the hit volume, knock ourselves
+  // as soon as contact is visible here — don't wait for server Impact (~1 RTT).
+  if (!VICTIM_SPECULATIVE_KNOCK) return
+  const attTeam = teamOfUser(att)
+  const my = localTeam()
+  if ((attTeam !== Team.Red && attTeam !== Team.Blue) || my === Team.None || attTeam === my) return
+  const start = { x, y, z }
+  const key = `${att}#${id}`
+  pendingVictim.set(key, {
+    att, id, dx, dz, start,
+    left: LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S + 0.2, // slack for avatar interpolation
+    prevAtt: p ? { x: p.x, y: p.y, z: p.z } : start,
+  })
+}
+
+/** Shared victim impulse (confirmed Impact or speculative). Marks ImpactGate applied. */
+function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: string): boolean {
+  const verdict = gate.accept(att, id, Date.now())
+  if (verdict !== 'ok' || isKnockbackImmune() || !isLungeEnabledNow()) {
+    console.log(`[Lunge] ${why} #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
+    return false
+  }
+  safePhysics('lunge knockback', () => {
+    Physics.applyImpulseToPlayer(Vector3.create(dx * LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, dz * LUNGE_KNOCKBACK))
+    if (LUNGE_KNOCK_FORCE > 0) {
+      Physics.applyForceToPlayerForDuration(knockForceEnt, LUNGE_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), LUNGE_KNOCK_FORCE)
+    }
+  })
+  startKnockLock()
+  const p = Transform.getOrNull(engine.PlayerEntity)?.position
+  if (p) {
+    impactFx(p, teamOfUser(att), true)
+    for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: p.x + dx * s, y: p.y + 0.3, z: p.z + dz * s }, { r: 1, g: 0.3, b: 0 }, 0.18)
+  }
+  lastHitBy = att; lastHitAge = 0
+  console.log(`[Lunge] ${why} by ${att.slice(0, 8)} #${id} dir=(${dx.toFixed(2)},${dz.toFixed(2)})`)
+  return true
+}
+
+/** Each frame: if a remote lunger's box reaches us on our screen, knock now. */
+function trySpeculativeVictim(dt: number): void {
+  if (pendingVictim.size === 0) return
+  const myPos = Transform.getOrNull(engine.PlayerEntity)?.position
+  for (const [key, pend] of pendingVictim) {
+    pend.left -= dt
+    if (pend.left <= 0) { pendingVictim.delete(key); continue }
+    if (!VICTIM_SPECULATIVE_KNOCK || !myPos || isKnockbackImmune() || !isLungeEnabledNow()) continue
+    const attPos = avatarPos(pend.att)
+    if (!attPos) continue
+    const a0 = pend.prevAtt ?? attPos
+    const a1 = { x: attPos.x, y: attPos.y, z: attPos.z }
+    pend.prevAtt = a1
+    const me: V3 = { x: myPos.x, y: myPos.y, z: myPos.z }
+    if (!boxHit(a0, a1, me, pend.start, pend.dx, pend.dz)) continue
+    pendingVictim.delete(key)
+    const k = knockDir(a1, me, pend.dx, pend.dz)
+    flashSlash(pend.att)
+    flashHitbox(pend.att)
+    applyVictimKnock(pend.att, pend.id, k.x, k.z, 'speculative knock')
+  }
 }
 
 function onImpact(attacker: string, id: number, target: string, dx: number, dz: number): void {
@@ -363,25 +427,8 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     return
   }
   if (me && tgt === me) {
-    const verdict = gate.accept(att, id, Date.now())
-    if (verdict !== 'ok' || isKnockbackImmune() || !isLungeEnabledNow()) {
-      console.log(`[Lunge] impact #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
-      return
-    }
-    safePhysics('lunge knockback', () => {
-      Physics.applyImpulseToPlayer(Vector3.create(dx * LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, dz * LUNGE_KNOCKBACK))
-      if (LUNGE_KNOCK_FORCE > 0) {
-        Physics.applyForceToPlayerForDuration(knockForceEnt, LUNGE_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), LUNGE_KNOCK_FORCE)
-      }
-    })
-    startKnockLock()
-    const p = Transform.getOrNull(engine.PlayerEntity)?.position
-    if (p) {
-      impactFx(p, attTeam, true)
-      for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: p.x + dx * s, y: p.y + 0.3, z: p.z + dz * s }, { r: 1, g: 0.3, b: 0 }, 0.18)
-    }
-    lastHitBy = att; lastHitAge = 0
-    console.log(`[Lunge] knocked by ${att.slice(0, 8)} #${id} dir=(${dx.toFixed(2)},${dz.toFixed(2)})`)
+    pendingVictim.delete(`${att}#${id}`) // confirmed path; drop any watch
+    applyVictimKnock(att, id, dx, dz, 'knocked')
     return
   }
   const p = avatarPos(tgt)
@@ -404,13 +451,14 @@ export function initLunge(): void {
   stickForceEnt = engine.addEntity()
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   initLungeHitbox(avatarPos)
-  events.on('lunge:started', ({ attacker, id, dx, dz }) => onStarted(attacker, id, dx, dz))
-  events.on('round:reset', () => { cancelLunge('round reset'); clearKnockLock() })
+  events.on('lunge:started', ({ attacker, id, dx, dz, x, y, z }) => onStarted(attacker, id, dx, dz, x, y, z))
+  events.on('round:reset', () => { cancelLunge('round reset'); clearKnockLock(); pendingVictim.clear() })
   events.on('lunge:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
   events.on('player:respawned', ({ why }) => {
     // Fall/respawn mid-attack: drop the lunge (no brake after a teleport).
     cancelLunge(why)
     clearKnockLock()
+    pendingVictim.clear()
     if (lastHitBy && lastHitAge < LAST_HIT_S) console.log(`[Lunge] knocked off by ${lastHitBy.slice(0, 8)} (${why})`)
     lastHitBy = ''
   })
@@ -432,6 +480,7 @@ export function initLunge(): void {
       if (lockLeft <= 0) { lockLeft = 0; applyControl() }
     }
     if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) triggerLunge()
+    trySpeculativeVictim(dt)
 
     const t = Transform.getOrNull(engine.PlayerEntity)
     const pos: V3 | null = t ? { x: t.position.x, y: t.position.y, z: t.position.z } : null

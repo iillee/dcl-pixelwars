@@ -318,6 +318,10 @@ export const LUNGE_KNOCKBACK_LOCK = true
 export const LUNGE_KNOCKBACK_LOCK_S = 0.3
 /** Victim drops an impact older than this vs when it saw that lunge start (ms). Was 400; too tight for DCL RTT. */
 export const LUNGE_IMPACT_MAX_AGE_MS = 800
+/** Victim anticipates knockback when they see lungeStarted/burstFired and are in the hit volume,
+ *  before server Impact arrives. Confirmed Impact is deduped via ImpactGate (no double push).
+ *  Residual risk: rare false knock if we look in-volume but the attacker never reports us. */
+export const VICTIM_SPECULATIVE_KNOCK = true
 
 // ─── Ghost bot (server-shoved; it walks a graph and can't fall) ─────
 export const LUNGE_BOT_SHOVE = 6

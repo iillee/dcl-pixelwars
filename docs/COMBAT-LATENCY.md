@@ -1,4 +1,4 @@
-# Combat latency map (Milestone B lag pass) — 2026-10-23
+# Combat latency map (Milestone B) — updated 2026-10-23
 
 ## Pipeline (Lunge E / Burst F)
 
@@ -8,26 +8,37 @@
 4. **Server authority** — ledger dedupe + team + window → broadcast `lungeImpact` / `burstImpact`.
 5. **Victim client** — ImpactGate (dedupe + max age) → local Physics impulse (SDK can only move the local avatar).
 
-Victim knockback therefore always pays **~1 RTT after the attacker's hit detect**. That cannot be removed without speculative victim physics (deferred: risk of contradictory knockback).
+## Victim speculative knock (2026-10-23, `VICTIM_SPECULATIVE_KNOCK`)
 
-## Root causes found (this pass)
+Goal: reduce **perceived** delay between a successful hit and the victim actually moving.
 
-| Source | Effect | Fix shipped? |
-|--------|--------|--------------|
-| Burst LOS raycast before `burstHit` | 0–300 ms delay before hit entered the network (`BURST_LOS_TIMEOUT_S` fail-open) | Yes — `BURST_LOS = false` |
-| `burstFired` after paint footprint loop | Remotes / ImpactGate start delayed by paint work | Yes — broadcast first |
-| Burst press sent network before local FX | Activate felt one tick late vs Lunge | Yes — `showShockwave` before `sendBurstUse` |
-| Burst attacker had no connect SFX on player hits | Unclear attribution on press | Yes — optimistic `playDashHitSfx` + positional pop |
-| `LUNGE_IMPACT_MAX_AGE_MS = 400` | High RTT silently dropped real knockbacks (felt like lag) | Yes — 800 ms (Burst 600→900) |
-| Victim impulse waits on server round-trip | Inherent to authority model | No — needs 2-client playtest; speculative knock deferred |
+| Ability | When we anticipate | How |
+|---------|-------------------|-----|
+| **Lunge** | After `lungeStarted`, each frame while the active+grace window is live | Victim runs the same `boxHit` against the remote lunger's avatar on their screen. On contact → apply full knock + `ImpactGate.accept`. |
+| **Burst** | On `burstFired` | If local feet are inside `inBurst(origin)` and opposing team → apply full knock + gate.accept immediately. |
 
-## Remaining risks / next playtest
+Confirmed `*Impact` still goes through `ImpactGate`: if speculation already applied that `(attacker, id)`, Impact is **dup** (no double push). If speculation never fired (we looked outside the volume), Impact applies normally.
 
-- **2-client:** confirm knockbacks still apply (not dropped) and directions match; watch for rare through-geometry Burst hits with LOS off.
-- Victim still feels knock **after** RTT — if still muddy, next lever is cautious local anticipation on `lungeStarted`/`burstFired` + gate (not done here).
-- Do not reintroduce mode vote / Corruption.
+Toggle: `VICTIM_SPECULATIVE_KNOCK` in `shared/pvp.ts`.
 
-## How to verify
+### Residual risk
+- **False knock / ghost push:** we look in-volume (avatar desync) but the attacker never reports us → server never sends Impact. We still flew. No soft-revert (avoids jank if Impact is merely late). Rare in practice; same geometry as the attacker uses.
+- Direction uses the same `knockDir` / `burstDir` formulas as the confirmed path, so confirmed Impact matching speculation should not diverge when both fire.
 
-1. Solo Creator Hub: E/F activate SFX/VFX feel immediate; Burst near a dummy/player should pop on connect without a pause.
-2. Ideally two Explorers: Lunge/Burst each other; victim should fly more reliably; attacker should hear connect instantly; remotes should see Burst FX sooner.
+## Root causes / fixes
+
+| Source | Effect | Fix |
+|--------|--------|-----|
+| Burst LOS raycast before `burstHit` | 0–300 ms delay | `BURST_LOS = false` |
+| `burstFired` after paint loop | Remotes delayed | Broadcast first |
+| Burst press sent network before local FX | Activate felt late | `showShockwave` before send |
+| Tight Impact max-age | High RTT dropped real knocks | Lunge 800 / Burst 900 ms |
+| Victim impulse waits on Impact RTT | Opponent moves late | **Speculative knock (this pass)** |
+
+## How to verify (2 clients)
+
+1. Two Explorers on opposite teams, restart Creator Hub after pull.
+2. **Lunge:** A charges B. B should start flying when A's body reaches them on B's screen — not a full beat later. A should see B move sooner than before. Console on B: `[Lunge] speculative knock by …` often, then Impact arrives as dup (no second shove).
+3. **Burst:** A fires F next to B. B should move on/near the shockwave, not after an extra hitch. Console: `[Burst] speculative knock by …`.
+4. Watch for rare false knocks (B flies with no attacker hit FX) — note and we can tighten or disable the flag.
+5. Confirm no double-launch (speculation + Impact).
