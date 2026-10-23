@@ -118,7 +118,8 @@ export function pickLungeSrc(): string { return LUNGE_SRCS[pickLungeIdx()] }
  *  AudioSource with the clip already bound, so a press only flips playing. */
 function initLungeSfx(): void {
   const pre = engine.addEntity()
-  AssetLoad.create(pre, { assets: [...LUNGE_SRCS] })
+  // click.wav is the recovery-brace tick (lunge.ts). Preload so the first charge's lock isn't silent.
+  AssetLoad.create(pre, { assets: [...LUNGE_SRCS, 'assets/sounds/click.wav'] })
   for (const src of LUNGE_SRCS) {
     const e = engine.addEntity()
     Transform.create(e, { parent: engine.CameraEntity })

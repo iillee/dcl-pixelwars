@@ -4,11 +4,12 @@
  * A flat, horizontal crescent (assets/images/lunge_slash.png: white alpha
  * half-ring, tinted with the attacker's team colour, emissive) lying at
  * LUNGE_SLASH_HEIGHT above the attacker's feet. The plane is
- * LUNGE_SLASH_WIDTH wide (= LUNGE_HITBOX_W) and half as deep, centred
- * LUNGE_SLASH_FORWARD ahead, so the arc's outer edge sits on the hitbox's
+ * LUNGE_SLASH_WIDTH wide and LUNGE_SLASH_DEPTH_FRAC deep, centred
+ * LUNGE_SLASH_FORWARD ahead, so the arc's forward tip sits on the hitbox's
  * far face (LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D). It follows the attacker for the
- * active window, then shrinks + fades over LUNGE_SLASH_FADE_S. A hit flashes
- * it brighter/whiter (jumping straight to full size if it lands during the intro).
+ * active window, holds full size for LUNGE_SLASH_HOLD_S, then shrinks + fades
+ * over LUNGE_SLASH_FADE_S. A hit flashes it brighter/whiter (jumping straight
+ * to full size if it lands during the intro).
  * Intro (LUNGE_SLASH_INTRO): grows from a right-hand fist point and/or fades
  * in over LUNGE_SLASH_GROW_S — visual only, the hitbox is live from frame 0. Remote lunges (lungeStarted broadcast) get the same
  * slash following that avatar. Pool of LUNGE_SLASH_POOL entities, reused.
@@ -18,7 +19,7 @@ import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { Team, TEAM_RGB } from '../shared/team'
 import {
   LUNGE_SLASH, LUNGE_SLASH_WIDTH, LUNGE_SLASH_HEIGHT, LUNGE_SLASH_FORWARD, LUNGE_SLASH_FADE_S,
-  LUNGE_SLASH_ALPHA, LUNGE_SLASH_FLIP, LUNGE_ACTIVE_S,
+  LUNGE_SLASH_ALPHA, LUNGE_SLASH_FLIP, LUNGE_ACTIVE_S, LUNGE_SLASH_HOLD_S, LUNGE_SLASH_DEPTH_FRAC,
   LUNGE_SLASH_INTRO, LUNGE_SLASH_GROW_S, LUNGE_SLASH_START_SCALE, LUNGE_SLASH_FIST_OFFSET,
 } from '../shared/pvp'
 
@@ -51,7 +52,7 @@ function setMat(s: Slash, alpha: number): void {
     emissiveTexture: Material.Texture.Common({ src: TEX }),
     albedoColor: Color4.create(r, g, b, alpha),
     emissiveColor: Color4.create(r, g, b, 1),
-    emissiveIntensity: 2.5 + 4 * f,
+    emissiveIntensity: 3.4 + 4 * f,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
     castShadows: false,
   })
@@ -109,7 +110,8 @@ function place(s: Slash, k: number, m = 1): void {
     p.z + fist.z + (norm.z - fist.z) * m)
   // Plane lies flat (X 90°, texture top → forward), then yaws to the lunge direction.
   tr.rotation = Quaternion.multiply(Quaternion.fromEulerDegrees(0, yaw, 0), Quaternion.fromEulerDegrees(90, 0, 0))
-  tr.scale = Vector3.create(LUNGE_SLASH_WIDTH * k, LUNGE_SLASH_WIDTH / 2 * k, 1)
+  const w = LUNGE_SLASH_WIDTH * k
+  tr.scale = Vector3.create(w, w * LUNGE_SLASH_DEPTH_FRAC, 1)
 }
 
 export function initLungeSlash(positionOf: (who: string) => Vector3 | null): void {
@@ -133,8 +135,19 @@ export function tickSlash(dt: number, localPos: Vector3 | null): void {
     for (const s of pool) {
       if (!s.live) continue
       s.t += dt
-      if (s.t <= LUNGE_ACTIVE_S) { if (s.introDone) place(s, 1); else intro(s); continue }
-      const f = (s.t - LUNGE_ACTIVE_S) / LUNGE_SLASH_FADE_S
+      const holdEnd = LUNGE_ACTIVE_S + LUNGE_SLASH_HOLD_S
+      if (s.t <= holdEnd) {
+        if (!s.introDone) { intro(s); continue }
+        // Hit flash stays full through the charge, then eases back during the hold
+        // so the crescent is team-coloured again while it is still readable.
+        if (s.t > LUNGE_ACTIVE_S && s.flash > 0) {
+          s.flash = Math.max(0, s.flash - dt * 5)
+          setMat(s, LUNGE_SLASH_ALPHA)
+        }
+        place(s, 1)
+        continue
+      }
+      const f = (s.t - holdEnd) / LUNGE_SLASH_FADE_S
       if (f >= 1) {
         s.live = false
         const tr = Transform.getMutable(s.ent)
