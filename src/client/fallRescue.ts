@@ -2,58 +2,73 @@
  * fallRescue.ts — Lakitu-style fall pickup (slice 1).
  *
  * Crossing the sky fall line catches the player once. An invisible physics
- * panel (same pattern as the early-join spawn pads in player.ts) appears under
- * their feet, one movePlayerTo puts them on it, and they stand there for the
- * beat. The body does not freefall, and nothing re-teleports them during
- * grab/carry — that loop was the stutter.
+ * panel (MeshCollider + CL_PHYSICS, same box as the early-join spawn pads)
+ * appears under their feet, one movePlayerTo puts them on it, and a Tween
+ * then carries that panel up and over to just above the team base.
  *
- * The panel does not slide toward base. SDK7 MeshColliders do not carry the
- * character controller, so moving the panel would drop them off the edge.
- * Y stays steady; the floater (parented to the panel) bobs. At drop the panel
- * is removed and one teleport sends them to the team base.
+ * SDK 7.30.2 does carry a standing avatar on a Tween platform. The explorer
+ * docs say a player standing on an entity moves with it when that entity
+ * moves, and a blocked InputModifier still leaves moving platforms in effect.
+ * The earlier "colliders don't carry" note was about writing Transform every
+ * frame — that is not a platform, and it stutters. This path does not write
+ * Transform per frame. The collider sits on the tweened entity (a physics
+ * child jitters). TweenSequence is not used: in this SDK its loop is only
+ * restart or yoyo, and an emptied restart sequence replays the path.
+ *
+ * If they drift more than a few meters off the panel, one teleport sends
+ * them to base (snap fallback). No rehold loop. A camera fly-along is not
+ * used — the Tween API is here and is the documented carry.
  *
  * Beat (Luke: tweak FALL_RESCUE):
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
  *                  spawn the panel, one movePlayerTo onto it (holdFallLine so it does not re-trip)
- *   grab           floater swoops in, parented to the panel
- *   carry          floater hangs and bobs; still locked; panel stays put
- *   drop           remove the panel, movePlayerTo team base, player:respawned
- *   peel           floater rises off and despawns, once the base teleport has landed
+ *   grab           floater swoops in, parented to the panel; panel stays put so the catch can land
+ *   carry          Tween: rise above the arena, cruise to the base, descend to just above it.
+ *                  Floater rides along. Movement stays locked.
+ *   arrive         remove the panel so they drop onto the base. player:respawned.
+ *                  A movePlayerTo happens only on the snap fallback.
+ *   peel           floater rises off and despawns
  *   land           walk only, abilities still off, then normal play
  *
- * Trip → drop = GRAB_S + CARRY_S (target 3.0–3.5s). Land lock is after that.
+ * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 3.8s).
  * Round reset / team / initial teleports call cancelFallRescue via teleportHome
- * and do not wait out a pickup. player:respawned fires only on the base drop.
+ * and drop the panel and the tween. player:respawned fires only on arrival.
  */
 
-import { engine, Entity, Material, MeshCollider, MeshRenderer, Transform, ColliderLayer } from '@dcl/sdk/ecs'
+import {
+  engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer, EasingFunction,
+} from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y, SCENE_SIZE } from '../maze/generator'
-import { FALL_RESPAWN_DROP, IS_SKY } from '../maze/level'
+import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { localTeam } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview } from './overviewCamera'
 
-/** Pickup timings and floater offsets. One place to tune in playtest. */
+/** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
-  /** Floater swoops in. Movement already locked. */
+  /** Floater swoops in. Panel stays put so the catch teleport can land. */
   GRAB_S: 0.4,
-  /** Out of the fight, floater overhead. GRAB_S + CARRY_S = 3.2s trip to drop. */
-  CARRY_S: 2.8,
-  /** Rise-and-shrink after the base teleport is visible. */
+  /** Rise from the catch to cruise height. */
+  RISE_S: 0.9,
+  /** Cruise across, above the top floor, to the base's XZ. */
+  CRUISE_S: 1.7,
+  /** Descend so the panel top sits just above the base. */
+  DESCEND_S: 0.8,
+  /** Rise-and-shrink after arrival. */
   PEEL_S: 0.3,
-  /** Walk only / no abilities after the drop, before full control. Target 0.5–0.8s. */
+  /** Walk only / no abilities after arrival, before full control. Target 0.5–0.8s. */
   LAND_LOCK_S: 0.65,
-  /** If movePlayerTo hasn't put us back above the fall line, allow another trip after this. */
+  /** If a teleport hasn't put us back above the fall line, allow another trip after this. */
   REARM_S: 2,
-  /** Don't wait longer than this for the drop teleport before peeling the floater. */
+  /** Don't wait longer than this for a snap teleport before peeling the floater. */
   PEEL_WAIT_S: 0.45,
-  /** Floater root height above the player origin while carrying. */
+  /** Floater root height above the panel surface while carrying. */
   HANG_Y: 2.65,
   /** Extra height at the start of the grab swoop. */
   APPROACH_EXTRA_Y: 4.5,
@@ -67,8 +82,23 @@ export const FALL_RESCUE = {
   PAD_THICK: 2,
   /** Feet this far above the pad top for the one catch teleport, so they settle onto it once. */
   FEET_CLEAR: 0.25,
-  /** Floater bob (m) while the pad Y stays fixed. */
+  /** Floater bob (m). The pad itself does not bob — a per-frame Transform write is not the carry. */
   BOB: 0.12,
+  /** Panel surface this many meters above SKY_TOP_Y while cruising, so the trip clears the roof. */
+  CRUISE_CLEAR: 8,
+  /**
+   * Panel surface above the base feet (baseSpawn y). High enough that the
+   * thick box stays clear of the base slab; removing the panel is the drop.
+   */
+  ARRIVE_ABOVE: 1.5,
+  /** Metres past the panel edge, or off its surface, before the one snap teleport. */
+  SLIP_M: 3,
+  /** Ignore slip at the start of the move so the catch teleport can finish sticking. */
+  SLIP_GRACE_S: 0.5,
+  /** Must stay off the panel this long. One bad frame is not a teleport. */
+  SLIP_SUSTAIN_S: 0.35,
+  /** After the last leg's duration, wait this long for the renderer to catch up before snapping. */
+  ARRIVE_SLACK_S: 0.45,
 }
 
 const CLOUD_MAT = {
@@ -91,24 +121,38 @@ const HOOK_MAT = {
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
 type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number; bob: number }
+type Vec = { x: number; y: number; z: number }
+type Leg = { from: Vec; to: Vec; ms: number }
+type Carry = { legs: Leg[]; index: number; legAt: number; beganAt: number }
+
+/** How the rescue ended. `carry` already delivered them; `snap` still needs the base teleport. */
+export type FallRescueEnd = 'snap' | 'carry'
 
 let installed = false
-let onDrop: () => void = () => {}
+let onEnd: (how: FallRescueEnd) => void = () => {}
 let phase: Phase = 'idle'
 let phaseLeft = 0
 let floater: Floater | null = null
 /** False from a home teleport until we're above the fall line again (or REARM_S). */
 let rearm = true
 let rearmLeft = 0
-/** Panel root (unit scale, at the surface). Null once we drop or cancel. */
-let padRoot: Entity | null = null
-let padCollider: Entity | null = null
+/** Tweened physics box. Its center is the transform; the surface is PAD_THICK/2 above that. */
+let pad: Entity | null = null
+/** Unit-scale child on the top face so the floater doesn't inherit the pad's scale. */
+let anchor: Entity | null = null
+let carry: Carry | null = null
+let slipAccum = 0
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 function holdHeight(): number { return fallLine() - FALL_RESCUE.HOLD_BELOW_LINE }
+function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
+function lerp(a: Vec, b: Vec, u: number): Vec {
+  return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
+}
+function v3(p: Vec): Vector3 { return Vector3.create(p.x, p.y, p.z) }
 
 /** Camera / body aim: team base, level with the hold so the view doesn't tip into the void. */
-function catchLook(hold: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+function catchLook(hold: Vec): Vec {
   const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
   let dx = base.x - hold.x
   let dz = base.z - hold.z
@@ -121,7 +165,7 @@ function catchLook(hold: { x: number; y: number; z: number }): { x: number; y: n
 }
 
 /** One catch. The panel is already in the world; this only places the avatar on it. */
-function catchOnce(hold: { x: number; y: number; z: number }): void {
+function catchOnce(hold: Vec): void {
   holdFallLine()
   exitOverview()
   const feet = { x: hold.x, y: hold.y + FALL_RESCUE.FEET_CLEAR, z: hold.z }
@@ -129,18 +173,54 @@ function catchOnce(hold: { x: number; y: number; z: number }): void {
   movePlayerTo({ newRelativePosition: feet, cameraTarget: look, avatarTarget: look }).catch(() => {})
 }
 
-function playerPos(): { x: number; y: number; z: number } | null {
+function playerPos(): Vec | null {
   const t = Transform.getOrNull(engine.PlayerEntity)
   return t ? { x: t.position.x, y: t.position.y, z: t.position.z } : null
 }
 
-/** Local offset while parented to the pad; world position once the pad is gone (peel / base). */
-function placeFloater(yOff: number, scale: number, world: { x: number; y: number; z: number } | null): void {
+/**
+ * Where the box center is. Prefer the renderer Transform once the tween has
+ * actually moved it (it stays in sync with the avatar). Until then use the
+ * authored leg, so a Transform that never leaves the catch still counts as
+ * the panel moving away.
+ */
+function padCenterNow(): Vec | null {
+  if (!pad) return null
+  const live = Transform.getOrNull(pad)
+  const livePos = live ? { x: live.position.x, y: live.position.y, z: live.position.z } : null
+  if (!carry) return livePos
+  const leg = carry.legs[carry.index]
+  if (livePos) {
+    const start = leg.from
+    const moved = Math.hypot(livePos.x - start.x, livePos.y - start.y, livePos.z - start.z)
+    if (moved > 0.5) return livePos
+  }
+  const u = Math.min(1, Math.max(0, (Date.now() - carry.legAt) / leg.ms))
+  return lerp(leg.from, leg.to, u)
+}
+
+function surfaceNow(): Vec | null {
+  const c = padCenterNow()
+  if (!c) return null
+  return { x: c.x, y: c.y + FALL_RESCUE.PAD_THICK / 2, z: c.z }
+}
+
+/** Past the edge of the footprint, or more than a few meters off the surface. */
+function offPanel(player: Vec, surface: Vec): boolean {
+  const half = FALL_RESCUE.PAD_SIZE / 2
+  const ox = Math.max(0, Math.abs(player.x - surface.x) - half)
+  const oz = Math.max(0, Math.abs(player.z - surface.z) - half)
+  if (Math.hypot(ox, oz) > FALL_RESCUE.SLIP_M) return true
+  return Math.abs(player.y - surface.y) > FALL_RESCUE.SLIP_M
+}
+
+/** Local offset while parented to the anchor; world position once the pad is gone (peel / base). */
+function placeFloater(yOff: number, scale: number, world: Vec | null): void {
   if (!floater) return
   const tr = Transform.getMutable(floater.root)
   const s = Math.max(0.02, scale)
   tr.scale = Vector3.create(s, s, s)
-  if (padRoot && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(0, yOff, 0)
+  if (anchor && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(0, yOff, 0)
   else if (world) tr.position = Vector3.create(world.x, world.y + yOff, world.z)
 }
 
@@ -150,42 +230,57 @@ function despawnFloater(): void {
   floater = null
 }
 
+function stopMotion(): void {
+  if (!pad) return
+  if (Tween.has(pad)) Tween.deleteFrom(pad)
+  if (TweenSequence.has(pad)) TweenSequence.deleteFrom(pad)
+}
+
 function despawnPad(): void {
-  if (padCollider) { engine.removeEntity(padCollider); padCollider = null }
-  if (padRoot) { engine.removeEntity(padRoot); padRoot = null }
+  stopMotion()
+  if (anchor) { engine.removeEntity(anchor); anchor = null }
+  if (pad) { engine.removeEntity(pad); pad = null }
 }
 
-/** Unit-scale root at the surface, thick physics box hanging below it. No mesh: invisible, same as the spawn pads. */
-function spawnPad(hold: { x: number; y: number; z: number }): void {
+/**
+ * Physics box is the tweened root (center at the transform, top at +scale.y/2).
+ * The anchor cancels that scale so the floater stays metre-sized and rides along.
+ */
+function spawnPad(hold: Vec): void {
   despawnPad()
-  const root = engine.addEntity()
-  Transform.create(root, { position: Vector3.create(hold.x, hold.y, hold.z) })
-  const box = engine.addEntity()
+  const size = FALL_RESCUE.PAD_SIZE
   const thick = FALL_RESCUE.PAD_THICK
-  Transform.create(box, {
-    parent: root,
-    position: Vector3.create(0, -thick / 2, 0),
-    scale: Vector3.create(FALL_RESCUE.PAD_SIZE, thick, FALL_RESCUE.PAD_SIZE),
+  const root = engine.addEntity()
+  Transform.create(root, {
+    position: Vector3.create(hold.x, hold.y - thick / 2, hold.z),
+    scale: Vector3.create(size, thick, size),
   })
-  MeshCollider.setBox(box, ColliderLayer.CL_PHYSICS)
-  padRoot = root
-  padCollider = box
+  MeshCollider.setBox(root, ColliderLayer.CL_PHYSICS)
+  const hang = engine.addEntity()
+  Transform.create(hang, {
+    parent: root,
+    position: Vector3.create(0, 0.5, 0),
+    scale: Vector3.create(1 / size, 1 / thick, 1 / size),
+  })
+  pad = root
+  anchor = hang
 }
 
-/** World position of the floater root. Parent scale is 1 and rotation is identity while it's on the pad. */
-function floaterWorld(): { x: number; y: number; z: number } | null {
+/** World position of the floater root. Anchor world scale is 1 and rotation stays identity. */
+function floaterWorld(): Vec | null {
   if (!floater) return null
   const local = Transform.getOrNull(floater.root)
   if (!local) return null
-  if (!padRoot) return local.position
-  const pad = Transform.getOrNull(padRoot)
-  if (!pad) return local.position
-  return { x: pad.position.x + local.position.x, y: pad.position.y + local.position.y, z: pad.position.z + local.position.z }
+  const localPos = { x: local.position.x, y: local.position.y, z: local.position.z }
+  if (!anchor || (phase !== 'grab' && phase !== 'carry')) return localPos
+  const surface = surfaceNow()
+  if (!surface) return localPos
+  return { x: surface.x + localPos.x, y: surface.y + localPos.y, z: surface.z + localPos.z }
 }
 
-/** Leave the pad before it is removed so the peel can play at the base. */
+/** Leave the pad before it is removed so the peel can play at the arrival point. */
 function detachFloater(): void {
-  if (!floater || !padRoot) return
+  if (!floater || !anchor) return
   const world = floaterWorld()
   const local = Transform.getOrNull(floater.root)
   if (!world || !local) return
@@ -207,11 +302,11 @@ function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' 
 
 /** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
 function spawnFloater(): void {
-  if (!padRoot) return
+  if (!anchor) return
   despawnFloater()
   const root = engine.addEntity()
   Transform.create(root, {
-    parent: padRoot,
+    parent: anchor,
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
   })
@@ -221,6 +316,114 @@ function spawnFloater(): void {
   const stem = makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT)
   const hook = makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT)
   floater = { root, ents: [root, cloud, puffL, puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0, bob: 0 }
+}
+
+function playLeg(index: number): void {
+  if (!pad || !carry) return
+  const leg = carry.legs[index]
+  carry.index = index
+  carry.legAt = Date.now()
+  // Explicit start equals the current end. An omitted start would snap the entity to the origin.
+  Tween.setMove(pad, v3(leg.from), v3(leg.to), leg.ms, EasingFunction.EF_LINEAR)
+}
+
+/** Three linear legs. Start positions are the pad center, not the surface. */
+function startCarry(): void {
+  if (!pad) { finish('snap', 'no panel'); return }
+  const tr = Transform.getOrNull(pad)
+  if (!tr) { finish('snap', 'panel has no transform'); return }
+  const start = { x: tr.position.x, y: tr.position.y, z: tr.position.z }
+  const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  const thick = FALL_RESCUE.PAD_THICK
+  const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR - thick / 2
+  const arriveY = base.y + FALL_RESCUE.ARRIVE_ABOVE - thick / 2
+  const riseTo = { x: start.x, y: cruiseY, z: start.z }
+  const cruiseTo = { x: base.x, y: cruiseY, z: base.z }
+  const landAt = { x: base.x, y: arriveY, z: base.z }
+  const now = Date.now()
+  carry = {
+    legs: [
+      { from: start, to: riseTo, ms: ms(FALL_RESCUE.RISE_S) },
+      { from: riseTo, to: cruiseTo, ms: ms(FALL_RESCUE.CRUISE_S) },
+      { from: cruiseTo, to: landAt, ms: ms(FALL_RESCUE.DESCEND_S) },
+    ],
+    index: 0,
+    legAt: now,
+    beganAt: now,
+  }
+  slipAccum = 0
+  playLeg(0)
+  const trip = (FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S).toFixed(2)
+  const surfaceCruise = cruiseY + thick / 2
+  const surfaceArrive = arriveY + thick / 2
+  console.log(
+    `[FallRescue] tween-carry ${trip}s trip, cruiseY=${surfaceCruise.toFixed(1)} arriveY=${surfaceArrive.toFixed(1)} → base ${base.x.toFixed(0)},${base.z.toFixed(0)}`,
+  )
+}
+
+/** Close enough to the last waypoint that dropping the panel lands them on the base. */
+function atDestination(player: Vec): boolean {
+  if (!carry) return false
+  const end = carry.legs[carry.legs.length - 1].to
+  const surfaceY = end.y + FALL_RESCUE.PAD_THICK / 2
+  const dx = player.x - end.x
+  const dz = player.z - end.z
+  return Math.hypot(dx, dz) <= FALL_RESCUE.PAD_SIZE / 2 + 1 && Math.abs(player.y - surfaceY) <= FALL_RESCUE.SLIP_M
+}
+
+/** Renderer Transform has reached this leg's end, or it never left the start (not tracking). */
+function legVisuallyDone(leg: Leg): boolean {
+  if (!pad) return true
+  const live = Transform.getOrNull(pad)
+  if (!live) return true
+  const fromStart = Math.hypot(live.position.x - leg.from.x, live.position.y - leg.from.y, live.position.z - leg.from.z)
+  if (fromStart < 0.5) return true
+  const left = Math.hypot(live.position.x - leg.to.x, live.position.y - leg.to.y, live.position.z - leg.to.z)
+  return left < 1.5
+}
+
+function tickCarry(dt: number): void {
+  if (!carry || !pad) { finish('snap', 'carry missing'); return }
+  const graceOver = (Date.now() - carry.beganAt) / 1000 >= FALL_RESCUE.SLIP_GRACE_S
+  const p = playerPos()
+  const surface = surfaceNow()
+  if (graceOver && p && surface) {
+    if (offPanel(p, surface)) slipAccum += dt
+    else slipAccum = 0
+    if (slipAccum >= FALL_RESCUE.SLIP_SUSTAIN_S) {
+      finish('snap', 'drifted off the panel')
+      return
+    }
+  }
+  const leg = carry.legs[carry.index]
+  const elapsed = Date.now() - carry.legAt
+  if (elapsed < leg.ms) return
+  // Don't replace the tween while the renderer is still finishing this leg.
+  if (!legVisuallyDone(leg) && (elapsed - leg.ms) / 1000 < FALL_RESCUE.ARRIVE_SLACK_S) return
+  if (carry.index < carry.legs.length - 1) {
+    playLeg(carry.index + 1)
+    return
+  }
+  // Clock is done. Drop only once they're actually over the base; a renderer
+  // still finishing the last meters gets a short slack, then one teleport.
+  if (p && atDestination(p)) { finish('carry', 'panel at base'); return }
+  if ((elapsed - leg.ms) / 1000 >= FALL_RESCUE.ARRIVE_SLACK_S) finish('snap', 'not over the base when the carry ended')
+}
+
+/** Shared ending. Walk lock is set before player:respawned so the lunge listener keeps walk-only. */
+function finish(how: FallRescueEnd, why: string): void {
+  if (phase !== 'grab' && phase !== 'carry') return
+  detachFloater()
+  carry = null
+  slipAccum = 0
+  despawnPad()
+  phase = 'land'
+  phaseLeft = FALL_RESCUE.LAND_LOCK_S
+  setFallMoveLock('walk')
+  if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
+  if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
+  else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
+  onEnd(how)
 }
 
 function begin(y: number): void {
@@ -239,44 +442,38 @@ function begin(y: number): void {
     catchOnce(hold)
   }
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
-  const beat = (FALL_RESCUE.GRAB_S + FALL_RESCUE.CARRY_S).toFixed(2)
-  console.log(`[FallRescue] trip y=${y.toFixed(1)} line=${line.toFixed(1)} pad=${holdHeight().toFixed(1)} one catch, no rehold, pickup ${beat}s`)
-}
-
-function drop(): void {
-  detachFloater()
-  despawnPad()
-  phase = 'land'
-  phaseLeft = FALL_RESCUE.LAND_LOCK_S
-  setFallMoveLock('walk')
-  if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
-  console.log(`[FallRescue] drop → base (pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s)`)
-  onDrop()
+  const trip = (FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S).toFixed(2)
+  console.log(`[FallRescue] trip y=${y.toFixed(1)} line=${line.toFixed(1)} pad=${holdHeight().toFixed(1)} tween-carry in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`)
 }
 
 function tickPhase(dt: number): void {
-  phaseLeft -= dt
-  if (phase === 'grab' && phaseLeft <= 0) {
-    phase = 'carry'
-    phaseLeft = FALL_RESCUE.CARRY_S
-    if (floater) floater.mode = 'hang'
+  if (phase === 'grab') {
+    phaseLeft -= dt
+    if (phaseLeft <= 0) {
+      phase = 'carry'
+      if (floater) floater.mode = 'hang'
+      startCarry()
+    }
     return
   }
-  if (phase === 'carry' && phaseLeft <= 0) {
-    drop()
+  if (phase === 'carry') {
+    tickCarry(dt)
     return
   }
-  if (phase === 'land' && phaseLeft <= 0) {
-    phase = 'idle'
-    phaseLeft = 0
-    setFallMoveLock('open')
-    console.log('[FallRescue] land lock done')
+  if (phase === 'land') {
+    phaseLeft -= dt
+    if (phaseLeft <= 0) {
+      phase = 'idle'
+      phaseLeft = 0
+      setFallMoveLock('open')
+      console.log('[FallRescue] land lock done')
+    }
   }
 }
 
 function tickFloater(dt: number, line: number): void {
   if (!floater) return
-  const onPad = padRoot !== null && (phase === 'grab' || phase === 'carry')
+  const onPad = anchor !== null && (phase === 'grab' || phase === 'carry')
   const world = onPad ? null : playerPos()
   if (!onPad && !world) { despawnFloater(); return }
   floater.bob += dt
@@ -327,22 +524,28 @@ export function holdFallLine(): void {
   rearmLeft = FALL_RESCUE.REARM_S
 }
 
-/** Round reset / team / initial spawn: drop the pickup immediately. Idempotent. */
+/** Round reset / team / initial spawn: drop the pickup, the panel, and the tween. Idempotent. */
 export function cancelFallRescue(why: string): void {
-  if (phase === 'idle' && !floater && !padRoot) return
+  if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
   phase = 'idle'
   phaseLeft = 0
+  carry = null
+  slipAccum = 0
   despawnFloater()
   despawnPad()
   setFallMoveLock('open')
 }
 
-/** `dropAtBase` is teleportHome('fell') — base move + player:respawned. No-op off sky. */
-export function initFallRescue(dropAtBase: () => void): void {
+/**
+ * `endRescue('snap')` is the single base teleport (they slipped off).
+ * `endRescue('carry')` means the panel already delivered them — emit player:respawned, do not movePlayerTo.
+ * No-op off sky.
+ */
+export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   if (installed) return
   installed = true
-  onDrop = dropAtBase
+  onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
   engine.addSystem(tick)
 }

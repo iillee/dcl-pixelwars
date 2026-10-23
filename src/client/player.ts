@@ -7,8 +7,9 @@
  *   - sky:     each player goes to their TEAM BASE once the server has
  *              assigned a team (teamAssigned), at each round reset, and
  *              whenever a fall rescue finishes (client/fallRescue.ts). Crossing
- *              the fall line stands them on an invisible panel under the arena,
- *              then teleportHome('fell') after the floater beat.
+ *              the fall line stands them on an invisible panel. A Tween carries
+ *              that panel to the base. teleportHome('fell') runs only if they
+ *              slipped off it.
  */
 
 import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'
@@ -89,6 +90,13 @@ export function initPlayerNet(): void {
     engine.addSystem(sys)
   }
 
-  // Sky fall line → timed pickup, then teleportHome('fell'). Off in classic / low arenas.
-  initFallRescue(() => teleportHome('fell'))
+  // Sky fall line → timed pickup. The panel tweens to the base; one teleport only if they slip off.
+  initFallRescue((how) => {
+    if (how === 'snap') { teleportHome('fell'); return }
+    // Delivered by the platform. Immunity and the land lock start here, with no cross-map teleport.
+    holdFallLine()
+    exitOverview()
+    console.log('[Player] fall rescue landed (tween-carry, no teleport)')
+    events.emit('player:respawned', { why: 'fell' })
+  })
 }
