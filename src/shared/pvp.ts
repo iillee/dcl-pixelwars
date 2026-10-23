@@ -181,6 +181,24 @@ export const AIR_SPIKE_FORCE = 40
 export const AIR_SPIKE_FORCE_S = 0.28
 /** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
 export const AIR_SPIKE_BOT_SHOVE = 2
+/** Attacker dive on an airborne press only (Yoshi Down-B style commit, not a freefall mode).
+ *  Downward impulse plus a short downward force. A small forward component sells the body commit
+ *  without leaving the 2 m cylinder. Ground Burst does not use these. */
+export const AIR_SPIKE_DIVE_IMPULSE = 48
+export const AIR_SPIKE_DIVE_FORWARD = 8
+export const AIR_SPIKE_DIVE_FORCE = 70
+export const AIR_SPIKE_DIVE_FORCE_S = 0.22
+/** Downward crescent (lunge_slash.png, crown leading down). Two crossed planes so it isn't edge-on. */
+export const AIR_SPIKE_ARC_W = 1.7 // m, horizontal, tips pinch in the texture
+export const AIR_SPIKE_ARC_H = 3.2 // m, vertical reach of one crescent
+export const AIR_SPIKE_ARC_DROP = 4.2 // m the crescent travels down from the chest
+export const AIR_SPIKE_ARC_S = 0.32
+export const AIR_SPIKE_ARC_ALPHA = 0.92
+export const AIR_SPIKE_ARC_CHEST = 1.35 // m above feet where the arc starts
+/** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav. */
+export const AIR_SPIKE_DIVE_VOL = 0.95
+export const AIR_SPIKE_HIT_VOL = 1
+export const AIR_SPIKE_STAMP_VOL = 0.92
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Expanding ring, particles, aura. */

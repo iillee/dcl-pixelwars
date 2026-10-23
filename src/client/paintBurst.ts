@@ -8,17 +8,18 @@
  *   Grounded: shockwave at our feet. Opponents within BURST_RADIUS → burstHit →
  *     the victim knocks itself outward (ImpactGate: dedupe + stale; respawn-immune).
  *     Server paints the radial footprint once.
- *   Airborne: downward spike. A player in the cylinder (clearly below, ~2 m across,
- *     ~5.5 m down) is a combat hit — strong downward knock, small outward, brief
- *     control lock, no paint. A miss that reaches the ground paints a 5-tile cross
- *     and bumps those tiles. No radial blast in the air.
+ *   Airborne: downward spike. The attacker commits into a short dive. A player in
+ *     the cylinder (clearly below, ~2 m across, ~5.5 m down) is a combat hit —
+ *     strong downward knock, small outward, brief control lock, no paint. A miss
+ *     that reaches the ground paints a 5-tile cross and bumps those tiles.
+ *     No radial blast in the air. Ground Burst does not dive.
  * Local test dummies are knocked directly; ghost bots are shoved server-side.
  */
 import {
   engine, Entity, InputAction, Material, MaterialTransparencyMode, MeshRenderer, Transform, AudioSource,
   inputSystem, PointerEventType, Physics, PlayerIdentityData, raycastSystem, RaycastQueryType, ColliderLayer,
 } from '@dcl/sdk/ecs'
-import { Color4, Vector3 } from '@dcl/sdk/math'
+import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
@@ -26,7 +27,10 @@ import {
   BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
-  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_DEPTH, AIR_SPIKE_CROSS_R,
+  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_CROSS_R,
+  AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
+  AIR_SPIKE_ARC_W, AIR_SPIKE_ARC_H, AIR_SPIKE_ARC_DROP, AIR_SPIKE_ARC_S, AIR_SPIKE_ARC_ALPHA, AIR_SPIKE_ARC_CHEST,
+  AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, V3 } from '../shared/burst'
@@ -39,7 +43,10 @@ let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it
 import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId, isPlayerGrounded } from '../paint'
 import { initBurstRipple, startRipple, airLanding } from './burstRipple'
-import { playDashHitSfx, playBurstSfx, BURST_SFX_SRC } from './audio'
+import {
+  playDashHitSfx, playBurstSfx, playAirDiveSfx, playAirHitSfx, playAirStampSfx,
+  BURST_SFX_SRC, AIR_DIVE_SRC, AIR_HIT_SRC, AIR_STAMP_SRC,
+} from './audio'
 import { sendBurstUse, sendBurstHit } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
@@ -50,6 +57,7 @@ const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
 let cooldownLeft = 0
 let burstId = 0
 let knockForceEnt: Entity = 0 as Entity
+let diveForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
 const rgbOf = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
@@ -99,40 +107,72 @@ function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   })
 }
 
-/** Thin team-coloured needle shot downward. Not a hit volume. */
-function showAirStreak(p: V3, team: Team): void {
-  const rgb = rgbOf(team)
-  const from = Vector3.create(p.x, p.y + 1.5, p.z)
-  const to = Vector3.create(p.x, Math.max(0, p.y + 1.5 - AIR_SPIKE_DEPTH), p.z)
-  addFx(0.22, e => {
-    Transform.create(e, { position: from, scale: Vector3.create(0.08, 2.2, 0.08) })
-    MeshRenderer.setBox(e)
-    glow(e, rgb, 0.9, 4)
-  }, (e, u) => {
-    const tr = Transform.getMutable(e)
-    tr.position = Vector3.lerp(from, to, easeOut(u))
-    glow(e, rgb, 0.9 * (1 - u), 4)
+const ARC_TEX = 'assets/images/lunge_slash.png'
+
+function arcMat(e: Entity, rgb: { r: number; g: number; b: number }, alpha: number): void {
+  Material.setPbrMaterial(e, {
+    texture: Material.Texture.Common({ src: ARC_TEX }),
+    emissiveTexture: Material.Texture.Common({ src: ARC_TEX }),
+    albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, alpha),
+    emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
+    emissiveIntensity: 3.4,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    castShadows: false,
   })
-  for (let i = 0; i < 3; i++) {
-    const lag = i * 0.18
-    addFx(0.28, e => {
-      Transform.create(e, { position: from, scale: Vector3.create(0.16, 0.16, 0.16) })
-      MeshRenderer.setSphere(e)
-      glow(e, rgb, 0.85, 3)
+}
+
+/** Vertical crescent (same pointed half-moon as Lunge) shot down the dive.
+ *  Two crossed planes so attackers and spectators both see a face. Not a hit volume. */
+function showAirStreak(p: V3, team: Team, fx: number, fz: number): void {
+  const rgb = rgbOf(team)
+  const fl = Math.hypot(fx, fz) || 1
+  const ux = fx / fl, uz = fz / fl
+  const yaw = Math.atan2(ux, uz) * 180 / Math.PI
+  const from = Vector3.create(p.x + ux * 0.35, p.y + AIR_SPIKE_ARC_CHEST, p.z + uz * 0.35)
+  const to = Vector3.create(from.x, from.y - AIR_SPIKE_ARC_DROP, from.z)
+  const easeIn = (u: number) => u * u
+  for (const extra of [0, 90]) {
+    const rot = Quaternion.multiply(
+      Quaternion.fromEulerDegrees(0, yaw + extra, 0),
+      Quaternion.fromEulerDegrees(180, 0, 0), // texture crown (image top) points down
+    )
+    addFx(AIR_SPIKE_ARC_S, e => {
+      Transform.create(e, { position: from, rotation: rot, scale: Vector3.create(AIR_SPIKE_ARC_W, AIR_SPIKE_ARC_H, 1) })
+      MeshRenderer.setPlane(e)
+      arcMat(e, rgb, AIR_SPIKE_ARC_ALPHA)
     }, (e, u) => {
-      const k = Math.max(0, u - lag) / (1 - lag)
       const tr = Transform.getMutable(e)
-      tr.position = Vector3.lerp(from, to, easeOut(Math.min(1, k)))
-      const s = 0.16 * (1 - u)
-      tr.scale = Vector3.create(s, s, s)
+      tr.position = Vector3.lerp(from, to, easeIn(u))
+      const a = AIR_SPIKE_ARC_ALPHA * (u < 0.72 ? 1 : (1 - u) / 0.28)
+      arcMat(e, rgb, Math.max(0, a))
     })
   }
 }
 
-/** Hit pop on the victim. Team sphere, not a ground disc. */
-function showAirHit(p: V3, team: Team): void {
+function playPositional(p: V3, src: string, vol: number): void {
+  addFx(1.1, e => {
+    Transform.create(e, { position: Vector3.create(p.x, p.y + 0.8, p.z) })
+    AudioSource.create(e, { audioClipUrl: src, playing: true, loop: false, volume: vol, global: false })
+  })
+}
+
+/** Short downward body commit. Local attacker only; grounded Burst never calls this. */
+function commitAirDive(fx: number, fz: number): void {
+  const fl = Math.hypot(fx, fz) || 1
+  safePhysics('air dive', () => {
+    Physics.applyImpulseToPlayer(Vector3.create(
+      (fx / fl) * AIR_SPIKE_DIVE_FORWARD, -AIR_SPIKE_DIVE_IMPULSE, (fz / fl) * AIR_SPIKE_DIVE_FORWARD,
+    ))
+    if (AIR_SPIKE_DIVE_FORCE > 0) {
+      Physics.applyForceToPlayerForDuration(diveForceEnt, AIR_SPIKE_DIVE_FORCE_S, Vector3.create(0, -1, 0), AIR_SPIKE_DIVE_FORCE)
+    }
+  })
+}
+
+/** Hit pop on the victim. Team sphere, not a ground disc. `positional` plays the sharp hit there. */
+function showAirHit(p: V3, team: Team, positional = false): void {
   const rgb = rgbOf(team)
-  playAt(p)
+  if (positional) playPositional(p, AIR_HIT_SRC, AIR_SPIKE_HIT_VOL)
   addFx(0.28, e => {
     Transform.create(e, { position: Vector3.create(p.x, p.y + 1, p.z), scale: Vector3.create(0.35, 0.35, 0.35) })
     MeshRenderer.setSphere(e)
@@ -279,15 +319,18 @@ export function triggerBurst(): void {
 /** Airborne F: downward spike. Player/bot in the cylinder → combat, no paint.
  *  Otherwise the landing cross, if the ground is inside the cylinder. Same cooldown. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
-  showAirStreak(p, team)
+  commitAirDive(fx, fz)
+  playAirDiveSfx()
+  showAirStreak(p, team, fx, fz)
   const hits = airPlayerHits(p, team, fx, fz)
   const bot = airBotBelow(p, team)
   if (hits.length > 0 || bot) {
     sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
     knockAirAnvils(p, fx, fz, id)
+    if (hits.length === 0) playAirHitSfx()
     for (const h of hits) {
       sendBurstHit(id, h.addr, h.k.x, h.k.z)
-      playDashHitSfx()
+      playAirHitSfx()
       showAirHit(h.pos, team)
     }
     console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} pos=${p.y.toFixed(2)}`)
@@ -298,6 +341,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
     sendBurstUse(id, land.id, p.x, p.y, p.z, fx, fz, 2)
     knockAirAnvils(p, fx, fz, id)
     startRipple({ x: land.x, y: land.y, z: land.z }, team, land.id, 'cross', AIR_SPIKE_CROSS_R)
+    playAirStampSfx()
     console.log(`[Burst] #${id} air spike miss → cross ${land.id}`)
     return
   }
@@ -338,7 +382,7 @@ function applyAirKnock(att: string, id: number, dx: number, dz: number, why: str
     }
   })
   startKnockLock()
-  playDashHitSfx()
+  playAirHitSfx()
   const self = Transform.getOrNull(engine.PlayerEntity)?.position
   if (self) showAirHit({ x: self.x, y: self.y, z: self.z }, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att))
   console.log(`[Burst] air ${why} by ${att.slice(0, 8)} #${id}`)
@@ -352,14 +396,15 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
     if (b) {
       const pos = { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }
-      if (air) showAirHit(pos, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att))
+      const col = teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att)
+      if (air) showAirHit(pos, col, att !== me)
       else playAt(pos)
     }
     return
   }
   if (air && tgt !== me && att !== me) {
     const p = posOf(tgt)
-    if (p) showAirHit(p, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att))
+    if (p) showAirHit(p, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att), true)
   }
   if (!me || tgt !== me) return
   if (air) applyAirKnock(att, id, dx, dz, 'spiked')
@@ -376,6 +421,7 @@ export function initPaintBurst(): void {
   if (BURST_MODE === 'off') return
   initKnockbackState()
   knockForceEnt = engine.addEntity()
+  diveForceEnt = engine.addEntity()
   initBurstRipple()
   engine.addSystem((dt: number) => {
     if (emoteLeft <= 0 || (emoteLeft -= dt) > 0) return
@@ -385,10 +431,23 @@ export function initPaintBurst(): void {
   events.on('burst:fired', ({ attacker, id, team, x, y, z, air, lx, ly, lz }) => {
     const att = attacker.toLowerCase()
     gate.sawStart(att, id, Date.now())
+    let faceX = 0, faceZ = 1
+    for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
+      if (entity === engine.PlayerEntity) continue
+      if (pid.address.toLowerCase() !== att) continue
+      const f = Vector3.rotate(Vector3.Forward(), tr.rotation)
+      const fl = Math.hypot(f.x, f.z)
+      if (fl > 1e-3) { faceX = f.x / fl; faceZ = f.z / fl }
+      break
+    }
     if (att !== myAddress()) {
       if (air) {
-        showAirStreak({ x, y, z }, team)
-        if (air === 2) startRipple({ x: lx, y: ly, z: lz }, team, '', 'cross', AIR_SPIKE_CROSS_R)
+        showAirStreak({ x, y, z }, team, faceX, faceZ)
+        playPositional({ x, y, z }, AIR_DIVE_SRC, AIR_SPIKE_DIVE_VOL)
+        if (air === 2) {
+          startRipple({ x: lx, y: ly, z: lz }, team, '', 'cross', AIR_SPIKE_CROSS_R)
+          playPositional({ x: lx, y: ly, z: lz }, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)
+        }
       } else showShockwave({ x, y, z }, team, false)
     }
     // Victim anticipation: if we're already in the volume, knock now
@@ -403,17 +462,7 @@ export function initPaintBurst(): void {
     const origin: V3 = { x, y, z }
     const me: V3 = { x: tp.x, y: tp.y, z: tp.z }
     if (air ? !inAirSpike(origin, me) : !inBurst(origin, me)) return
-    // Facing only matters when stacked on the origin; prefer attacker avatar facing.
-    let fx = 0, fz = 1
-    for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
-      if (entity === engine.PlayerEntity) continue
-      if (pid.address.toLowerCase() !== att) continue
-      const f = Vector3.rotate(Vector3.Forward(), tr.rotation)
-      const fl = Math.hypot(f.x, f.z)
-      if (fl > 1e-3) { fx = f.x / fl; fz = f.z / fl }
-      break
-    }
-    const k = burstDir(origin, me, fx, fz)
+    const k = burstDir(origin, me, faceX, faceZ)
     if (air) applyAirKnock(att, id, k.x, k.z, 'speculative spike')
     else applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
