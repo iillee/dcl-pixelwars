@@ -2,7 +2,8 @@
  * lungeHitbox.ts — visible Lunge hitbox (LUNGE_HITBOX_VISIBLE).
  *
  * A translucent team-coloured box (emissive, no collider) shown for the active
- * window + grace. Geometry comes from shared/lunge.ts hitboxAt(), the same
+ * window + grace. Off in play (`LUNGE_HITBOX_VISIBLE` false): no press flash,
+ * no sphere, no cube. Geometry comes from shared/lunge.ts hitboxAt(), the same
  * function boxHit() uses, and the local box is placed by lunge.ts with the very
  * position it just hit-tested that frame (single source of truth, no lag).
  * LUNGE_HITBOX_PARENT = true makes the local box a child of engine.PlayerEntity

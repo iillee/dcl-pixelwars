@@ -165,6 +165,39 @@ export const BURST_PAINT_MAX_DY = 1.5
 export const BURST_RADIUS = BURST_PAINT_RADIUS_CELLS * 2 + 1
 /** …and within this height (a full R-cell ramp run climbs ~3.5 m; a level is ~5.4 m). */
 export const BURST_HIT_MAX_DY = 3.5
+/** Aerial Burst (same F charge). Only when the press is airborne — grounded Burst stays the radial
+ *  blast. Cylinder straight down: a player in it is a combat spike (no paint). An air miss does not
+ *  paint; landing still paints through normal movement. Sideways air at the same height does not
+ *  connect (AIR_SPIKE_MIN_ABOVE). */
+export const AIR_SPIKE_RADIUS = 2 // m, horizontal feet-to-feet
+export const AIR_SPIKE_DEPTH = 5.5 // m, how far below the attacker the spike reaches
+export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this far above the victim
+/** Victim spike: strong downward impulse, small outward impulse, short downward carry. */
+export const AIR_SPIKE_DOWN = 110
+export const AIR_SPIKE_OUT = 18
+export const AIR_SPIKE_FORCE = 40
+export const AIR_SPIKE_FORCE_S = 0.28
+/** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
+export const AIR_SPIKE_BOT_SHOVE = 2
+/** Attacker dive on an airborne press only (Yoshi Down-B style commit, not a freefall mode).
+ *  Downward impulse plus a short downward force. A small forward component sells the body commit
+ *  without leaving the 2 m cylinder. Ground Burst does not use these. */
+export const AIR_SPIKE_DIVE_IMPULSE = 48
+export const AIR_SPIKE_DIVE_FORWARD = 8
+export const AIR_SPIKE_DIVE_FORCE = 70
+export const AIR_SPIKE_DIVE_FORCE_S = 0.22
+/** Dive trail: team spheres (same family as the ground Burst motes) falling down the commit.
+ *  Not the Lunge crescent. */
+export const AIR_SPIKE_TRAIL_N = 6
+export const AIR_SPIKE_TRAIL_DROP = 4.2 // m
+export const AIR_SPIKE_TRAIL_S = 0.4
+export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
+/** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
+ *  Stamp is the dive meeting the floor (no paint). It is dropped if contact is later than the window. */
+export const AIR_SPIKE_DIVE_VOL = 0.95
+export const AIR_SPIKE_HIT_VOL = 1
+export const AIR_SPIKE_STAMP_VOL = 0.92
+export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Expanding ring, particles, aura. */
@@ -186,19 +219,27 @@ export const BURST_TILE_SIZE = 1.9
 export const BURST_TILE_THICK = 0.3
 /** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
 export const BURST_TILE_POOL = 180
-/** Dash (lunge) trail: the 3×3 paint swath around the dashing avatar pops (edges first), once per cell, smaller and quicker than Burst
- *  (client/burstRipple.ts dashPop, shares the Burst slab pool; visual only, local + remote dashes). */
+/** Dash (lunge) trail: the 3×3 paint swath around the dashing avatar pops (edges first), plus cells
+ *  straight ahead (DASH_TILE_AHEAD) so the bump reaches the front paint. Smaller than Burst, but the
+ *  rise/settle is long enough that the forward tiles are still in the wave (client/burstRipple.ts dashPop). */
 export const DASH_TILE_POP = true
 /** Thin black outline on raised slabs (Burst + Dash), dcl-canvas style edge strips: 4 top edges per slab,
  *  parented to the slab so they ride its animation for free (pooled with it, no per-frame work). */
 export const SLAB_OUTLINE = true
 export const SLAB_OUTLINE_M = 0.03 // edge thickness in metres
 export const DASH_TILE_LIFT_FRAC = 0.35 // × BURST_TILE_LIFT (0.35 m) ≈ 0.12 m
-export const DASH_TILE_UP_S = 0.07
-export const DASH_TILE_DOWN_S = 0.14
+export const DASH_TILE_UP_S = 0.12 // was 0.07 — the rise stays readable while the lunge runs ahead
+export const DASH_TILE_DOWN_S = 0.30 // was 0.14 — settle lasts long enough to still be up at the front paint
 export const DASH_TILE_DELAY_S = 0.03 // after the avatar enters the cell (trails just behind)
 export const DASH_TILE_MAX = 60 // live dash slabs at once (all dashers; shares Burst's 180-slab pool)
 export const DASH_TILE_INNER_LAG_S = 0.06 // centre column pops this long after the swath's edge tiles // ≥ 2 × 49: two overlapping full 7×7 bursts
+/** Cells straight ahead of the entered cell that bump. 1 was only the 3×3 front row;
+ *  2 covers the paint footprint that sits another cell in front while the lunge outruns that row. */
+export const DASH_TILE_AHEAD = 2
+/** Front-row delay (s). Shorter than the centre-column lag so the wave reaches the paint ahead. */
+export const DASH_TILE_AHEAD_DELAY_S = 0.02
+/** Extra delay (s) per cell past the first one ahead, so the bump travels forward instead of stopping short. */
+export const DASH_TILE_AHEAD_STEP_S = 0.08
 
 /** Is Paint Burst live for this UTC round index? */
 export function burstEnabledForRound(roundIndex: number): boolean {
@@ -221,19 +262,25 @@ export const LUNGE_EMOTE_NAME = 'punch'
 // ─── Slash VFX (client/lungeSlash.ts) — shows the hit area ──────────
 /** Flat team-coloured crescent at the front of the hitbox during the lunge. */
 export const LUNGE_SLASH = true
-/** Crescent width (m). = LUNGE_HITBOX_W so players learn the range. */
-export const LUNGE_SLASH_WIDTH = 2.2
+/** Crescent width (m). Wider than LUNGE_HITBOX_W (2.2) so the arc reads at a glance;
+ *  the press-time hit-volume flash is the true push box. Was 2.2. */
+export const LUNGE_SLASH_WIDTH = 3.0
+/** Plane depth as a fraction of width. The mesh used to be width/2 (squashed), so the
+ *  crescent stopped short of the hitbox. 1 = square; the forward tip lands on the far face. */
+export const LUNGE_SLASH_DEPTH_FRAC = 1
 /** Height above the attacker's feet (m) — chest band. */
-export const LUNGE_SLASH_HEIGHT = 1.1
-/** Shrink + fade after the active window (s). */
-export const LUNGE_SLASH_FADE_S = 0.12
+export const LUNGE_SLASH_HEIGHT = 1.15 // was 1.1
+/** Shrink + fade after the active window + hold (s). Was 0.24; 0.12 was too fast to read. */
+export const LUNGE_SLASH_FADE_S = 0.18
+/** Full-size hold after the active window, before the fade (s). Was 0.30. Still well above a blink. */
+export const LUNGE_SLASH_HOLD_S = 0.18
 /** Peak opacity. */
-export const LUNGE_SLASH_ALPHA = 0.85
+export const LUNGE_SLASH_ALPHA = 0.92 // was 0.85
 /** Intro (visual only; the hitbox is live from frame 0): 'grow' = scale up from the
  *  fist point, 'fade' = alpha 0 → LUNGE_SLASH_ALPHA, 'both' = both together. */
 export const LUNGE_SLASH_INTRO: 'grow' | 'fade' | 'both' = 'both'
-/** Intro duration (s, ease-out), counted inside the active window. */
-export const LUNGE_SLASH_GROW_S = 0.07
+/** Intro duration (s, ease-out), counted inside the active window. Was 0.07. */
+export const LUNGE_SLASH_GROW_S = 0.10
 /** Starting scale for 'grow' (fraction of full size). */
 export const LUNGE_SLASH_START_SCALE = 0.15
 /** Fist point the slash grows from, in the attacker's frame (m): x = right, y = up from
@@ -248,14 +295,15 @@ export const LUNGE_DEBUG = false
 // ─── A. Attacker movement ───────────────────────────────────────────
 /** Active lunge time (s). Hits only count in this window (+ grace). */
 export const LUNGE_ACTIVE_S = 0.20
-/** Target travel (m). Informational: drives the impulse below, logged vs measured. */
-export const LUNGE_DISTANCE = 8.0 // was 4.0 (2.0 before that); Luke: ~2× further
-/** Horizontal impulse at start (Δv, assumed m/s: 8.0 m / 0.20 s = 40, +20% for
+/** Target travel (m). Informational: drives the impulse below, logged vs measured.
+ *  Still a short close-range charge (a few tiles), not a long dash. */
+export const LUNGE_DISTANCE = 9.2 // was 8.0 (4.0, then 2.0); feel pass +~15%
+/** Horizontal impulse at start (Δv, assumed m/s: 9.2 m / 0.20 s = 46, +~20% for
  *  ground friction). Added ON TOP of run speed. Cancelled by a brake impulse at
  *  the end that removes only the lunge's extra speed (run speed is kept), so the
  *  lunge stops cleanly instead of sliding/launching. Units unconfirmed: tune with
  *  the logged "[Lunge] travelled" distance (measured from the press, run included). */
-export const LUNGE_IMPULSE = 48 // was 24 (12 before that)
+export const LUNGE_IMPULSE = 56 // was 48 (24, 12 before that)
 /** Vertical part of the attacker's impulse. 0 = surface-following, no ramp launches. */
 export const LUNGE_LIFT = 0
 /** Downward force during the lunge window so downhill lunges hug the ramp. */
@@ -264,7 +312,9 @@ export const LUNGE_STICK_FORCE = 120
  *  remaining EXTRA speed (forward speed minus the speed at the press) / its peak
  *  extra, so run momentum survives and a lunge into a wall doesn't bounce back. */
 export const LUNGE_BRAKE = 0.7
-/** After the active window: no new lunge, run/jog/jump disabled (walk only). */
+/** After the active window: no new lunge, run/jog/jump disabled (walk only).
+ *  Intentional brace — amber LOCK on the desktop slot, amber tint on mobile, plus a click.
+ *  No world mesh. Short on purpose. */
 export const LUNGE_RECOVERY_S = 0.20
 /** Press → press (s). Covers active + recovery. */
 export const LUNGE_COOLDOWN_S = 2
@@ -273,7 +323,7 @@ export const LUNGE_COOLDOWN_S = 2
 /** Hitbox: a box in front of the attacker, oriented along the lunge direction,
  *  re-placed every frame from the player's CURRENT Transform and swept from last
  *  frame's box so fast frames can't skip targets (shared/lunge.ts boxHit).
- *  Width across the lunge (m), = LUNGE_SLASH_WIDTH so the slash shows the range. */
+ *  Width across the lunge (m). The slash is wider (LUNGE_SLASH_WIDTH); this box is the real reach. */
 export const LUNGE_HITBOX_W = 2.2
 /** Depth along the lunge (m), near face → far face. */
 export const LUNGE_HITBOX_D = 1.4
@@ -282,9 +332,10 @@ export const LUNGE_HITBOX_D = 1.4
 export const LUNGE_HITBOX_H = 1.8
 /** Gap from the avatar centre to the box's near face (m). Reach = FORWARD + D = 1.7 m. */
 export const LUNGE_HITBOX_FORWARD = 0.3
-/** Show the hitbox as a translucent team-coloured box (active window + grace). */
+/** Debug only: translucent team box for the active window + grace. Off in play.
+ *  No press flash — the crescent is the telegraph. */
 export const LUNGE_HITBOX_VISIBLE = false
-/** Box alpha (flashes brighter on a hit). */
+/** Box alpha when LUNGE_HITBOX_VISIBLE is on (flashes brighter on a hit). */
 export const LUNGE_HITBOX_ALPHA = 0.25
 /** false = world-space box placed from the same per-frame numbers as the hit test
  *  (default). true = child of engine.PlayerEntity with a local offset (try this if
@@ -298,19 +349,28 @@ export const LUNGE_HIT_MAX_DY = LUNGE_HITBOX_H
 export const LUNGE_HIT_BEHIND = 0.3
 /** Extra hit time after the active window (avatar interpolation lag, s). */
 export const LUNGE_HIT_GRACE_S = 0.06
-/** Slash VFX plane centre ahead of the attacker (m), derived so the arc's outer edge
- *  (centre + width/2) lands exactly on the hitbox's far face (FORWARD + D = 1.7 m). */
-export const LUNGE_SLASH_FORWARD = LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D - LUNGE_SLASH_WIDTH / 2
+/** Slash plane centre ahead of the attacker (m). Forward tip
+ *  (centre + width * DEPTH_FRAC / 2) sits on the hitbox far face (FORWARD + D = 1.7 m). */
+export const LUNGE_SLASH_FORWARD = LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D - (LUNGE_SLASH_WIDTH * LUNGE_SLASH_DEPTH_FRAC) / 2
+
+// ─── Hit / miss read (client/lunge.ts impactFx / miss dust) ─────────
+/** Team-coloured hit burst end scale (m) at chest height. Was 3.2 inline. */
+export const LUNGE_HIT_POP_TO = 5.0
+/** White hit core end scale (m). Was 1.4. Boom stays on this one; miss has no boom. */
+export const LUNGE_HIT_CORE_TO = 2.2
+/** Grey miss-dust end scale (m). Foot-level, ahead of the brace, no impact sound. Was 0.9. */
+export const LUNGE_MISS_DUST_TO = 1.2
 
 // ─── Victim knockback (victim's own client) ─────────────────────────
 /** Weight of the lunge direction vs attacker→target direction. */
 export const LUNGE_KNOCK_FACING_WEIGHT = 0.5
-/** Horizontal impulse away from the attacker. Strong: must threaten edges. */
-export const LUNGE_KNOCKBACK = 93 // was 62 (×1.5, Luke)
+/** Horizontal impulse away from the attacker. Strong: must threaten edges.
+ *  Feel pass: modest bump. Still a shove, not a map-length launch. */
+export const LUNGE_KNOCKBACK = 108 // was 93 (62 before that, ×1.5)
 /** Small upward part (breaks floor friction; exaggerates the hit). */
-export const LUNGE_KNOCK_LIFT = 10 // was 8
+export const LUNGE_KNOCK_LIFT = 12 // was 10 (8 before that)
 /** Horizontal force held after the impulse (carries the victim further). */
-export const LUNGE_KNOCK_FORCE = 38 // was 25
+export const LUNGE_KNOCK_FORCE = 44 // was 38 (25 before that)
 export const LUNGE_KNOCK_FORCE_S = 0.35
 /** Victim control lock: walk/jog/run/jump disabled while the knockback carries them,
  *  so they can't steer against the push. A second hit extends it (no stacking). */
@@ -324,7 +384,7 @@ export const LUNGE_IMPACT_MAX_AGE_MS = 800
 export const VICTIM_SPECULATIVE_KNOCK = true
 
 // ─── Ghost bot (server-shoved; it walks a graph and can't fall) ─────
-export const LUNGE_BOT_SHOVE = 6
+export const LUNGE_BOT_SHOVE = 7 // was 6; tracks the modest knock bump
 export const LUNGE_BOT_STUN_S = 1.2
 
 // ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
@@ -339,7 +399,7 @@ export const LUNGE_DUMMY_RESPAWN_S = 1
  *  arena. Client-local like the dummies. Once per anvil per slide; COOLDOWN_S between launches. */
 export const ANVIL_LAUNCH_ENABLED = true
 export const ANVIL_LAUNCH_MIN_SPEED = 3
-export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 93)
+export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 108)
 export const ANVIL_LAUNCH_LIFT = 45
 export const ANVIL_LAUNCH_COOLDOWN_S = 1
 /** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
@@ -357,9 +417,8 @@ export const ANVIL_SNAP_M = 3
  *  snapshots on the same path) until the server anvil stops, diverges, or this many seconds pass. */
 export const ANVIL_PREDICT_CONFIRMED_MAX_S = 4
 /** m/s per Physics impulse unit (unknown in SDK7; guess). The dummy gets the same
- *  LUNGE_KNOCK* numbers × this: 93 → 23.3 m/s horizontal, lift 10 → 2.5 m/s, force
- *  38 → 9.5 m/s² for 0.35 s (≈31 m flat travel before friction stops it; was ≈14 m).
- *  Tune until the dummy flies like a real victim. */
+ *  LUNGE_KNOCK* numbers × this: 108 → 27 m/s horizontal, lift 12 → 3 m/s, force
+ *  44 → 11 m/s² for 0.35 s. Tune until the dummy flies like a real victim. */
 export const LUNGE_DUMMY_UNIT = 0.25
 /** Dummy gravity (m/s²) and ground friction (m/s² of horizontal deceleration). */
 export const LUNGE_DUMMY_GRAVITY = 20

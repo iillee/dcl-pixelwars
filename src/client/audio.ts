@@ -16,6 +16,7 @@
 
 import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
 import { events } from '../shared/events'
+import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL } from '../shared/pvp'
 
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
@@ -41,6 +42,7 @@ export function initAudio(): void {
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   initLungeSfx()
   initBurstSfx()
+  initAirSpikeSfx()
   initFlagtagSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
@@ -118,7 +120,8 @@ export function pickLungeSrc(): string { return LUNGE_SRCS[pickLungeIdx()] }
  *  AudioSource with the clip already bound, so a press only flips playing. */
 function initLungeSfx(): void {
   const pre = engine.addEntity()
-  AssetLoad.create(pre, { assets: [...LUNGE_SRCS] })
+  // click.wav is the recovery-brace tick (lunge.ts). Preload so the first charge's lock isn't silent.
+  AssetLoad.create(pre, { assets: [...LUNGE_SRCS, 'assets/sounds/click.wav'] })
   for (const src of LUNGE_SRCS) {
     const e = engine.addEntity()
     Transform.create(e, { parent: engine.CameraEntity })
@@ -179,6 +182,41 @@ function initBurstSfx(): void {
 export function playBurstSfx(): void {
   if (!burstSfxEnt) return
   AudioSource.createOrReplace(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
+}
+
+/** Aerial Burst cues. Distinct from the grounded shockwave (burst_impact.wav).
+ *  Dive = press, hit = player connect, stamp = feet meet the floor (no paint). */
+export const AIR_DIVE_SRC = 'assets/sounds/air_spike_dive.wav'
+export const AIR_HIT_SRC = 'assets/sounds/air_spike_hit.wav'
+export const AIR_STAMP_SRC = 'assets/sounds/air_spike_stamp.wav'
+let airDiveEnt: Entity | null = null
+let airHitEnt: Entity | null = null
+let airStampEnt: Entity | null = null
+function initAirSpikeSfx(): void {
+  const pre = engine.addEntity()
+  AssetLoad.create(pre, { assets: [AIR_DIVE_SRC, AIR_HIT_SRC, AIR_STAMP_SRC] })
+  const make = (src: string) => {
+    const e = engine.addEntity()
+    Transform.create(e, { parent: engine.CameraEntity })
+    AudioSource.create(e, { audioClipUrl: src, playing: false, loop: false, volume: 1, global: true })
+    return e
+  }
+  airDiveEnt = make(AIR_DIVE_SRC)
+  airHitEnt = make(AIR_HIT_SRC)
+  airStampEnt = make(AIR_STAMP_SRC)
+}
+function playGlobal(ent: Entity | null, src: string, volume: number): void {
+  if (!ent) return
+  AudioSource.createOrReplace(ent, { audioClipUrl: src, playing: true, loop: false, volume, global: true, currentTime: 0 })
+}
+export function playAirDiveSfx(): void {
+  playGlobal(airDiveEnt, AIR_DIVE_SRC, AIR_SPIKE_DIVE_VOL)
+}
+export function playAirHitSfx(): void {
+  playGlobal(airHitEnt, AIR_HIT_SRC, AIR_SPIKE_HIT_VOL)
+}
+export function playAirStampSfx(): void {
+  playGlobal(airStampEnt, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)
 }
 
 /** flagtag sounds (copied verbatim from flagtag/assets/sounds): death.mp3 on the local fall-respawn

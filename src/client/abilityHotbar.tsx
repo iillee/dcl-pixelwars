@@ -63,7 +63,10 @@ type Geo = {
 const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50, tuck: 48 }
 const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 72 }
 
-type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string }
+type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean }
+/** Walk-only brace. Text and a slot tint only — no ring, disc, or volume mesh. */
+const LOCK_AMBER = Color4.create(1, 0.62, 0.15, 1)
+const LOCK_TINT = Color4.create(1, 0.78, 0.35, 1)
 
 export function KeyHint(props: { label: string }) {
   if (isMobile()) return null
@@ -81,7 +84,6 @@ export function KeyHint(props: { label: string }) {
 function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; g: Geo }) {
   const { hud, g } = props
   const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
-  const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
   const border = !hud.enabled ? DIM_BORDER : hud.ready ? GOLD_BORDER : WHITE_BORDER
   return (
     <UiEntity
@@ -118,6 +120,16 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? Color4.create(0, 0, 0, 1) : WHITE) : DIM }}
+        />
+      ) : null}
+      {hud.recovering ? (
+        <Label
+          key={`ui_pvp_lock_${props.id}`}
+          value="<b>LOCK</b>"
+          fontSize={Math.round(g.slot * 0.2)}
+          color={LOCK_AMBER}
+          textAlign="middle-center"
+          uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(g.slot * 0.05), left: 0 }, width: '100%', height: Math.round(g.slot * 0.26) }}
         />
       ) : null}
       {hud.text ? (
@@ -213,12 +225,12 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
   const { hud } = props
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
   const ring = hud.ready ? CIRCLE_READY : CIRCLE_INK
-  const iconCol = !hud.enabled || cooling ? Color4.create(0, 0, 0, 0.25) : Color4.create(0, 0, 0, 1) // solid black like Lunge
+  const iconCol = !hud.enabled || cooling ? Color4.create(0, 0, 0, 0.25) : Color4.create(0, 0, 0, 1)
   return (
     <UiEntity key={`ui_pvp_circle_${props.id}`}
       uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_X_OFFSET - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
         borderRadius: CIRCLE_D / 2, borderWidth: CIRCLE_RING, borderColor: ring, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
-      uiBackground={{ color: PANEL_LIGHT }}
+      uiBackground={{ color: hud.recovering ? LOCK_TINT : PANEL_LIGHT }}
       onMouseDown={props.onPress}>
       <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), height: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), pointerFilter: 'none' }}
         uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />

@@ -19,11 +19,14 @@
  *    teams, broadcasts lungeImpact; the VICTIM's client applies its own
  *    knockback and drops it if it arrives > LUNGE_IMPACT_MAX_AGE_MS after
  *    it saw that lunge start, or twice.
- * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.wav, preloaded) + upper-body 'punch' emote (LUNGE_EMOTE); active =
+ * C. Feedback: press = team glow puff (no input delay) + random lunge take (assets/sounds/lunge_0N.wav, preloaded) + upper-body 'punch' emote (LUNGE_EMOTE)
+ *    + slash crescent (held readable). No hit-volume mesh. Active =
  *    streak behind the avatar (shown on remote avatars too via
- *    lungeStarted); hit = pop + impact boom + big burst at contact, attacker
- *    brakes on the spot (hit-stop stand-in); miss = small grey dust puff
- *    at the end, nothing else. Pressing during cooldown does nothing.
+ *    lungeStarted); hit = big team pop + white core + impact boom at contact, attacker
+ *    brakes on the spot (hit-stop stand-in); miss = grey dust ahead of the feet,
+ *    no boom. Recovery (walk only) is UI + a click: amber LOCK on the desktop
+ *    slot, amber tint on the mobile slot. No disc, sphere, or hitbox mesh.
+ *    Pressing during cooldown does nothing.
  * Debug (LUNGE_DEBUG): hitbox spheres per frame, direction dots, hit and
  * knockback markers, state log.
  */
@@ -43,6 +46,7 @@ import {
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
+  LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
   VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
@@ -95,21 +99,42 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
   Material.setPbrMaterial(ent, {
     albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, alpha),
     emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
-    emissiveIntensity: 3,
+    emissiveIntensity: 4,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
   })
   if (sound) AudioSource.create(ent, { audioClipUrl: sound.src, playing: true, loop: false, volume: sound.vol, global: false })
   fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
-const GREY = { r: 0.7, g: 0.7, b: 0.7 }
+const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const WHITE = { r: 1, g: 1, b: 1 }
+const RECOVERY_CLICK = 'assets/sounds/click.wav'
+let recoveryClickEnt: Entity = 0 as Entity
+
+/** Walk-only brace. Sound only — the slot UI carries the visual. */
+function playRecoveryClick(): void {
+  if (!recoveryClickEnt) return
+  AudioSource.createOrReplace(recoveryClickEnt, {
+    audioClipUrl: RECOVERY_CLICK, playing: true, loop: false, volume: 0.45, global: true, currentTime: 0,
+  })
+}
 
 function impactFx(p: V3, team: Team, withSound: boolean): void {
-  spawnFx({ x: p.x, y: p.y + 1, z: p.z }, teamRgb(team), 0.22, 0.9, 0.5, 3.2, 0.6,
+  // Chest-height team burst + white core + boom. Miss dust never uses these.
+  spawnFx({ x: p.x, y: p.y + 1, z: p.z }, teamRgb(team), 0.28, 0.85, 0.7, LUNGE_HIT_POP_TO, 0.75,
     withSound ? { src: DASH_HIT_SRC, vol: 1 } : undefined)
-  spawnFx({ x: p.x, y: p.y + 1, z: p.z }, WHITE, 0.1, 0.9, 0.3, 1.4, 0.9,
-    withSound ? { src: BOOM_SRC, vol: 0.5 } : undefined)
+  spawnFx({ x: p.x, y: p.y + 1.05, z: p.z }, WHITE, 0.14, 0.9, 0.4, LUNGE_HIT_CORE_TO, 0.95,
+    withSound ? { src: BOOM_SRC, vol: 0.7 } : undefined)
+}
+
+/** Whiff: grey puffs ahead of the feet. No boom, no team colour, no white core. */
+function missDust(p: V3): void {
+  const ahead = (side: number, to: number, dur: number) => spawnFx(
+    { x: p.x + dir.x * 0.85 + dir.z * side, y: p.y + 0.18, z: p.z + dir.z * 0.85 - dir.x * side },
+    GREY, dur, dur, 0.16, to, 0.4)
+  ahead(0, LUNGE_MISS_DUST_TO, 0.28)
+  ahead(0.45, 0.7, 0.24)
+  ahead(-0.45, 0.7, 0.24)
 }
 
 // Streak (dash.ts wind trail, short + dense). Also drawn on remote avatars.
@@ -233,10 +258,13 @@ function clearKnockLock(): void {
 // ─── Public HUD + trigger ───────────────────────────────────────────
 export function isLungeEnabledNow(): boolean { return lungeEnabledForRound(getRoundIndex()) }
 
-export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number } {
+export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean } {
   const enabled = isLungeEnabledNow()
   const cd = Math.max(0, cooldownLeft)
-  return { show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0, cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S }
+  return {
+    show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0,
+    cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery',
+  }
 }
 
 /** E / LUNGE slot. Silent no-op while active, recovering or cooling down. */
@@ -292,7 +320,8 @@ function endActive(): void {
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   const travelled = p ? Math.hypot(p.x - startPos.x, p.z - startPos.z) : 0
   console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE}) hit=${hitAny} brake=${frac.toFixed(2)} run=${baseSpeed.toFixed(1)} peak=${peakSpeed.toFixed(1)}`)
-  if (!hitAny && p) spawnFx({ x: p.x, y: p.y + 0.15, z: p.z }, GREY, 0.2, 0.2, 0.3, 0.9, 0.35) // miss: dust
+  if (p && !hitAny) missDust(p) // grey dust ahead; a hit is the chest pop + boom
+  playRecoveryClick()
   state = 'recovery'; stateLeft = LUNGE_RECOVERY_S
   dbgLog(`#${lungeId} → recovery`)
 }
@@ -449,6 +478,8 @@ export function initLunge(): void {
   initKnockbackState()
   knockForceEnt = engine.addEntity()
   stickForceEnt = engine.addEntity()
+  recoveryClickEnt = engine.addEntity()
+  Transform.create(recoveryClickEnt, { parent: engine.CameraEntity })
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   initLungeHitbox(avatarPos)
   events.on('lunge:started', ({ attacker, id, dx, dz, x, y, z }) => onStarted(attacker, id, dx, dz, x, y, z))
