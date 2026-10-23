@@ -80,13 +80,14 @@ export function ownerCounts(): Array<{ id: string; team: number; cells: number }
 }
 
 /** Live coverage counters. Called by the 5s log tick. */
-export function coverage(): { red: number; blue: number; total: number } {
-  let red = 0, blue = 0
+export function coverage(): { red: number; blue: number; corruption: number; total: number } {
+  let red = 0, blue = 0, corruption = 0
   for (const t of cellTeam.values()) {
     if (t === 1) red++
     else if (t === 2) blue++
+    else if (t === 3) corruption++
   }
-  return { red, blue, total: cellTeam.size }
+  return { red, blue, corruption, total: cellTeam.size }
 }
 
 /**

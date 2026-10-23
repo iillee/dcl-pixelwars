@@ -101,6 +101,9 @@ export type Events = {
   'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
   'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }
 
+  // Corruption outbreak telegraph. Subscriber: paint.ts (warn tint).
+  'corruption:warn': { cells: string[]; remainingMs: number }
+
   // Local: client/player teleported us home (spawn, round reset, fall).
   // Subscriber: client/knockback (brief knockback immunity).
   'player:respawned': { why: string }

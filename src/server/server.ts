@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams, assignAllToTeam } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
@@ -33,6 +33,8 @@ import { initDiscord, bindNameResolver, schedulePlayerJoin, flushPendingJoins } 
 // redefine here; edit the shared module if the cadence changes.
 import { getRoundIndex as currentRoundIndex, getRoundEndMs, isRoundActive, setRoundState, ROUND_INTERVAL_MS, SUMMARY_MS } from '../shared/roundTiming'
 import { GameMode, GameModeId, MODE_VOTE_MS, resolveModeVote } from '../shared/gameMode'
+import { Team } from '../shared/team'
+import { initCorruption, startCorruptionRound, stopCorruption, tickCorruption, isCorruptionActive, countCorruption } from './corruption'
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
@@ -233,11 +235,13 @@ export async function setupServer(): Promise<void> {
     const c = pendingFinal
     const pruned = pruneForNewRound()
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round start`)
-    const shuffled = shuffleTeams()
+    // Corruption = everyone on Red (same side vs tiles). Pixelwars keeps balanced shuffle.
+    const shuffled = currentMode === GameMode.Ooze ? assignAllToTeam(Team.Red) : shuffleTeams()
     for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
-    console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+    console.log(`[Server] teams ${currentMode === GameMode.Ooze ? 'unified (Corruption)' : 'reshuffled'}: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
     room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
     clearPaintState()
+    stopCorruption()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
     anvilsMazeChanged()
@@ -246,7 +250,8 @@ export async function setupServer(): Promise<void> {
     setRoundState(seed, Date.now() + ROUND_INTERVAL_MS, true)
     pendingNextIdx = 0
     pendingFinal = { red: 0, blue: 0, total: 0 }
-    console.log(`[Server] round ${seed} started (mode=${currentMode === GameMode.Ooze ? 'OOZE' : 'PIXELWARS'})`)
+    if (currentMode === GameMode.Ooze) startCorruptionRound()
+    console.log(`[Server] round ${seed} started (mode=${currentMode === GameMode.Ooze ? 'CORRUPTION' : 'PIXELWARS'})`)
     sendRoundClock()
   }
 
@@ -321,6 +326,11 @@ export async function setupServer(): Promise<void> {
     }
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     let team = assignTeam(from)
+    // Corruption mid-join: everyone fights on the same side (Red).
+    if (currentMode === GameMode.Ooze) {
+      setTeam(from, Team.Red)
+      team = Team.Red
+    }
     // Second human joins a solo human (+ bot): always the opposite team, so it's 1v1 and the bot retires
     // on the next bot tick. Covers a rejoiner whose kept team matches the other human's.
     const other = activeSoloHumanTeam(from)
@@ -420,15 +430,21 @@ export async function setupServer(): Promise<void> {
     // Tick bots BEFORE draining, so any paint they generate this frame
     // rides out on the same broadcast — no extra latency and no wasted
     // "skip empty" checks.
-    if (isRoundActive()) tickBots(broadcastClock) // bots idle while no round runs
+    if (isRoundActive()) {
+      if (currentMode === GameMode.Ooze) tickCorruption(broadcastClock)
+      else tickBots(broadcastClock) // bots idle while no round runs / Corruption
+    }
     broadcastClock = 0
     const changes = drainDelta()
     if (changes.length === 0) return
     const c = coverage()
+    // Corruption HUD remap: red = player paint, blue = remaining corruption.
+    const redOut = currentMode === GameMode.Ooze ? (c.red + c.blue) : c.red
+    const blueOut = currentMode === GameMode.Ooze ? c.corruption : c.blue
     // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
     // message. Every chunk carries the same coverage counters.
     for (let i = 0; i < changes.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total })
+      room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: redOut, blue: blueOut, total: c.total })
     }
   })
 
@@ -719,8 +735,11 @@ export async function setupServer(): Promise<void> {
     // Chunked like paintDelta. The client applies each chunk independently
     // (same path as paint:delta), so order and count don't matter. An empty
     // round still sends one empty chunk so the client sees the server alive.
+    // Corruption snapshot remap: same HUD contract as paintDelta.
+    const redSnap = currentMode === GameMode.Ooze ? (c.red + c.blue) : c.red
+    const blueSnap = currentMode === GameMode.Ooze ? c.corruption : c.blue
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, seed: currentRoundIndex() }, { to: [from] })
+      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: redSnap, blue: blueSnap, total: c.total, seed: currentRoundIndex() }, { to: [from] })
     }
     sendRoundClock(from) // late joiners: current round + time left (or idle)
   })
@@ -775,7 +794,73 @@ export async function setupServer(): Promise<void> {
   })
 
   // Round end → summary (client) → mode vote splash → lock → roundReset / next round.
-  engine.addSystem(() => {
+  
+
+  initCorruption({
+    applyPaint,
+    teamOf: teamOfCell,
+    getGraph: getWalkableGraph,
+    playerCount: presentCount,
+    sendWarn: (cells, remainingMs) => { room.send('corruptionWarn', { cells, remainingMs }) },
+    onCleared: () => { finishActiveRound('eradicated') },
+  })
+
+  /** End the live round (timer or Corruption eradication). Idempotent via intermission gate. */
+  function finishActiveRound(why: string): void {
+    if (!isRoundActive()) return
+    if (intermission !== 'idle') return
+    const now = Date.now()
+    const lastRoundIndex = currentRoundIndex()
+    const idx = lastRoundIndex + 1
+    const present = presentCount() > 0
+    const c = coverage()
+    const corr = currentMode === GameMode.Ooze ? countCorruption() : 0
+    console.log(`[Server] round ${lastRoundIndex} ended (${why}) final red=${c.red} blue=${c.blue} corruption=${c.corruption ?? corr} total=${c.total} present=${present}`)
+
+    const teamCells: Record<number, number> = { 1: 0, 2: 0 }
+    for (const [uid, n] of roundCells) {
+      const tm = getTeam(uid)
+      if (tm !== null) teamCells[tm] = (teamCells[tm] ?? 0) + n
+    }
+    for (const { userId, team } of rosterEntries()) {
+      room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
+    }
+    const painted = new Map(roundCells)
+    roundCells.clear()
+    pendingBombs.length = 0
+    const owners = buildStandings(painted)
+    clearRoundStats()
+    room.send('roundOwners', { owners })
+    console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
+
+    setRoundState(lastRoundIndex, now, false)
+    stopCorruption()
+    pendingNextIdx = idx
+    // Corruption summary: red = player paint, blue = remaining corruption (0 = eradicated).
+    if (currentMode === GameMode.Ooze) {
+      pendingFinal = { red: c.red + c.blue, blue: c.corruption, total: c.total }
+      room.send('roundEnded', { finalRed: pendingFinal.red, finalBlue: pendingFinal.blue, finalTotal: pendingFinal.total })
+    } else {
+      pendingFinal = { red: c.red, blue: c.blue, total: c.total }
+      room.send('roundEnded', { finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    }
+    sendRoundClock()
+
+    if (!present) {
+      intermission = 'idle'
+      console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
+      clearPaintState()
+      void saveLeaderboard()
+      publishLeaderboard()
+      return
+    }
+
+    intermission = 'summaryWait'
+    summaryEndsAt = now + SUMMARY_MS
+    console.log(`[Server] summary wait ${SUMMARY_MS / 1000}s → then mode vote`)
+  }
+
+engine.addSystem(() => {
     const now = Date.now()
 
     // ── Intermission: summary wait → open vote ──
@@ -804,53 +889,7 @@ export async function setupServer(): Promise<void> {
     }
 
     if (!isRoundActive() || now < getRoundEndMs()) return
-    if (intermission !== 'idle') return // already ending
-
-    // Round timer hit zero.
-    const lastRoundIndex = currentRoundIndex()
-    const idx = lastRoundIndex + 1
-    const present = presentCount() > 0
-    const c = coverage()
-    console.log(`[Server] round ${lastRoundIndex} ended (final red=${c.red} blue=${c.blue} total=${c.total}) present=${present}`)
-
-    // Personal results + owners BEFORE summary UI.
-    const teamCells: Record<number, number> = { 1: 0, 2: 0 }
-    for (const [uid, n] of roundCells) {
-      const t = getTeam(uid)
-      if (t !== null) teamCells[t] = (teamCells[t] ?? 0) + n
-    }
-    for (const { userId, team } of rosterEntries()) {
-      room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
-    }
-    const painted = new Map(roundCells)
-    roundCells.clear()
-    pendingBombs.length = 0
-    const owners = buildStandings(painted)
-    clearRoundStats()
-    room.send('roundOwners', { owners })
-    console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
-
-    // Freeze the round clock (inactive) while summary + vote run. Maze/paint stay until vote locks.
-    setRoundState(lastRoundIndex, now, false)
-    pendingNextIdx = idx
-    pendingFinal = { red: c.red, blue: c.blue, total: c.total }
-    room.send('roundEnded', { finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
-    sendRoundClock()
-
-    if (!present) {
-      intermission = 'idle'
-      console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
-      // Still clear board so the next cold-start is clean.
-      clearPaintState()
-      void saveLeaderboard()
-      publishLeaderboard()
-      return
-    }
-
-    // Wait for the client summary animation, then open the mode-vote splash (10s max).
-    intermission = 'summaryWait'
-    summaryEndsAt = now + SUMMARY_MS
-    console.log(`[Server] summary wait ${SUMMARY_MS / 1000}s → then mode vote`)
+    finishActiveRound('timer')
   })
 
   // Discord flush tick — low frequency; the delay is 5s so 1Hz polling

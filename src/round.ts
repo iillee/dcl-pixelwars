@@ -70,7 +70,7 @@ interface BannerState {
   visible: boolean
   redPct: number
   bluePct: number
-  winner: 'RED' | 'BLUE' | 'TIE'
+  winner: 'RED' | 'BLUE' | 'TIE' | 'CLEARED' | 'OVERRUN'
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
@@ -117,7 +117,12 @@ export function showRoundEndBanner(red: number, blue: number, total: number): vo
   banner.visible = true
   banner.redPct = redPct
   banner.bluePct = bluePct
-  banner.winner = redPct > bluePct ? 'RED' : bluePct > redPct ? 'BLUE' : 'TIE'
+  // Corruption: blue channel = remaining corruption (0 = eradicated).
+  if (getCurrentGameMode() === GameMode.Ooze) {
+    banner.winner = blue <= 0 ? 'CLEARED' : 'OVERRUN'
+  } else {
+    banner.winner = redPct > bluePct ? 'RED' : bluePct > redPct ? 'BLUE' : 'TIE'
+  }
   banner.shownAtMs = Date.now()
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
@@ -138,6 +143,7 @@ export function getBanner(): BannerState {
 
 // ─── Server event subscriber ────────────────────────────────────
 import { events } from './shared/events'
+import { getCurrentGameMode, GameMode } from './client/modeVote'
 import { coverage } from './paint'
 
 /**

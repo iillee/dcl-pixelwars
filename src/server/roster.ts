@@ -100,6 +100,16 @@ export function setTeam(userId: string, team: number): void {
   teamOf.set(userId, team)
 }
 
+/** Corruption PvE: every connected player on the same team (default Red). */
+export function assignAllToTeam(team: number = 1): Array<{ userId: string; team: number }> {
+  const out: Array<{ userId: string; team: number }> = []
+  for (const uid of Array.from(teamOf.keys()).filter(u => connected.has(u))) {
+    teamOf.set(uid, team)
+    out.push({ userId: uid, team })
+  }
+  return out
+}
+
 /** For diagnostics. */
 export function rosterSize(): number {
   return teamOf.size

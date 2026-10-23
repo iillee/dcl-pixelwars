@@ -332,9 +332,9 @@ function RoundSummary(p: number) {
   const rows = (b.owners as SummaryRow[]).slice().sort((x, y) => y.cells - x.cells)
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
-  const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
+  const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : b.winner === 'CLEARED' ? 'CORRUPTION' : b.winner === 'OVERRUN' ? 'TIME' : ''
   const show = a > 0
-  const titleWords = teamWord !== '' ? [teamWord, 'WINS!'] : ["IT'S A TIE"]
+  const titleWords = b.winner === 'CLEARED' ? ['CORRUPTION', 'CLEARED!'] : b.winner === 'OVERRUN' ? ['TIME', 'UP!'] : teamWord !== '' ? [teamWord, 'WINS!'] : ["IT'S A TIE"]
   const titleF = titleFontFor(titleWords, k, cv.w * 0.9)
   // Letter-spaced subtitle; on narrow phones where it would drop under the 12 px floor, the plain words.
   const SUB_WIDE = 'F I N A L     T E R R I T O R Y     C O N T R O L'
@@ -350,8 +350,8 @@ function RoundSummary(p: number) {
         {show && (
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k } }}>
             <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: titleF * 1.2, flexShrink: 0 }}>
-              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' ? RED_COLOR : BLUE_COLOR, a)} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord, titleF), height: titleF * 1.2, flexShrink: 0, margin: { right: titleF * TITLE_WORD_GAP } }} />}
-              <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign={teamWord !== '' ? 'middle-left' : 'middle-center'} textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: titleF * 1.2, flexShrink: 0 }} />
+              {teamWord !== '' && <Label value={teamWord} fontSize={titleF} color={withA(b.winner === 'RED' || b.winner === 'CLEARED' ? RED_COLOR : b.winner === 'OVERRUN' ? Color4.create(0.45,0.12,0.55,1) : BLUE_COLOR, a)} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord, titleF), height: titleF * 1.2, flexShrink: 0, margin: { right: titleF * TITLE_WORD_GAP } }} />}
+              <Label value={b.winner === 'CLEARED' ? 'CLEARED!' : b.winner === 'OVERRUN' ? 'UP!' : teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign={teamWord !== '' ? 'middle-left' : 'middle-center'} textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: titleF * 1.2, flexShrink: 0 }} />
             </UiEntity>
             <Label value={SUB} fontSize={subF} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
           </UiEntity>
@@ -393,13 +393,15 @@ function coveragePct(): { red: number; blue: number } {
 
 function bannerColor(): Color4 {
   const b = getBanner()
-  if (b.winner === 'RED')  return RED_COLOR
-  if (b.winner === 'BLUE') return BLUE_COLOR
+  if (b.winner === 'RED' || b.winner === 'CLEARED')  return RED_COLOR
+  if (b.winner === 'BLUE' || b.winner === 'OVERRUN') return Color4.create(0.35, 0.1, 0.45, 1)
   return Color4.White()
 }
 
 function bannerHeadline(): string {
   const b = getBanner()
+  if (b.winner === 'CLEARED') return 'CORRUPTION CLEARED'
+  if (b.winner === 'OVERRUN') return "TIME'S UP"
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
 }
 

@@ -61,12 +61,28 @@ export function initPaintNet(): void {
     clearAllPaintState()
     setServerCoverage({ red: 0, blue: 0, total: 0 })
   })
+
+  // Outbreak telegraph: briefly tint preview cells before paintDelta converts them.
+  events.on('corruption:warn', ({ cells }) => {
+    for (const id of cells) {
+      const e = cellEntity.get(id)
+      if (!e) continue
+      if (cellTeam.get(id) === Team.Corruption) continue
+      Material.setPbrMaterial(e, {
+        albedoColor: Color4.create(0.45, 0.12, 0.55, 1),
+        roughness: 1.0,
+        metallic: 0.0,
+        specularIntensity: 0.0,
+      })
+    }
+  })
 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
   [Team.None]: Color4.create(1, 1, 1, 1),
   [Team.Red]:  Color4.create(255/255, 117/255, 119/255, 1), // pallet.jpeg #FF7577
-  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC (queued for Phase 3)
+  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC
+  [Team.Corruption]: Color4.create(28/255, 8/255, 36/255, 1), // near-black purple
 }
 
 // ─── Mask format ─────────────────────────────────────────────────────

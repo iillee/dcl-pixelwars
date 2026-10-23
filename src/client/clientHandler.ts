@@ -134,6 +134,10 @@ function wireInbound(): void {
     events.emit('mode:voteLocked', { mode, wanted, fallback })
   })
 
+  room.onMessage('corruptionWarn', ({ cells, remainingMs }) => {
+    events.emit('corruption:warn', { cells, remainingMs })
+  })
+
   room.onMessage('dashImpact', ({ attacker, target, dx, dz }) => {
     events.emit('dash:impact', { attacker, target, dx, dz })
   })

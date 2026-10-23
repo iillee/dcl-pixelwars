@@ -211,6 +211,13 @@ export const Messages = {
     yaw: Schemas.Int, alive: Schemas.Int, moving: Schemas.Int, slide: Schemas.Int,
   })) }),
 
+  // Corruption (Ooze) telegraph: cells about to convert. Client shows a
+  // brief warn tint; convert arrives via normal paintDelta as team=3.
+  corruptionWarn: Schemas.Map({
+    cells: Schemas.Array(Schemas.String),
+    remainingMs: Schemas.Int,
+  }),
+
   // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
   // sender's position. Server checks round mode, team and cooldown, snaps
   // it to the floor, broadcasts bombArmed, and after BOMB_FUSE_S paints

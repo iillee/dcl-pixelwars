@@ -1,9 +1,9 @@
 /**
  * gameMode.ts — Pixelwars vs Corruption (Ooze) mode ids + vote resolution.
  *
- * Shared by client splash UI and server lock logic. Corruption/Ooze is not playable yet
- * (OOZE_READY = false): if it wins a vote we fall back to Pixelwars and tell
- * clients via modeVoteLocked.fallback.
+ * Shared by client splash UI and server lock logic. Corruption/Ooze is
+ * playable when OOZE_READY is true; otherwise an Ooze vote falls back to
+ * Pixelwars via modeVoteLocked.fallback.
  */
 
 export const GameMode = {
@@ -14,7 +14,7 @@ export const GameMode = {
 export type GameModeId = (typeof GameMode)[keyof typeof GameMode]
 
 /** Flip to true when Corruption (Ooze) rounds are implemented. */
-export const OOZE_READY = false
+export const OOZE_READY = true
 
 export const MODE_LABEL: Record<GameModeId, string> = {
   [GameMode.Pixelwars]: 'PIXELWARS',
@@ -30,6 +30,30 @@ export const MODE_SUB: Record<GameModeId, string> = {
  * Server ends early once every present player has voted.
  */
 export const MODE_VOTE_MS = 10_000
+
+// ─── Corruption (Ooze) cadence / budget ───────────────────────────────
+/** Growth pulse interval (~8–12s band; 10s centre). */
+export const CORRUPTION_PULSE_MS = 10_000
+/** Outbreak every N pulses (telegraphed burst, not constant spam). */
+export const CORRUPTION_OUTBREAK_EVERY = 3
+/** Visible warning before an outbreak converts cells. */
+export const CORRUPTION_TELEGRAPH_MS = 1_500
+/** Seed foci at round start (mid-map). */
+export const CORRUPTION_SEED_FOCI = 3
+/** Soft BFS radius (steps) around each seed focus. */
+export const CORRUPTION_SEED_RADIUS = 2
+/** Max cells an outbreak blob may claim (seed + adjacent spill). */
+export const CORRUPTION_OUTBREAK_BLOB = 8
+
+/**
+ * Shared expansion budget per pulse — sublinear in player count so solo
+ * stays fair and a full lobby doesn't instantly flood the map.
+ *   budget = 6 + 4 * sqrt(n)   (n = present humans, min 1)
+ */
+export function corruptionPulseBudget(playerCount: number): number {
+  const n = Math.max(1, playerCount)
+  return Math.max(4, Math.round(6 + 4 * Math.sqrt(n)))
+}
 
 /**
  * Pick the winning mode from tallies.
