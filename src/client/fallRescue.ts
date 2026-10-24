@@ -3,8 +3,10 @@
  *
  * Crossing the sky fall line catches the player once. An invisible physics
  * panel (MeshCollider + CL_PHYSICS, same box as the early-join spawn pads)
- * appears under their feet, one movePlayerTo puts them on it, and a Tween
- * then carries that panel up and over to just above the team base.
+ * appears just under their feet — led a little by fall speed — and a Tween
+ * carries that panel up and over to just above the team base. The catch does
+ * not move or aim the camera. movePlayerTo at the catch is only a tiny
+ * position nudge if they are already under the surface, with no look target.
  *
  * SDK 7.30.2 does carry a standing avatar on a Tween platform. The explorer
  * docs say a player standing on an entity moves with it when that entity
@@ -21,8 +23,9 @@
  *
  * Beat (Luke: tweak FALL_RESCUE):
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
- *                  spawn the panel, one movePlayerTo onto it (holdFallLine so it does not re-trip)
- *   grab           floater swoops in, parented to the panel; panel stays put so the catch can land
+ *                  spawn the panel under their feet (holdFallLine so it does not re-trip).
+ *                  No catch teleport and no camera / avatar target — the view stays put.
+ *   grab           floater swoops in, parented to the panel; panel stays put so they can land on it
  *   carry          Tween: rise above the arena, cruise to the base, descend to just above it.
  *                  Floater rides along. Movement stays locked.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
@@ -42,7 +45,7 @@ import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
-import { baseSpawn, MIN_Y, SCENE_SIZE } from '../maze/generator'
+import { baseSpawn, MIN_Y } from '../maze/generator'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
@@ -52,7 +55,7 @@ import { exitOverview } from './overviewCamera'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
-  /** Floater swoops in. Panel stays put so the catch teleport can land. */
+  /** Floater swoops in. Panel stays put so they can fall onto it. The rise does the lift. */
   GRAB_S: 0.4,
   /** Rise from the catch to cruise height. */
   RISE_S: 0.9,
@@ -74,8 +77,14 @@ export const FALL_RESCUE = {
   APPROACH_EXTRA_Y: 4.5,
   /** How far the floater climbs while it peels off. */
   PEEL_RISE: 2.2,
-  /** Panel top is this far below the fall line (MIN_Y - FALL_RESPAWN_DROP). ~2 m → y≈64, under the arena, not the ground. */
-  HOLD_BELOW_LINE: 2,
+  /** Seconds of current velocity used to place the pad ahead of the fall, so they meet it. */
+  CATCH_LEAD_S: 0.12,
+  /** Pad surface at least this far under the feet. Keeps the box from spawning inside the body. */
+  CATCH_MIN_DROP: 0.3,
+  /** Cap that lead. A fast fall must not open a long drop before the rise; the box thickness covers one late frame. */
+  CATCH_MAX_DROP: 1.2,
+  /** If they are already under the surface by more than this, do not yoink them. Slip fallback handles a real miss. */
+  CATCH_NUDGE_M: 0.75,
   /** Invisible pad width (m). Wide enough that leftover knock momentum still lands on it. */
   PAD_SIZE: 12,
   /** Invisible pad thickness (m). Thick so a fast fall doesn't tunnel through before the catch teleport lands. */
@@ -93,7 +102,7 @@ export const FALL_RESCUE = {
   ARRIVE_ABOVE: 1.5,
   /** Metres past the panel edge, or off its surface, before the one snap teleport. */
   SLIP_M: 3,
-  /** Ignore slip at the start of the move so the catch teleport can finish sticking. */
+  /** Ignore slip at the start of the move so landing on the pad can finish. */
   SLIP_GRACE_S: 0.5,
   /** Must stay off the panel this long. One bad frame is not a teleport. */
   SLIP_SUSTAIN_S: 0.35,
@@ -142,35 +151,67 @@ let pad: Entity | null = null
 let anchor: Entity | null = null
 let carry: Carry | null = null
 let slipAccum = 0
+/** Last idle sample, so the catch can lead the pad by fall speed instead of teleporting. */
+let sample: { p: Vec; at: number } | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
-function holdHeight(): number { return fallLine() - FALL_RESCUE.HOLD_BELOW_LINE }
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
 function lerp(a: Vec, b: Vec, u: number): Vec {
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
 }
 function v3(p: Vec): Vector3 { return Vector3.create(p.x, p.y, p.z) }
 
-/** Camera / body aim: team base, level with the hold so the view doesn't tip into the void. */
-function catchLook(hold: Vec): Vec {
-  const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
-  let dx = base.x - hold.x
-  let dz = base.z - hold.z
-  if (dx * dx + dz * dz < 4) {
-    dx = SCENE_SIZE / 2 - hold.x
-    dz = SCENE_SIZE / 2 - hold.z
-  }
-  const len = Math.hypot(dx, dz) || 1
-  return { x: hold.x + (dx / len) * 8, y: hold.y, z: hold.z + (dz / len) * 8 }
+function remember(p: Vec): void {
+  sample = { p, at: Date.now() }
 }
 
-/** One catch. The panel is already in the world; this only places the avatar on it. */
-function catchOnce(hold: Vec): void {
+/** Velocity since the previous sample. A stale or missing sample is zero — place the pad under where they are now. */
+function fallVelocity(p: Vec): Vec {
+  if (!sample) return { x: 0, y: 0, z: 0 }
+  const dt = (Date.now() - sample.at) / 1000
+  if (dt < 0.001 || dt > 0.5) return { x: 0, y: 0, z: 0 }
+  return { x: (p.x - sample.p.x) / dt, y: (p.y - sample.p.y) / dt, z: (p.z - sample.p.z) / dt }
+}
+
+/**
+ * Pad top just under the feet, a short step ahead of the fall. Same XZ, plus a
+ * small horizontal lead that still leaves them near the middle of the pad.
+ * No teleport: the rise leg is the lift, and the camera keeps its current aim.
+ */
+function catchPoint(p: Vec, v: Vec): Vec {
+  const fall = Math.max(0, -v.y)
+  const drop = Math.min(
+    FALL_RESCUE.CATCH_MAX_DROP,
+    Math.max(FALL_RESCUE.CATCH_MIN_DROP, fall * FALL_RESCUE.CATCH_LEAD_S),
+  )
+  let lx = v.x * FALL_RESCUE.CATCH_LEAD_S
+  let lz = v.z * FALL_RESCUE.CATCH_LEAD_S
+  const h = Math.hypot(lx, lz)
+  const cap = FALL_RESCUE.PAD_SIZE * 0.2
+  if (h > cap) { lx *= cap / h; lz *= cap / h }
+  return { x: p.x + lx, y: p.y - drop, z: p.z + lz }
+}
+
+/**
+ * They slipped through the top during the grab. Nudge Y only, and only when the
+ * gap is tiny. No cameraTarget / avatarTarget — those were the one-frame look snap.
+ * Returns the teleport distance, or 0 when the catch stays a plain landing.
+ */
+function nudgeOntoPad(): number {
+  const p = playerPos()
+  const surface = surfaceNow()
+  if (!p || !surface) return 0
+  const half = FALL_RESCUE.PAD_SIZE / 2
+  if (Math.hypot(p.x - surface.x, p.z - surface.z) > half) return 0
+  // On the surface, or still falling toward it: leave them. Only a body already inside the box is nudged.
+  const below = surface.y - p.y
+  if (below <= 0.15 || below > FALL_RESCUE.CATCH_NUDGE_M) return 0
+  const feetY = surface.y + FALL_RESCUE.FEET_CLEAR
+  const delta = feetY - p.y
+  movePlayerTo({ newRelativePosition: { x: p.x, y: feetY, z: p.z } }).catch(() => {})
   holdFallLine()
-  exitOverview()
-  const feet = { x: hold.x, y: hold.y + FALL_RESCUE.FEET_CLEAR, z: hold.z }
-  const look = catchLook(feet)
-  movePlayerTo({ newRelativePosition: feet, cameraTarget: look, avatarTarget: look }).catch(() => {})
+  console.log(`[FallRescue] catch teleport ${delta.toFixed(2)}m (no look target)`)
+  return delta
 }
 
 function playerPos(): Vec | null {
@@ -426,30 +467,35 @@ function finish(how: FallRescueEnd, why: string): void {
   onEnd(how)
 }
 
-function begin(y: number): void {
+function begin(p: Vec): void {
   const line = fallLine()
-  const p = playerPos()
+  const v = fallVelocity(p)
+  const hold = catchPoint(p, v)
   phase = 'grab'
   phaseLeft = FALL_RESCUE.GRAB_S
   // Interrupt first: cancelling a lunge rewrites InputModifier, then the freeze wins.
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
   playFallRescueSfx()
-  if (p) {
-    const hold = { x: p.x, y: holdHeight(), z: p.z }
-    spawnPad(hold)
-    spawnFloater()
-    catchOnce(hold)
-  }
+  // The catch itself does not move the player. Overview off so the follow camera rides the tween.
+  holdFallLine()
+  exitOverview()
+  spawnPad(hold)
+  spawnFloater()
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
   const trip = (FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S).toFixed(2)
-  console.log(`[FallRescue] trip y=${y.toFixed(1)} line=${line.toFixed(1)} pad=${holdHeight().toFixed(1)} tween-carry in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`)
+  const under = p.y - hold.y
+  console.log(
+    `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, tween-carry in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
+  )
 }
 
 function tickPhase(dt: number): void {
   if (phase === 'grab') {
     phaseLeft -= dt
     if (phaseLeft <= 0) {
+      // Rare: they passed through the top. A short Y nudge only — never a look snap.
+      nudgeOntoPad()
       phase = 'carry'
       if (floater) floater.mode = 'hang'
       startCarry()
@@ -512,10 +558,10 @@ function tick(dt: number): void {
   }
   if (phase !== 'idle') tickPhase(step)
   tickFloater(step, line)
-  if (phase !== 'idle' || !rearm || !isMazeReady()) return
-  const y = playerPos()?.y
-  if (y === undefined || y >= line) return
-  begin(y)
+  const p = playerPos()
+  if (p && phase === 'idle' && rearm && isMazeReady() && p.y < line) begin(p)
+  // Sample after the trip so the lead uses the fall, not the frame we just caught.
+  if (p && phase === 'idle') remember(p)
 }
 
 /** Ignore the fall line until we're above it again. movePlayerTo is async. */

@@ -7,7 +7,8 @@
  *   - sky:     each player goes to their TEAM BASE once the server has
  *              assigned a team (teamAssigned), at each round reset, and
  *              whenever a fall rescue finishes (client/fallRescue.ts). Crossing
- *              the fall line stands them on an invisible panel. A Tween carries
+ *              the fall line spawns an invisible panel under their feet. The
+ *              catch does not teleport or retarget the camera. A Tween carries
  *              that panel to the base. teleportHome('fell') runs only if they
  *              slipped off it.
  */
