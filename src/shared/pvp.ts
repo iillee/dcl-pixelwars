@@ -172,11 +172,20 @@ export const BURST_HIT_MAX_DY = 3.5
 export const AIR_SPIKE_RADIUS = 2 // m, horizontal feet-to-feet
 export const AIR_SPIKE_DEPTH = 5.5 // m, how far below the attacker the spike reaches
 export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this far above the victim
-/** Victim spike: strong downward impulse, small outward impulse, short downward carry. */
+/** Victim spike: strong downward impulse, small outward impulse, short downward carry.
+ *  The glider clamps locomotion fall to ~1 m/s and eats force-Y while it is open.
+ *  AIR_SPIKE_GLIDE_LOCK_S shuts it (disableGliding) before the impulse and holds it
+ *  shut so the victim cannot reopen and float out of the external downward velocity. */
 export const AIR_SPIKE_DOWN = 110
 export const AIR_SPIKE_OUT = 18
 export const AIR_SPIKE_FORCE = 40
 export const AIR_SPIKE_FORCE_S = 0.28
+export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
+/** Attacker, on a connect only: upward impulse that clears a downward fall
+ *  (explorer zeros negative locomotion vy on an upward impulse) and leaves a
+ *  small hop. No downward dive impulse is applied on that press. */
+export const AIR_SPIKE_STOP_POP = 8
+export const AIR_SPIKE_STOP_S = 0.35
 /** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
 export const AIR_SPIKE_BOT_SHOVE = 2
 /** Attacker dive on an airborne press only (Yoshi Down-B style commit, not a freefall mode).
@@ -193,7 +202,10 @@ export const AIR_SPIKE_TRAIL_DROP = 4.2 // m
 export const AIR_SPIKE_TRAIL_S = 0.4
 export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
 /** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
- *  Stamp is the dive meeting the floor (no paint). It is dropped if contact is later than the window. */
+ *  Dive = press. A miss that lands inside AIR_SPIKE_STAMP_WINDOW_S plays the grounded
+ *  shockwave (ripple, motes, burst_impact) — not air_spike_stamp.wav. A connect does
+ *  not: the dive stops in the air and that cue is cancelled. No burst paint and no
+ *  second knock. The cue is dropped if the feet meet the floor later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
 export const AIR_SPIKE_STAMP_VOL = 0.92

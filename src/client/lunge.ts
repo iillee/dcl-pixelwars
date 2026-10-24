@@ -214,21 +214,36 @@ function dbgMark(p: V3, rgb: { r: number; g: number; b: number }, size: number, 
 }
 function dbgLog(msg: string): void { if (LUNGE_DEBUG) console.log(`[Lunge dbg] ${msg}`) }
 
-// ─── Input modifier: one owner, two reasons ─────────────────────────
-// recoveryOn: our own lunge (active + recovery) → walk only.
-// lockLeft:   we were knocked back → no movement input at all.
+// ─── Input modifier: one owner, three reasons ───────────────────────
+// recoveryOn:    our own lunge (active + recovery) → walk only.
+// lockLeft:      we were knocked back → no movement input at all.
+// glideLockLeft: glider forced shut (aerial spike). Outlasts the movement lock
+//                so the victim cannot reopen and parachute out of the fall.
+// Explorer (player.gd): while the glider is opening or open, locomotion fall
+// speed is clamped to 1 m/s. disableJump and disableGliding both force-close
+// it; scene impulses are a separate velocity and are not part of that clamp.
 let recoveryOn = false
 let lockLeft = 0
+let glideLockLeft = 0
 let sparkAccum = 0
 function applyControl(): void {
+  const noGlide = glideLockLeft > 0
   safePhysics('input modifier', () => {
     if (lockLeft > 0 || emoteLockLeft > 0) {
       InputModifier.createOrReplace(engine.PlayerEntity, {
-        mode: InputModifier.Mode.Standard({ disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true }),
+        mode: InputModifier.Mode.Standard({
+          disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true, disableGliding: true,
+        }),
       })
     } else if (recoveryOn) {
       InputModifier.createOrReplace(engine.PlayerEntity, {
-        mode: InputModifier.Mode.Standard({ disableJump: true, disableRun: true, disableJog: true, disableDoubleJump: true }),
+        mode: InputModifier.Mode.Standard({
+          disableJump: true, disableRun: true, disableJog: true, disableDoubleJump: true, disableGliding: noGlide,
+        }),
+      })
+    } else if (noGlide) {
+      InputModifier.createOrReplace(engine.PlayerEntity, {
+        mode: InputModifier.Mode.Standard({ disableGliding: true }),
       })
     } else if (InputModifier.has(engine.PlayerEntity)) {
       InputModifier.deleteFrom(engine.PlayerEntity)
@@ -249,9 +264,17 @@ export function startKnockLock(): void {
   lockLeft = Math.max(lockLeft, LUNGE_KNOCKBACK_LOCK_S)
   applyControl()
 }
+/** Keep the glider shut for `seconds` (extends, never stacks down). Closes an
+ *  already-open glide via disableGliding. Shares applyControl with the knock lock. */
+export function startGlideLock(seconds: number): void {
+  if (seconds <= 0) return
+  glideLockLeft = Math.max(glideLockLeft, seconds)
+  applyControl()
+}
 function clearKnockLock(): void {
-  if (lockLeft <= 0) return
+  if (lockLeft <= 0 && glideLockLeft <= 0) return
   lockLeft = 0
+  glideLockLeft = 0
   applyControl()
 }
 
@@ -474,6 +497,13 @@ function cancelLunge(why: string): void {
 }
 
 export function initLunge(): void {
+  // Glide lock is owned here (applyControl) but aerial Burst uses it even if a
+  // future change turns the lunge off, so the timer is not inside that early-out.
+  engine.addSystem((dt: number) => {
+    if (glideLockLeft <= 0) return
+    glideLockLeft -= dt
+    if (glideLockLeft <= 0) { glideLockLeft = 0; applyControl() }
+  })
   if (LUNGE_MODE === 'off') return
   initKnockbackState()
   knockForceEnt = engine.addEntity()
