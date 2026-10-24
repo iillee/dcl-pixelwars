@@ -40,22 +40,22 @@ export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
  * Three steps on each platform. Pitch is OV_PITCH_DEG at every step.
- * Desktop close is 7: the camera sits ~19 m out (~18 m from the head). Explorer
- * nameplates (godot nameplate_layer) keep the name until 20 m and hide it at
- * 25 m, so 8 would already be fading. 76 is the midpoint of 7 and 145. 145 is
- * past the ~scale-50 ceiling clamp; that click stays on the clamp and widens
- * fov to about 62° at L0 and 69° at L+1. If a live fov write does not take
- * effect, the far step does not move the picture.
+ * Desktop close is 7 (~19 m). Nameplates keep the name until 20 m.
+ * The ceiling stops the throw near scale 51 at L0 (~140 m), 45 at L+1, 58 at L-1.
+ * Middle is 29 (~79 m): halfway from 7 to that L0 clamp, and under every floor's
+ * ceiling, so it is a real dolly. Far is 60, which the clamp shortens to the
+ * ceiling on every floor. A later VirtualCamera.fov write does not change the
+ * lens while that camera stays active, so the far step does not depend on it.
  *
- * Mobile starts at the closest. Desktop starts at 76: one plus click reaches 7,
- * one minus click reaches 145. The table is latched when overview opens:
+ * Mobile starts at the closest. Desktop starts at 29: one plus click reaches 7,
+ * one minus click reaches 60. The table is latched when overview opens:
  * isMobile() resolves async, and a live re-read would compare a desktop scale
  * to the mobile max of 25 and disable minus.
  */
 const MOBILE_ZOOM_SCALES = [5, 15, 25]
-const DESKTOP_ZOOM_SCALES = [7, 76, 145]
-const DESKTOP_DEFAULT_SCALE = 76
-/** Safety cap. Desktop far (145) at L+1 is about 69°, under this. */
+const DESKTOP_ZOOM_SCALES = [7, 29, 60]
+const DESKTOP_DEFAULT_SCALE = 29
+/** Cap for a step past the ceiling. The desktop client does not apply that wider fov while this camera stays active. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
@@ -80,7 +80,7 @@ let lookEnt: Entity | null = null
 let active = false
 let scale = DESKTOP_DEFAULT_SCALE
 let scaleInit = false
-/** Index into the table latched in `zoomMobile`. Desktop starts on 76: plus is 7, minus is 145. */
+/** Index into the table latched in `zoomMobile`. Desktop starts on 29: plus is 7, minus is 60. */
 let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
 /** Platform latched while overview is open. Reading isMobile() live would
  *  judge a desktop scale against the mobile max of 25 once detection
@@ -188,7 +188,7 @@ function maxDistance(): number {
   return Math.max(4, max)
 }
 
-/** Camera stays on OV_PITCH_DEG. Past the clamp, only the lens changes. */
+/** Camera stays on OV_PITCH_DEG. Past the clamp the throw stops; a wider fov is written but the active camera does not pick it up. */
 function applyFraming(view: number): void {
   const wantDist = view * DIST_PER_SCALE
   const cap = maxDistance()
@@ -201,7 +201,7 @@ function zoomTable(): readonly number[] {
   return zoomMobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
 }
 
-/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 76. */
+/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 29. */
 function useZoomTable(mobile: boolean, snapDefault: boolean): void {
   zoomMobile = mobile
   const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
@@ -233,7 +233,7 @@ function setActive(on: boolean): void {
   if (active) {
     const mobile = isMobile()
     // First open picks the platform default. Mobile re-opens at its closest
-    // level. Desktop stays on the step it already had, which begins at 76.
+    // level. Desktop stays on the step it already had, which begins at 29.
     useZoomTable(mobile, !scaleInit || mobile)
     scaleInit = true
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
