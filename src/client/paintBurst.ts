@@ -50,8 +50,8 @@ import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId, isPlayerGrounded } from '../paint'
 import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
-  playDashHitSfx, playBurstSfx, playAirHitSfx,
-  BURST_SFX_SRC, AIR_HIT_SRC,
+  playDashSfx, playDashHitSfx, playBurstSfx, playAirHitSfx,
+  DASH_SRC, BURST_SFX_SRC, AIR_HIT_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
@@ -412,10 +412,10 @@ export function triggerBurst(): void {
  *  Miss: full dive (a void miss keeps falling). The landing shockwave and its
  *  paint wait until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
-  // No press clip. A miss plays burst_impact once, at the landing, the same
-  // single sound as a ground Burst. Playing air_spike_dive here as well made
-  // the local player hear the burst twice. A connect has no landing; its sound
-  // is the hit clip only.
+  // Press: the dash whoosh once (swoosh.mp3, not air_spike_dive). Landing is
+  // burst_impact once. A player connect is the hit clip once, and disarms the
+  // landing so that impact does not also play.
+  playDashSfx()
   showAirTrail(p, team, fx, fz)
   sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
   const anvils = knockAirAnvils(p, fx, fz, id)
@@ -543,8 +543,8 @@ export function initPaintBurst(): void {
     if (att !== myAddress()) {
       if (air) {
         showAirTrail({ x, y, z }, team, faceX, faceZ)
-        // Landing plays burst_impact once. The press dive clip is not played
-        // here either, or a remote would hear the burst twice.
+        // One positional dash whoosh. The attacker already played it locally.
+        playPositional({ x, y, z }, DASH_SRC, 0.85)
         armLandingStamp(att, team, id)
       } else showShockwave({ x, y, z }, team, false)
     }
