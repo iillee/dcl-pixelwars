@@ -25,8 +25,10 @@
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
  *                  spawn the panel under their feet (holdFallLine so it does not re-trip).
  *                  No catch teleport and no camera / avatar target — the view stays put.
- *   grab           floater swoops in, parented to the panel. The panel bobs in place
- *                  (engine Tween, not a per-frame Transform write) so they can land.
+ *   grab           floater swoops in and tracks the avatar while sideways speed
+ *                  slides them across the pad. At the end of the grab the pad shifts
+ *                  under their feet (one Transform write, not a carry tween) and a
+ *                  same-position movePlayerTo clears that speed. No camera target.
  *   carry          Tween: rise above the arena, cruise to the base, descend to just above it,
  *                  with the same bob baked into the path. The cloud inherits it by parenting.
  *                  Movement stays locked.
@@ -180,8 +182,9 @@ function fallVelocity(p: Vec): Vec {
 }
 
 /**
- * Pad top just under the feet, a short step ahead of the fall. Same XZ, plus a
- * small horizontal lead that still leaves them near the middle of the pad.
+ * Pad top just under the feet, ahead of the fall. Horizontal lead covers the
+ * drop onto the pad plus the whole grab, because movement lock does not cancel
+ * velocity and they keep sliding. Capped so a wild estimate still lands on the pad.
  * No teleport: the rise leg is the lift, and the camera keeps its current aim.
  */
 function catchPoint(p: Vec, v: Vec): Vec {
@@ -190,35 +193,16 @@ function catchPoint(p: Vec, v: Vec): Vec {
     FALL_RESCUE.CATCH_MAX_DROP,
     Math.max(FALL_RESCUE.CATCH_MIN_DROP, fall * FALL_RESCUE.CATCH_LEAD_S),
   )
-  let lx = v.x * FALL_RESCUE.CATCH_LEAD_S
-  let lz = v.z * FALL_RESCUE.CATCH_LEAD_S
+  const fallTime = fall > 0.5 ? drop / fall : 0
+  const slideT = fallTime + FALL_RESCUE.GRAB_S
+  let lx = v.x * slideT
+  let lz = v.z * slideT
   const h = Math.hypot(lx, lz)
-  const cap = FALL_RESCUE.PAD_SIZE * 0.2
+  const cap = FALL_RESCUE.PAD_SIZE / 2 - 1
   if (h > cap) { lx *= cap / h; lz *= cap / h }
   return { x: p.x + lx, y: p.y - drop, z: p.z + lz }
 }
 
-/**
- * They slipped through the top during the grab. Nudge Y only, and only when the
- * gap is tiny. No cameraTarget / avatarTarget — those were the one-frame look snap.
- * Returns the teleport distance, or 0 when the catch stays a plain landing.
- */
-function nudgeOntoPad(): number {
-  const p = playerPos()
-  const surface = surfaceNow()
-  if (!p || !surface) return 0
-  const half = FALL_RESCUE.PAD_SIZE / 2
-  if (Math.hypot(p.x - surface.x, p.z - surface.z) > half) return 0
-  // On the surface, or still falling toward it: leave them. Only a body already inside the box is nudged.
-  const below = surface.y - p.y
-  if (below <= 0.15 || below > FALL_RESCUE.CATCH_NUDGE_M) return 0
-  const feetY = surface.y + FALL_RESCUE.FEET_CLEAR
-  const delta = feetY - p.y
-  movePlayerTo({ newRelativePosition: { x: p.x, y: feetY, z: p.z } }).catch(() => {})
-  holdFallLine()
-  console.log(`[FallRescue] catch teleport ${delta.toFixed(2)}m (no look target)`)
-  return delta
-}
 
 function playerPos(): Vec | null {
   const t = Transform.getOrNull(engine.PlayerEntity)
@@ -261,14 +245,24 @@ function offPanel(player: Vec, surface: Vec): boolean {
   return Math.abs(player.y - surface.y) > FALL_RESCUE.SLIP_M
 }
 
+/** Avatar XZ relative to the pad center, in anchor metres. Null when we can't see either. */
+function playerLocalXZ(): { x: number; z: number } | null {
+  const p = playerPos()
+  const s = surfaceNow()
+  if (!p || !s) return null
+  return { x: p.x - s.x, z: p.z - s.z }
+}
+
 /** Local offset while parented to the anchor; world position once the pad is gone (peel / base). */
-function placeFloater(yOff: number, scale: number, world: Vec | null): void {
+function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: { x: number; z: number } | null): void {
   if (!floater) return
   const tr = Transform.getMutable(floater.root)
   const s = Math.max(0.02, scale)
   tr.scale = Vector3.create(s, s, s)
-  if (anchor && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(0, yOff, 0)
-  else if (world) tr.position = Vector3.create(world.x, world.y + yOff, world.z)
+  const x = localXZ?.x ?? 0
+  const z = localXZ?.z ?? 0
+  if (anchor && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(x, yOff, z)
+  else if (world) tr.position = Vector3.create(world.x + x, world.y + yOff, world.z + z)
 }
 
 function despawnFloater(): void {
@@ -403,7 +397,7 @@ function pathAt(t: number, start: Vec, riseTo: Vec, cruiseTo: Vec, landAt: Vec):
  * with that bob still in the samples. Linear chords between quarter-cycle knots.
  * Not a TweenSequence — this SDK restarts a finished sequence.
  */
-function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number } {
+function buildLegs(start: Vec, fromT: number): { legs: Leg[]; cruiseY: number; arriveY: number } {
   const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
   const thick = FALL_RESCUE.PAD_THICK
   const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR - thick / 2
@@ -413,9 +407,9 @@ function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number 
   const landAt = { x: base.x, y: arriveY, z: base.z }
   const total = tripSeconds()
   const step = (Math.PI / 2) / FALL_RESCUE.BOB_RATE
-  const marks = [0, FALL_RESCUE.GRAB_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S, total]
+  const marks = [fromT, 0, FALL_RESCUE.GRAB_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S, total]
   for (let t = step; t < total; t += step) marks.push(t)
-  const times = [...new Set(marks.map(t => Math.round(t * 1000) / 1000))].sort((a, b) => a - b)
+  const times = [...new Set(marks.map(t => Math.round(Math.min(total, Math.max(fromT, t)) * 1000) / 1000))].sort((a, b) => a - b)
   const legs: Leg[] = []
   for (let i = 0; i < times.length - 1; i++) {
     const t0 = times[i]
@@ -429,10 +423,52 @@ function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number 
   return { legs, cruiseY, arriveY }
 }
 
+/**
+ * Grab is over. The cloud was showing the pad center while sideways speed
+ * carried the avatar on, so measure that XZ gap, then put the pad under them.
+ * One Transform write does not carry the avatar (a Tween would keep the offset).
+ * A same-position movePlayerTo drops the leftover speed. No camera or avatar target.
+ */
+function recenterPad(): void {
+  const p = playerPos()
+  const live = pad ? Transform.getOrNull(pad) : null
+  if (!p || !live || !pad || !carry) {
+    console.log('[FallRescue] grab end player-to-cloud n/a')
+    return
+  }
+  const off = Math.hypot(p.x - live.position.x, p.z - live.position.z)
+  const trippedAt = carry.beganAt
+  stopMotion()
+  const tr = Transform.getMutable(pad)
+  tr.position.x = p.x
+  tr.position.z = p.z
+  const bob = bobOffset(FALL_RESCUE.GRAB_S)
+  const start = { x: p.x, y: tr.position.y - bob, z: p.z }
+  const built = buildLegs(start, FALL_RESCUE.GRAB_S)
+  const now = Date.now()
+  carry = { legs: built.legs, index: 0, legAt: now, beganAt: trippedAt }
+  slipAccum = 0
+  if (built.legs.length > 0) playLeg(0)
+  // On the surface: pin them here so the rise doesn't start with sideways speed.
+  // Still in the air: don't freeze the fall. The pad is already under their XZ.
+  const surfaceY = tr.position.y + FALL_RESCUE.PAD_THICK / 2
+  const below = surfaceY - p.y
+  let feetY = p.y
+  if (below > 0.15 && below <= FALL_RESCUE.CATCH_NUDGE_M) feetY = surfaceY + FALL_RESCUE.FEET_CLEAR
+  const onPad = p.y - surfaceY < 1 && below <= FALL_RESCUE.CATCH_NUDGE_M
+  if (onPad) {
+    movePlayerTo({ newRelativePosition: { x: p.x, y: feetY, z: p.z } }).catch(() => {})
+    holdFallLine()
+    if (feetY - p.y > 0.15) console.log(`[FallRescue] catch teleport ${(feetY - p.y).toFixed(2)}m (no look target)`)
+  }
+  const aligned = Math.hypot(p.x - tr.position.x, p.z - tr.position.z)
+  console.log(`[FallRescue] grab end player-to-cloud ${aligned.toFixed(2)}m (was ${off.toFixed(2)}m)`)
+}
+
 /** Start the bobbed carry as soon as the pad exists. `start` is the pad center. */
 function startPath(start: Vec): void {
   if (!pad) { finish('snap', 'no panel'); return }
-  const built = buildLegs(start)
+  const built = buildLegs(start, 0)
   if (built.legs.length === 0) { finish('snap', 'empty carry path'); return }
   const now = Date.now()
   carry = { legs: built.legs, index: 0, legAt: now, beganAt: now }
@@ -539,12 +575,12 @@ function tickPhase(dt: number): void {
     // Same clock as the bobbed tween, so the swoop doesn't drift off the panel.
     phaseLeft = carry ? Math.max(0, FALL_RESCUE.GRAB_S - (Date.now() - carry.beganAt) / 1000) : phaseLeft - dt
     if (phaseLeft <= 0) {
-      // Rare: they passed through the top. A short Y nudge only — never a look snap.
-      nudgeOntoPad()
+      // Slide the pad under them before the rise. A tween would carry the offset along.
+      recenterPad()
       phase = 'carry'
       if (floater) {
         floater.mode = 'hang'
-        placeFloater(FALL_RESCUE.HANG_Y, 1, null)
+        placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
       }
     }
     return
@@ -569,10 +605,13 @@ function tickFloater(dt: number, line: number): void {
   // No local bob. The panel Tween is the motion, and this root is parented to it.
   if (floater.mode === 'in') {
     const u = 1 - Math.max(0, phaseLeft) / FALL_RESCUE.GRAB_S
-    placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world)
+    placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world, playerLocalXZ())
     return
   }
-  if (floater.mode === 'hang') return
+  if (floater.mode === 'hang') {
+    placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
+    return
+  }
   if (floater.mode === 'wait') {
     placeFloater(FALL_RESCUE.HANG_Y, 1, world)
     floater.waitLeft -= dt
