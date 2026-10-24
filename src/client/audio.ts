@@ -185,9 +185,9 @@ export function playBurstSfx(): void {
   AudioSource.createOrReplace(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
 }
 
-/** Aerial Burst cues. The landing slam uses burst_impact, once, not these clips.
- *  Hit = player connect. Dive and stamp stay loaded; the press does not play them
- *  (that stacked a second burst on the landing). */
+/** Aerial Burst cues. The press reuses the dash whoosh (playDashSfx), not these clips.
+ *  Landing is burst_impact once. Hit = player connect (air_spike_hit). Dive and
+ *  stamp stay loaded and are not played. */
 export const AIR_DIVE_SRC = 'assets/sounds/air_spike_dive.wav'
 export const AIR_HIT_SRC = 'assets/sounds/air_spike_hit.wav'
 export const AIR_STAMP_SRC = 'assets/sounds/air_spike_stamp.wav'
