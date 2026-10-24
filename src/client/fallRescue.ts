@@ -19,10 +19,14 @@
  * collider's full transform delta onto the avatar inside _physics_process
  * (player.gd _update_platform_follow). Scene tweens advance on the render
  * tick, so the mesh glides and the body steps. The docs list moving platforms
- * as a mobile inconsistency with no ETA. A continuous tween was playtested
- * (3d43e91) and still stepped. On mobile the pad stays still, a virtual
- * camera parented to the cloud flies the view, and one movePlayerTo (no
- * camera target) puts the body on the base while that camera is up.
+ * as a mobile inconsistency with no ETA. A continuous tween (3d43e91) and a
+ * camera ride (b6b9033) were playtested: the view is smooth, the body still
+ * teleports. On mobile the pad stays still. A virtual camera and a stand-in
+ * AvatarShape are parented to the cloud, so both move on the render tick.
+ * The real avatar is hidden in a tight AvatarModifierArea at the catch and
+ * at the base, and one movePlayerTo (no camera target) runs while that hide
+ * is already up. The stand-in and the hide come off on the same frame the
+ * camera returns.
  *
  * If they drift more than a few meters off the panel, one teleport sends
  * them to base (snap fallback). No rehold loop. Desktop does not use a
@@ -36,8 +40,8 @@
  *                  stays overhead if sideways speed slides them on the pad. The pad
  *                  itself is not moved out from under them, and nothing teleports.
  *   carry          Desktop: three continuous legs. Cloud XZ stays locked.
- *                  Mobile: the pad does not move. The camera rides the cloud,
- *                  then one teleport (no camera target) lands the body.
+ *                  Mobile: the pad does not move. A stand-in rides the cloud
+ *                  with the camera. The real body is hidden, then teleported.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
@@ -50,11 +54,12 @@
 
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
-  MainCamera, VirtualCamera,
+  MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { isMobile } from '@dcl/sdk/platform'
+import { getPlayer } from '@dcl/sdk/players'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y } from '../maze/generator'
@@ -173,6 +178,10 @@ let cameraRide = false
 let mobileRide: MobileRide | null = null
 let rideCam: Entity | null = null
 let rideLook: Entity | null = null
+/** Local lookalike parented to the cloud. Only the falling client creates it. */
+let standIn: Entity | null = null
+/** Small hide volumes at the catch and at the base. Local visual only. */
+let hideAreas: Entity[] = []
 /** Wall clock of the trip, so the grab swoop and the slip grace share one start. */
 let trippedAt = 0
 let slipAccum = 0
@@ -457,7 +466,8 @@ function mountRideCamera(): void {
   if (!floater) return
   releaseRideCamera()
   rideLook = engine.addEntity()
-  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(0, 0.35, 0.4) })
+  // Below the puff, toward the stand-in's head, so the rider stays in frame.
+  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(0, -0.4, 0.2) })
   rideCam = engine.addEntity()
   Transform.create(rideCam, { parent: floater.root, position: Vector3.create(0, 1.8, -6) })
   VirtualCamera.create(rideCam, {
@@ -469,8 +479,81 @@ function mountRideCamera(): void {
 }
 
 /**
+ * One standing avatar, not a zone. The client's detector is a 1.5m capsule
+ * centered 0.9m above the feet and 0.25m in radius. This box covers that
+ * capsule and little else, so a neighbour has to be on top of the spawn.
+ */
+const HIDE_BOX = Vector3.create(1.6, 2.2, 1.6)
+const HIDE_CENTER_Y = 0.9
+
+function rgb(c: { r: number; g: number; b: number } | undefined): { r: number; g: number; b: number } | undefined {
+  if (!c) return undefined
+  return { r: c.r, g: c.g, b: c.b }
+}
+
+function hideAvatarAt(at: Vec): void {
+  const e = engine.addEntity()
+  Transform.create(e, { position: Vector3.create(at.x, at.y + HIDE_CENTER_Y, at.z) })
+  AvatarModifierArea.create(e, {
+    area: HIDE_BOX,
+    // Empty on purpose: the box is the limit. A wide area with an exclude
+    // list would still hide anyone the list missed.
+    excludeIds: [],
+    modifiers: [AvatarModifierType.AMT_HIDE_AVATARS],
+  })
+  hideAreas.push(e)
+}
+
+/**
+ * Hide the real body at the catch and at the base, and put a lookalike on
+ * the cloud. The base volume is created before movePlayerTo so the teleport
+ * lands inside it. AvatarShape is a scene NPC: the mobile client strips its
+ * area trigger, so these volumes do not hide the stand-in.
+ */
+function spawnCarryDisguise(): void {
+  clearCarryDisguise()
+  const caught = playerPos()
+  if (caught) hideAvatarAt(caught)
+  const home = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  hideAvatarAt(home)
+  if (!floater) return
+  const e = engine.addEntity()
+  const yaw = Transform.getOrNull(engine.PlayerEntity)?.rotation
+  Transform.create(e, {
+    parent: floater.root,
+    // Cloud root sits HANG_Y above the feet. The stand-in origin is the feet.
+    position: Vector3.create(0, -FALL_RESCUE.HANG_Y, 0),
+    rotation: yaw ?? { x: 0, y: 0, z: 0, w: 1 },
+  })
+  const me = getPlayer()
+  const avatar = me?.avatar
+  // No name: an AvatarShape named "NPC" (the proto default) hides its nameplate.
+  // Passing the player's name would float a second tag under the cloud.
+  AvatarShape.create(e, {
+    id: me?.userId || 'fall-rescue',
+    bodyShape: avatar?.bodyShapeUrn || undefined,
+    skinColor: rgb(avatar?.skinColor),
+    hairColor: rgb(avatar?.hairColor),
+    eyeColor: rgb(avatar?.eyesColor),
+    wearables: me?.wearables ?? [],
+    emotes: me?.emotes ?? [],
+  })
+  standIn = e
+  console.log(
+    `[FallRescue] mobile stand-in on cloud, local avatar hidden (${me?.wearables.length ?? 0} wearables, body ${avatar?.bodyShapeUrn || 'default'})`,
+  )
+}
+
+function clearCarryDisguise(): void {
+  if (standIn) { engine.removeEntity(standIn); standIn = null }
+  for (const e of hideAreas) engine.removeEntity(e)
+  hideAreas = []
+}
+
+/**
  * Mobile path. The pad never moves, so physics-tick platform follow has
- * nothing to step. The cloud (a render-tick tween) carries the camera.
+ * nothing to step. The cloud (a render-tick tween) carries the camera and
+ * the stand-in.
  */
 function startCameraRide(): void {
   if (!floater) { finish('snap', 'no cloud'); return }
@@ -490,6 +573,9 @@ function startCameraRide(): void {
   }))
   legs[0].from = start
   mountRideCamera()
+  // Same moment as the stand-in, so the two bodies never both show.
+  // The base hide is already up; the teleport at RIDE_HANDOFF_S lands in it.
+  spawnCarryDisguise()
   const now = Date.now()
   mobileRide = { legs, index: 0, legAt: now, beganAt: now, sentHome: false, failed: false }
   playContinuous(floater.root, legs[0], legs.length === 1)
@@ -571,7 +657,9 @@ function tickCarry(dt: number): void {
 function finish(how: FallRescueEnd, why: string): void {
   if (phase !== 'grab' && phase !== 'carry') return
   const rode = cameraRide
+  // Camera cut, stand-in, and unhide land on the same frame.
   releaseRideCamera()
+  clearCarryDisguise()
   detachFloater()
   carry = null
   mobileRide = null
@@ -711,6 +799,7 @@ export function cancelFallRescue(why: string): void {
   if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
   releaseRideCamera()
+  clearCarryDisguise()
   pinOverviewClosed(false)
   phase = 'idle'
   phaseLeft = 0

@@ -10,8 +10,10 @@
  *              the fall line spawns an invisible panel under their feet. The
  *              catch does not teleport or retarget the camera. On desktop a
  *              Tween carries that panel to the base. On mobile the pad stays
- *              still and a camera rides the cloud, because that client only
- *              steps the avatar onto a moving collider at physics ticks.
+ *              still. A camera and a stand-in ride the cloud, and the real
+ *              avatar stays hidden until that camera returns, because that
+ *              client only steps the body onto a moving collider at physics
+ *              ticks.
  *              teleportHome('fell') runs only if they slipped off it.
  */
 
