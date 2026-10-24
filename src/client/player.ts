@@ -8,9 +8,11 @@
  *              assigned a team (teamAssigned), at each round reset, and
  *              whenever a fall rescue finishes (client/fallRescue.ts). Crossing
  *              the fall line spawns an invisible panel under their feet. The
- *              catch does not teleport or retarget the camera. A Tween carries
- *              that panel to the base. teleportHome('fell') runs only if they
- *              slipped off it.
+ *              catch does not teleport or retarget the camera. On desktop a
+ *              Tween carries that panel to the base. On mobile the pad stays
+ *              still and a camera rides the cloud, because that client only
+ *              steps the avatar onto a moving collider at physics ticks.
+ *              teleportHome('fell') runs only if they slipped off it.
  */
 
 import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'
@@ -22,7 +24,7 @@ import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { baseSpawn } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
-import { cancelFallRescue, holdFallLine, initFallRescue } from './fallRescue'
+import { cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
 
 // Classic centre cross: cell (2,2), MAZE_ORIGIN=8, CELL=32 → centre (88, 88).
 const CLASSIC_SPAWN = { x: 88, y: 2, z: 88 }
@@ -91,13 +93,16 @@ export function initPlayerNet(): void {
     engine.addSystem(sys)
   }
 
-  // Sky fall line → timed pickup. The panel tweens to the base; one teleport only if they slip off.
+  // Sky fall line → timed pickup. Desktop: the panel tweens to the base.
+  // Mobile: the body was already moved under the ride camera. Either way,
+  // arrival does not teleport again. One teleport only if they slip off.
   initFallRescue((how) => {
     if (how === 'snap') { teleportHome('fell'); return }
-    // Delivered by the platform. Immunity and the land lock start here, with no cross-map teleport.
+    // Immunity and the land lock start here, with no teleport at this moment.
     holdFallLine()
     exitOverview()
-    console.log('[Player] fall rescue landed (tween-carry, no teleport)')
+    const via = fallRescueCameraRide() ? 'mobile camera ride, body already home' : 'tween-carry, no teleport'
+    console.log(`[Player] fall rescue landed (${via})`)
     events.emit('player:respawned', { why: 'fell' })
   })
 }
