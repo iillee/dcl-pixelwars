@@ -40,19 +40,22 @@ export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
  * Three steps on each platform. Pitch is OV_PITCH_DEG at every step.
- * Desktop far (135) is past the ~scale-50 ceiling clamp, so that click keeps
- * the camera on the clamp and zooms out only by widening VirtualCamera.fov.
- * If a live fov write does not take effect, the picture stays put.
+ * Desktop close is 7: the camera sits ~19 m out (~18 m from the head). Explorer
+ * nameplates (godot nameplate_layer) keep the name until 20 m and hide it at
+ * 25 m, so 8 would already be fading. 76 is the midpoint of 7 and 145. 145 is
+ * past the ~scale-50 ceiling clamp; that click stays on the clamp and widens
+ * fov to about 62° at L0 and 69° at L+1. If a live fov write does not take
+ * effect, the far step does not move the picture.
  *
- * Mobile starts at the closest. Desktop starts at 55 (middle): one plus click
- * reaches 22, one minus click reaches 135. The table is latched when overview
- * opens: isMobile() resolves async, and a live re-read would compare scale 55
+ * Mobile starts at the closest. Desktop starts at 76: one plus click reaches 7,
+ * one minus click reaches 145. The table is latched when overview opens:
+ * isMobile() resolves async, and a live re-read would compare a desktop scale
  * to the mobile max of 25 and disable minus.
  */
 const MOBILE_ZOOM_SCALES = [5, 15, 25]
-const DESKTOP_ZOOM_SCALES = [22, 55, 135]
-const DESKTOP_DEFAULT_SCALE = 55
-/** Safety cap. Desktop far (135) at a typical play height lands under this. */
+const DESKTOP_ZOOM_SCALES = [7, 76, 145]
+const DESKTOP_DEFAULT_SCALE = 76
+/** Safety cap. Desktop far (145) at L+1 is about 69°, under this. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
@@ -77,10 +80,10 @@ let lookEnt: Entity | null = null
 let active = false
 let scale = DESKTOP_DEFAULT_SCALE
 let scaleInit = false
-/** Index into the table latched in `zoomMobile`. Desktop starts on 55 (middle): plus is 22, minus is 135. */
+/** Index into the table latched in `zoomMobile`. Desktop starts on 76: plus is 7, minus is 145. */
 let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
 /** Platform latched while overview is open. Reading isMobile() live would
- *  judge a desktop scale of 55 against the mobile max of 25 once detection
+ *  judge a desktop scale against the mobile max of 25 once detection
  *  resolves, and minus would disable with no click. */
 let zoomMobile = false
 /** Eased scale. Distance and fov come from this. Pitch stays OV_PITCH_DEG. */
@@ -198,7 +201,7 @@ function zoomTable(): readonly number[] {
   return zoomMobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
 }
 
-/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 55. */
+/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 76. */
 function useZoomTable(mobile: boolean, snapDefault: boolean): void {
   zoomMobile = mobile
   const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
@@ -228,7 +231,7 @@ function setActive(on: boolean): void {
   if (active) {
     const mobile = isMobile()
     // First open picks the platform default. Mobile re-opens at its closest
-    // level. Desktop stays on the step it already had, which begins at 55.
+    // level. Desktop stays on the step it already had, which begins at 76.
     useZoomTable(mobile, !scaleInit || mobile)
     scaleInit = true
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
