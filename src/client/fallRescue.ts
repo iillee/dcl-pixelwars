@@ -10,22 +10,18 @@
  * follows them during the grab, then locks. The pad stays put so the rise
  * still carries them.
  *
- * The carry is three ease-in-out legs (rise, cruise, descend). Each leg
- * starts and ends at zero speed, so the joints match instead of kinking.
- * A sine bob is not baked into the pad: quarter-cycle linear chords reversed
- * vertical velocity every half second, and the avatar physics fought that.
- * The cloud stays parented at the XZ offset it had at grab end. A slow sine
- * on its local Y is the only write during the carry — it does not chase the
- * player, and it is not on the collider. The old per-frame XZ follow copied
- * physics noise onto the cloud.
+ * The carry is three constant-speed legs (rise, cruise, descend) on
+ * setMoveContinuous. A turn replaces the direction and speed only. It does
+ * not pass a start point, so the engine keeps the platform's real position.
+ * setMove applies `start` immediately, and the Transform a scene can read
+ * lags the renderer — a frame on desktop, several on the mobile client —
+ * so each script-side leg restart popped the pad. TweenSequence is not
+ * used: the mobile client does not run it (the later legs never play).
  *
- * SDK 7.30.2 does carry a standing avatar on a Tween platform. The explorer
- * docs say a player standing on an entity moves with it when that entity
- * moves, and a blocked InputModifier still leaves moving platforms in effect.
- * The earlier "colliders don't carry" note was about writing Transform every
- * frame — that is not a platform, and it stutters. The collider sits on the
- * tweened entity (a physics child jitters). The pad path is not a
- * TweenSequence: loop defaults to restart, which would replay the trip.
+ * Nothing writes a Transform during the carry. The cloud's XZ is locked
+ * when the grab ends. A per-frame write on that child dirties the physics
+ * parent, and a low mobile rate turns that into a hitch. The input lock
+ * is not per-frame; it is applied when the hold changes.
  *
  * If they drift more than a few meters off the panel, one teleport sends
  * them to base (snap fallback). No rehold loop. A camera fly-along is not
@@ -38,9 +34,9 @@
  *   grab           floater swoops in. Its local XZ follows the avatar so the cloud
  *                  stays overhead if sideways speed slides them on the pad. The pad
  *                  itself is not moved out from under them, and nothing teleports.
- *   carry          Three ease-in-out tweens: rise, cruise, descend. The cloud XZ
- *                  locked at grab end rides along. A slow sine floats the cloud
- *                  only. No pad bob, no per-frame pad or player write, no movePlayerTo.
+ *   carry          Three continuous legs: rise, cruise, descend. Turns do not
+ *                  snap the pad. Cloud XZ stays at the grab-end lock. No per-frame
+ *                  Transform write, no movePlayerTo.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
@@ -52,7 +48,7 @@
  */
 
 import {
-  engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer, EasingFunction,
+  engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { room } from '../shared/messages'
@@ -99,13 +95,6 @@ export const FALL_RESCUE = {
   PAD_SIZE: 20,
   /** Invisible pad thickness (m). Thick so a fast fall doesn't tunnel through before they land. */
   PAD_THICK: 2,
-  /**
-   * Cloud-only float (m). Sine on the floater's local Y, not the physics pad.
-   * Much smaller than the old pad bob, and it never reverses the platform.
-   */
-  CLOUD_BOB: 0.06,
-  /** Full cloud-float cycle, milliseconds. Phase starts at the carry, so the first frame is zero. */
-  CLOUD_BOB_MS: 2400,
   /** Panel surface this many meters above SKY_TOP_Y while cruising, so the trip clears the roof. */
   CRUISE_CLEAR: 8,
   /**
@@ -164,8 +153,6 @@ let anchor: Entity | null = null
 let carry: Carry | null = null
 /** Wall clock of the trip, so the grab swoop and the slip grace share one start. */
 let trippedAt = 0
-/** Wall clock when the carry started. The cloud float is phased off this so it doesn't pop. */
-let carryAt = 0
 let slipAccum = 0
 /** Last idle sample, so the catch can lead the pad by fall speed instead of teleporting. */
 let sample: { p: Vec; at: number } | null = null
@@ -174,10 +161,6 @@ function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
 function lerp(a: Vec, b: Vec, u: number): Vec {
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
-}
-/** easeInOutSine. Same curve as EasingFunction.EF_EASESINE, so slip prediction matches the renderer. */
-function easeInOutSine(u: number): number {
-  return -(Math.cos(Math.PI * u) - 1) / 2
 }
 function v3(p: Vec): Vector3 { return Vector3.create(p.x, p.y, p.z) }
 
@@ -237,7 +220,7 @@ function padCenterNow(): Vec | null {
     if (moved > 0.5) return livePos
   }
   const u = Math.min(1, Math.max(0, (Date.now() - carry.legAt) / leg.ms))
-  return lerp(leg.from, leg.to, easeInOutSine(u))
+  return lerp(leg.from, leg.to, u)
 }
 
 function surfaceNow(): Vec | null {
@@ -374,9 +357,20 @@ function playLeg(index: number): void {
   const leg = carry.legs[index]
   carry.index = index
   carry.legAt = Date.now()
-  // Explicit start equals the current end. An omitted start would snap the entity to the origin.
-  // Ease-in-out so this leg's speed is 0 at both ends and matches the next leg.
-  Tween.setMove(pad, v3(leg.from), v3(leg.to), leg.ms, EasingFunction.EF_EASESINE)
+  const dx = leg.to.x - leg.from.x
+  const dy = leg.to.y - leg.from.y
+  const dz = leg.to.z - leg.from.z
+  const dist = Math.hypot(dx, dy, dz)
+  const speed = dist / (leg.ms / 1000)
+  // Unit direction. A zero leg (already above the base) just holds.
+  const dir = dist > 0.001 ? Vector3.create(dx / dist, dy / dist, dz / dist) : Vector3.create(0, 1, 0)
+  const last = index === carry.legs.length - 1
+  // No start position. setMove would teleport the pad to `start`, and the
+  // position the scene can read on mobile lags the platform, so each new leg
+  // popped. Continuous keeps the engine's real position and only changes velocity.
+  // Duration 0 means "until replaced". The last leg is timed so it stops on the
+  // base instead of sinking through it while the script catches up.
+  Tween.setMoveContinuous(pad, dir, dist > 0.001 ? speed : 0, last ? leg.ms : 0)
 }
 
 function tripSeconds(): number {
@@ -385,8 +379,8 @@ function tripSeconds(): number {
 
 /**
  * Three legs from the pad's current center: rise, cruise, descend.
- * No grab hold and no bob samples — those extra setMove calls were the hitch.
- * The grab is the pad sitting still while the cloud swoops.
+ * The grab is the pad sitting still while the cloud swoops. The legs are
+ * played as one continuous tween, not as separate setMove calls.
  */
 function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number } {
   const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
@@ -422,7 +416,7 @@ function startPath(start: Vec, trippedAt: number): void {
   playLeg(0)
   const thick = FALL_RESCUE.PAD_THICK
   console.log(
-    `[FallRescue] tween-carry ${tripSeconds().toFixed(2)}s trip, 3 ease-in-out legs, cloud float ${FALL_RESCUE.CLOUD_BOB}m visual only, cruiseY=${(built.cruiseY + thick / 2).toFixed(1)} arriveY=${(built.arriveY + thick / 2).toFixed(1)}`,
+    `[FallRescue] tween-carry ${tripSeconds().toFixed(2)}s trip, 3 continuous legs, no per-frame write, cruiseY=${(built.cruiseY + thick / 2).toFixed(1)} arriveY=${(built.arriveY + thick / 2).toFixed(1)}`,
   )
 }
 
@@ -434,17 +428,6 @@ function atDestination(player: Vec): boolean {
   const dx = player.x - end.x
   const dz = player.z - end.z
   return Math.hypot(dx, dz) <= FALL_RESCUE.PAD_SIZE / 2 + 1 && Math.abs(player.y - surfaceY) <= FALL_RESCUE.SLIP_M
-}
-
-/** Renderer Transform has reached this leg's end, or it never left the start (not tracking). */
-function legVisuallyDone(leg: Leg): boolean {
-  if (!pad) return true
-  const live = Transform.getOrNull(pad)
-  if (!live) return true
-  const fromStart = Math.hypot(live.position.x - leg.from.x, live.position.y - leg.from.y, live.position.z - leg.from.z)
-  if (fromStart < 0.5) return true
-  const left = Math.hypot(live.position.x - leg.to.x, live.position.y - leg.to.y, live.position.z - leg.to.z)
-  return left < 1.5
 }
 
 function tickCarry(dt: number): void {
@@ -464,8 +447,8 @@ function tickCarry(dt: number): void {
   const leg = carry.legs[carry.index]
   const elapsed = Date.now() - carry.legAt
   if (elapsed < leg.ms) return
-  // Don't replace the tween while the renderer is still finishing this leg.
-  if (!legVisuallyDone(leg) && (elapsed - leg.ms) / 1000 < FALL_RESCUE.ARRIVE_SLACK_S) return
+  // Turn on the clock. Do not wait for the reported Transform: on mobile that
+  // report lags, and waiting holds the platform still between legs.
   if (carry.index < carry.legs.length - 1) {
     playLeg(carry.index + 1)
     return
@@ -481,7 +464,6 @@ function finish(how: FallRescueEnd, why: string): void {
   if (phase !== 'grab' && phase !== 'carry') return
   detachFloater()
   carry = null
-  carryAt = 0
   slipAccum = 0
   despawnPad()
   phase = 'land'
@@ -530,7 +512,6 @@ function tickPhase(dt: number): void {
         floater.mode = 'hang'
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
       }
-      carryAt = Date.now()
       logGrabAlignment()
       const live = pad ? Transform.getOrNull(pad) : null
       if (!live) { finish('snap', 'no panel'); return }
@@ -561,14 +542,8 @@ function tickFloater(dt: number, line: number): void {
     placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world, playerLocalXZ())
     return
   }
-  // Carry: local Y only, a continuous sine. XZ stays at the grab-end lock. The pad is not written.
-  if (floater.mode === 'hang') {
-    const tr = Transform.getMutable(floater.root)
-    const cycle = FALL_RESCUE.CLOUD_BOB_MS
-    const u = ((Date.now() - carryAt) % cycle) / cycle
-    tr.position.y = FALL_RESCUE.HANG_Y + Math.sin(u * Math.PI * 2) * FALL_RESCUE.CLOUD_BOB
-    return
-  }
+  // Carry: the offset locked at grab end rides the parent. Do not write Transform.
+  if (floater.mode === 'hang') return
   if (floater.mode === 'wait') {
     placeFloater(FALL_RESCUE.HANG_Y, 1, world)
     floater.waitLeft -= dt
@@ -617,7 +592,6 @@ export function cancelFallRescue(why: string): void {
   phaseLeft = 0
   carry = null
   trippedAt = 0
-  carryAt = 0
   slipAccum = 0
   despawnFloater()
   despawnPad()
