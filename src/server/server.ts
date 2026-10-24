@@ -128,6 +128,9 @@ export async function setupServer(): Promise<void> {
   // Paint Burst: last accepted burst per player (cooldown) + hit dedupe.
   const lastBurstAt = new Map<string, number>()
   const bursts = new BurstLedger()
+  // Players whose fall-rescue cloud other clients should be showing.
+  const rescueRiders = new Set<string>()
+  const rescueStartAt = new Map<string, number>()
   const pendingBombs: Array<{ from: string; team: number; x: number; y: number; z: number; at: number }> = []
 
   // Detect real disconnects so the bot respawns immediately when a
@@ -223,6 +226,12 @@ export async function setupServer(): Promise<void> {
     lunges.forget(userId)
     bursts.forget(userId)
     lastBurstAt.delete(userId)
+    const left = userId.toLowerCase()
+    if (rescueRiders.delete(left)) {
+      rescueStartAt.delete(left)
+      room.send('rescueEnd', { who: left })
+      console.log(`[Server] rescueEnd ${left.slice(0, 10)} (left)`)
+    }
     broadcastRoster('leave')
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
@@ -629,6 +638,41 @@ export async function setupServer(): Promise<void> {
     if (!from || getTeam(from) === null) return
     const by = noteFell(from)
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
+  })
+  // Relay the rider's cloud so every other client can show it. who is the
+  // authenticated sender, not the payload. Timings are clamped so a bad
+  // client cannot pin a cloud up.
+  const clampRescueT = (v: number) => Math.min(8, Math.max(0.05, v))
+  const rescuePosOk = (x: number, y: number, z: number) =>
+    [x, y, z].every(n => typeof n === 'number' && isFinite(n)) &&
+    x >= -40 && z >= -40 && x <= SCENE_SIZE + 40 && z <= SCENE_SIZE + 40 && y >= -80 && y <= 260
+  room.onMessage('rescueStart', (m, context) => {
+    const from = context?.from
+    if (!from || getTeam(from) === null) return
+    if (!rescuePosOk(m.x, m.y, m.z) || !rescuePosOk(m.bx, m.by, m.bz)) return
+    if (![m.grab, m.rise, m.cruise, m.descend].every(n => typeof n === 'number' && isFinite(n))) return
+    const who = from.toLowerCase()
+    const now = Date.now()
+    if (now - (rescueStartAt.get(who) ?? 0) < 400) return
+    rescueStartAt.set(who, now)
+    rescueRiders.add(who)
+    const msg = {
+      who,
+      x: m.x, y: m.y, z: m.z,
+      bx: m.bx, by: m.by, bz: m.bz,
+      mobile: m.mobile ? 1 : 0,
+      grab: clampRescueT(m.grab), rise: clampRescueT(m.rise), cruise: clampRescueT(m.cruise), descend: clampRescueT(m.descend),
+    }
+    room.send('rescueStart', msg)
+    console.log(`[Server] rescueStart ${who.slice(0, 10)} mobile=${msg.mobile} catch=${m.x.toFixed(1)},${m.y.toFixed(1)},${m.z.toFixed(1)}`)
+  })
+  room.onMessage('rescueEnd', (_m, context) => {
+    const from = context?.from
+    if (!from) return
+    const who = from.toLowerCase()
+    rescueRiders.delete(who)
+    rescueStartAt.delete(who)
+    room.send('rescueEnd', { who })
   })
   room.onMessage('anvilRespawn', (_m, context) => { if (context?.from) anvilsRespawnRequest(context.from) })
 

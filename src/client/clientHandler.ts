@@ -149,6 +149,13 @@ function wireInbound(): void {
   room.onMessage('bombBlast', ({ attacker, team, x, y, z, cells }) => {
     events.emit('bomb:blast', { attacker, team: team as Team, x, y, z, cells })
   })
+
+  room.onMessage('rescueStart', (m) => {
+    events.emit('rescue:start', m)
+  })
+  room.onMessage('rescueEnd', ({ who }) => {
+    events.emit('rescue:end', { who })
+  })
 }
 
 /** Paint Bomb prototype: drop a bomb at our position (see client/paintBomb.ts). */

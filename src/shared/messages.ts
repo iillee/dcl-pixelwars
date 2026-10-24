@@ -208,6 +208,18 @@ export const Messages = {
   // Client → Server (round stats): anvil i launched me / I fell off and respawned.
   anvilLaunched: Schemas.Map({ i: Schemas.Int }),
   playerFell: Schemas.Map({}),
+  // Fall rescue cloud for everyone else. The rider sends rescueStart at the
+  // catch (who is ignored; the server stamps the authenticated id). mobile 1
+  // means observers fly the cloud along catch → base; 0 means they follow the
+  // synced avatar. rescueEnd removes it (also sent when the rider disconnects).
+  rescueStart: Schemas.Map({
+    who: Schemas.String,
+    x: Schemas.Number, y: Schemas.Number, z: Schemas.Number,
+    bx: Schemas.Number, by: Schemas.Number, bz: Schemas.Number,
+    mobile: Schemas.Int,
+    grab: Schemas.Number, rise: Schemas.Number, cruise: Schemas.Number, descend: Schemas.Number,
+  }),
+  rescueEnd: Schemas.Map({ who: Schemas.String }),
   // Client → Server: walking/running into anvil i (direction dx,dz; our position x,z). Server moves it slowly.
   anvilPush: Schemas.Map({ i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, z: Schemas.Number, run: Schemas.Int }),
   // Server → Clients: all anvils (feet pos, velocity, yaw, alive, moving, slide = hit/respawn counter).

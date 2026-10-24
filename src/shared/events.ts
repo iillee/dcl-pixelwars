@@ -99,6 +99,17 @@ export type Events = {
   'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
   'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }
 
+  // Fall rescue, for everyone except the rider. Subscriber: client/fallRescue.
+  // mobile 1: animate the cloud catch → base. mobile 0: follow that avatar.
+  'rescue:start': {
+    who: string
+    x: number; y: number; z: number
+    bx: number; by: number; bz: number
+    mobile: number
+    grab: number; rise: number; cruise: number; descend: number
+  }
+  'rescue:end': { who: string }
+
   // Local: client/player put us back in play (spawn, round reset, fall-rescue arrival).
   // The fall rescue emits this when the carry reaches the base (or the slip teleport does),
   // not when the fall line is crossed.

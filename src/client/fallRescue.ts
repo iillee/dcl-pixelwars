@@ -50,23 +50,32 @@
  * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 3.8s).
  * Round reset / team / initial teleports call cancelFallRescue via teleportHome
  * and drop the panel and the tween. player:respawned fires only on arrival.
+ *
+ * Other clients do not see this pad. At the trip we broadcast rescueStart
+ * (catch, base, timings, mobile flag). Each other client spawns the same
+ * cloud. A desktop rider's avatar is actually moving, so that cloud follows
+ * the synced transform with light smoothing. A mobile rider's real avatar
+ * freezes and then pops home, so observers instead fly the cloud along the
+ * rise / cruise / descend path. rescueEnd, a disconnect, or a safety timeout
+ * removes it. The rider's own cloud, pad, and camera are unchanged.
  */
 
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
-  MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType,
+  MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { isMobile } from '@dcl/sdk/platform'
 import { getPlayer } from '@dcl/sdk/players'
 import { room } from '../shared/messages'
+import { events } from '../shared/events'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y } from '../maze/generator'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
-import { localTeam } from './knockback'
+import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
 
@@ -187,6 +196,8 @@ let trippedAt = 0
 let slipAccum = 0
 /** Last idle sample, so the catch can lead the pad by fall speed instead of teleporting. */
 let sample: { p: Vec; at: number } | null = null
+/** Catch we just broadcast, so a self-echo with no address yet is not a second cloud. */
+let localCatch: Vec | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
@@ -368,6 +379,18 @@ function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' 
   return e
 }
 
+/** Same white cloud the rider sees: body, two puffs, stem, hook. Root is ents[0]. */
+function cloudParts(root: Entity): Entity[] {
+  return [
+    root,
+    makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT),
+    makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT),
+    makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT),
+    makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT),
+    makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT),
+  ]
+}
+
 /** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
 function spawnFloater(): void {
   if (!anchor) return
@@ -378,12 +401,7 @@ function spawnFloater(): void {
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
   })
-  const cloud = makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT)
-  const puffL = makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT)
-  const puffR = makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT)
-  const stem = makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT)
-  const hook = makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT)
-  floater = { root, ents: [root, cloud, puffL, puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0 }
+  floater = { root, ents: cloudParts(root), mode: 'in', peelLeft: 0, waitLeft: 0 }
 }
 
 /** Constant-speed leg. No start point, so replacing it does not snap the entity. */
@@ -667,6 +685,7 @@ function finish(how: FallRescueEnd, why: string): void {
   despawnPad()
   phase = 'land'
   phaseLeft = FALL_RESCUE.LAND_LOCK_S
+  sendRescueEnd()
   setFallMoveLock('walk')
   if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
   if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
@@ -677,6 +696,23 @@ function finish(how: FallRescueEnd, why: string): void {
   // and does not pop back on this same frame.
   pinOverviewClosed(false)
   cameraRide = false
+}
+
+function sendRescueStart(hold: Vec, mobile: boolean): void {
+  const home = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  try {
+    room.send('rescueStart', {
+      who: '',
+      x: hold.x, y: hold.y, z: hold.z,
+      bx: home.x, by: home.y, bz: home.z,
+      mobile: mobile ? 1 : 0,
+      grab: FALL_RESCUE.GRAB_S, rise: FALL_RESCUE.RISE_S, cruise: FALL_RESCUE.CRUISE_S, descend: FALL_RESCUE.DESCEND_S,
+    })
+  } catch (err) { console.log('[FallRescue] rescueStart send failed', err) }
+}
+
+function sendRescueEnd(): void {
+  try { room.send('rescueEnd', { who: '' }) } catch (err) { console.log('[FallRescue] rescueEnd send failed', err) }
 }
 
 function begin(p: Vec): void {
@@ -698,7 +734,9 @@ function begin(p: Vec): void {
   // isMobile() stays false until the explorer answers. A fall in that window
   // uses the desktop pad ride. By a real trip it has resolved.
   cameraRide = isMobile()
+  localCatch = hold
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
+  sendRescueStart(hold, cameraRide)
   const trip = tripSeconds().toFixed(2)
   const under = p.y - hold.y
   const how = cameraRide ? 'mobile camera ride' : 'tween-carry'
@@ -732,10 +770,11 @@ function tickPhase(dt: number): void {
   if (phase === 'land') {
     phaseLeft -= dt
     if (phaseLeft <= 0) {
-      phase = 'idle'
-      phaseLeft = 0
-      setFallMoveLock('open')
-      console.log('[FallRescue] land lock done')
+  phase = 'idle'
+  phaseLeft = 0
+  localCatch = null
+  setFallMoveLock('open')
+  console.log('[FallRescue] land lock done')
     }
   }
 }
@@ -769,9 +808,159 @@ function tickFloater(dt: number, line: number): void {
   if (floater.peelLeft <= 0) despawnFloater()
 }
 
+// ─── Clouds for everyone else ───────────────────────────────────────
+/** Seconds of follow lag. Stays with the rider, soft enough to hide sync jitter. */
+const REMOTE_FOLLOW_S = 0.15
+/** Desktop: avatar gone this long means they left. rescueEnd usually wins first. */
+const REMOTE_MISSING_S = 3
+/** Past the broadcast trip, drop the cloud if rescueEnd never arrives. */
+const REMOTE_TIMEOUT_SLACK_S = 3
+
+type RemoteCloud = {
+  who: string
+  root: Entity
+  ents: Entity[]
+  mobile: boolean
+  catch: Vec
+  base: Vec
+  grab: number
+  rise: number
+  cruise: number
+  descend: number
+  started: number
+  pos: Vec
+  seen: boolean
+  missing: number
+}
+const remotes = new Map<string, RemoteCloud>()
+
+function remoteFeet(who: string): Vec | null {
+  for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
+    if (entity === engine.PlayerEntity) continue
+    if (pid.address.toLowerCase() !== who) continue
+    return { x: tr.position.x, y: tr.position.y, z: tr.position.z }
+  }
+  return null
+}
+
+function hangAt(p: Vec, extraY = 0): Vec {
+  return { x: p.x, y: p.y + FALL_RESCUE.HANG_Y + extraY, z: p.z }
+}
+
+/** Mobile observers: the real avatar freezes, so the cloud flies the same three legs. */
+function mobileCloudPose(c: RemoteCloud, age: number): { pos: Vec; scale: number } {
+  if (age < c.grab) {
+    const u = age / Math.max(0.05, c.grab)
+    return {
+      pos: hangAt(c.catch, (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y),
+      scale: 0.2 + 0.8 * u,
+    }
+  }
+  let t = age - c.grab
+  const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR + FALL_RESCUE.HANG_Y
+  const arriveY = c.base.y + FALL_RESCUE.ARRIVE_ABOVE + FALL_RESCUE.HANG_Y
+  const start = hangAt(c.catch)
+  const riseTo = { x: c.catch.x, y: cruiseY, z: c.catch.z }
+  const cruiseTo = { x: c.base.x, y: cruiseY, z: c.base.z }
+  const landTo = { x: c.base.x, y: arriveY, z: c.base.z }
+  const legs: Array<{ from: Vec; to: Vec; s: number }> = [
+    { from: start, to: riseTo, s: c.rise },
+    { from: riseTo, to: cruiseTo, s: c.cruise },
+    { from: cruiseTo, to: landTo, s: c.descend },
+  ]
+  for (const leg of legs) {
+    if (t <= leg.s) {
+      const u = leg.s <= 0.001 ? 1 : Math.min(1, t / leg.s)
+      return { pos: lerp(leg.from, leg.to, u), scale: 1 }
+    }
+    t -= leg.s
+  }
+  return { pos: landTo, scale: 1 }
+}
+
+function placeRemote(c: RemoteCloud, pos: Vec, scale: number): void {
+  const tr = Transform.getMutable(c.root)
+  const s = Math.max(0.02, scale)
+  tr.position = Vector3.create(pos.x, pos.y, pos.z)
+  tr.scale = Vector3.create(s, s, s)
+}
+
+function clearRemote(who: string, why = ''): void {
+  const key = who.toLowerCase()
+  const c = remotes.get(key)
+  if (!c) return
+  for (let i = c.ents.length - 1; i >= 0; i--) engine.removeEntity(c.ents[i])
+  remotes.delete(key)
+  if (why) console.log(`[FallRescue] remote cloud done ${key.slice(0, 8)} (${why})`)
+}
+
+function isOwnRescue(who: string, catchP: Vec): boolean {
+  const me = myAddress()
+  if (me !== '' && who.toLowerCase() === me) return true
+  if (me === '' && localCatch && phase !== 'idle') {
+    return Math.hypot(catchP.x - localCatch.x, catchP.y - localCatch.y, catchP.z - localCatch.z) < 0.5
+  }
+  return false
+}
+
+function onRemoteStart(m: {
+  who: string; x: number; y: number; z: number; bx: number; by: number; bz: number
+  mobile: number; grab: number; rise: number; cruise: number; descend: number
+}): void {
+  const who = m.who.toLowerCase()
+  const catchP = { x: m.x, y: m.y, z: m.z }
+  if (!who || isOwnRescue(who, catchP)) return
+  if (![m.x, m.y, m.z, m.bx, m.by, m.bz, m.grab, m.rise, m.cruise, m.descend].every(n => Number.isFinite(n))) return
+  clearRemote(who)
+  const root = engine.addEntity()
+  const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y)
+  Transform.create(root, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(0.2, 0.2, 0.2) })
+  remotes.set(who, {
+    who, root, ents: cloudParts(root), mobile: m.mobile !== 0,
+    catch: catchP, base: { x: m.bx, y: m.by, z: m.bz },
+    grab: m.grab, rise: m.rise, cruise: m.cruise, descend: m.descend,
+    started: Date.now(), pos, seen: false, missing: 0,
+  })
+  console.log(`[FallRescue] remote cloud ${who.slice(0, 8)} ${m.mobile ? 'path' : 'follow'}`)
+}
+
+function tickRemotes(dt: number): void {
+  const now = Date.now()
+  for (const who of [...remotes.keys()]) {
+    const c = remotes.get(who)
+    if (!c) continue
+    const age = (now - c.started) / 1000
+    if (age > c.grab + c.rise + c.cruise + c.descend + REMOTE_TIMEOUT_SLACK_S) {
+      clearRemote(who, 'timeout')
+      continue
+    }
+    if (c.mobile) {
+      const pose = mobileCloudPose(c, age)
+      placeRemote(c, pose.pos, pose.scale)
+      continue
+    }
+    const feet = remoteFeet(who)
+    if (feet) {
+      c.missing = 0
+      const target = hangAt(feet)
+      if (!c.seen) { c.seen = true; c.pos = target }
+      else {
+        const u = 1 - Math.exp(-dt / REMOTE_FOLLOW_S)
+        c.pos = lerp(c.pos, target, u)
+      }
+    } else if (c.seen) {
+      c.missing += dt
+      if (c.missing > REMOTE_MISSING_S) { clearRemote(who, 'avatar left'); continue }
+    } else c.pos = hangAt(c.catch)
+    const u = Math.min(1, age / Math.max(0.05, c.grab))
+    placeRemote(c, c.pos, 0.2 + 0.8 * u)
+  }
+}
+
 function tick(dt: number): void {
   // A background hitch shouldn't skip the whole pickup and drop on the same frame.
   const step = Math.min(dt, 0.1)
+  tickRemotes(step)
   const line = fallLine()
   if (!rearm) {
     if (rearmLeft > 0) rearmLeft -= step
@@ -798,6 +987,8 @@ export function holdFallLine(): void {
 export function cancelFallRescue(why: string): void {
   if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
+  sendRescueEnd()
+  localCatch = null
   releaseRideCamera()
   clearCarryDisguise()
   pinOverviewClosed(false)
@@ -823,5 +1014,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   installed = true
   onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
+  events.on('rescue:start', onRemoteStart)
+  events.on('rescue:end', ({ who }) => clearRemote(who, 'ended'))
   engine.addSystem(tick)
 }
