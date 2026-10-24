@@ -64,8 +64,7 @@ const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, ti
 const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 72 }
 
 type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean }
-/** Walk-only brace. Text and a slot tint only — no ring, disc, or volume mesh. */
-const LOCK_AMBER = Color4.create(1, 0.62, 0.15, 1)
+/** Walk-only brace. Slot tint only — no LOCK label, ring, disc, or volume mesh. */
 const LOCK_TINT = Color4.create(1, 0.78, 0.35, 1)
 
 export function KeyHint(props: { label: string }) {
@@ -120,16 +119,6 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           key={`ui_pvp_icon_${props.id}`}
           uiTransform={{ width: g.icon, height: g.icon, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: hud.enabled ? (props.id === 'lunge' ? Color4.create(0, 0, 0, 1) : WHITE) : DIM }}
-        />
-      ) : null}
-      {hud.recovering ? (
-        <Label
-          key={`ui_pvp_lock_${props.id}`}
-          value="<b>LOCK</b>"
-          fontSize={Math.round(g.slot * 0.2)}
-          color={LOCK_AMBER}
-          textAlign="middle-center"
-          uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(g.slot * 0.05), left: 0 }, width: '100%', height: Math.round(g.slot * 0.26) }}
         />
       ) : null}
       {hud.text ? (
