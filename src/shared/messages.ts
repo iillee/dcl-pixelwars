@@ -178,9 +178,13 @@ export const Messages = {
 
   // Paint Burst (shared/pvp.ts BURST_*, client/paintBurst.ts, shared/burst.ts).
   // Client → Server: burst at (x, y, z) on `cell`, facing (fx, fz).
-  // air: 0 grounded radial (server paints the circle), non-zero airborne spike (no paint).
+  // air: 0 grounded radial (server paints the circle now), non-zero airborne spike
+  // (no paint yet — a later burstLand paints the same footprint once, on a miss that lands).
   // Server checks the shared cooldown and rebroadcasts burstFired.
   burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int }),
+  // Client → Server: airborne burst `id` met the floor at (x, y, z) on `cell`.
+  // Same centre + footprint + applyPaint path as a grounded burstUse. Once per id.
+  burstLand: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.

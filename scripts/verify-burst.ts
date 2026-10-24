@@ -201,12 +201,18 @@ check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).le
   check('air spike: clearly below the gate is a hit', inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_MIN_ABOVE - 0.05)))
   check('air spike: outside the horizontal radius is not a hit', !inAirSpike(up, P(AIR_SPIKE_RADIUS + 0.2, 0, 3)))
   check('air spike: deeper than the cylinder is not a hit', !inAirSpike(up, P(0, 0, 6 - AIR_SPIKE_DEPTH - 0.3)))
-  // An air miss does not paint. Landing colour comes from normal movement only.
+  // A miss that lands paints once, through claimPaint. A second call and a grounded burst do not.
   const led = new BurstLedger()
   led.start('a', 7, 0, 1)
   check('air and ground share one ledger; spike mode is remembered', led.mode('a', 7) === 1 && led.hit('a', 7, 'b', 10) === 'ok')
+  check('landing paint claimed once for the air burst', led.claimPaint('a', 7, 100, 2))
+  check('landing paint is not applied twice', !led.claimPaint('a', 7, 200, 2))
   led.start('a', 8, 20, 0)
   check('a later grounded burst is radial mode on the same attacker', led.mode('a', 8) === 0 && led.mode('a', 7) === 0)
+  check('a grounded burst does not take a landing paint', !led.claimPaint('a', 8, 30, 2))
+  const late = new BurstLedger()
+  late.start('a', 1, 0, 1)
+  check('landing paint outside the window is rejected', !late.claimPaint('a', 1, 2100, 2))
 }
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }

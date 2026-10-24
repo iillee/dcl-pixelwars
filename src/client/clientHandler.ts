@@ -286,6 +286,11 @@ export function sendBurstUse(id: number, cell: string, x: number, y: number, z: 
   console.log(`[Client] → burstUse #${id}${air ? ` air=${air}` : ''}`)
   room.send('burstUse', { id, cell, x, y, z, fx, fz, air })
 }
+/** Airborne Burst met the floor. Server paints the ground-Burst footprint once. */
+export function sendBurstLand(id: number, cell: string, x: number, y: number, z: number): void {
+  console.log(`[Client] → burstLand #${id} cell=${cell || '(none)'}`)
+  room.send('burstLand', { id, cell, x, y, z })
+}
 export function sendBurstHit(id: number, target: string, dx: number, dz: number): void {
   console.log(`[Client] → burstHit #${id} ${target.slice(0, 8)}`)
   room.send('burstHit', { id, target, dx, dz })

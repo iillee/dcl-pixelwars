@@ -90,15 +90,24 @@ export function burstCentre(graph: WalkableGraph, cell: string, p: V3): string |
 
 /** Server: one live burst per attacker; each target accepted once, within the hit window. */
 export class BurstLedger {
-  private last = new Map<string, { id: number; at: number; hits: Set<string>; air: number }>()
-  /** `air`: 0 ground radial, 1 airborne spike (no paint). */
+  private last = new Map<string, { id: number; at: number; hits: Set<string>; air: number; painted: boolean }>()
+  /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing). */
   start(from: string, id: number, now: number, air = 0): void {
-    this.last.set(from, { id, at: now, hits: new Set(), air })
+    this.last.set(from, { id, at: now, hits: new Set(), air, painted: false })
   }
   /** 0 when this burst is the grounded radial (or unknown). Non-zero means the downward spike. */
   mode(from: string, id: number): number {
     const l = this.last.get(from)
     return l && l.id === id ? l.air : 0
+  }
+  /** One landing footprint for an airborne burst, inside `windowS`. Ground bursts and a second call are rejected. */
+  claimPaint(from: string, id: number, now: number, windowS: number): boolean {
+    const l = this.last.get(from)
+    if (!l || l.id !== id || l.air === 0) return false
+    if (now - l.at > windowS * 1000) return false
+    if (l.painted) return false
+    l.painted = true
+    return true
   }
   hit(from: string, id: number, target: string, now: number): 'ok' | 'unknown' | 'stale' | 'dup' {
     const l = this.last.get(from)

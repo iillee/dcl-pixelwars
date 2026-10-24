@@ -10,13 +10,12 @@
  *     Server paints the radial footprint once.
  *   Airborne: downward spike. The attacker commits into a short dive. A player in
  *     the cylinder (clearly below, ~2 m across, ~5.5 m down) is a combat hit —
- *     strong downward knock, small outward, brief control lock, no paint. An air
- *     miss does not paint. No radial blast in the air. When the feet meet the floor
- *     the grounded shockwave (tile ripple, outward motes, burst_impact) plays at
- *     the landing point — the same presentation as a ground Burst, local and remote.
- *     A connect does not: the dive stops in the air (no ground-burst VFX there),
- *     the victim is spiked downward with the glider forced shut, and that landing
- *     does not knock again or paint a burst footprint. Ground Burst does not dive.
+ *     strong downward knock, small outward, brief control lock. A miss over the
+ *     void keeps the dive and falls. A miss that meets the floor plays the grounded
+ *     shockwave and the server paints that footprint once (same path as a ground
+ *     Burst). A connect does not play or paint it: most of the downward speed is
+ *     cancelled, nothing is added upward, and the victim is spiked with the glider
+ *     forced shut. Ground Burst does not dive.
  * Local test dummies are knocked directly; ghost bots are shoved server-side.
  */
 import {
@@ -35,7 +34,9 @@ import {
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
-  AIR_SPIKE_GLIDE_LOCK_S, AIR_SPIKE_STOP_POP, AIR_SPIKE_STOP_S,
+  AIR_SPIKE_GLIDE_LOCK_S,
+  AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
+  AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, V3 } from '../shared/burst'
@@ -52,7 +53,7 @@ import {
   playDashHitSfx, playBurstSfx, playAirDiveSfx, playAirHitSfx,
   BURST_SFX_SRC, AIR_DIVE_SRC, AIR_HIT_SRC,
 } from './audio'
-import { sendBurstUse, sendBurstHit } from './clientHandler'
+import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
@@ -142,10 +143,10 @@ function showAirTrail(p: V3, team: Team, fx: number, fz: number): void {
 }
 
 /** One grounded shockwave per dive, when feet meet the floor.
- *  Same presentation as a ground Burst (showShockwave): tile ripple, outward motes,
- *  burst_impact. No second knock and no burst paint — the cylinder hit already
- *  resolved at the press. The first few frames are skipped so a low hop does not
- *  fire on the press. */
+ *  Same presentation as a ground Burst (showShockwave). The local client also
+ *  asks the server to paint that footprint once. No second knock — the cylinder
+ *  hit already resolved at the press. The first few frames are skipped so a low
+ *  hop does not fire on the press. */
 const STAMP_ARM_S = 0.08
 const stampWatch: Array<{ who: string; team: Team; id: number; left: number }> = []
 function armLandingStamp(who: string, team: Team, id: number): void {
@@ -176,6 +177,8 @@ function tickStamps(dt: number): void {
       // same call ground Burst uses when burstFired arrives for someone else.
       const cell = s.who === '' ? (getCurrentCellId() ?? '') : ''
       showShockwave(pos, s.team, s.who === '', cell)
+      // One report. The server claims the paint once and uses the ground-Burst footprint.
+      if (s.who === '') sendBurstLand(s.id, cell, pos.x, pos.y, pos.z)
       console.log(`[Burst] #${s.id} landing shockwave ${s.who === '' ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`)
       stampWatch.splice(i, 1)
     } else if (s.left <= 0) stampWatch.splice(i, 1)
@@ -203,29 +206,41 @@ function commitAirDive(fx: number, fz: number): void {
   })
 }
 
-/** Kill the attacker's downward momentum on a connect. Same-frame impulses add,
- *  so this is only used when the downward dive was not applied. An upward impulse
- *  clears a negative locomotion fall and leaves AIR_SPIKE_STOP_POP of rise.
- *  A few later frames nudge again only while the feet are still descending. */
-let diveBrake: { y: number; left: number } | null = null
-function stopAirDive(): void {
-  safePhysics('stop air dive', () => {
-    Physics.removeForceFromPlayer(diveForceEnt)
-    Physics.applyImpulseToPlayer(Vector3.create(0, AIR_SPIKE_STOP_POP, 0))
-  })
+/** Recent locomotion fall (m/s, negative = down), sampled before this frame's impulse.
+ *  Clamped so a teleport doesn't look like a meteor. */
+let fallSampleY: number | null = null
+let fallVy = 0
+function sampleFall(dt: number): void {
   const y = Transform.getOrNull(engine.PlayerEntity)?.position.y
-  diveBrake = { y: y ?? 0, left: AIR_SPIKE_STOP_S }
+  if (y === undefined) { fallSampleY = null; return }
+  if (fallSampleY !== null && dt > 1e-4) fallVy = Math.max(-40, Math.min(40, (y - fallSampleY) / dt))
+  fallSampleY = y
 }
-function tickDiveBrake(dt: number): void {
-  if (!diveBrake) return
-  diveBrake.left -= dt
-  const y = Transform.getOrNull(engine.PlayerEntity)?.position.y
-  if (y === undefined || diveBrake.left <= 0) { diveBrake = null; return }
-  const dy = y - diveBrake.y
-  diveBrake.y = y
-  if (dy < -0.02) {
-    safePhysics('spike hover', () => Physics.applyImpulseToPlayer(Vector3.create(0, AIR_SPIKE_STOP_POP, 0)))
-  } else if (dy > 0.02) diveBrake = null
+
+/** Connect: keep a fraction of the downward speed, no upward hop.
+ *  Same-frame impulses add. The dive impulse is applied, then a smaller upward
+ *  cancel, so net vertical stays negative. The upward one also zeros locomotion
+ *  fall; that cleared speed is included in the fraction via `fallVy`. The
+ *  sustained dive force is not applied — a miss is the path that keeps it.
+ *  Gravity resumes unless AIR_SPIKE_HANG_S > 0, which only offsets gravity. */
+function partialStopDive(fx: number, fz: number): void {
+  const fl = Math.hypot(fx, fz) || 1
+  const diveDown = AIR_SPIKE_DIVE_IMPULSE
+  const preexisting = Math.max(0, -fallVy)
+  const keepDown = (preexisting + diveDown) * AIR_SPIKE_KEEP_FRACTION
+  const cancelY = Math.max(0, diveDown - keepDown)
+  safePhysics('partial stop', () => {
+    Physics.removeForceFromPlayer(diveForceEnt)
+    Physics.applyImpulseToPlayer(Vector3.create(
+      (fx / fl) * AIR_SPIKE_DIVE_FORWARD, -diveDown, (fz / fl) * AIR_SPIKE_DIVE_FORWARD,
+    ))
+    if (cancelY > 0) Physics.applyImpulseToPlayer(Vector3.create(0, cancelY, 0))
+    if (AIR_SPIKE_HANG_S > 0 && AIR_SPIKE_HANG_FORCE > 0) {
+      Physics.applyForceToPlayerForDuration(diveForceEnt, AIR_SPIKE_HANG_S, Vector3.create(0, 1, 0), AIR_SPIKE_HANG_FORCE)
+    }
+  })
+  if (!AIR_SPIKE_RECOVER_GLIDE) startGlideLock(AIR_SPIKE_RECOVER_GLIDE_S)
+  console.log(`[Burst] partial stop keep=${keepDown.toFixed(1)} m/s cancel=${cancelY.toFixed(1)} glide=${AIR_SPIKE_RECOVER_GLIDE ? 'open' : `shut ${AIR_SPIKE_RECOVER_GLIDE_S}s`}`)
 }
 
 /** Hit pop on the victim. Team sphere, not a ground disc. `positional` plays the sharp hit there. */
@@ -379,8 +394,9 @@ export function triggerBurst(): void {
 }
 
 /** Airborne F: downward spike. A player or bot in the cylinder is combat.
- *  Hit: stop the dive in the air (no landing shockwave). Miss: dive, and the
- *  landing shockwave waits until the feet meet the floor. No paint either way. */
+ *  Hit: keep a fraction of the fall, no landing shockwave and no burst paint.
+ *  Miss: full dive (a void miss keeps falling). The landing shockwave and its
+ *  paint wait until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
   playAirDiveSfx()
   showAirTrail(p, team, fx, fz)
@@ -389,10 +405,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
   const hits = airPlayerHits(p, team, fx, fz)
   const bot = airBotBelow(p, team)
   if (hits.length > 0 || bot || anvils > 0) {
-    // The cylinder is tested at the press, so the connect is known before any
-    // downward impulse. Skipping the dive (instead of adding one and cancelling
-    // it) matters: same-frame impulses accumulate.
-    stopAirDive()
+    partialStopDive(fx, fz)
     disarmLandingStamp('')
     if (hits.length === 0) playAirHitSfx()
     for (const h of hits) {
@@ -400,12 +413,13 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
       playAirHitSfx()
       showAirHit(h.pos, team)
     }
-    console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} anvils=${anvils} — dive stopped pos=${p.y.toFixed(2)}`)
+    console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} anvils=${anvils} pos=${p.y.toFixed(2)}`)
     return
   }
+  // Full dive, including the sustained downward force. Nothing cancels this.
   commitAirDive(fx, fz)
   armLandingStamp('', team, id)
-  console.log(`[Burst] #${id} air spike miss (no paint) pos=${p.y.toFixed(2)}`)
+  console.log(`[Burst] #${id} air spike miss pos=${p.y.toFixed(2)}`)
 }
 
 /** Victim impulse (confirmed Impact or speculative). Marks ImpactGate applied. */
@@ -535,10 +549,10 @@ export function initPaintBurst(): void {
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
 
   engine.addSystem((dt: number) => {
+    sampleFall(dt)
     if (cooldownLeft > 0) cooldownLeft -= dt
     if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) triggerBurst()
     tickStamps(dt)
-    tickDiveBrake(dt)
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]
       f.t += dt

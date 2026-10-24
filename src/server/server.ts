@@ -37,7 +37,7 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
-  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
+  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_BOT_SHOVE,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
@@ -490,8 +490,21 @@ export async function setupServer(): Promise<void> {
 
   // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
   // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S), shared by ground and air.
-  // air 0: radial paint + radial bot shove. any other air value: spike, no paint.
+  // air 0: radial paint + radial bot shove. air 1: spike now; the landing paints once via burstLand.
   // burstHit: attacker client found a player; accepted once per (attacker, burst id, target).
+  // Same centre, footprint, applyPaint, and score credit as a grounded burstUse. Once.
+  const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number): string[] => {
+    const graph = getWalkableGraph()
+    const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
+    const fp = graph && centre ? burstFootprint(graph, centre) : []
+    let gained = 0
+    for (const cid of fp) if (applyPaint(cid, team, from)) gained++
+    if (gained > 0) {
+      leaderboardIncrement(from, gained)
+      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+    }
+    return fp
+  }
   room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air }, context) => {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
@@ -506,23 +519,13 @@ export async function setupServer(): Promise<void> {
     lastBurstAt.set(from, now)
     markActive(from)
     bursts.start(from, id, now, airborne ? 1 : 0)
-    const graph = getWalkableGraph()
     const origin = { x, y, z }
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
     room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
-    let gained = 0
-    let fp: string[] = []
-    if (!airborne) {
-      const centre = graph ? burstCentre(graph, cell, origin) : null
-      fp = graph && centre ? burstFootprint(graph, centre) : []
-      if (graph && centre) for (const cid of fp) if (applyPaint(cid, team, from)) gained++
-    }
-    if (gained > 0) {
-      leaderboardIncrement(from, gained)
-      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
-    }
+    // Air paints later, once, from burstLand. Applying it here as well would double the footprint.
+    const fp = airborne ? [] : paintBurstFootprint(from, team, cell, x, y, z)
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
-    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} painted ${gained} cells | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} footprint=${fp.length} rampCells=${rampIds}`)
+    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} footprint=${fp.length} | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} rampCells=${rampIds}`)
     if (!airborne) {
       for (const b of getBotPositions()) {
         if (b.team === team || !inBurst(origin, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
@@ -548,6 +551,24 @@ export async function setupServer(): Promise<void> {
         }
       }
     }
+  })
+
+  // Landing of an airborne burst: one ground-Burst footprint at the feet.
+  // Movement paint may already own the 3×3 under the player; applyPaint does not
+  // re-credit those cells, so the score matches a single grounded burst.
+  room.onMessage('burstLand', ({ id, cell, x, y, z }, context) => {
+    const from = context?.from
+    if (!from || !burstEnabledForRound(currentRoundIndex())) return
+    const team = getTeam(from)
+    if (team === null || ![x, y, z].every(isFinite)) return
+    const now = Date.now()
+    if (!bursts.claimPaint(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
+      console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} rejected`)
+      return
+    }
+    markActive(from)
+    const fp = paintBurstFootprint(from, team, cell, x, y, z)
+    console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} footprint=${fp.length} cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
   })
 
   // Shared anvils: the attacker's client detected the hit; same ledgers (once per lunge/burst id

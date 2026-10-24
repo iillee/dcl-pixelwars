@@ -166,9 +166,10 @@ export const BURST_RADIUS = BURST_PAINT_RADIUS_CELLS * 2 + 1
 /** …and within this height (a full R-cell ramp run climbs ~3.5 m; a level is ~5.4 m). */
 export const BURST_HIT_MAX_DY = 3.5
 /** Aerial Burst (same F charge). Only when the press is airborne — grounded Burst stays the radial
- *  blast. Cylinder straight down: a player in it is a combat spike (no paint). An air miss does not
- *  paint; landing still paints through normal movement. Sideways air at the same height does not
- *  connect (AIR_SPIKE_MIN_ABOVE). */
+ *  blast. Cylinder straight down: a player in it is a combat spike. An air miss that meets the
+ *  floor paints the same footprint as a ground Burst (server, once). A miss over the void does
+ *  not paint and the dive keeps going. Sideways air at the same height does not connect
+ *  (AIR_SPIKE_MIN_ABOVE). */
 export const AIR_SPIKE_RADIUS = 2 // m, horizontal feet-to-feet
 export const AIR_SPIKE_DEPTH = 5.5 // m, how far below the attacker the spike reaches
 export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this far above the victim
@@ -181,11 +182,30 @@ export const AIR_SPIKE_OUT = 18
 export const AIR_SPIKE_FORCE = 40
 export const AIR_SPIKE_FORCE_S = 0.28
 export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
-/** Attacker, on a connect only: upward impulse that clears a downward fall
- *  (explorer zeros negative locomotion vy on an upward impulse) and leaves a
- *  small hop. No downward dive impulse is applied on that press. */
-export const AIR_SPIKE_STOP_POP = 8
-export const AIR_SPIKE_STOP_S = 0.35
+/**
+ * Attacker recovery after a connect. One block so a playtest can tune the risk.
+ * A miss does not use these: the full dive (impulse + downward force) keeps going,
+ * and over the void that is a fall.
+ *
+ * The explorer has no velocity read. Any upward impulse zeros a negative locomotion
+ * fall and adds that impulse to external velocity. On a connect we still apply the
+ * dive impulse, then a smaller upward cancel, so the NET vertical impulse stays
+ * downward: most of the fall is removed, nothing is added upward, gravity resumes.
+ * Kept speed = AIR_SPIKE_KEEP_FRACTION × (measured fall + the dive impulse).
+ * Near an arena edge that leaves a short drop plus the dive's forward speed —
+ * survivable if you recover, a fall if you don't.
+ */
+/** Share of the downward speed kept on a connect. 0 = full cancel, 1 = no cancel. */
+export const AIR_SPIKE_KEEP_FRACTION = 0.22
+/** How long to offset gravity after the cancel. 0 = gravity resumes immediately.
+ *  This is not a hop: the force only counters gravity, it does not add rise. */
+export const AIR_SPIKE_HANG_S = 0
+/** Upward force during AIR_SPIKE_HANG_S. About explorer gravity (10). Ignored when the hang is 0. */
+export const AIR_SPIKE_HANG_FORCE = 10
+/** Glider available the moment the spike connects. false holds it shut for LOCK_S. */
+export const AIR_SPIKE_RECOVER_GLIDE = false
+/** How long the attacker's glider stays shut when RECOVER_GLIDE is false. */
+export const AIR_SPIKE_RECOVER_GLIDE_S = 0.35
 /** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
 export const AIR_SPIKE_BOT_SHOVE = 2
 /** Attacker dive on an airborne press only (Yoshi Down-B style commit, not a freefall mode).
@@ -203,15 +223,17 @@ export const AIR_SPIKE_TRAIL_S = 0.4
 export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
 /** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
  *  Dive = press. A miss that lands inside AIR_SPIKE_STAMP_WINDOW_S plays the grounded
- *  shockwave (ripple, motes, burst_impact) — not air_spike_stamp.wav. A connect does
- *  not: the dive stops in the air and that cue is cancelled. No burst paint and no
- *  second knock. The cue is dropped if the feet meet the floor later than the window. */
+ *  shockwave and the server paints that footprint once. A connect does not play it.
+ *  No second knock. The cue is dropped if the feet meet the floor later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
 export const AIR_SPIKE_STAMP_VOL = 0.92
 export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
+/** Server: accept one landing paint this long after an airborne burstUse (s).
+ *  The stamp window plus a little RTT, so a dive that lands near the end still paints. */
+export const SERVER_BURST_LAND_WINDOW_S = 1.9
 /** Expanding ring, particles, aura. */
 export const BURST_RING_S = 0.35
 export const BURST_PARTICLES = 8
