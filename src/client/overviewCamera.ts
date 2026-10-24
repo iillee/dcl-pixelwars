@@ -39,24 +39,20 @@ export const OV_YAW_DEG = 45      // axis-aligned with the maze grid: WASD (came
 export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
- * Steps are a table, not a fixed subtraction. Each entry is ~×1.35 the last.
- * Pitch is OV_PITCH_DEG at every step — the same fixed isometric angle as main.
- * A 35.26° throw cannot back up past about scale 50 (scene ceiling), so desktop
- * steps past that clamp, including the default 55 and then 74, 100 and 135,
- * keep the camera where the clamp put it and zoom out only by widening
- * VirtualCamera.fov. Do not lower the pitch to fake those steps: if a live fov
- * write does not take effect, the picture stays put and that has to be reported
- * as a client limit.
+ * Three steps on each platform. Pitch is OV_PITCH_DEG at every step.
+ * Desktop far (135) is past the ~scale-50 ceiling clamp, so that click keeps
+ * the camera on the clamp and zooms out only by widening VirtualCamera.fov.
+ * If a live fov write does not take effect, the picture stays put.
  *
- * Mobile stays on its original three levels (max 25) and starts at the closest.
- * Desktop starts at 55 and keeps that step across toggles. The table is latched
- * when overview opens: isMobile() resolves async, and a live re-read would
- * compare scale 55 to the mobile max of 25 and disable minus.
+ * Mobile starts at the closest. Desktop starts at 55 (middle): one plus click
+ * reaches 22, one minus click reaches 135. The table is latched when overview
+ * opens: isMobile() resolves async, and a live re-read would compare scale 55
+ * to the mobile max of 25 and disable minus.
  */
 const MOBILE_ZOOM_SCALES = [5, 15, 25]
-const DESKTOP_ZOOM_SCALES = [5, 7, 9, 12, 17, 22, 30, 41, 55, 74, 100, 135]
+const DESKTOP_ZOOM_SCALES = [22, 55, 135]
 const DESKTOP_DEFAULT_SCALE = 55
-/** Safety cap. 74 / 100 / 135 at a typical play height land well under this. */
+/** Safety cap. Desktop far (135) at a typical play height lands under this. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
@@ -81,7 +77,7 @@ let lookEnt: Entity | null = null
 let active = false
 let scale = DESKTOP_DEFAULT_SCALE
 let scaleInit = false
-/** Index into the table latched in `zoomMobile`. Desktop starts on 55, so minus has 74, 100, 135 left. */
+/** Index into the table latched in `zoomMobile`. Desktop starts on 55 (middle): plus is 22, minus is 135. */
 let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
 /** Platform latched while overview is open. Reading isMobile() live would
  *  judge a desktop scale of 55 against the mobile max of 25 once detection
