@@ -505,12 +505,27 @@ export async function setupServer(): Promise<void> {
     }
     return fp
   }
+  const commitBurstPaint = (from: string, id: number, fp: string[]) => {
+    // Empty centre is not a paint. The client retries with a later grounded sample.
+    if (fp.length === 0 || !bursts.commitPaint(from, id)) return
+    room.send('burstPainted', { id, n: fp.length }, { to: [from] })
+  }
   room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air }, context) => {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) { logDrop(from, 'burstUse', team === null ? 'no team' : 'bad position'); return }
     const now = Date.now()
+    // Same id is the shockwave retrying its paint. Cooldown must not drop it, and
+    // it must not broadcast or punch a second time.
+    if (bursts.matches(from, id)) {
+      if (bursts.mode(from, id) === 0 && !bursts.hasPaint(from, id)) {
+        const fp = paintBurstFootprint(from, team, cell, x, y, z)
+        console.log(`[Server] burstUse ${from.slice(0, 8)} #${id} replay footprint=${fp.length} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
+        commitBurstPaint(from, id, fp)
+      }
+      return
+    }
     if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
@@ -527,6 +542,7 @@ export async function setupServer(): Promise<void> {
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
     console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} footprint=${fp.length} | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} rampCells=${rampIds}`)
     if (!airborne) {
+      commitBurstPaint(from, id, fp)
       for (const b of getBotPositions()) {
         if (b.team === team || !inBurst(origin, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
         let dx = b.x - x, dz = b.z - z
@@ -562,13 +578,15 @@ export async function setupServer(): Promise<void> {
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) return
     const now = Date.now()
-    if (!bursts.claimPaint(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
+    if (!bursts.paintReady(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
       console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} rejected`)
       return
     }
     markActive(from)
     const fp = paintBurstFootprint(from, team, cell, x, y, z)
     console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} footprint=${fp.length} cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
+    if (fp.length === 0) return
+    commitBurstPaint(from, id, fp)
   })
 
   // Shared anvils: the attacker's client detected the hit; same ledgers (once per lunge/burst id

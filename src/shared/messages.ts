@@ -185,6 +185,9 @@ export const Messages = {
   // Client → Server: airborne burst `id` met the floor at (x, y, z) on `cell`.
   // Same centre + footprint + applyPaint path as a grounded burstUse. Once per id.
   burstLand: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Server → attacker only: footprint for burst `id` was applied (n = cell count).
+  // The client retries burstUse / burstLand until this arrives. n > 0 only.
+  burstPainted: Schemas.Map({ id: Schemas.Int, n: Schemas.Int }),
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.

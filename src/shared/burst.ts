@@ -100,14 +100,34 @@ export class BurstLedger {
     const l = this.last.get(from)
     return l && l.id === id ? l.air : 0
   }
-  /** One landing footprint for an airborne burst, inside `windowS`. Ground bursts and a second call are rejected. */
-  claimPaint(from: string, id: number, now: number, windowS: number): boolean {
+  /** This attacker's live burst is `id` (a retry of the same press, not a new one). */
+  matches(from: string, id: number): boolean {
+    const l = this.last.get(from)
+    return !!l && l.id === id
+  }
+  /** The footprint for this id was already applied. An empty centre does not set this. */
+  hasPaint(from: string, id: number): boolean {
+    const l = this.last.get(from)
+    return !!l && l.id === id && l.painted
+  }
+  /** Landing may paint: airborne, same id, inside `windowS`, not yet painted. Does not consume. */
+  paintReady(from: string, id: number, now: number, windowS: number): boolean {
     const l = this.last.get(from)
     if (!l || l.id !== id || l.air === 0) return false
     if (now - l.at > windowS * 1000) return false
-    if (l.painted) return false
+    return !l.painted
+  }
+  /** Mark the footprint applied. Once. Ground and landing both use this. */
+  commitPaint(from: string, id: number): boolean {
+    const l = this.last.get(from)
+    if (!l || l.id !== id || l.painted) return false
     l.painted = true
     return true
+  }
+  /** One landing footprint for an airborne burst, inside `windowS`. Ground bursts and a second call are rejected. */
+  claimPaint(from: string, id: number, now: number, windowS: number): boolean {
+    if (!this.paintReady(from, id, now, windowS)) return false
+    return this.commitPaint(from, id)
   }
   hit(from: string, id: number, target: string, now: number): 'ok' | 'unknown' | 'stale' | 'dup' {
     const l = this.last.get(from)

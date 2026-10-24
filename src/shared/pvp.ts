@@ -233,9 +233,21 @@ export const AIR_SPIKE_STAMP_VOL = 0.92
 export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
 /** Server: accept burstHit this long after burstUse (s). */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
+/** Metres above the walkable surface that still count as standing for Burst.
+ *  Movement paint stays at 0.4 m. A mobile bob, or a hotbar press that samples
+ *  the previous frame, can sit above that and still be on the floor. 1.15 m is
+ *  inside the server paint height band and below a real jump, so the press
+ *  stays a ground Burst and the landing still resolves a centre. */
+export const BURST_STANCE_SLACK = 1.15
+/** Client keeps resending a shockwave's paint until the server confirms a footprint. */
+export const BURST_PAINT_RETRY_S = 2.5
+export const BURST_PAINT_RETRY_GAP_S = 0.25
+/** Client resends an airborne burstUse until the server echoes burstFired. */
+export const BURST_USE_RETRY_S = 1.5
 /** Server: accept one landing paint this long after an airborne burstUse (s).
- *  The stamp window plus a little RTT, so a dive that lands near the end still paints. */
-export const SERVER_BURST_LAND_WINDOW_S = 1.9
+ *  The stamp window, plus the client's paint retries, plus RTT. An empty
+ *  footprint does not consume the claim, so a later grounded sample still paints. */
+export const SERVER_BURST_LAND_WINDOW_S = 4.5
 /** Expanding ring, particles, aura. */
 export const BURST_RING_S = 0.35
 export const BURST_PARTICLES = 8
