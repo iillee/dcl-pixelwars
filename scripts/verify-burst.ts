@@ -213,6 +213,15 @@ check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).le
   const late = new BurstLedger()
   late.start('a', 1, 0, 1)
   check('landing paint outside the window is rejected', !late.claimPaint('a', 1, 2100, 2))
+  // A shockwave retry is the same id. Empty is not consumed; a second commit is.
+  const again = new BurstLedger()
+  again.start('a', 3, 0, 0)
+  check('same id is the live ground burst', again.matches('a', 3) && !again.matches('a', 4) && !again.hasPaint('a', 3))
+  check('ground paint commits once', again.commitPaint('a', 3) && again.hasPaint('a', 3) && !again.commitPaint('a', 3))
+  const dive = new BurstLedger()
+  dive.start('a', 4, 0, 1)
+  check('landing stays ready until the footprint commits', dive.paintReady('a', 4, 100, 2) && dive.paintReady('a', 4, 200, 2))
+  check('committing the landing ends it', dive.commitPaint('a', 4) && !dive.paintReady('a', 4, 300, 2) && dive.hasPaint('a', 4))
 }
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }

@@ -16,6 +16,9 @@
  *     Burst). A connect does not play or paint it: most of the downward speed is
  *     cancelled, nothing is added upward, and the victim is spiked with the glider
  *     forced shut. Ground Burst does not dive.
+ *   The hotbar only queues the press. Ground vs air uses a live stance sample
+ *   (BURST_STANCE_SLACK), not the previous frame's grounded flag. A shockwave
+ *   keeps resending its paint until the server confirms the footprint.
  * Local test dummies are knocked directly; ghost bots are shoved server-side.
  */
 import {
@@ -34,6 +37,7 @@ import {
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
+  BURST_PAINT_RETRY_S, BURST_PAINT_RETRY_GAP_S, BURST_USE_RETRY_S,
   AIR_SPIKE_GLIDE_LOCK_S,
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
@@ -48,7 +52,7 @@ import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
 let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
-import { getCurrentCellId, isPlayerGrounded } from '../paint'
+import { sampleBurstStance } from '../paint'
 import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirHitSfx,
@@ -154,29 +158,104 @@ function showAirTrail(p: V3, team: Team, fx: number, fz: number): void {
 let localShockId = -1
 let localShockAt = 0
 const STAMP_ARM_S = 0.08
-const stampWatch: Array<{ who: string; team: Team; id: number; left: number }> = []
-function armLandingStamp(who: string, team: Team, id: number): void {
+/** One hitch must not burn the whole landing window. Low fps still gets later frames. */
+const STAMP_STEP_CAP_S = 0.25
+const stampWatch: Array<{ who: string; team: Team; id: number; left: number; fx: number; fz: number }> = []
+
+/** Shockwave already played. Resend until burstPainted, with a fresh grounded sample. */
+type PaintHold = { id: number; kind: 'ground' | 'land'; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
+const paintHolds: PaintHold[] = []
+/** Airborne burstUse, original sample. Resend until our own burstFired. Position stays the press. */
+type UseHold = { id: number; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
+const useHolds: UseHold[] = []
+
+function safeSend(label: string, fn: () => void): boolean {
+  try { fn(); return true } catch (e) { console.log(`[Burst] ${label} send failed`, e); return false }
+}
+function queuePaint(kind: 'ground' | 'land', id: number, cell: string, p: V3, fx: number, fz: number): void {
+  const row: PaintHold = { id, kind, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_PAINT_RETRY_S }
+  const i = paintHolds.findIndex(h => h.id === id)
+  if (i >= 0) paintHolds[i] = row
+  else paintHolds.push(row)
+}
+function kickPaint(id: number): void {
+  const h = paintHolds.find(x => x.id === id)
+  if (h) h.arm = 0
+}
+function clearPaint(id: number): void {
+  const i = paintHolds.findIndex(h => h.id === id)
+  if (i >= 0) paintHolds.splice(i, 1)
+}
+function queueUse(id: number, cell: string, p: V3, fx: number, fz: number): void {
+  const row: UseHold = { id, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_USE_RETRY_S }
+  const i = useHolds.findIndex(h => h.id === id)
+  if (i >= 0) useHolds[i] = row
+  else useHolds.push(row)
+}
+function kickUse(id: number): void {
+  const h = useHolds.find(x => x.id === id)
+  if (h) h.arm = 0
+}
+function clearUse(id: number): void {
+  const i = useHolds.findIndex(h => h.id === id)
+  if (i >= 0) useHolds.splice(i, 1)
+}
+function flushBurstNet(dt: number): void {
+  for (let i = useHolds.length - 1; i >= 0; i--) {
+    const h = useHolds[i]
+    h.left -= dt
+    h.arm -= dt
+    if (h.arm > 0) { if (h.left <= 0) useHolds.splice(i, 1); continue }
+    safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1))
+    h.arm = BURST_PAINT_RETRY_GAP_S
+    if (h.left <= 0) useHolds.splice(i, 1)
+  }
+  for (let i = paintHolds.length - 1; i >= 0; i--) {
+    const h = paintHolds[i]
+    h.left -= dt
+    h.arm -= dt
+    if (h.arm > 0) { if (h.left <= 0) { console.log(`[Burst] #${h.id} paint retry gave up (${h.kind})`); paintHolds.splice(i, 1) }; continue }
+    const live = sampleBurstStance()
+    if (live?.grounded) { h.x = live.x; h.y = live.y; h.z = live.z; h.cell = live.cell }
+    if (h.kind === 'ground') safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 0))
+    else {
+      // The landing paint needs the airborne ledger. A lost press is started here; a
+      // press the server already has is ignored (same id, no second broadcast).
+      safeSend('burstLand retry', () => {
+        sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1)
+        sendBurstLand(h.id, h.cell, h.x, h.y, h.z)
+      })
+    }
+    h.arm = BURST_PAINT_RETRY_GAP_S
+    if (h.left <= 0) { console.log(`[Burst] #${h.id} paint retry gave up (${h.kind})`); paintHolds.splice(i, 1) }
+  }
+}
+
+function armLandingStamp(who: string, team: Team, id: number, fx = 0, fz = 1): void {
   const i = stampWatch.findIndex(s => s.who === who)
-  const row = { who, team, id, left: AIR_SPIKE_STAMP_WINDOW_S }
+  const row = { who, team, id, left: AIR_SPIKE_STAMP_WINDOW_S, fx, fz }
   if (i >= 0) stampWatch[i] = row
   else stampWatch.push(row)
 }
-/** A connect is the air-hit, not a ground slam. Drop the landing shockwave. */
+/** A connect is the air-hit, not a ground slam. Drop the landing shockwave and its paint. */
 function disarmLandingStamp(who: string): void {
   const i = stampWatch.findIndex(s => s.who === who)
-  if (i >= 0) stampWatch.splice(i, 1)
+  if (i < 0) return
+  if (who === '') clearPaint(stampWatch[i].id)
+  stampWatch.splice(i, 1)
 }
 function tickStamps(dt: number): void {
+  const step = Math.min(Math.max(dt, 0), STAMP_STEP_CAP_S)
   for (let i = stampWatch.length - 1; i >= 0; i--) {
     const s = stampWatch[i]
-    s.left -= dt
+    s.left -= step
     const elapsed = AIR_SPIKE_STAMP_WINDOW_S - s.left
     if (elapsed < STAMP_ARM_S) continue
-    const live = s.who === '' ? Transform.getOrNull(engine.PlayerEntity)?.position : null
+    const stance = s.who === '' ? sampleBurstStance() : null
     const pos: V3 | null = s.who === ''
-      ? (live ? { x: live.x, y: live.y, z: live.z } : null)
+      ? (stance ? { x: stance.x, y: stance.y, z: stance.z } : null)
       : posOf(s.who)
-    const landed = s.who === '' ? isPlayerGrounded() : !!(pos && nearGround(pos))
+    const landed = s.who === '' ? !!stance?.grounded : !!(pos && nearGround(pos))
     if (landed && pos) {
       // Local: camera-parented burst_impact + reported cell, same as a grounded press.
       // Remote: positional burst_impact and ripple from the avatar's landing point,
@@ -185,15 +264,19 @@ function tickStamps(dt: number): void {
       // us) must not play the positional copy on top of the camera one.
       const me = myAddress()
       const localShock = s.who === '' || (me !== '' && s.who === me)
-      const cell = s.who === '' ? (getCurrentCellId() ?? '') : ''
+      const cell = s.who === '' ? (stance?.cell ?? '') : ''
       const now = Date.now()
       const repeat = localShock && localShockId === s.id && now - localShockAt < AIR_SPIKE_STAMP_WINDOW_S * 1000
       if (!repeat) {
         if (localShock) { localShockId = s.id; localShockAt = now }
         showShockwave(pos, s.team, localShock, cell)
       }
-      // One report. The server claims the paint once and uses the ground-Burst footprint.
-      if (s.who === '') sendBurstLand(s.id, cell, pos.x, pos.y, pos.z)
+      // The server paints once. Retries keep going until burstPainted, so a lost
+      // burstUse or an empty centre does not leave the shockwave unpainted.
+      if (s.who === '') {
+        queuePaint('land', s.id, cell, pos, s.fx, s.fz)
+        if (!safeSend('burstLand', () => sendBurstLand(s.id, cell, pos.x, pos.y, pos.z))) kickPaint(s.id)
+      }
       console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
     } else if (s.left <= 0) stampWatch.splice(i, 1)
@@ -359,25 +442,32 @@ function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
   addFx(BURST_LOS_TIMEOUT_S, () => {}, (_e, u) => { if (u >= 0.95) finish(true) })
 }
 
+/** Hotbar press (mobile circle, desktop slot). The gameplay system fires it, so the
+ *  stance sample is this frame's feet and the send runs there too. */
+let burstRequested = false
+export function requestBurst(): void { burstRequested = true }
+
 export function triggerBurst(): void {
   if (isMoveLocked()) return
   const team = localTeam()
   if (!isBurstEnabledNow() || team === Team.None || cooldownLeft > 0) return
+  const stance = sampleBurstStance()
   const t = Transform.getOrNull(engine.PlayerEntity)
-  if (!t) return
-  const p: V3 = { x: t.position.x, y: t.position.y, z: t.position.z }
+  if (!stance || !t) return
+  const p: V3 = { x: stance.x, y: stance.y, z: stance.z }
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
   cooldownLeft = BURST_COOLDOWN_S
-  if (!isPlayerGrounded()) {
+  if (!stance.grounded) {
     fireAirSpike(id, team, p, f.x, f.z)
     return
   }
-  const cell = getCurrentCellId() ?? ''
+  const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
   showShockwave(p, team, true, cell)
-  sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0)
+  queuePaint('ground', id, cell, p, f.x, f.z)
+  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0))) kickPaint(id)
   if (BURST_EMOTE_ENABLED) {
     // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
     holdForEmote(BURST_EMOTE_FREEZE_S)
@@ -420,7 +510,8 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
   // the local player hear the burst twice. A connect has no landing; its sound
   // is the hit clip only.
   showAirTrail(p, team, fx, fz)
-  sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
+  queueUse(id, '', p, fx, fz)
+  if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1))) kickUse(id)
   const anvils = knockAirAnvils(p, fx, fz, id)
   const hits = airPlayerHits(p, team, fx, fz)
   const bot = airBotBelow(p, team)
@@ -438,7 +529,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
   }
   // Full dive, including the sustained downward force. Nothing cancels this.
   commitAirDive(fx, fz)
-  armLandingStamp('', team, id)
+  armLandingStamp('', team, id, fx, fz)
   console.log(`[Burst] #${id} air spike miss pos=${p.y.toFixed(2)}`)
 }
 
@@ -493,7 +584,10 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   // Player and bot hits both arrive as burstImpact; an anvil connect is local only.
   if (air) {
     disarmLandingStamp(att)
-    if (me && att === me) disarmLandingStamp('')
+    if (me && att === me) {
+      disarmLandingStamp('')
+      clearPaint(id)
+    }
   }
   if (tgt.startsWith('bot:')) {
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
@@ -533,6 +627,8 @@ export function initPaintBurst(): void {
   })
   events.on('burst:fired', ({ attacker, id, team, x, y, z, air }) => {
     const att = attacker.toLowerCase()
+    const selfAddr = myAddress()
+    if (selfAddr !== '' && att === selfAddr) clearUse(id)
     gate.sawStart(att, id, Date.now())
     let faceX = 0, faceZ = 1
     for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
@@ -568,12 +664,18 @@ export function initPaintBurst(): void {
     else applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
+  events.on('burst:painted', ({ id, n }) => { if (n > 0) { clearPaint(id); clearUse(id) } })
 
   engine.addSystem((dt: number) => {
     sampleFall(dt)
     if (cooldownLeft > 0) cooldownLeft -= dt
-    if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) triggerBurst()
+    // Key and hotbar share this call, after the paint system has run. One press, one burst.
+    if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {
+      burstRequested = false
+      triggerBurst()
+    }
     tickStamps(dt)
+    flushBurstNet(dt)
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]
       f.t += dt

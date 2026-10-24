@@ -138,6 +138,9 @@ function wireInbound(): void {
   room.onMessage('burstImpact', ({ attacker, id, target, dx, dz, air }) => {
     events.emit('burst:impact', { attacker, id, target, dx, dz, air })
   })
+  room.onMessage('burstPainted', ({ id, n }) => {
+    events.emit('burst:painted', { id, n })
+  })
 
   room.onMessage('bombArmed', ({ attacker, team, x, y, z }) => {
     events.emit('bomb:armed', { attacker, team: team as Team, x, y, z })

@@ -10,6 +10,7 @@ import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
 import { isMoveLocked } from './client/moveLock'
+import { BURST_STANCE_SLACK } from './shared/pvp'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
 import { BASE_PAINT_LOCK } from './maze/level'
 
@@ -674,6 +675,24 @@ const WALKABLE_TOP = 0.5
 let playerGrounded = true
 export function isPlayerGrounded(): boolean { return playerGrounded }
 
+// Live Burst stance. The hotbar press does not wait for the paint system, and
+// that system's 0.4 m flag is the previous frame. Burst asks again, here.
+let stanceCell = 16
+let stanceStep = 8
+let stanceLookup: ((tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null) | null = null
+
+/** Feet right now, and whether they are close enough to a walkable cell to be a ground Burst.
+ *  Independent of `isPlayerGrounded` (movement paint, one frame behind, 0.4 m). */
+export function sampleBurstStance(): { x: number; y: number; z: number; cell: string; grounded: boolean } | null {
+  const t = Transform.getOrNull(engine.PlayerEntity)
+  if (!t) return null
+  const { x, y, z } = t.position
+  if (!stanceLookup) return { x, y, z, cell: lastCenterId ?? '', grounded: playerGrounded }
+  const hit = worldToCellId(x, y, z, stanceCell, stanceStep, stanceLookup)
+  if (!hit) return { x, y, z, cell: '', grounded: false }
+  return { x, y, z, cell: hit.id, grounded: y - hit.groundY <= BURST_STANCE_SLACK }
+}
+
 // ─── Painting system (per-frame, single-player for now) ──────────────
 // Reads player position, resolves current cell, paints it.
 // Team is hard-coded to Red for Phase 1 solo testing.
@@ -681,6 +700,9 @@ export function initPaintingSystem(
   CELL: number, STEP: number,
   lookupTile: (tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null,
 ) {
+  stanceCell = CELL
+  stanceStep = STEP
+  stanceLookup = lookupTile
   const GROUND_TOLERANCE = 0.4
   // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
   // in world meters; one cell is CELL / SIZE = 2m.
