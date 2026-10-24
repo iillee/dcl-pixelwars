@@ -40,11 +40,13 @@ export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
  * Steps are a table, not a fixed subtraction. Each entry is ~×1.35 the last.
- * A fixed 35° pitch cannot back up past about scale 50 (scene ceiling), so
- * desktop steps 74, 100 and 135 would not move the camera and minus would
- * end disabled at 135 with the picture unchanged. Those steps lower the pitch
- * (down to PITCH_MIN) to dolly out, then widen fov for whatever the bounds
- * still cannot hold.
+ * Pitch is OV_PITCH_DEG at every step — the same fixed isometric angle as main.
+ * A 35.26° throw cannot back up past about scale 50 (scene ceiling), so desktop
+ * steps past that clamp, including the default 55 and then 74, 100 and 135,
+ * keep the camera where the clamp put it and zoom out only by widening
+ * VirtualCamera.fov. Do not lower the pitch to fake those steps: if a live fov
+ * write does not take effect, the picture stays put and that has to be reported
+ * as a client limit.
  *
  * Mobile stays on its original three levels (max 25) and starts at the closest.
  * Desktop starts at 55 and keeps that step across toggles. The table is latched
@@ -54,9 +56,7 @@ export const OV_FOV_DEG   = 24
 const MOBILE_ZOOM_SCALES = [5, 15, 25]
 const DESKTOP_ZOOM_SCALES = [5, 7, 9, 12, 17, 22, 30, 41, 55, 74, 100, 135]
 const DESKTOP_DEFAULT_SCALE = 55
-/** Shallowest pitch used to dolly past the ceiling. Steeper stays isometric. */
-const PITCH_MIN = 14
-/** Past this, a wider lens stands in for a throw the scene bounds will not allow. */
+/** Safety cap. 74 / 100 / 135 at a typical play height land well under this. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
@@ -71,6 +71,8 @@ const FOCUS_Y_RATE     = 4
 const YAW_BLEND_S      = 0.8
 const TRANSITION_SPEED = 260 // m/s glide in/out
 
+const SIN_P = Math.sin(OV_PITCH_DEG * DEG)
+const COS_P = Math.cos(OV_PITCH_DEG * DEG)
 const FWD = { x: Math.sin(OV_YAW_DEG * DEG), z: Math.cos(OV_YAW_DEG * DEG) }
 
 // MARK: State
@@ -85,10 +87,9 @@ let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
  *  judge a desktop scale of 55 against the mobile max of 25 once detection
  *  resolves, and minus would disable with no click. */
 let zoomMobile = false
-/** Eased scale. Pitch, distance and fov are derived from this so a click moves the picture. */
+/** Eased scale. Distance and fov come from this. Pitch stays OV_PITCH_DEG. */
 let viewScale = DESKTOP_DEFAULT_SCALE
-let pitchDeg = OV_PITCH_DEG
-/** Lens used when the wanted throw is longer than the scene bounds allow. */
+/** Lens used when the wanted throw is longer than the fixed-pitch clamp. */
 let fov = OV_FOV_DEG
 let fovApplied = -1
 const focus = { x: SCENE_SIZE / 2, y: BASE_Y, z: SCENE_SIZE / 2 }
@@ -161,11 +162,9 @@ function update(dt: number): void {
 }
 
 function place(): void {
-  const sinP = Math.sin(pitchDeg * DEG)
-  const cosP = Math.cos(pitchDeg * DEG)
-  const cx = focus.x - FWD.x * camDist * cosP
-  const cz = focus.z - FWD.z * camDist * cosP
-  let cy = focus.y + camDist * sinP
+  const cx = focus.x - FWD.x * camDist * COS_P
+  const cz = focus.z - FWD.z * camDist * COS_P
+  let cy = focus.y + camDist * SIN_P
   cy = Math.max(focus.y + MIN_ABOVE_FOCUS, Math.min(cy, SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M))
   if (lookEnt !== null) {
     const t = Transform.getMutable(lookEnt)
@@ -177,38 +176,23 @@ function place(): void {
   }
 }
 
-/** Longest throw at `pitch` that stays inside the scene and under the ceiling. */
-function maxDistanceAt(pitch: number): number {
-  const sinP = Math.sin(pitch * DEG)
-  const cosP = Math.cos(pitch * DEG)
+/** Longest throw at the fixed isometric pitch that stays inside the scene and under the ceiling. */
+function maxDistance(): number {
   let max = Infinity
-  const bx = -FWD.x * cosP, bz = -FWD.z * cosP
+  const bx = -FWD.x * COS_P, bz = -FWD.z * COS_P
   const lo = BOUNDS_INSET_M, hi = SCENE_SIZE - BOUNDS_INSET_M
   if (bx < -1e-6) max = Math.min(max, (focus.x - lo) / -bx)
   if (bx > 1e-6)  max = Math.min(max, (hi - focus.x) / bx)
   if (bz < -1e-6) max = Math.min(max, (focus.z - lo) / -bz)
   if (bz > 1e-6)  max = Math.min(max, (hi - focus.z) / bz)
-  if (sinP > 1e-4) max = Math.min(max, (SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M - focus.y) / sinP)
+  max = Math.min(max, (SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M - focus.y) / SIN_P)
   return Math.max(4, max)
 }
 
-/** Steepest pitch that can hold `wantDist`. Fixed 35° tops out near scale 50, which is why 74/100/135 never moved. */
-function pitchFor(wantDist: number): number {
-  if (maxDistanceAt(OV_PITCH_DEG) >= wantDist) return OV_PITCH_DEG
-  if (maxDistanceAt(PITCH_MIN) < wantDist) return PITCH_MIN
-  let lo = PITCH_MIN, hi = OV_PITCH_DEG
-  for (let i = 0; i < 14; i++) {
-    const mid = (lo + hi) / 2
-    if (maxDistanceAt(mid) >= wantDist) lo = mid
-    else hi = mid
-  }
-  return lo
-}
-
+/** Camera stays on OV_PITCH_DEG. Past the clamp, only the lens changes. */
 function applyFraming(view: number): void {
   const wantDist = view * DIST_PER_SCALE
-  pitchDeg = pitchFor(wantDist)
-  const cap = maxDistanceAt(pitchDeg)
+  const cap = maxDistance()
   camDist = Math.min(wantDist, cap)
   fov = targetFov(wantDist, camDist)
   writeFov(fov)
@@ -279,7 +263,7 @@ export function rotateOverview(steps: number): void {
   yawT = 0
 }
 
-/** Framing of `wantDist` when the camera can only sit at `distCap`. In range, the lens stays OV_FOV_DEG. */
+/** Same framed width as an OV_FOV_DEG camera at `wantDist`, when it can only sit at `distCap`. In range, the lens stays OV_FOV_DEG. */
 function targetFov(wantDist: number, distCap: number): number {
   if (wantDist <= distCap) return OV_FOV_DEG
   const tanHalf = Math.tan(OV_FOV_DEG * DEG / 2) * (wantDist / distCap)
