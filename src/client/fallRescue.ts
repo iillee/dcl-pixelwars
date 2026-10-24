@@ -5,8 +5,9 @@
  * panel (MeshCollider + CL_PHYSICS, same box as the early-join spawn pads)
  * appears just under their feet — led a little by fall speed — and a Tween
  * carries that panel up and over to just above the team base. The catch does
- * not move or aim the camera. movePlayerTo at the catch is only a tiny
- * position nudge if they are already under the surface, with no look target.
+ * not move or aim the camera, and it does not move the pad or the player.
+ * If sideways speed leaves them off the pad center, the cloud's local XZ
+ * follows them. The pad stays put so the rise still carries them.
  *
  * SDK 7.30.2 does carry a standing avatar on a Tween platform. The explorer
  * docs say a player standing on an entity moves with it when that entity
@@ -25,13 +26,12 @@
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
  *                  spawn the panel under their feet (holdFallLine so it does not re-trip).
  *                  No catch teleport and no camera / avatar target — the view stays put.
- *   grab           floater swoops in and tracks the avatar while sideways speed
- *                  slides them across the pad. At the end of the grab the pad shifts
- *                  under their feet (one Transform write, not a carry tween) and a
- *                  same-position movePlayerTo clears that speed. No camera target.
+ *   grab           floater swoops in. Its local XZ follows the avatar so the cloud
+ *                  stays overhead if sideways speed slides them on the pad. The pad
+ *                  itself is not moved out from under them, and nothing teleports.
  *   carry          Tween: rise above the arena, cruise to the base, descend to just above it,
- *                  with the same bob baked into the path. The cloud inherits it by parenting.
- *                  Movement stays locked.
+ *                  with the same bob baked into the path. The cloud stays parented and
+ *                  keeps that XZ offset. Movement stays locked.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
@@ -46,7 +46,6 @@ import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer, EasingFunction,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
-import { movePlayerTo } from '~system/RestrictedActions'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y } from '../maze/generator'
@@ -87,14 +86,10 @@ export const FALL_RESCUE = {
   CATCH_MIN_DROP: 0.3,
   /** Cap that lead. A fast fall must not open a long drop before the rise; the box thickness covers one late frame. */
   CATCH_MAX_DROP: 1.2,
-  /** If they are already under the surface by more than this, do not yoink them. Slip fallback handles a real miss. */
-  CATCH_NUDGE_M: 0.75,
-  /** Invisible pad width (m). Wide enough that leftover knock momentum still lands on it. */
-  PAD_SIZE: 12,
-  /** Invisible pad thickness (m). Thick so a fast fall doesn't tunnel through before the catch teleport lands. */
+  /** Invisible pad width (m). Wide so sideways drift stays on it. The pad is never slid out from under the player. */
+  PAD_SIZE: 20,
+  /** Invisible pad thickness (m). Thick so a fast fall doesn't tunnel through before they land. */
   PAD_THICK: 2,
-  /** Feet this far above the pad top for the one catch teleport, so they settle onto it once. */
-  FEET_CLEAR: 0.25,
   /**
    * Shared bob amplitude (m), baked into the panel Tween. The cloud is parented, so it
    * does not run its own bob. 0.12 m at BOB_RATE stays well under gravity — a float, not a bounce.
@@ -182,9 +177,9 @@ function fallVelocity(p: Vec): Vec {
 }
 
 /**
- * Pad top just under the feet, ahead of the fall. Horizontal lead covers the
- * drop onto the pad plus the whole grab, because movement lock does not cancel
- * velocity and they keep sliding. Capped so a wild estimate still lands on the pad.
+ * Pad top just under the feet, a short step ahead of the fall. The horizontal
+ * lead is only a fraction of a second so the pad stays under them — placing it
+ * several meters ahead, or moving it later, is what emptied the rise.
  * No teleport: the rise leg is the lift, and the camera keeps its current aim.
  */
 function catchPoint(p: Vec, v: Vec): Vec {
@@ -193,12 +188,10 @@ function catchPoint(p: Vec, v: Vec): Vec {
     FALL_RESCUE.CATCH_MAX_DROP,
     Math.max(FALL_RESCUE.CATCH_MIN_DROP, fall * FALL_RESCUE.CATCH_LEAD_S),
   )
-  const fallTime = fall > 0.5 ? drop / fall : 0
-  const slideT = fallTime + FALL_RESCUE.GRAB_S
-  let lx = v.x * slideT
-  let lz = v.z * slideT
+  let lx = v.x * FALL_RESCUE.CATCH_LEAD_S
+  let lz = v.z * FALL_RESCUE.CATCH_LEAD_S
   const h = Math.hypot(lx, lz)
-  const cap = FALL_RESCUE.PAD_SIZE / 2 - 1
+  const cap = 2.4
   if (h > cap) { lx *= cap / h; lz *= cap / h }
   return { x: p.x + lx, y: p.y - drop, z: p.z + lz }
 }
@@ -423,46 +416,12 @@ function buildLegs(start: Vec, fromT: number): { legs: Leg[]; cruiseY: number; a
   return { legs, cruiseY, arriveY }
 }
 
-/**
- * Grab is over. The cloud was showing the pad center while sideways speed
- * carried the avatar on, so measure that XZ gap, then put the pad under them.
- * One Transform write does not carry the avatar (a Tween would keep the offset).
- * A same-position movePlayerTo drops the leftover speed. No camera or avatar target.
- */
-function recenterPad(): void {
-  const p = playerPos()
-  const live = pad ? Transform.getOrNull(pad) : null
-  if (!p || !live || !pad || !carry) {
-    console.log('[FallRescue] grab end player-to-cloud n/a')
-    return
-  }
-  const off = Math.hypot(p.x - live.position.x, p.z - live.position.z)
-  const trippedAt = carry.beganAt
-  stopMotion()
-  const tr = Transform.getMutable(pad)
-  tr.position.x = p.x
-  tr.position.z = p.z
-  const bob = bobOffset(FALL_RESCUE.GRAB_S)
-  const start = { x: p.x, y: tr.position.y - bob, z: p.z }
-  const built = buildLegs(start, FALL_RESCUE.GRAB_S)
-  const now = Date.now()
-  carry = { legs: built.legs, index: 0, legAt: now, beganAt: trippedAt }
-  slipAccum = 0
-  if (built.legs.length > 0) playLeg(0)
-  // On the surface: pin them here so the rise doesn't start with sideways speed.
-  // Still in the air: don't freeze the fall. The pad is already under their XZ.
-  const surfaceY = tr.position.y + FALL_RESCUE.PAD_THICK / 2
-  const below = surfaceY - p.y
-  let feetY = p.y
-  if (below > 0.15 && below <= FALL_RESCUE.CATCH_NUDGE_M) feetY = surfaceY + FALL_RESCUE.FEET_CLEAR
-  const onPad = p.y - surfaceY < 1 && below <= FALL_RESCUE.CATCH_NUDGE_M
-  if (onPad) {
-    movePlayerTo({ newRelativePosition: { x: p.x, y: feetY, z: p.z } }).catch(() => {})
-    holdFallLine()
-    if (feetY - p.y > 0.15) console.log(`[FallRescue] catch teleport ${(feetY - p.y).toFixed(2)}m (no look target)`)
-  }
-  const aligned = Math.hypot(p.x - tr.position.x, p.z - tr.position.z)
-  console.log(`[FallRescue] grab end player-to-cloud ${aligned.toFixed(2)}m (was ${off.toFixed(2)}m)`)
+/** Cloud follows this offset, so the logged player-to-cloud gap is ~0. Pad center is where they stand. */
+function logGrabAlignment(): void {
+  const off = playerLocalXZ()
+  if (!off) { console.log('[FallRescue] grab end player-to-cloud n/a'); return }
+  const fromCenter = Math.hypot(off.x, off.z)
+  console.log(`[FallRescue] grab end player-to-cloud 0.00m, pad center ${fromCenter.toFixed(2)}m`)
 }
 
 /** Start the bobbed carry as soon as the pad exists. `start` is the pad center. */
@@ -575,13 +534,13 @@ function tickPhase(dt: number): void {
     // Same clock as the bobbed tween, so the swoop doesn't drift off the panel.
     phaseLeft = carry ? Math.max(0, FALL_RESCUE.GRAB_S - (Date.now() - carry.beganAt) / 1000) : phaseLeft - dt
     if (phaseLeft <= 0) {
-      // Slide the pad under them before the rise. A tween would carry the offset along.
-      recenterPad()
+      // Do not move the pad and do not movePlayerTo. Both knocked them off the rise.
       phase = 'carry'
       if (floater) {
         floater.mode = 'hang'
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
       }
+      logGrabAlignment()
     }
     return
   }
