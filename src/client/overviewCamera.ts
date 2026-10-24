@@ -109,7 +109,7 @@ export function setupOverviewCamera(): void {
     // exit unless the player turned it off.
     // Mobile starts in the regular view (Luke); the overview returns after a respawn only if the player opened it (mobileWant).
     if (resumeIn > 0) resumeIn -= dt
-    if (mobileWant && !active && resumeIn <= 0 && isMobile()) setActive(true)
+    if (!overviewPinned && mobileWant && !active && resumeIn <= 0 && isMobile()) setActive(true)
     if (active) update(dt)
   })
 }
@@ -173,6 +173,8 @@ export function toggleOverview(): void {
 }
 let mobileWant = false
 let resumeIn = 0
+/** While set, do not resume overview. A fall-rescue camera ride owns MainCamera. */
+let overviewPinned = false
 /** After a forced exit (respawn / teleport), wait this long before mobile re-enters overview. */
 const MOBILE_RESUME_S = 1.0
 function setActive(on: boolean): void {
@@ -188,6 +190,15 @@ function setActive(on: boolean): void {
   }
   const main = MainCamera.getMutableOrNull(engine.CameraEntity) ?? MainCamera.create(engine.CameraEntity)
   main.virtualCameraEntity = active ? camEntity : undefined
+}
+
+/** Keep overview from taking MainCamera back. The mobile rescue ride uses it. */
+export function pinOverviewClosed(on: boolean): void {
+  overviewPinned = on
+  if (on && active) exitOverview()
+  // The ride outlasts MOBILE_RESUME_S, so the countdown has already hit zero.
+  // Arm it again or overview takes the camera the frame the ride lets go.
+  if (!on) resumeIn = MOBILE_RESUME_S
 }
 
 /** Leave overview if it's on (e.g. before movePlayerTo so its cameraTarget lands). */

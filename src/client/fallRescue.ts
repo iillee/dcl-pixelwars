@@ -10,22 +10,23 @@
  * follows them during the grab, then locks. The pad stays put so the rise
  * still carries them.
  *
- * The carry is three constant-speed legs (rise, cruise, descend) on
- * setMoveContinuous. A turn replaces the direction and speed only. It does
- * not pass a start point, so the engine keeps the platform's real position.
- * setMove applies `start` immediately, and the Transform a scene can read
- * lags the renderer — a frame on desktop, several on the mobile client —
- * so each script-side leg restart popped the pad. TweenSequence is not
- * used: the mobile client does not run it (the later legs never play).
+ * Desktop carry: three constant-speed legs (rise, cruise, descend) on
+ * setMoveContinuous. A turn changes direction and speed only, with no start
+ * point, so the pad is not snapped. Nothing writes a Transform during that
+ * carry. The cloud's XZ locks at the end of the grab.
  *
- * Nothing writes a Transform during the carry. The cloud's XZ is locked
- * when the grab ends. A per-frame write on that child dirties the physics
- * parent, and a low mobile rate turns that into a hitch. The input lock
- * is not per-frame; it is applied when the hold changes.
+ * Mobile does not get that ride. The godot-explorer player copies a kinematic
+ * collider's full transform delta onto the avatar inside _physics_process
+ * (player.gd _update_platform_follow). Scene tweens advance on the render
+ * tick, so the mesh glides and the body steps. The docs list moving platforms
+ * as a mobile inconsistency with no ETA. A continuous tween was playtested
+ * (3d43e91) and still stepped. On mobile the pad stays still, a virtual
+ * camera parented to the cloud flies the view, and one movePlayerTo (no
+ * camera target) puts the body on the base while that camera is up.
  *
  * If they drift more than a few meters off the panel, one teleport sends
- * them to base (snap fallback). No rehold loop. A camera fly-along is not
- * used — the Tween API is here and is the documented carry.
+ * them to base (snap fallback). No rehold loop. Desktop does not use a
+ * camera fly-along.
  *
  * Beat (Luke: tweak FALL_RESCUE):
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
@@ -34,9 +35,9 @@
  *   grab           floater swoops in. Its local XZ follows the avatar so the cloud
  *                  stays overhead if sideways speed slides them on the pad. The pad
  *                  itself is not moved out from under them, and nothing teleports.
- *   carry          Three continuous legs: rise, cruise, descend. Turns do not
- *                  snap the pad. Cloud XZ stays at the grab-end lock. No per-frame
- *                  Transform write, no movePlayerTo.
+ *   carry          Desktop: three continuous legs. Cloud XZ stays locked.
+ *                  Mobile: the pad does not move. The camera rides the cloud,
+ *                  then one teleport (no camera target) lands the body.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
@@ -49,8 +50,11 @@
 
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
+  MainCamera, VirtualCamera,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
+import { movePlayerTo } from '~system/RestrictedActions'
+import { isMobile } from '@dcl/sdk/platform'
 import { room } from '../shared/messages'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y } from '../maze/generator'
@@ -59,7 +63,7 @@ import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { localTeam } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
-import { exitOverview } from './overviewCamera'
+import { exitOverview, pinOverviewClosed } from './overviewCamera'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -110,6 +114,13 @@ export const FALL_RESCUE = {
   SLIP_SUSTAIN_S: 0.35,
   /** After the last leg's duration, wait this long for the renderer to catch up before snapping. */
   ARRIVE_SLACK_S: 0.45,
+  /**
+   * Mobile only. Seconds after the cloud camera starts before the body is
+   * teleported. The client blends toward a virtual camera over its
+   * transition time (0.6s) and only then parents the view to that entity.
+   * The handoff waits until that attach, and the teleport omits cameraTarget.
+   */
+  RIDE_HANDOFF_S: 0.75,
 }
 
 const CLOUD_MAT = {
@@ -134,9 +145,15 @@ type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: numb
 type Vec = { x: number; y: number; z: number }
 type Leg = { from: Vec; to: Vec; ms: number }
 type Carry = { legs: Leg[]; index: number; legAt: number; beganAt: number }
+type MobileRide = { legs: Leg[]; index: number; legAt: number; beganAt: number; sentHome: boolean; failed: boolean }
 
 /** How the rescue ended. `carry` already delivered them; `snap` still needs the base teleport. */
 export type FallRescueEnd = 'snap' | 'carry'
+
+/** True while a mobile ride owns the ending. Read from the arrival callback, before it is cleared. */
+export function fallRescueCameraRide(): boolean {
+  return cameraRide
+}
 
 let installed = false
 let onEnd: (how: FallRescueEnd) => void = () => {}
@@ -151,6 +168,11 @@ let pad: Entity | null = null
 /** Unit-scale child on the top face so the floater doesn't inherit the pad's scale. */
 let anchor: Entity | null = null
 let carry: Carry | null = null
+/** Set at the trip from isMobile(). Desktop keeps the pad tween. */
+let cameraRide = false
+let mobileRide: MobileRide | null = null
+let rideCam: Entity | null = null
+let rideLook: Entity | null = null
 /** Wall clock of the trip, so the grab swoop and the slip grace share one start. */
 let trippedAt = 0
 let slipAccum = 0
@@ -306,7 +328,9 @@ function floaterWorld(): Vec | null {
   const local = Transform.getOrNull(floater.root)
   if (!local) return null
   const localPos = { x: local.position.x, y: local.position.y, z: local.position.z }
-  if (!anchor || (phase !== 'grab' && phase !== 'carry')) return localPos
+  // After the mobile ride detaches the cloud, its position is already world.
+  const parented = anchor !== null && local.parent === anchor
+  if (!parented || (phase !== 'grab' && phase !== 'carry')) return localPos
   const surface = surfaceNow()
   if (!surface) return localPos
   return { x: surface.x + localPos.x, y: surface.y + localPos.y, z: surface.z + localPos.z }
@@ -314,6 +338,7 @@ function floaterWorld(): Vec | null {
 
 /** Leave the pad before it is removed so the peel can play at the arrival point. */
 function detachFloater(): void {
+  if (floater && Tween.has(floater.root)) Tween.deleteFrom(floater.root)
   if (!floater || !anchor) return
   const world = floaterWorld()
   const local = Transform.getOrNull(floater.root)
@@ -352,25 +377,25 @@ function spawnFloater(): void {
   floater = { root, ents: [root, cloud, puffL, puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0 }
 }
 
-function playLeg(index: number): void {
-  if (!pad || !carry) return
-  const leg = carry.legs[index]
-  carry.index = index
-  carry.legAt = Date.now()
+/** Constant-speed leg. No start point, so replacing it does not snap the entity. */
+function playContinuous(entity: Entity, leg: Leg, last: boolean): void {
   const dx = leg.to.x - leg.from.x
   const dy = leg.to.y - leg.from.y
   const dz = leg.to.z - leg.from.z
   const dist = Math.hypot(dx, dy, dz)
   const speed = dist / (leg.ms / 1000)
-  // Unit direction. A zero leg (already above the base) just holds.
   const dir = dist > 0.001 ? Vector3.create(dx / dist, dy / dist, dz / dist) : Vector3.create(0, 1, 0)
-  const last = index === carry.legs.length - 1
-  // No start position. setMove would teleport the pad to `start`, and the
-  // position the scene can read on mobile lags the platform, so each new leg
-  // popped. Continuous keeps the engine's real position and only changes velocity.
-  // Duration 0 means "until replaced". The last leg is timed so it stops on the
-  // base instead of sinking through it while the script catches up.
-  Tween.setMoveContinuous(pad, dir, dist > 0.001 ? speed : 0, last ? leg.ms : 0)
+  // Duration 0 means "until replaced". The last leg is timed so it stops
+  // instead of sailing past the end while the script catches up.
+  Tween.setMoveContinuous(entity, dir, dist > 0.001 ? speed : 0, last ? leg.ms : 0)
+}
+
+function playLeg(index: number): void {
+  if (!pad || !carry) return
+  const leg = carry.legs[index]
+  carry.index = index
+  carry.legAt = Date.now()
+  playContinuous(pad, leg, index === carry.legs.length - 1)
 }
 
 function tripSeconds(): number {
@@ -420,6 +445,89 @@ function startPath(start: Vec, trippedAt: number): void {
   )
 }
 
+function releaseRideCamera(): void {
+  const main = MainCamera.getMutableOrNull(engine.CameraEntity)
+  if (main && rideCam !== null && main.virtualCameraEntity === rideCam) main.virtualCameraEntity = undefined
+  if (rideCam) { engine.removeEntity(rideCam); rideCam = null }
+  if (rideLook) { engine.removeEntity(rideLook); rideLook = null }
+}
+
+/** View from just behind the cloud. The blend toward this camera is the takeoff. */
+function mountRideCamera(): void {
+  if (!floater) return
+  releaseRideCamera()
+  rideLook = engine.addEntity()
+  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(0, 0.35, 0.4) })
+  rideCam = engine.addEntity()
+  Transform.create(rideCam, { parent: floater.root, position: Vector3.create(0, 1.8, -6) })
+  VirtualCamera.create(rideCam, {
+    lookAtEntity: rideLook,
+    defaultTransition: { transitionMode: VirtualCamera.Transition.Time(0.6) },
+  })
+  const main = MainCamera.getMutableOrNull(engine.CameraEntity) ?? MainCamera.create(engine.CameraEntity)
+  main.virtualCameraEntity = rideCam
+}
+
+/**
+ * Mobile path. The pad never moves, so physics-tick platform follow has
+ * nothing to step. The cloud (a render-tick tween) carries the camera.
+ */
+function startCameraRide(): void {
+  if (!floater) { finish('snap', 'no cloud'); return }
+  pinOverviewClosed(true)
+  detachFloater()
+  const live = Transform.getOrNull(floater.root)
+  if (!live) { finish('snap', 'no cloud'); return }
+  const start = { x: live.position.x, y: live.position.y, z: live.position.z }
+  // Same world path the cloud would take on the desktop pad: surface is
+  // PAD_THICK/2 above the pad center, and the cloud hangs HANG_Y above that.
+  const lift = FALL_RESCUE.HANG_Y + FALL_RESCUE.PAD_THICK / 2
+  const built = buildLegs({ x: start.x, y: start.y - lift, z: start.z })
+  const legs = built.legs.map(leg => ({
+    from: { x: leg.from.x, y: leg.from.y + lift, z: leg.from.z },
+    to: { x: leg.to.x, y: leg.to.y + lift, z: leg.to.z },
+    ms: leg.ms,
+  }))
+  legs[0].from = start
+  mountRideCamera()
+  const now = Date.now()
+  mobileRide = { legs, index: 0, legAt: now, beganAt: now, sentHome: false, failed: false }
+  playContinuous(floater.root, legs[0], legs.length === 1)
+  console.log(
+    `[FallRescue] mobile camera ride ${tripSeconds().toFixed(2)}s — pad stays put, platform carry steps on physics ticks`,
+  )
+}
+
+/** Body goes to the base while the ride camera is already up. No cameraTarget. */
+function sendHomeUnderCamera(): void {
+  const s = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  console.log(`[FallRescue] mobile teleport under camera → ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`)
+  movePlayerTo({ newRelativePosition: s }).catch(err => {
+    console.log('[FallRescue] mobile teleport failed', err)
+    if (mobileRide) mobileRide.failed = true
+  })
+}
+
+function tickMobile(): void {
+  if (!mobileRide || !floater) { finish('snap', 'mobile ride missing'); return }
+  const ride = mobileRide
+  if (ride.failed) { finish('snap', 'mobile teleport failed'); return }
+  if (!ride.sentHome && (Date.now() - ride.beganAt) / 1000 >= FALL_RESCUE.RIDE_HANDOFF_S) {
+    ride.sentHome = true
+    sendHomeUnderCamera()
+  }
+  const leg = ride.legs[ride.index]
+  if (Date.now() - ride.legAt < leg.ms) return
+  if (ride.index < ride.legs.length - 1) {
+    const next = ride.index + 1
+    ride.index = next
+    ride.legAt = Date.now()
+    playContinuous(floater.root, ride.legs[next], next === ride.legs.length - 1)
+    return
+  }
+  finish('carry', 'mobile camera ride')
+}
+
 /** Close enough to the last waypoint that dropping the panel lands them on the base. */
 function atDestination(player: Vec): boolean {
   if (!carry) return false
@@ -462,8 +570,11 @@ function tickCarry(dt: number): void {
 /** Shared ending. Walk lock is set before player:respawned so the lunge listener keeps walk-only. */
 function finish(how: FallRescueEnd, why: string): void {
   if (phase !== 'grab' && phase !== 'carry') return
+  const rode = cameraRide
+  releaseRideCamera()
   detachFloater()
   carry = null
+  mobileRide = null
   slipAccum = 0
   despawnPad()
   phase = 'land'
@@ -471,8 +582,13 @@ function finish(how: FallRescueEnd, why: string): void {
   setFallMoveLock('walk')
   if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
   if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
+  else if (rode) console.log(`[FallRescue] mobile camera ride arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   onEnd(how)
+  // After onEnd's exitOverview, so a mobile overview does not steal the ride
+  // and does not pop back on this same frame.
+  pinOverviewClosed(false)
+  cameraRide = false
 }
 
 function begin(p: Vec): void {
@@ -491,11 +607,15 @@ function begin(p: Vec): void {
   spawnPad(hold)
   spawnFloater()
   trippedAt = Date.now()
+  // isMobile() stays false until the explorer answers. A fall in that window
+  // uses the desktop pad ride. By a real trip it has resolved.
+  cameraRide = isMobile()
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
   const trip = tripSeconds().toFixed(2)
   const under = p.y - hold.y
+  const how = cameraRide ? 'mobile camera ride' : 'tween-carry'
   console.log(
-    `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, tween-carry in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
+    `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, ${how} in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
   )
 }
 
@@ -513,6 +633,7 @@ function tickPhase(dt: number): void {
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
       }
       logGrabAlignment()
+      if (cameraRide) { startCameraRide(); return }
       const live = pad ? Transform.getOrNull(pad) : null
       if (!live) { finish('snap', 'no panel'); return }
       startPath({ x: live.position.x, y: live.position.y, z: live.position.z }, trippedAt)
@@ -571,6 +692,7 @@ function tick(dt: number): void {
   }
   if (phase !== 'idle') tickPhase(step)
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
+  if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
   const p = playerPos()
   if (p && phase === 'idle' && rearm && isMazeReady() && p.y < line) begin(p)
@@ -588,9 +710,13 @@ export function holdFallLine(): void {
 export function cancelFallRescue(why: string): void {
   if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
+  releaseRideCamera()
+  pinOverviewClosed(false)
   phase = 'idle'
   phaseLeft = 0
   carry = null
+  mobileRide = null
+  cameraRide = false
   trippedAt = 0
   slipAccum = 0
   despawnFloater()
