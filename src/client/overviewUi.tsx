@@ -19,20 +19,21 @@ import {
 
 const INK = Color4.create(0.13, 0.13, 0.15, 1) // = SUMMARY_INK in ui.tsx
 const INK_DIM = Color4.create(0.13, 0.13, 0.15, 0.3)
-const EYE_ON = Color4.create(0.72, 0.45, 0.0, 1) // dark amber: "active" but readable on the light panel
+/** Yellow plate on the eye button while overview is on. The eye glyph stays INK. */
+const EYE_FILL_ON = Color4.create(1, 0.88, 0.15, 1)
 const SMALL = 68 // same height as the clock panel
-const GLYPH = 24 // +/− bar length and rotate ring diameter
+const GLYPH = 24 // +/− bar length and rotate icon box
 const BAR = 4    // glyph stroke
+/** White silhouette, tinted with the glyph colour. Same box as the +/− strokes. */
+const ROTATE_SRC = 'assets/images/overview_rotate.png'
 
-/** +, − and rotate drawn as boxes so they sit exactly centred (font glyphs don't, and ⟳ is missing). */
+/** + and − are bars. Rotate is a thick near-full circular arrow (⟳ isn't in the UI font). */
 function Glyph(props: { kind: 'in' | 'out' | 'rot'; color: Color4 }) {
   const c = props.color
   if (props.kind === 'rot') {
     return (
-      <UiEntity uiTransform={{ width: GLYPH, height: GLYPH, borderRadius: GLYPH / 2, borderWidth: BAR, borderColor: c, pointerFilter: 'none' }}>
-        {/* arrow head notch at the top-right */}
-        <UiEntity uiTransform={{ positionType: 'absolute', position: { top: -BAR - 2, right: -2 }, width: 9, height: 9 }} uiBackground={{ color: c }} />
-      </UiEntity>
+      <UiEntity uiTransform={{ width: GLYPH, height: GLYPH, pointerFilter: 'none' }}
+        uiBackground={{ textureMode: 'stretch', texture: { src: ROTATE_SRC }, color: c }} />
     )
   }
   return (
@@ -44,7 +45,7 @@ function Glyph(props: { kind: 'in' | 'out' | 'rot'; color: Color4 }) {
 }
 
 /** Key-tile framed square button (light rim, dark ring, PANEL_LIGHT fill) used for the top bar buttons. */
-export function TileButton(props: { id: string; onPress: () => void; children?: any; marginRight?: number; keyLabel?: string }) {
+export function TileButton(props: { id: string; onPress: () => void; children?: any; marginRight?: number; keyLabel?: string; fill?: Color4 }) {
   return (
     <UiEntity
       key={props.id}
@@ -56,7 +57,7 @@ export function TileButton(props: { id: string; onPress: () => void; children?: 
       onMouseDown={props.onPress}
     >
       <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: RADIUS - BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
-        uiBackground={{ color: PANEL_LIGHT }}>
+        uiBackground={{ color: props.fill ?? PANEL_LIGHT }}>
         {props.children}
       </UiEntity>
       {props.keyLabel && <KeyHint label={props.keyLabel} />}
@@ -87,19 +88,20 @@ function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: b
   )
 }
 
-// Eye toggle (icon + tint copied from dcl-snowdrift layer.brushSize.tsx SpectatorButton:
-// assets/images/eye.png, white silhouette, 3:2 box, gold while active).
+// Eye icon copied from dcl-snowdrift layer.brushSize.tsx SpectatorButton
+// (assets/images/eye.png, white silhouette, 3:2 box). Stays ink; the plate goes yellow while overview is on.
 const EYE_SRC = 'assets/images/eye.png'
 const EYE_W = 21
 const EYE_H = 14
 const ROW_GAP = 8
 
-/** Eye button (left of the timer): toggles overview; amber while on. */
+/** Eye button (left of the timer): toggles overview. The white plate turns yellow while on; the eye stays ink. */
 export function OverviewEye() {
   return (
-    <TileButton id="ui_overview_eye" onPress={() => { playUiClick(); toggleOverview() }} keyLabel="4">
+    <TileButton id="ui_overview_eye" onPress={() => { playUiClick(); toggleOverview() }} keyLabel="4"
+      fill={isOverviewActive() ? EYE_FILL_ON : PANEL_LIGHT}>
       <UiEntity uiTransform={{ width: EYE_W * 1.6, height: EYE_H * 1.6, pointerFilter: 'none' }}
-        uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }} />
+        uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: INK }} />
     </TileButton>
   )
 }
@@ -110,7 +112,7 @@ export function OverviewEyeInline() {
     <UiEntity
       key="ui_overview_eye_inline"
       uiTransform={{ width: EYE_W, height: EYE_H, positionType: 'absolute', position: { top: 35, left: 19 }, pointerFilter: 'block' }}
-      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: isOverviewActive() ? EYE_ON : INK }}
+      uiBackground={{ textureMode: 'stretch', texture: { src: EYE_SRC }, color: INK }}
       onMouseDown={() => { playUiClick(); toggleOverview() }}
     />
   )
