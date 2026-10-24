@@ -6,21 +6,23 @@
  *   - classic: everyone goes to the centre cross on join and at each round reset.
  *   - sky:     each player goes to their TEAM BASE once the server has
  *              assigned a team (teamAssigned), at each round reset, and
- *              whenever they fall more than FALL_RESPAWN_DROP m below the LOWEST
- *              tile level (MIN_Y; bases+line mode has a level below the bases).
+ *              whenever a fall rescue finishes (client/fallRescue.ts). Crossing
+ *              the fall line spawns an invisible panel under their feet. The
+ *              catch does not teleport or retarget the camera. A Tween carries
+ *              that panel to the base. teleportHome('fell') runs only if they
+ *              slipped off it.
  */
 
-import { room } from '../shared/messages'
 import { engine, Transform, MeshCollider, ColliderLayer } from '@dcl/sdk/ecs'
 import { Vector3 } from '@dcl/sdk/math'
 import { isMazeReady } from '../maze/rebuild'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
-import { playDeathSfx } from './audio'
 import { Team } from '../shared/team'
-import { MIN_Y, baseSpawn } from '../maze/generator'
-import { IS_SKY, FALL_RESPAWN_DROP } from '../maze/level'
+import { baseSpawn } from '../maze/generator'
+import { IS_SKY } from '../maze/level'
+import { cancelFallRescue, holdFallLine, initFallRescue } from './fallRescue'
 
 // Classic centre cross: cell (2,2), MAZE_ORIGIN=8, CELL=32 → centre (88, 88).
 const CLASSIC_SPAWN = { x: 88, y: 2, z: 88 }
@@ -29,6 +31,11 @@ const CLASSIC_CAMERA_TARGET = { x: 88, y: 2, z: 96 }
 let myTeam: Team = Team.None
 
 function teleportHome(why: string): void {
+  // A spawn / round-reset teleport must not finish a pickup a few seconds later.
+  // The fall drop ('fell') is the rescue ending — keep its land lock.
+  if (why !== 'fell') cancelFallRescue(why)
+  // movePlayerTo is async: don't treat the pre-teleport height as a new fall.
+  holdFallLine()
   let pos = CLASSIC_SPAWN, look = CLASSIC_CAMERA_TARGET
   if (IS_SKY) {
     const s = baseSpawn(myTeam === Team.Blue ? 2 : 1) // no team yet → RED base (scene.json default)
@@ -65,8 +72,6 @@ export function initPlayerNet(): void {
     if (!IS_SKY || myTeam === Team.None) teleportHome('initial')
   })
 
-  // Sky: fall respawn below MIN_Y - FALL_RESPAWN_DROP. Off when the lowest
-  // level is near the ground (MIN_Y < FALL_RESPAWN_DROP): nothing to fall to.
   // Sky: until the maze exists, invisible static pads under both base spawns hold players that
   // spawn early (scene spawn point = RED base); removed once the maze has finished building.
   if (IS_SKY) {
@@ -86,17 +91,13 @@ export function initPlayerNet(): void {
     engine.addSystem(sys)
   }
 
-  if (IS_SKY && MIN_Y >= FALL_RESPAWN_DROP) {
-    let cooldown = 0
-    engine.addSystem((dt: number) => {
-      if (cooldown > 0) { cooldown -= dt; return }
-      if (!isMazeReady()) return // no level to land on yet: the next teleport would just fall again
-      const t = Transform.getOrNull(engine.PlayerEntity)
-      if (!t || t.position.y >= MIN_Y - FALL_RESPAWN_DROP) return
-      cooldown = 2
-      teleportHome('fell')
-      playDeathSfx()
-      room.send('playerFell', {})
-    })
-  }
+  // Sky fall line → timed pickup. The panel tweens to the base; one teleport only if they slip off.
+  initFallRescue((how) => {
+    if (how === 'snap') { teleportHome('fell'); return }
+    // Delivered by the platform. Immunity and the land lock start here, with no cross-map teleport.
+    holdFallLine()
+    exitOverview()
+    console.log('[Player] fall rescue landed (tween-carry, no teleport)')
+    events.emit('player:respawned', { why: 'fell' })
+  })
 }

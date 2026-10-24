@@ -1,8 +1,8 @@
 /**
  * roundStats.ts — per-round KOs and deaths for the round-end summary.
  *
- * Death = a player fell off and respawned (their client reports playerFell). Bots walk the graph and
- * can't fall, so they never die (and can't be KO'd).
+ * Death = a player crossed the fall line (client reports playerFell on the trip, before the rescue
+ * drops them at base). Bots walk the graph and can't fall, so they never die (and can't be KO'd).
  * KO = the enemy who last hit that player (dash / lunge / burst impact, or an anvil they hit or
  * pushed that launched the player) within KO_WINDOW_MS before the fall. Cleared every round.
  */

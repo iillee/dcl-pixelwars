@@ -58,6 +58,7 @@ import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
+import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
 const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
@@ -214,28 +215,35 @@ function dbgMark(p: V3, rgb: { r: number; g: number; b: number }, size: number, 
 }
 function dbgLog(msg: string): void { if (LUNGE_DEBUG) console.log(`[Lunge dbg] ${msg}`) }
 
-// ─── Input modifier: one owner, three reasons ───────────────────────
+// ─── Input modifier: one owner ──────────────────────────────────────
 // recoveryOn:    our own lunge (active + recovery) → walk only.
 // lockLeft:      we were knocked back → no movement input at all.
+// emoteLockLeft: short hold so a Burst emote isn't cancelled by locomotion.
 // glideLockLeft: glider forced shut (aerial spike). Outlasts the movement lock
 //                so the victim cannot reopen and parachute out of the fall.
+// getMoveLock(): fall rescue — frozen for the pickup, walk for the land brace.
+// Frozen / knock / emote win over walk-only. applyControl is the only writer.
 // Explorer (player.gd): while the glider is opening or open, locomotion fall
 // speed is clamped to 1 m/s. disableJump and disableGliding both force-close
 // it; scene impulses are a separate velocity and are not part of that clamp.
+// A fall-rescue freeze does not itself shut the glider; a spike lock, knock,
+// or emote hold still does.
 let recoveryOn = false
 let lockLeft = 0
 let glideLockLeft = 0
 let sparkAccum = 0
 function applyControl(): void {
   const noGlide = glideLockLeft > 0
+  const gate = getMoveLock()
   safePhysics('input modifier', () => {
-    if (lockLeft > 0 || emoteLockLeft > 0) {
+    if (lockLeft > 0 || emoteLockLeft > 0 || gate === 'frozen') {
       InputModifier.createOrReplace(engine.PlayerEntity, {
         mode: InputModifier.Mode.Standard({
-          disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true, disableGliding: true,
+          disableWalk: true, disableJog: true, disableRun: true, disableJump: true, disableDoubleJump: true,
+          disableGliding: lockLeft > 0 || emoteLockLeft > 0 || noGlide,
         }),
       })
-    } else if (recoveryOn) {
+    } else if (recoveryOn || gate === 'walk') {
       InputModifier.createOrReplace(engine.PlayerEntity, {
         mode: InputModifier.Mode.Standard({
           disableJump: true, disableRun: true, disableJog: true, disableDoubleJump: true, disableGliding: noGlide,
@@ -249,6 +257,15 @@ function applyControl(): void {
       InputModifier.deleteFrom(engine.PlayerEntity)
     }
   })
+}
+/** Fall rescue hold. Shares this component with the lunge / knockback lock. */
+export function setFallMoveLock(next: MoveLock): void {
+  setMoveLock(next)
+  applyControl()
+}
+/** Drop our lunge on a fall trip (no brake, cooldown kept). Not a respawn. */
+export function interruptLocalLunge(why: string): void {
+  cancelLunge(why)
 }
 /** Short movement hold so a one-shot scene emote (Burst) isn't cancelled by locomotion. Shares this module's
  *  InputModifier so it never fights the lunge / knockback lock (applyControl owns the component). */
@@ -285,13 +302,14 @@ export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean
   const enabled = isLungeEnabledNow()
   const cd = Math.max(0, cooldownLeft)
   return {
-    show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0,
-    cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery',
+    show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0 && !isMoveLocked(),
+    cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery' || isMoveLocked(),
   }
 }
 
-/** E / LUNGE slot. Silent no-op while active, recovering or cooling down. */
+/** E / LUNGE slot. Silent no-op while active, recovering, cooling down, or held by a fall rescue. */
 export function triggerLunge(): void {
+  if (isMoveLocked()) return
   if (!isLungeEnabledNow() || localTeam() === Team.None || cooldownLeft > 0 || state !== 'ready') return
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return

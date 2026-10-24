@@ -42,6 +42,7 @@ import {
 import { inBurst, inAirSpike, burstDir, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock } from './lunge'
+import { isMoveLocked } from './moveLock'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
@@ -318,10 +319,11 @@ function posOf(who: string): V3 | null {
 export function isBurstEnabledNow(): boolean { return burstEnabledForRound(getRoundIndex()) }
 
 /** F slot state, same shape as getLungeHud (fill = cooldown, no number). cooldownFrac: 1 = just used, 0 = ready. */
-export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number } {
+export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean } {
   const enabled = isBurstEnabledNow() && localTeam() !== Team.None
   const cd = Math.max(0, cooldownLeft)
-  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S }
+  const locked = isMoveLocked()
+  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S, recovering: locked }
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
@@ -358,6 +360,7 @@ function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
 }
 
 export function triggerBurst(): void {
+  if (isMoveLocked()) return
   const team = localTeam()
   if (!isBurstEnabledNow() || team === Team.None || cooldownLeft > 0) return
   const t = Transform.getOrNull(engine.PlayerEntity)

@@ -9,6 +9,7 @@
 import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
+import { isMoveLocked } from './client/moveLock'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
 import { BASE_PAINT_LOCK } from './maze/level'
 
@@ -707,7 +708,8 @@ export function initPaintingSystem(
       onOwnPaint = localTeam !== Team.None && cellTeam.get(center.id) === localTeam
     }
     playerGrounded = y - center.groundY <= GROUND_TOLERANCE
-    if (!playerGrounded) return
+    // Fall rescue holds paint off through the pickup and the walk-only land brace.
+    if (!playerGrounded || isMoveLocked()) return
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue
