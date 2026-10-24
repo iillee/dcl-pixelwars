@@ -25,12 +25,15 @@
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
  *                  spawn the panel under their feet (holdFallLine so it does not re-trip).
  *                  No catch teleport and no camera / avatar target — the view stays put.
- *   grab           floater swoops in, parented to the panel; panel stays put so they can land on it
- *   carry          Tween: rise above the arena, cruise to the base, descend to just above it.
- *                  Floater rides along. Movement stays locked.
+ *   grab           floater swoops in, parented to the panel. The panel bobs in place
+ *                  (engine Tween, not a per-frame Transform write) so they can land.
+ *   carry          Tween: rise above the arena, cruise to the base, descend to just above it,
+ *                  with the same bob baked into the path. The cloud inherits it by parenting.
+ *                  Movement stays locked.
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
+ * The cloud puffs carry a slightly larger inside-out black shell so they read against the white level.
  *   land           walk only, abilities still off, then normal play
  *
  * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 3.8s).
@@ -91,8 +94,13 @@ export const FALL_RESCUE = {
   PAD_THICK: 2,
   /** Feet this far above the pad top for the one catch teleport, so they settle onto it once. */
   FEET_CLEAR: 0.25,
-  /** Floater bob (m). The pad itself does not bob — a per-frame Transform write is not the carry. */
+  /**
+   * Shared bob amplitude (m), baked into the panel Tween. The cloud is parented, so it
+   * does not run its own bob. 0.12 m at BOB_RATE stays well under gravity — a float, not a bounce.
+   */
   BOB: 0.12,
+  /** Radians per second. Quarter-cycle samples keep the path smooth without a per-frame write. */
+  BOB_RATE: 3.2,
   /** Panel surface this many meters above SKY_TOP_Y while cruising, so the trip clears the roof. */
   CRUISE_CLEAR: 8,
   /**
@@ -126,10 +134,13 @@ const HOOK_MAT = {
   metallic: 0,
   castShadows: false,
 }
+/** Unlit black shell. One negative axis flips the winding so it reads as a rim, not a solid ball. */
+const OUTLINE_MAT = { diffuseColor: Color4.create(0, 0, 0, 1), castShadows: false }
+const OUTLINE_SCALE = 1.14
 
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
-type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number; bob: number }
+type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number }
 type Vec = { x: number; y: number; z: number }
 type Leg = { from: Vec; to: Vec; ms: number }
 type Carry = { legs: Leg[]; index: number; legAt: number; beganAt: number }
@@ -341,6 +352,23 @@ function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' 
   return e
 }
 
+/** Slightly larger inside-out black sphere. The white puff sits in front of the rim. */
+function makeOutline(parent: Entity, pos: Vector3, scale: Vector3): Entity {
+  const e = engine.addEntity()
+  Transform.create(e, {
+    parent,
+    position: pos,
+    scale: Vector3.create(scale.x * OUTLINE_SCALE, scale.y * OUTLINE_SCALE, -scale.z * OUTLINE_SCALE),
+  })
+  MeshRenderer.setSphere(e)
+  Material.setBasicMaterial(e, OUTLINE_MAT)
+  return e
+}
+
+function makeCloud(parent: Entity, pos: Vector3, scale: Vector3): Entity[] {
+  return [makeOutline(parent, pos, scale), makePart(parent, pos, scale, 'sphere', CLOUD_MAT)]
+}
+
 /** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
 function spawnFloater(): void {
   if (!anchor) return
@@ -351,12 +379,12 @@ function spawnFloater(): void {
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
   })
-  const cloud = makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT)
-  const puffL = makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT)
-  const puffR = makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT)
+  const cloud = makeCloud(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15))
+  const puffL = makeCloud(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62))
+  const puffR = makeCloud(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55))
   const stem = makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT)
   const hook = makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT)
-  floater = { root, ents: [root, cloud, puffL, puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0, bob: 0 }
+  floater = { root, ents: [root, ...cloud, ...puffL, ...puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0 }
 }
 
 function playLeg(index: number): void {
@@ -368,12 +396,36 @@ function playLeg(index: number): void {
   Tween.setMove(pad, v3(leg.from), v3(leg.to), leg.ms, EasingFunction.EF_LINEAR)
 }
 
-/** Three linear legs. Start positions are the pad center, not the surface. */
-function startCarry(): void {
-  if (!pad) { finish('snap', 'no panel'); return }
-  const tr = Transform.getOrNull(pad)
-  if (!tr) { finish('snap', 'panel has no transform'); return }
-  const start = { x: tr.position.x, y: tr.position.y, z: tr.position.z }
+function tripSeconds(): number {
+  return FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S
+}
+
+/** Bob fades out over the descent so the landing isn't mid-bounce. Zero at t=0, so the catch doesn't pop. */
+function bobOffset(t: number): number {
+  const descendAt = FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S
+  const fade = t <= descendAt ? 1 : 1 - Math.min(1, (t - descendAt) / FALL_RESCUE.DESCEND_S)
+  return Math.sin(t * FALL_RESCUE.BOB_RATE) * FALL_RESCUE.BOB * fade
+}
+
+/** Center of the pad along the carry, plus the shared bob. `t` is seconds from the trip. */
+function pathAt(t: number, start: Vec, riseTo: Vec, cruiseTo: Vec, landAt: Vec): Vec {
+  const g = FALL_RESCUE.GRAB_S
+  const r = g + FALL_RESCUE.RISE_S
+  const c = r + FALL_RESCUE.CRUISE_S
+  let base: Vec
+  if (t <= g) base = start
+  else if (t <= r) base = lerp(start, riseTo, (t - g) / FALL_RESCUE.RISE_S)
+  else if (t <= c) base = lerp(riseTo, cruiseTo, (t - r) / FALL_RESCUE.CRUISE_S)
+  else base = lerp(cruiseTo, landAt, Math.min(1, (t - c) / FALL_RESCUE.DESCEND_S))
+  return { x: base.x, y: base.y + bobOffset(t), z: base.z }
+}
+
+/**
+ * One engine-side path: bob in place through the grab, then rise, cruise, descend
+ * with that bob still in the samples. Linear chords between quarter-cycle knots.
+ * Not a TweenSequence — this SDK restarts a finished sequence.
+ */
+function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number } {
   const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
   const thick = FALL_RESCUE.PAD_THICK
   const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR - thick / 2
@@ -381,24 +433,36 @@ function startCarry(): void {
   const riseTo = { x: start.x, y: cruiseY, z: start.z }
   const cruiseTo = { x: base.x, y: cruiseY, z: base.z }
   const landAt = { x: base.x, y: arriveY, z: base.z }
-  const now = Date.now()
-  carry = {
-    legs: [
-      { from: start, to: riseTo, ms: ms(FALL_RESCUE.RISE_S) },
-      { from: riseTo, to: cruiseTo, ms: ms(FALL_RESCUE.CRUISE_S) },
-      { from: cruiseTo, to: landAt, ms: ms(FALL_RESCUE.DESCEND_S) },
-    ],
-    index: 0,
-    legAt: now,
-    beganAt: now,
+  const total = tripSeconds()
+  const step = (Math.PI / 2) / FALL_RESCUE.BOB_RATE
+  const marks = [0, FALL_RESCUE.GRAB_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S, FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S, total]
+  for (let t = step; t < total; t += step) marks.push(t)
+  const times = [...new Set(marks.map(t => Math.round(t * 1000) / 1000))].sort((a, b) => a - b)
+  const legs: Leg[] = []
+  for (let i = 0; i < times.length - 1; i++) {
+    const t0 = times[i]
+    const t1 = times[i + 1]
+    legs.push({
+      from: pathAt(t0, start, riseTo, cruiseTo, landAt),
+      to: pathAt(t1, start, riseTo, cruiseTo, landAt),
+      ms: ms(t1 - t0),
+    })
   }
+  return { legs, cruiseY, arriveY }
+}
+
+/** Start the bobbed carry as soon as the pad exists. `start` is the pad center. */
+function startPath(start: Vec): void {
+  if (!pad) { finish('snap', 'no panel'); return }
+  const built = buildLegs(start)
+  if (built.legs.length === 0) { finish('snap', 'empty carry path'); return }
+  const now = Date.now()
+  carry = { legs: built.legs, index: 0, legAt: now, beganAt: now }
   slipAccum = 0
   playLeg(0)
-  const trip = (FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S).toFixed(2)
-  const surfaceCruise = cruiseY + thick / 2
-  const surfaceArrive = arriveY + thick / 2
+  const thick = FALL_RESCUE.PAD_THICK
   console.log(
-    `[FallRescue] tween-carry ${trip}s trip, cruiseY=${surfaceCruise.toFixed(1)} arriveY=${surfaceArrive.toFixed(1)} → base ${base.x.toFixed(0)},${base.z.toFixed(0)}`,
+    `[FallRescue] tween-carry ${tripSeconds().toFixed(2)}s trip, bob ${FALL_RESCUE.BOB}m on the panel, cruiseY=${(built.cruiseY + thick / 2).toFixed(1)} arriveY=${(built.arriveY + thick / 2).toFixed(1)}`,
   )
 }
 
@@ -425,7 +489,8 @@ function legVisuallyDone(leg: Leg): boolean {
 
 function tickCarry(dt: number): void {
   if (!carry || !pad) { finish('snap', 'carry missing'); return }
-  const graceOver = (Date.now() - carry.beganAt) / 1000 >= FALL_RESCUE.SLIP_GRACE_S
+  // beganAt is the trip. Landing on the pad gets the grab plus the usual grace.
+  const graceOver = (Date.now() - carry.beganAt) / 1000 >= FALL_RESCUE.GRAB_S + FALL_RESCUE.SLIP_GRACE_S
   const p = playerPos()
   const surface = surfaceNow()
   if (graceOver && p && surface) {
@@ -482,8 +547,9 @@ function begin(p: Vec): void {
   exitOverview()
   spawnPad(hold)
   spawnFloater()
+  startPath({ x: hold.x, y: hold.y - FALL_RESCUE.PAD_THICK / 2, z: hold.z })
   try { room.send('playerFell', {}) } catch (err) { console.log('[FallRescue] playerFell send failed', err) }
-  const trip = (FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S).toFixed(2)
+  const trip = tripSeconds().toFixed(2)
   const under = p.y - hold.y
   console.log(
     `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, tween-carry in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
@@ -492,20 +558,20 @@ function begin(p: Vec): void {
 
 function tickPhase(dt: number): void {
   if (phase === 'grab') {
-    phaseLeft -= dt
+    // Same clock as the bobbed tween, so the swoop doesn't drift off the panel.
+    phaseLeft = carry ? Math.max(0, FALL_RESCUE.GRAB_S - (Date.now() - carry.beganAt) / 1000) : phaseLeft - dt
     if (phaseLeft <= 0) {
       // Rare: they passed through the top. A short Y nudge only — never a look snap.
       nudgeOntoPad()
       phase = 'carry'
-      if (floater) floater.mode = 'hang'
-      startCarry()
+      if (floater) {
+        floater.mode = 'hang'
+        placeFloater(FALL_RESCUE.HANG_Y, 1, null)
+      }
     }
     return
   }
-  if (phase === 'carry') {
-    tickCarry(dt)
-    return
-  }
+  if (phase === 'carry') return
   if (phase === 'land') {
     phaseLeft -= dt
     if (phaseLeft <= 0) {
@@ -522,22 +588,20 @@ function tickFloater(dt: number, line: number): void {
   const onPad = anchor !== null && (phase === 'grab' || phase === 'carry')
   const world = onPad ? null : playerPos()
   if (!onPad && !world) { despawnFloater(); return }
-  floater.bob += dt
-  const bob = Math.sin(floater.bob * 3.2) * FALL_RESCUE.BOB
+  // No local bob. The panel Tween is the motion, and this root is parented to it.
   if (floater.mode === 'in') {
     const u = 1 - Math.max(0, phaseLeft) / FALL_RESCUE.GRAB_S
-    placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y + bob * u, 0.2 + 0.8 * u, world)
+    placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world)
     return
   }
-  if (floater.mode === 'hang' || floater.mode === 'wait') {
-    placeFloater(FALL_RESCUE.HANG_Y + bob, 1, world)
-    if (floater.mode === 'wait') {
-      floater.waitLeft -= dt
-      const liveY = playerPos()?.y
-      if ((liveY !== undefined && liveY >= line) || floater.waitLeft <= 0) {
-        floater.mode = 'peel'
-        floater.peelLeft = FALL_RESCUE.PEEL_S
-      }
+  if (floater.mode === 'hang') return
+  if (floater.mode === 'wait') {
+    placeFloater(FALL_RESCUE.HANG_Y, 1, world)
+    floater.waitLeft -= dt
+    const liveY = playerPos()?.y
+    if ((liveY !== undefined && liveY >= line) || floater.waitLeft <= 0) {
+      floater.mode = 'peel'
+      floater.peelLeft = FALL_RESCUE.PEEL_S
     }
     return
   }
@@ -557,6 +621,7 @@ function tick(dt: number): void {
     if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
   }
   if (phase !== 'idle') tickPhase(step)
+  if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   tickFloater(step, line)
   const p = playerPos()
   if (p && phase === 'idle' && rearm && isMazeReady() && p.y < line) begin(p)
