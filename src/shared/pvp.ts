@@ -224,14 +224,18 @@ export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
 /** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
  *  A miss that lands inside AIR_SPIKE_STAMP_WINDOW_S plays that same burst_impact once
  *  (not the press dive clip as well — the two together read as a double burst).
- *  The server paints that footprint once. A connect does not play the landing;
- *  its sound is air_spike_hit. No second knock. The cue is dropped if the feet
- *  meet the floor later than the window. */
+ *  The server paints that footprint once, and the shockwave knocks with the same
+ *  radius, force, and hit validation as a ground Burst. A connect does not play
+ *  the landing; its sound is air_spike_hit, and the landing stays disarmed so
+ *  there is no second shockwave. The cue is dropped if the feet meet the floor
+ *  later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
 export const AIR_SPIKE_STAMP_VOL = 0.92
 export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
-/** Server: accept burstHit this long after burstUse (s). */
+/** Server: accept burstHit this long after the shockwave opens (s).
+ *  A ground press opens it on burstUse. A landing opens it when that air miss
+ *  is accepted, so a dive longer than this can still knock. */
 export const SERVER_BURST_HIT_WINDOW_S = 1.0
 /** Metres above the walkable surface that still count as standing for Burst.
  *  Movement paint stays at 0.4 m. A mobile bob, or a hotbar press that samples

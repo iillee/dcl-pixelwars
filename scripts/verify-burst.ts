@@ -3,11 +3,12 @@
  * Run: npx tsx scripts/verify-burst.ts. Cooldown config, 3D radius, outward
  * direction, server hit ledger, and the paint footprint on a real maze graph
  * (stays on walkable adjacency: no gaps, no other levels), and the one-time
- * paint centre resolution (burstUse cell → footprint). Feel, LOS raycast
- * and networking need an Explorer playtest.
+ * paint centre resolution (burstUse cell → footprint). The landing shockwave
+ * uses the same radius, direction, and hit ledger as a ground Burst. Feel,
+ * LOS raycast and networking need an Explorer playtest.
  */
-import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre } from '../src/shared/burst'
-import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE } from '../src/shared/pvp'
+import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre, shockwaveHits } from '../src/shared/burst'
+import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, SERVER_BURST_LAND_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
 import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
 import { worldToCellId } from '../src/paint'
@@ -222,6 +223,50 @@ check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).le
   dive.start('a', 4, 0, 1)
   check('landing stays ready until the footprint commits', dive.paintReady('a', 4, 100, 2) && dive.paintReady('a', 4, 200, 2))
   check('committing the landing ends it', dive.commitPaint('a', 4) && !dive.paintReady('a', 4, 300, 2) && dive.hasPaint('a', 4))
+}
+{
+  // Landing shockwave knockback. Same geometry as a ground Burst (shockwaveHits →
+  // inBurst + burstDir). The press cylinder does not hit someone standing beside
+  // the landing spot; the landing shockwave does, and pushes them outward.
+  const press = P(0, 0, 6)
+  const feet = P(0, 0, 0)
+  const beside = { id: 'near', ...P(3, 0, 0) }
+  const far = { id: 'far', ...P(BURST_RADIUS + 0.3, 0, 0) }
+  const above = { id: 'up', ...P(1, 0, BURST_HIT_MAX_DY + 0.3) }
+  const spiked = { id: 'spike', ...P(0.4, 0, 4) }
+  check('player beside the landing is outside the air-spike cylinder', !inAirSpike(press, beside))
+  check('a direct spike under the attacker is inside the cylinder', inAirSpike(press, spiked))
+  const hits = shockwaveHits(feet, [beside, far, above, spiked], 0, 1)
+  const near = hits.find(h => h.id === 'near')
+  check('landing shockwave hits the nearby player inside the ground radius', !!near && hits.every(h => h.id !== 'far'))
+  check('landing knock direction is outward from the feet', !!near && Math.abs(near.x - 1) < 1e-6 && Math.abs(near.z) < 1e-6)
+  check('landing shockwave uses the ground height limit', !hits.some(h => h.id === 'up') && !hits.some(h => h.id === 'spike'))
+  const stacked = shockwaveHits(feet, [{ id: 'on', x: feet.x, y: feet.y, z: feet.z + 0.05 }], 0, 1)
+  check('landing overlap falls back to facing, same as a ground burst', stacked.length === 1 && Math.abs(stacked[0].z - 1) < 1e-9)
+  // Ledger: landing opens the ground hit window without spending the paint or
+  // flipping the press mode (an air paint retry must not look like a ground replay).
+  // burstHit → noteHit runs only when hit() is ok, so a dup is not a second KO.
+  const knock = new BurstLedger()
+  knock.start('a', 9, 0, 1, 0, 1)
+  check('spike impact before the landing, press facing kept', knock.impactAir('a', 9) === 1 && knock.mode('a', 9) === 1 && knock.facing('a', 9).z === 1)
+  check('spike victim accepted inside the press window', knock.hit('a', 9, 'spike', 400) === 'ok')
+  check('press window rejects a hit before the landing opens', knock.hit('a', 9, 'early', SERVER_BURST_HIT_WINDOW_S * 1000 + 1) === 'stale')
+  const landAt = 1500
+  check('landing knock opens once inside the land window', knock.openLanding('a', 9, landAt, SERVER_BURST_LAND_WINDOW_S) && knock.landed('a', 9))
+  check('landing knock does not open twice', !knock.openLanding('a', 9, landAt + 50, SERVER_BURST_LAND_WINDOW_S))
+  check('landing impact is the ground radial; press mode stays airborne', knock.impactAir('a', 9) === 0 && knock.mode('a', 9) === 1)
+  check('the spiked victim is not accepted again (no second knock, no second KO)', knock.hasHit('a', 9, 'spike') && knock.hit('a', 9, 'spike', landAt + 20) === 'dup')
+  check('a nearby player is accepted on the landing window', knock.hit('a', 9, 'near', landAt + 20) === 'ok')
+  check('same nearby player is not credited twice', knock.hit('a', 9, 'near', landAt + 40) === 'dup')
+  check('landing hit window is the ground window, measured from the landing', knock.hit('a', 9, 'slow', landAt + SERVER_BURST_HIT_WINDOW_S * 1000 + 1) === 'stale')
+  check('opening the landing does not spend the paint', knock.paintReady('a', 9, landAt + 100, SERVER_BURST_LAND_WINDOW_S))
+  const gnd = new BurstLedger()
+  gnd.start('g', 1, 0, 0, 1, 0)
+  check('a grounded burst does not open a landing knock', !gnd.openLanding('g', 1, 10, SERVER_BURST_LAND_WINDOW_S) && gnd.impactAir('g', 1) === 0 && !gnd.landed('g', 1))
+  const late = new BurstLedger()
+  late.start('a', 2, 0, 1)
+  check('landing knock outside the land window is rejected', !late.openLanding('a', 2, SERVER_BURST_LAND_WINDOW_S * 1000 + 1, SERVER_BURST_LAND_WINDOW_S) && late.impactAir('a', 2) === 1)
+  check('a connect that never lands stays a downward spike', late.hit('a', 2, 'victim', 100) === 'ok' && late.impactAir('a', 2) === 1)
 }
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }

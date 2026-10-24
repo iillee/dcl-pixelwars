@@ -41,7 +41,7 @@ import {
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_BOT_SHOVE,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
-import { BurstLedger, burstFootprint, burstCentre, inBurst, inAirSpike } from '../shared/burst'
+import { BurstLedger, burstFootprint, burstCentre, inAirSpike, shockwaveHits } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
@@ -490,9 +490,22 @@ export async function setupServer(): Promise<void> {
 
   // ─── Paint Burst (shared/pvp.ts BURST_*, shared/burst.ts) ─────────
   // burstUse: server-enforced cooldown (SERVER_MIN_BURST_GAP_S), shared by ground and air.
-  // air 0: radial paint + radial bot shove. air 1: spike now; the landing paints once via burstLand.
+  // air 0: radial paint + radial bot shove. air 1: spike now; the landing paints once via burstLand
+  // and, on the first accepted sample, opens the same radial knock (players via burstHit, bots here).
   // burstHit: attacker client found a player; accepted once per (attacker, burst id, target).
   // Same centre, footprint, applyPaint, and score credit as a grounded burstUse. Once.
+  // Same radius and direction as the client shockwave. Slack matches the old inline bot check.
+  const radialBotShock = (from: string, id: number, team: number, origin: { x: number; y: number; z: number }, fx: number, fz: number, now: number) => {
+    const targets = getBotPositions().filter(b => b.team !== team).map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z }))
+    for (const h of shockwaveHits(origin, targets, fx, fz, BURST_RADIUS + 1)) {
+      // A spike that already connected this bot must not shove it again when the miss lands.
+      if (bursts.hasHit(from, id, `bot:${h.id}`)) continue
+      if (punchBot(h.id, origin.x, origin.y, origin.z, h.x, h.z, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+        bursts.hit(from, id, `bot:${h.id}`, now)
+        room.send('burstImpact', { attacker: from, id, target: `bot:${h.id}`, dx: h.x, dz: h.z, air: 0 })
+      }
+    }
+  }
   const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number): string[] => {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
@@ -533,7 +546,7 @@ export async function setupServer(): Promise<void> {
     const airborne = air !== 0
     lastBurstAt.set(from, now)
     markActive(from)
-    bursts.start(from, id, now, airborne ? 1 : 0)
+    bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
     const origin = { x, y, z }
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
     room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
@@ -543,17 +556,7 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} footprint=${fp.length} | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} rampCells=${rampIds}`)
     if (!airborne) {
       commitBurstPaint(from, id, fp)
-      for (const b of getBotPositions()) {
-        if (b.team === team || !inBurst(origin, { x: b.x, y: b.y, z: b.z }, BURST_RADIUS + 1)) continue
-        let dx = b.x - x, dz = b.z - z
-        const l = Math.hypot(dx, dz)
-        if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
-        const dl = Math.hypot(dx, dz) || 1
-        if (punchBot(b.id, x, y, z, dx / dl, dz / dl, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
-          bursts.hit(from, id, `bot:${b.id}`, now)
-          room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl, air: 0 })
-        }
-      }
+      radialBotShock(from, id, team, origin, fx, fz, now)
     } else {
       for (const b of getBotPositions()) {
         if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
@@ -572,6 +575,9 @@ export async function setupServer(): Promise<void> {
   // Landing of an airborne burst: one ground-Burst footprint at the feet.
   // Movement paint may already own the 3×3 under the player; applyPaint does not
   // re-credit those cells, so the score matches a single grounded burst.
+  // The first accepted sample also opens the ground shockwave: same bot shove,
+  // and a burstFired (air 0) so victims anticipate exactly as they do for a press.
+  // Player hits arrive as burstHit after this message and share that validation.
   room.onMessage('burstLand', ({ id, cell, x, y, z }, context) => {
     const from = context?.from
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
@@ -583,6 +589,15 @@ export async function setupServer(): Promise<void> {
       return
     }
     markActive(from)
+    const origin = { x, y, z }
+    // Before paint, and before the burstHits queued behind this message.
+    // An empty footprint still opens the knock; the client already played the shockwave.
+    // A later retry paints without shoving or broadcasting again.
+    if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
+      const face = bursts.facing(from, id)
+      room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0 })
+      radialBotShock(from, id, team, origin, face.x, face.z, now)
+    }
     const fp = paintBurstFootprint(from, team, cell, x, y, z)
     console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} footprint=${fp.length} cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
     if (fp.length === 0) return
@@ -630,7 +645,7 @@ export async function setupServer(): Promise<void> {
     const verdict = bursts.hit(from, id, victim.userId, Date.now())
     if (verdict !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`); return }
     noteHit(from, victim.userId)
-    const spike = bursts.mode(from, id) !== 0
+    const spike = bursts.impactAir(from, id) !== 0
     room.send('burstImpact', { attacker: from, id, target: victim.userId, dx: dx / len, dz: dz / len, air: spike ? 1 : 0 })
   })
 

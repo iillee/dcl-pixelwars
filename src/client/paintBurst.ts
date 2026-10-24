@@ -12,10 +12,11 @@
  *     the cylinder (clearly below, ~2 m across, ~5.5 m down) is a combat hit —
  *     strong downward knock, small outward, brief control lock. A miss over the
  *     void keeps the dive and falls. A miss that meets the floor plays the grounded
- *     shockwave and the server paints that footprint once (same path as a ground
- *     Burst). A connect does not play or paint it: most of the downward speed is
- *     cancelled, nothing is added upward, and the victim is spiked with the glider
- *     forced shut. Ground Burst does not dive.
+ *     shockwave, the server paints that footprint once, and the shockwave knocks
+ *     through the same radial path as a ground Burst (radialKnock → burstHit).
+ *     A connect does not play, paint, or knock with it: the landing stays disarmed,
+ *     most of the downward speed is cancelled, nothing is added upward, and the
+ *     victim is spiked with the glider forced shut. Ground Burst does not dive.
  *   The hotbar only queues the press. Ground vs air uses a live stance sample
  *   (BURST_STANCE_SLACK), not the previous frame's grounded flag. A shockwave
  *   keeps resending its paint until the server confirms the footprint.
@@ -43,7 +44,7 @@ import {
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
-import { inBurst, inAirSpike, burstDir, V3 } from '../shared/burst'
+import { inBurst, inAirSpike, burstDir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
@@ -150,10 +151,20 @@ function showAirTrail(p: V3, team: Team, fx: number, fz: number): void {
 /** One grounded shockwave per dive, when feet meet the floor.
  *  Same presentation as a ground Burst (showShockwave). Audio is one
  *  burst_impact per landing: camera-parented for the diver, positional for
- *  everyone else. A second stamp for the same dive (own echo) does not play
- *  it again. The local client also asks the server to paint that footprint
- *  once. No second knock — the cylinder hit already resolved at the press.
+ *  everyone else. A second stamp for the same dive (own echo, or the server's
+ *  landing burstFired) does not play it again. The local client asks the server
+ *  to paint that footprint once, then runs the ground radial knock (players and
+ *  anvils). The server echoes burstFired air 0 so other clients anticipate.
  *  The first few frames are skipped so a low hop does not fire on the press. */
+/** Shockwave VFX already played for this attacker#id (landing stamp or burstFired). */
+const shockSeen = new Map<string, number>()
+function sawShock(key: string, now: number): boolean {
+  const prev = shockSeen.get(key)
+  if (prev !== undefined && now - prev < 6000) return true
+  shockSeen.set(key, now)
+  if (shockSeen.size > 64) shockSeen.delete(shockSeen.keys().next().value as string)
+  return false
+}
 /** Last local landing that already played burst_impact, so a self echo cannot. */
 let localShockId = -1
 let localShockAt = 0
@@ -237,7 +248,7 @@ function armLandingStamp(who: string, team: Team, id: number, fx = 0, fz = 1): v
   if (i >= 0) stampWatch[i] = row
   else stampWatch.push(row)
 }
-/** A connect is the air-hit, not a ground slam. Drop the landing shockwave and its paint. */
+/** A connect is the air-hit, not a ground slam. Drop the landing shockwave, its knock, and its paint. */
 function disarmLandingStamp(who: string): void {
   const i = stampWatch.findIndex(s => s.who === who)
   if (i < 0) return
@@ -267,15 +278,20 @@ function tickStamps(dt: number): void {
       const cell = s.who === '' ? (stance?.cell ?? '') : ''
       const now = Date.now()
       const repeat = localShock && localShockId === s.id && now - localShockAt < AIR_SPIKE_STAMP_WINDOW_S * 1000
-      if (!repeat) {
+      // The server also broadcasts this shockwave (air 0) for victim anticipation.
+      // Whichever arrives first plays burst_impact; the other stays silent.
+      if (!repeat && !sawShock(`${s.who}#${s.id}`, now)) {
         if (localShock) { localShockId = s.id; localShockAt = now }
         showShockwave(pos, s.team, localShock, cell)
       }
       // The server paints once. Retries keep going until burstPainted, so a lost
       // burstUse or an empty centre does not leave the shockwave unpainted.
+      // burstLand goes out before the radial hits so the server opens the ground
+      // phase first (same validation, radial impact, not another spike).
       if (s.who === '') {
         queuePaint('land', s.id, cell, pos, s.fx, s.fz)
-        if (!safeSend('burstLand', () => sendBurstLand(s.id, cell, pos.x, pos.y, pos.z))) kickPaint(s.id)
+        if (safeSend('burstLand', () => sendBurstLand(s.id, cell, pos.x, pos.y, pos.z))) radialKnock(pos, s.team, s.fx, s.fz, s.id)
+        else kickPaint(s.id)
       }
       console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
@@ -442,6 +458,31 @@ function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
   addFx(BURST_LOS_TIMEOUT_S, () => {}, (_e, u) => { if (u >= 0.95) finish(true) })
 }
 
+/** Ground shockwave hits: opponents in BURST_RADIUS, outward burstDir, then burstHit.
+ *  A grounded press and an air-miss landing both call this. LOS, anvil dummies,
+ *  and the server's team / once / window / KO credit checks are the press path. */
+function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): void {
+  const players: Array<V3 & { id: string }> = []
+  for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
+    if (entity === engine.PlayerEntity) continue
+    const tt = teamOfUser(pid.address)
+    if ((tt !== Team.Red && tt !== Team.Blue) || tt === team) continue
+    players.push({ id: pid.address.toLowerCase(), x: tr.position.x, y: tr.position.y, z: tr.position.z })
+  }
+  for (const h of shockwaveHits(p, players, fx, fz)) {
+    losThen(p, h.at, () => {
+      // Optimistic connect: attacker hears/sees the hit now; victim knock still waits on burstImpact.
+      sendBurstHit(id, h.id, h.x, h.z)
+      playDashHitSfx()
+      playAt(h.at)
+    })
+  }
+  const dummies = getDummyTargets().map(d => ({ id: d.i, x: d.pos.x, y: d.pos.y, z: d.pos.z }))
+  for (const h of shockwaveHits(p, dummies, fx, fz)) {
+    losThen(p, h.at, () => hitDummy(h.id, h.x, h.z, 1, id), DUMMY_LOS_SLACK)
+  }
+}
+
 /** Hotbar press (mobile circle, desktop slot). The gameplay system fires it, so the
  *  stance sample is this frame's feet and the send runs there too. */
 let burstRequested = false
@@ -474,36 +515,15 @@ export function triggerBurst(): void {
     void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: false }).catch(() => {})
     emoteLeft = BURST_EMOTE_S
   }
-  // Opponent players (attacker-detected, like Lunge; server dedupes).
-  for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
-    if (entity === engine.PlayerEntity) continue
-    const tt = teamOfUser(pid.address)
-    if ((tt !== Team.Red && tt !== Team.Blue) || tt === team) continue
-    const tp: V3 = { x: tr.position.x, y: tr.position.y, z: tr.position.z }
-    if (!inBurst(p, tp)) continue
-    const addr = pid.address.toLowerCase()
-    const k = burstDir(p, tp, f.x, f.z)
-    losThen(p, tp, () => {
-      // Optimistic connect: attacker hears/sees the hit now; victim knock still waits on burstImpact.
-      sendBurstHit(id, addr, k.x, k.z)
-      playDashHitSfx()
-      playAt(tp)
-    })
-  }
-  // Local test dummies.
-  for (const d of getDummyTargets()) {
-    if (!inBurst(p, d.pos)) continue
-    const k = burstDir(p, d.pos, f.x, f.z)
-    losThen(p, d.pos, () => hitDummy(d.i, k.x, k.z, 1, id), DUMMY_LOS_SLACK)
-  }
+  radialKnock(p, team, f.x, f.z, id)
   // TEMP (ramp paint debug): reported cell + feet position; compare with the [Server] burst line.
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
 /** Airborne F: downward spike. A player or bot in the cylinder is combat.
- *  Hit: keep a fraction of the fall, no landing shockwave and no burst paint.
- *  Miss: full dive (a void miss keeps falling). The landing shockwave and its
- *  paint wait until the feet meet the floor. */
+ *  Hit: keep a fraction of the fall, no landing shockwave, no landing knock, no burst paint.
+ *  Miss: full dive (a void miss keeps falling). The landing shockwave, its knock,
+ *  and its paint wait until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
   // No press clip. A miss plays burst_impact once, at the landing, the same
   // single sound as a ground Burst. Playing air_spike_dive here as well made
@@ -645,11 +665,16 @@ export function initPaintBurst(): void {
         // Landing plays burst_impact once. The press dive clip is not played
         // here either, or a remote would hear the burst twice.
         armLandingStamp(att, team, id)
-      } else showShockwave({ x, y, z }, team, false)
+      } else if (!sawShock(`${att}#${id}`, Date.now())) {
+        // Ground press, or the landing rebroadcast. The stamp may have played it already.
+        showShockwave({ x, y, z }, team, false)
+      }
     }
     // Victim anticipation: if we're already in the volume, knock now
     // (Impact arrives ~same RTT; this wins when Fired is processed before Impact).
-    // Air uses the downward cylinder and the spike impulse, never the radial lift.
+    // The press is air 1 (downward cylinder). The landing rebroadcast is air 0
+    // at the feet, so this is the same radial knock as a ground Burst.
+    // sawStart above refreshes the gate, or a long dive would drop the impact as stale.
     if (!VICTIM_SPECULATIVE_KNOCK) return
     const my = localTeam()
     if (my === Team.None || team === my) return

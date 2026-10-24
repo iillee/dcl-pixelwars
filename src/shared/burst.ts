@@ -34,6 +34,23 @@ export function burstDir(origin: V3, t: V3, fx: number, fz: number): { x: number
 }
 
 /**
+ * Targets a ground shockwave hits. Used for a grounded press and for the landing
+ * of an air miss — same radius, same outward direction. `id` is whatever the
+ * caller knocks (player address, bot id, anvil index).
+ */
+export function shockwaveHits<T extends V3 & { id: string | number }>(
+  origin: V3, targets: readonly T[], fx: number, fz: number, radius = BURST_RADIUS,
+): Array<{ id: T['id']; x: number; z: number; at: T }> {
+  const out: Array<{ id: T['id']; x: number; z: number; at: T }> = []
+  for (const t of targets) {
+    if (!inBurst(origin, t, radius)) continue
+    const d = burstDir(origin, t, fx, fz)
+    out.push({ id: t.id, x: d.x, z: d.z, at: t })
+  }
+  return out
+}
+
+/**
  * Footprint cells around `center` on the walkable graph: BFS over walkable
  * adjacency that only steps through cells inside the shape (square: |dx|,|dz|
  * ≤ R cells; cross: |dx|+|dz| ≤ R cells; circle: centre distance ≤ R cells), each step within
@@ -90,15 +107,52 @@ export function burstCentre(graph: WalkableGraph, cell: string, p: V3): string |
 
 /** Server: one live burst per attacker; each target accepted once, within the hit window. */
 export class BurstLedger {
-  private last = new Map<string, { id: number; at: number; hits: Set<string>; air: number; painted: boolean }>()
-  /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing). */
-  start(from: string, id: number, now: number, air = 0): void {
-    this.last.set(from, { id, at: now, hits: new Set(), air, painted: false })
+  private last = new Map<string, {
+    id: number; at: number; hits: Set<string>; air: number; painted: boolean
+    fx: number; fz: number; landed: boolean; landAt: number
+  }>()
+  /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing).
+   *  `fx, fz` is the press facing, kept for the landing shockwave's overlap fallback. */
+  start(from: string, id: number, now: number, air = 0, fx = 0, fz = 1): void {
+    this.last.set(from, { id, at: now, hits: new Set(), air, painted: false, fx, fz, landed: false, landAt: now })
   }
-  /** 0 when this burst is the grounded radial (or unknown). Non-zero means the downward spike. */
+  /** 0 when this burst is the grounded radial (or unknown). Non-zero means the downward spike.
+   *  Stays the press mode after the landing opens, so an air paint retry is not treated as a ground replay. */
   mode(from: string, id: number): number {
     const l = this.last.get(from)
     return l && l.id === id ? l.air : 0
+  }
+  /** Press facing. Overlap knockback falls back to this, on the ground and on landing. */
+  facing(from: string, id: number): { x: number; z: number } {
+    const l = this.last.get(from)
+    return l && l.id === id ? { x: l.fx, z: l.fz } : { x: 0, z: 1 }
+  }
+  /** The air miss has opened its ground shockwave. Once. Paint is separate. */
+  landed(from: string, id: number): boolean {
+    const l = this.last.get(from)
+    return !!l && l.id === id && l.landed
+  }
+  /** burstImpact.air. Downward spike until the landing shockwave opens, then the ground radial. */
+  impactAir(from: string, id: number): number {
+    const l = this.last.get(from)
+    if (!l || l.id !== id) return 0
+    return l.air !== 0 && !l.landed ? 1 : 0
+  }
+  /** First accepted landing of an airborne burst, inside the land window.
+   *  Once. Starts the same hit window a ground burst has (measured from the landing,
+   *  so a dive longer than that window can still knock). Does not consume the paint. */
+  openLanding(from: string, id: number, now: number, windowS: number): boolean {
+    const l = this.last.get(from)
+    if (!l || l.id !== id || l.air === 0 || l.landed) return false
+    if (now - l.at > windowS * 1000) return false
+    l.landed = true
+    l.landAt = now
+    return true
+  }
+  /** Target already accepted for this burst (the spike, or an earlier landing hit). */
+  hasHit(from: string, id: number, target: string): boolean {
+    const l = this.last.get(from)
+    return !!l && l.id === id && l.hits.has(target.toLowerCase())
   }
   /** This attacker's live burst is `id` (a retry of the same press, not a new one). */
   matches(from: string, id: number): boolean {
@@ -132,7 +186,9 @@ export class BurstLedger {
   hit(from: string, id: number, target: string, now: number): 'ok' | 'unknown' | 'stale' | 'dup' {
     const l = this.last.get(from)
     if (!l || l.id !== id) return 'unknown'
-    if (now - l.at > SERVER_BURST_HIT_WINDOW_S * 1000) return 'stale'
+    // Ground: window runs from the press. Landing: the same window runs from the shockwave open.
+    const anchor = l.landed ? l.landAt : l.at
+    if (now - anchor > SERVER_BURST_HIT_WINDOW_S * 1000) return 'stale'
     const k = target.toLowerCase()
     if (l.hits.has(k)) return 'dup'
     l.hits.add(k)

@@ -184,11 +184,15 @@ export const Messages = {
   burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int }),
   // Client → Server: airborne burst `id` met the floor at (x, y, z) on `cell`.
   // Same centre + footprint + applyPaint path as a grounded burstUse. Once per id.
+  // The first accepted sample also opens the ground shockwave (burstFired air 0,
+  // then the same burstHit validation). A retry only finishes the paint.
   burstLand: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
   // Server → attacker only: footprint for burst `id` was applied (n = cell count).
   // The client retries burstUse / burstLand until this arrives. n > 0 only.
   burstPainted: Schemas.Map({ id: Schemas.Int, n: Schemas.Int }),
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
+  // air 1 is the airborne press. A second burstFired with air 0, same id, is that
+  // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
   burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
