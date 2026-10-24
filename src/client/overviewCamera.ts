@@ -39,21 +39,24 @@ export const OV_YAW_DEG = 45      // axis-aligned with the maze grid: WASD (came
 export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
- * Steps are a table, not a fixed subtraction. A linear step of 10 is only
- * ~10% at the far end (and scales past ~45–52 never move the camera — the
- * scene ceiling clamps the throw), so the first zoom-ins from a far zoom
- * did nothing. Each entry is ~×1.35 the last, so every click changes the
- * framed size by a similar amount.
+ * Steps are a table, not a fixed subtraction. Each entry is ~×1.35 the last.
+ * A fixed 35° pitch cannot back up past about scale 50 (scene ceiling), so
+ * desktop steps 74, 100 and 135 would not move the camera and minus would
+ * end disabled at 135 with the picture unchanged. Those steps lower the pitch
+ * (down to PITCH_MIN) to dolly out, then widen fov for whatever the bounds
+ * still cannot hold.
  *
- * Mobile stays on its original three levels (max 25). Desktop keeps the
- * closest (5) and the default (55) and continues past the old max of 90.
- * isMobile() resolves async, so the table is read live.
+ * Mobile stays on its original three levels (max 25) and starts at the closest.
+ * Desktop starts at 55 and keeps that step across toggles. The table is latched
+ * when overview opens: isMobile() resolves async, and a live re-read would
+ * compare scale 55 to the mobile max of 25 and disable minus.
  */
 const MOBILE_ZOOM_SCALES = [5, 15, 25]
 const DESKTOP_ZOOM_SCALES = [5, 7, 9, 12, 17, 22, 30, 41, 55, 74, 100, 135]
-const zoomScales = () => isMobile() ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
-const scaleDefault = () => isMobile() ? MOBILE_ZOOM_SCALES[0] : 55
-/** Past this, a wider lens stands in for a throw the scene ceiling will not allow. */
+const DESKTOP_DEFAULT_SCALE = 55
+/** Shallowest pitch used to dolly past the ceiling. Steeper stays isometric. */
+const PITCH_MIN = 14
+/** Past this, a wider lens stands in for a throw the scene bounds will not allow. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
@@ -68,17 +71,24 @@ const FOCUS_Y_RATE     = 4
 const YAW_BLEND_S      = 0.8
 const TRANSITION_SPEED = 260 // m/s glide in/out
 
-const SIN_P = Math.sin(OV_PITCH_DEG * DEG)
-const COS_P = Math.cos(OV_PITCH_DEG * DEG)
 const FWD = { x: Math.sin(OV_YAW_DEG * DEG), z: Math.cos(OV_YAW_DEG * DEG) }
 
 // MARK: State
 let camEntity: Entity | null = null
 let lookEnt: Entity | null = null
 let active = false
-let scale = 55
+let scale = DESKTOP_DEFAULT_SCALE
 let scaleInit = false
-/** Lens used when the wanted throw is longer than maxDistance() allows. */
+/** Index into the table latched in `zoomMobile`. Desktop starts on 55, so minus has 74, 100, 135 left. */
+let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
+/** Platform latched while overview is open. Reading isMobile() live would
+ *  judge a desktop scale of 55 against the mobile max of 25 once detection
+ *  resolves, and minus would disable with no click. */
+let zoomMobile = false
+/** Eased scale. Pitch, distance and fov are derived from this so a click moves the picture. */
+let viewScale = DESKTOP_DEFAULT_SCALE
+let pitchDeg = OV_PITCH_DEG
+/** Lens used when the wanted throw is longer than the scene bounds allow. */
 let fov = OV_FOV_DEG
 let fovApplied = -1
 const focus = { x: SCENE_SIZE / 2, y: BASE_Y, z: SCENE_SIZE / 2 }
@@ -144,23 +154,18 @@ function update(dt: number): void {
     focus.y += (ty - focus.y) * (1 - Math.exp(-FOCUS_Y_RATE * dt))
   }
   const ease = 1 - Math.exp(-DIST_RATE * dt)
-  const cap = maxDistance()
-  const wantDist = scale * DIST_PER_SCALE
-  const placeDist = Math.min(wantDist, cap)
-  // Pull in immediately when the ceiling/bounds shrink; ease when zooming out.
-  if (camDist > placeDist) camDist = placeDist
-  else camDist += (placeDist - camDist) * ease
-  const goalFov = targetFov(wantDist, cap)
-  fov += (goalFov - fov) * ease
-  if (Math.abs(goalFov - fov) < 0.02) fov = goalFov
-  writeFov(fov)
+  viewScale += (scale - viewScale) * ease
+  if (Math.abs(scale - viewScale) < 0.02) viewScale = scale
+  applyFraming(viewScale)
   place()
 }
 
 function place(): void {
-  const cx = focus.x - FWD.x * camDist * COS_P
-  const cz = focus.z - FWD.z * camDist * COS_P
-  let cy = focus.y + camDist * SIN_P
+  const sinP = Math.sin(pitchDeg * DEG)
+  const cosP = Math.cos(pitchDeg * DEG)
+  const cx = focus.x - FWD.x * camDist * cosP
+  const cz = focus.z - FWD.z * camDist * cosP
+  let cy = focus.y + camDist * sinP
   cy = Math.max(focus.y + MIN_ABOVE_FOCUS, Math.min(cy, SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M))
   if (lookEnt !== null) {
     const t = Transform.getMutable(lookEnt)
@@ -172,17 +177,58 @@ function place(): void {
   }
 }
 
-/** Longest throw that keeps the camera inside the scene and under the ceiling. */
-function maxDistance(): number {
+/** Longest throw at `pitch` that stays inside the scene and under the ceiling. */
+function maxDistanceAt(pitch: number): number {
+  const sinP = Math.sin(pitch * DEG)
+  const cosP = Math.cos(pitch * DEG)
   let max = Infinity
-  const bx = -FWD.x * COS_P, bz = -FWD.z * COS_P
+  const bx = -FWD.x * cosP, bz = -FWD.z * cosP
   const lo = BOUNDS_INSET_M, hi = SCENE_SIZE - BOUNDS_INSET_M
   if (bx < -1e-6) max = Math.min(max, (focus.x - lo) / -bx)
   if (bx > 1e-6)  max = Math.min(max, (hi - focus.x) / bx)
   if (bz < -1e-6) max = Math.min(max, (focus.z - lo) / -bz)
   if (bz > 1e-6)  max = Math.min(max, (hi - focus.z) / bz)
-  max = Math.min(max, (SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M - focus.y) / SIN_P)
+  if (sinP > 1e-4) max = Math.min(max, (SCENE_HEIGHT_LIMIT - CEILING_MARGIN_M - focus.y) / sinP)
   return Math.max(4, max)
+}
+
+/** Steepest pitch that can hold `wantDist`. Fixed 35° tops out near scale 50, which is why 74/100/135 never moved. */
+function pitchFor(wantDist: number): number {
+  if (maxDistanceAt(OV_PITCH_DEG) >= wantDist) return OV_PITCH_DEG
+  if (maxDistanceAt(PITCH_MIN) < wantDist) return PITCH_MIN
+  let lo = PITCH_MIN, hi = OV_PITCH_DEG
+  for (let i = 0; i < 14; i++) {
+    const mid = (lo + hi) / 2
+    if (maxDistanceAt(mid) >= wantDist) lo = mid
+    else hi = mid
+  }
+  return lo
+}
+
+function applyFraming(view: number): void {
+  const wantDist = view * DIST_PER_SCALE
+  pitchDeg = pitchFor(wantDist)
+  const cap = maxDistanceAt(pitchDeg)
+  camDist = Math.min(wantDist, cap)
+  fov = targetFov(wantDist, camDist)
+  writeFov(fov)
+}
+
+function zoomTable(): readonly number[] {
+  return zoomMobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
+}
+
+/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 55. */
+function useZoomTable(mobile: boolean, snapDefault: boolean): void {
+  zoomMobile = mobile
+  const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
+  if (snapDefault) {
+    const i = mobile ? 0 : table.indexOf(DESKTOP_DEFAULT_SCALE)
+    zoomIndex = i >= 0 ? i : 0
+  } else if (zoomIndex < 0 || zoomIndex >= table.length) {
+    zoomIndex = 0
+  }
+  scale = table[zoomIndex]
 }
 
 // MARK: API
@@ -201,16 +247,16 @@ const MOBILE_RESUME_S = 1.0
 function setActive(on: boolean): void {
   if (camEntity === null) return
   active = on
-  if (!scaleInit) { scaleInit = true; scale = scaleDefault() }
   if (active) {
-    if (isMobile()) scale = scaleDefault()
+    const mobile = isMobile()
+    // First open picks the platform default. Mobile re-opens at its closest
+    // level. Desktop stays on the step it already had, which begins at 55.
+    useZoomTable(mobile, !scaleInit || mobile)
+    scaleInit = true
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) { focus.x = p.x; focus.y = Math.max(p.y, BASE_Y - 15); focus.z = p.z }
-    const cap = maxDistance()
-    const wantDist = scale * DIST_PER_SCALE
-    camDist = Math.min(wantDist, cap)
-    fov = targetFov(wantDist, cap)
-    writeFov(fov)
+    viewScale = scale
+    applyFraming(viewScale)
     place()
   }
   const main = MainCamera.getMutableOrNull(engine.CameraEntity) ?? MainCamera.create(engine.CameraEntity)
@@ -258,17 +304,14 @@ function writeFov(next: number): void {
 }
 
 function stepScale(dir: 1 | -1): void {
-  const table = zoomScales()
-  if (dir < 0) {
-    for (let i = table.length - 1; i >= 0; i--) if (table[i] < scale - 0.01) { scale = table[i]; return }
-    scale = table[0]
-  } else {
-    for (const step of table) if (step > scale + 0.01) { scale = step; return }
-    scale = table[table.length - 1]
-  }
+  const table = zoomTable()
+  const next = zoomIndex + dir
+  if (next < 0 || next >= table.length) return
+  zoomIndex = next
+  scale = table[zoomIndex]
 }
 
 export function overviewZoomIn(): void { if (active) stepScale(-1) }
 export function overviewZoomOut(): void { if (active) stepScale(1) }
-export function canOverviewZoomIn(): boolean { return active && scale > zoomScales()[0] + 0.01 }
-export function canOverviewZoomOut(): boolean { return active && scale < zoomScales()[zoomScales().length - 1] - 0.01 }
+export function canOverviewZoomIn(): boolean { return active && zoomIndex > 0 }
+export function canOverviewZoomOut(): boolean { return active && zoomIndex < zoomTable().length - 1 }
