@@ -33,7 +33,6 @@
  *   arrive         remove the panel so they drop onto the base. player:respawned.
  *                  A movePlayerTo happens only on the snap fallback.
  *   peel           floater rises off and despawns
- * The cloud puffs carry a slightly larger inside-out black shell so they read against the white level.
  *   land           walk only, abilities still off, then normal play
  *
  * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 3.8s).
@@ -134,10 +133,6 @@ const HOOK_MAT = {
   metallic: 0,
   castShadows: false,
 }
-/** Unlit black shell. One negative axis flips the winding so it reads as a rim, not a solid ball. */
-const OUTLINE_MAT = { diffuseColor: Color4.create(0, 0, 0, 1), castShadows: false }
-const OUTLINE_SCALE = 1.14
-
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
 type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number }
@@ -352,23 +347,6 @@ function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' 
   return e
 }
 
-/** Slightly larger inside-out black sphere. The white puff sits in front of the rim. */
-function makeOutline(parent: Entity, pos: Vector3, scale: Vector3): Entity {
-  const e = engine.addEntity()
-  Transform.create(e, {
-    parent,
-    position: pos,
-    scale: Vector3.create(scale.x * OUTLINE_SCALE, scale.y * OUTLINE_SCALE, -scale.z * OUTLINE_SCALE),
-  })
-  MeshRenderer.setSphere(e)
-  Material.setBasicMaterial(e, OUTLINE_MAT)
-  return e
-}
-
-function makeCloud(parent: Entity, pos: Vector3, scale: Vector3): Entity[] {
-  return [makeOutline(parent, pos, scale), makePart(parent, pos, scale, 'sphere', CLOUD_MAT)]
-}
-
 /** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
 function spawnFloater(): void {
   if (!anchor) return
@@ -379,12 +357,12 @@ function spawnFloater(): void {
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
   })
-  const cloud = makeCloud(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15))
-  const puffL = makeCloud(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62))
-  const puffR = makeCloud(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55))
+  const cloud = makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT)
+  const puffL = makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT)
+  const puffR = makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT)
   const stem = makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT)
   const hook = makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT)
-  floater = { root, ents: [root, ...cloud, ...puffL, ...puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0 }
+  floater = { root, ents: [root, cloud, puffL, puffR, stem, hook], mode: 'in', peelLeft: 0, waitLeft: 0 }
 }
 
 function playLeg(index: number): void {
