@@ -184,8 +184,9 @@ export function playBurstSfx(): void {
   AudioSource.createOrReplace(burstSfxEnt, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: true, currentTime: 0 })
 }
 
-/** Aerial Burst cues. Distinct from the grounded shockwave (burst_impact.wav).
- *  Dive = press, hit = player connect, stamp = feet meet the floor (no paint). */
+/** Aerial Burst cues. The landing slam uses burst_impact, once, not these clips.
+ *  Hit = player connect. Dive and stamp stay loaded; the press does not play them
+ *  (that stacked a second burst on the landing). */
 export const AIR_DIVE_SRC = 'assets/sounds/air_spike_dive.wav'
 export const AIR_HIT_SRC = 'assets/sounds/air_spike_hit.wav'
 export const AIR_STAMP_SRC = 'assets/sounds/air_spike_stamp.wav'

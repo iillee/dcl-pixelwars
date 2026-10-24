@@ -33,7 +33,7 @@ import {
   AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S,
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
-  AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
+  AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
   AIR_SPIKE_GLIDE_LOCK_S,
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
@@ -50,8 +50,8 @@ import { ImpactGate } from '../shared/lunge'
 import { getCurrentCellId, isPlayerGrounded } from '../paint'
 import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
-  playDashHitSfx, playBurstSfx, playAirDiveSfx, playAirHitSfx,
-  BURST_SFX_SRC, AIR_DIVE_SRC, AIR_HIT_SRC,
+  playDashHitSfx, playBurstSfx, playAirHitSfx,
+  BURST_SFX_SRC, AIR_HIT_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
@@ -143,10 +143,15 @@ function showAirTrail(p: V3, team: Team, fx: number, fz: number): void {
 }
 
 /** One grounded shockwave per dive, when feet meet the floor.
- *  Same presentation as a ground Burst (showShockwave). The local client also
- *  asks the server to paint that footprint once. No second knock — the cylinder
- *  hit already resolved at the press. The first few frames are skipped so a low
- *  hop does not fire on the press. */
+ *  Same presentation as a ground Burst (showShockwave). Audio is one
+ *  burst_impact per landing: camera-parented for the diver, positional for
+ *  everyone else. A second stamp for the same dive (own echo) does not play
+ *  it again. The local client also asks the server to paint that footprint
+ *  once. No second knock — the cylinder hit already resolved at the press.
+ *  The first few frames are skipped so a low hop does not fire on the press. */
+/** Last local landing that already played burst_impact, so a self echo cannot. */
+let localShockId = -1
+let localShockAt = 0
 const STAMP_ARM_S = 0.08
 const stampWatch: Array<{ who: string; team: Team; id: number; left: number }> = []
 function armLandingStamp(who: string, team: Team, id: number): void {
@@ -175,11 +180,20 @@ function tickStamps(dt: number): void {
       // Local: camera-parented burst_impact + reported cell, same as a grounded press.
       // Remote: positional burst_impact and ripple from the avatar's landing point,
       // same call ground Burst uses when burstFired arrives for someone else.
+      // Own echo (address stamp while we already slammed, or the address matches
+      // us) must not play the positional copy on top of the camera one.
+      const me = myAddress()
+      const localShock = s.who === '' || (me !== '' && s.who === me)
       const cell = s.who === '' ? (getCurrentCellId() ?? '') : ''
-      showShockwave(pos, s.team, s.who === '', cell)
+      const now = Date.now()
+      const repeat = localShock && localShockId === s.id && now - localShockAt < AIR_SPIKE_STAMP_WINDOW_S * 1000
+      if (!repeat) {
+        if (localShock) { localShockId = s.id; localShockAt = now }
+        showShockwave(pos, s.team, localShock, cell)
+      }
       // One report. The server claims the paint once and uses the ground-Burst footprint.
       if (s.who === '') sendBurstLand(s.id, cell, pos.x, pos.y, pos.z)
-      console.log(`[Burst] #${s.id} landing shockwave ${s.who === '' ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`)
+      console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
     } else if (s.left <= 0) stampWatch.splice(i, 1)
   }
@@ -398,7 +412,10 @@ export function triggerBurst(): void {
  *  Miss: full dive (a void miss keeps falling). The landing shockwave and its
  *  paint wait until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
-  playAirDiveSfx()
+  // No press clip. A miss plays burst_impact once, at the landing, the same
+  // single sound as a ground Burst. Playing air_spike_dive here as well made
+  // the local player hear the burst twice. A connect has no landing; its sound
+  // is the hit clip only.
   showAirTrail(p, team, fx, fz)
   sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1)
   const anvils = knockAirAnvils(p, fx, fz, id)
@@ -526,7 +543,8 @@ export function initPaintBurst(): void {
     if (att !== myAddress()) {
       if (air) {
         showAirTrail({ x, y, z }, team, faceX, faceZ)
-        playPositional({ x, y, z }, AIR_DIVE_SRC, AIR_SPIKE_DIVE_VOL)
+        // Landing plays burst_impact once. The press dive clip is not played
+        // here either, or a remote would hear the burst twice.
         armLandingStamp(att, team, id)
       } else showShockwave({ x, y, z }, team, false)
     }

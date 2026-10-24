@@ -222,9 +222,11 @@ export const AIR_SPIKE_TRAIL_DROP = 4.2 // m
 export const AIR_SPIKE_TRAIL_S = 0.4
 export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
 /** Air-only sounds (assets/sounds/air_spike_*.wav). Ground Burst keeps burst_impact.wav.
- *  Dive = press. A miss that lands inside AIR_SPIKE_STAMP_WINDOW_S plays the grounded
- *  shockwave and the server paints that footprint once. A connect does not play it.
- *  No second knock. The cue is dropped if the feet meet the floor later than the window. */
+ *  A miss that lands inside AIR_SPIKE_STAMP_WINDOW_S plays that same burst_impact once
+ *  (not the press dive clip as well — the two together read as a double burst).
+ *  The server paints that footprint once. A connect does not play the landing;
+ *  its sound is air_spike_hit. No second knock. The cue is dropped if the feet
+ *  meet the floor later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
 export const AIR_SPIKE_STAMP_VOL = 0.92
