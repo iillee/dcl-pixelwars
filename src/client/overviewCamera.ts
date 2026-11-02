@@ -39,22 +39,26 @@ export const OV_YAW_DEG = 45      // axis-aligned with the maze grid: WASD (came
 export const OV_FOV_DEG   = 24
 /**
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
- * Three steps on each platform. Pitch is OV_PITCH_DEG at every step.
+ * Four steps on each platform. Pitch is OV_PITCH_DEG at every step.
  * Desktop close is 7 (~19 m). Nameplates keep the name until 20 m.
  * The ceiling stops the throw near scale 51 at L0 (~140 m), 45 at L+1, 58 at L-1.
  * Middle is 29 (~79 m): halfway from 7 to that L0 clamp, and under every floor's
  * ceiling, so it is a real dolly. Far is 60, which the clamp shortens to the
- * ceiling on every floor. A later VirtualCamera.fov write does not change the
- * lens while that camera stays active, so the far step does not depend on it.
+ * ceiling on every floor. Farthest is 90: the throw is already at the ceiling,
+ * so it widens the lens instead. A VirtualCamera.fov write does not change the
+ * lens while that camera stays active, so a step past the clamp switches to a
+ * second camera (wideEntity) whose fov is written before it goes live.
  *
  * Mobile starts at the closest. Desktop starts at 29: one plus click reaches 7,
- * one minus click reaches 60. The table is latched when overview opens:
+ * minus reaches 60, then 90. The table is latched when overview opens:
  * isMobile() resolves async, and a live re-read would compare a desktop scale
- * to the mobile max of 25 and disable minus.
+ * to the mobile max and disable minus.
  */
-const MOBILE_ZOOM_SCALES = [5, 15, 25]
-const DESKTOP_ZOOM_SCALES = [7, 29, 60]
+const MOBILE_ZOOM_SCALES = [5, 15, 25, 40]
+const DESKTOP_ZOOM_SCALES = [7, 29, 60, 90]
 const DESKTOP_DEFAULT_SCALE = 29
+/** Only steps above this use the wide camera, so 60 keeps its clamped look. */
+const WIDE_MIN_SCALE = 60
 /** Cap for a step past the ceiling. The desktop client does not apply that wider fov while this camera stays active. */
 const FOV_MAX = 80
 const DEG = Math.PI / 180
@@ -76,6 +80,10 @@ const FWD = { x: Math.sin(OV_YAW_DEG * DEG), z: Math.cos(OV_YAW_DEG * DEG) }
 
 // MARK: State
 let camEntity: Entity | null = null
+/** Same pose as camEntity; holds the wider lens for steps past the ceiling clamp. */
+let wideEntity: Entity | null = null
+let wideLive = false
+let wideFov = -1
 let lookEnt: Entity | null = null
 let active = false
 let scale = DESKTOP_DEFAULT_SCALE
@@ -110,6 +118,13 @@ export function setupOverviewCamera(): void {
   camEntity = engine.addEntity()
   Transform.create(camEntity, { position: Vector3.create(focus.x, focus.y + 50, focus.z) })
   VirtualCamera.create(camEntity, {
+    lookAtEntity: lookEnt,
+    fov: OV_FOV_DEG,
+    defaultTransition: { transitionMode: VirtualCamera.Transition.Speed(TRANSITION_SPEED) },
+  })
+  wideEntity = engine.addEntity()
+  Transform.create(wideEntity, { position: Vector3.create(focus.x, focus.y + 50, focus.z) })
+  VirtualCamera.create(wideEntity, {
     lookAtEntity: lookEnt,
     fov: OV_FOV_DEG,
     defaultTransition: { transitionMode: VirtualCamera.Transition.Speed(TRANSITION_SPEED) },
@@ -169,10 +184,26 @@ function place(): void {
     const t = Transform.getMutable(lookEnt)
     t.position.x = focus.x; t.position.y = focus.y; t.position.z = focus.z
   }
-  if (camEntity !== null) {
-    const t = Transform.getMutable(camEntity)
+  for (const e of [camEntity, wideEntity]) {
+    if (e === null) continue
+    const t = Transform.getMutable(e)
     t.position.x = cx; t.position.y = cy; t.position.z = cz
   }
+}
+
+/** Point MainCamera at the right overview camera for the target step. Past the
+ *  clamp, the wide camera gets that step's lens while idle, then goes live. */
+function pickCamera(): void {
+  if (camEntity === null || wideEntity === null || !active) return
+  const f = targetFov(scale * DIST_PER_SCALE, maxDistance())
+  const wide = scale > WIDE_MIN_SCALE && f > OV_FOV_DEG + 0.5
+  if (wide && !wideLive && Math.abs(f - wideFov) >= 0.05) {
+    wideFov = f
+    VirtualCamera.getMutable(wideEntity).fov = f
+  }
+  wideLive = wide
+  const main = MainCamera.getMutableOrNull(engine.CameraEntity) ?? MainCamera.create(engine.CameraEntity)
+  main.virtualCameraEntity = wide ? wideEntity : camEntity
 }
 
 /** Longest throw at the fixed isometric pitch that stays inside the scene and under the ceiling. */
@@ -241,9 +272,13 @@ function setActive(on: boolean): void {
     viewScale = scale
     applyFraming(viewScale)
     place()
+    wideLive = false
+    pickCamera()
+    return
   }
+  wideLive = false
   const main = MainCamera.getMutableOrNull(engine.CameraEntity) ?? MainCamera.create(engine.CameraEntity)
-  main.virtualCameraEntity = active ? camEntity : undefined
+  main.virtualCameraEntity = undefined
 }
 
 /** Keep overview from taking MainCamera back. The mobile rescue ride uses it. */
@@ -292,6 +327,7 @@ function stepScale(dir: 1 | -1): void {
   if (next < 0 || next >= table.length) return
   zoomIndex = next
   scale = table[zoomIndex]
+  pickCamera()
 }
 
 export function overviewZoomIn(): void { if (active) stepScale(-1) }
