@@ -473,6 +473,11 @@ export const BOT_LUNGE_CHANCE = 0.35
 /** Burst when the target is inside this share of BURST_RADIUS. */
 export const BOT_BURST_RANGE_FRAC = 0.75
 export const BOT_BURST_CHANCE = 0.25
+/** No human in range: Burst for paint when at least this share of the footprint isn't the bot's
+ *  (and the footprint has at least MIN cells, so not in a corridor stub), with this chance per think. */
+export const BOT_BURST_PAINT_FRAC = 0.6
+export const BOT_BURST_PAINT_MIN_CELLS = 20
+export const BOT_BURST_PAINT_CHANCE = 0.5
 /** Aim error on a lunge, ± degrees (uniform). */
 export const BOT_AIM_ERROR_DEG = 12
 /** Bot dash speed and length for its lunge (m/s, s): LUNGE_DISTANCE over LUNGE_ACTIVE_S, then it brakes. */

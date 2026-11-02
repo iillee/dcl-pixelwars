@@ -25,13 +25,13 @@ import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { KnockSpec } from '../../shared/knocks'
-import { inBurst } from '../../shared/burst'
+import { inBurst, burstFootprint } from '../../shared/burst'
 import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
-  BURST_COOLDOWN_S, BURST_RADIUS,
+  BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
 } from '../../shared/pvp'
-import { Bot, makeSmartTarget, PaintReader } from './bot'
+import { Bot, makeValueTarget, PaintReader } from './bot'
 
 type V3 = { x: number; y: number; z: number }
 type Combat = {
@@ -181,7 +181,7 @@ function spawnBot(): void {
   const bot = new Bot({
     team,
     startCell,
-    pickTarget: makeSmartTarget(deps.paint, team),
+    pickTarget: makeValueTarget(deps.paint, team),
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
   }) as LiveBot
   botIdCounter++
@@ -314,8 +314,19 @@ function fight(b: LiveBot, dt: number): void {
     const d = Math.hypot(h.x - p.x, h.z - p.z)
     if (d < best) { best = d; tgt = h }
   }
-  if (!tgt) return
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
+  if (!tgt) {
+    // Nobody to fight: Burst for paint, like a player does, where most of the footprint isn't ours yet.
+    if (!can.burst || c.burstCd > 0 || !deps) return
+    const fp = burstFootprint(graph, b.currentCell)
+    if (fp.length < BOT_BURST_PAINT_MIN_CELLS) return
+    const gain = fp.filter(id => deps!.paint.teamOf(id) !== b.team).length
+    if (gain / fp.length < BOT_BURST_PAINT_FRAC || Math.random() >= BOT_BURST_PAINT_CHANCE) return
+    c.burstCd = BURST_COOLDOWN_S
+    deps.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    console.log(`[Bots] ghost ${b.botId} bursts for paint (${gain}/${fp.length} cells)`)
+    return
+  }
   if (can.lunge && c.lungeCd <= 0 && best <= BOT_LUNGE_RANGE && Math.random() < BOT_LUNGE_CHANCE) {
     const err = (Math.random() * 2 - 1) * BOT_AIM_ERROR_DEG * Math.PI / 180
     const ax = (tgt.x - p.x) / Math.max(best, 1e-3), az = (tgt.z - p.z) / Math.max(best, 1e-3)

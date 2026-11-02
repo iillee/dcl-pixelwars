@@ -190,6 +190,64 @@ export function makeSmartTarget(paint: PaintReader, myTeam: number): PickTarget 
   }
 }
 
+// ─── valueTarget (Phase 4: paint like a player) ───────────────────────
+// A player heads for the nearest patch worth painting, not a random far
+// cell. Each candidate (random deep cells + sampled enemy cells) scores the
+// 3×3 stamp the bot would lay there: neutral +1, enemy +2 (a flip is a
+// two-point swing), own 0; divided by travel (straight line, a level change
+// counts extra). Pick among the top few so it isn't predictable.
+
+const VALUE_SAMPLE_K = 64
+const VALUE_ENEMY_K = 32
+const VALUE_TOP_N = 3
+/** Metres added to every distance: favours rich patches over the very nearest cell. */
+const VALUE_DIST_BIAS_M = 8
+const VALUE_RADIUS = 1
+/** A level change costs this many metres extra (ramps are detours). */
+const VALUE_LEVEL_PENALTY_M = 12
+
+function stampValue(cellId: string, graph: WalkableGraph, paint: PaintReader, myTeam: number): number {
+  const colon = cellId.indexOf(':')
+  if (colon < 0) return 0
+  const prefix = cellId.slice(0, colon + 1)
+  const [cs, rs] = cellId.slice(colon + 1).split(',')
+  const col = parseInt(cs, 10), row = parseInt(rs, 10)
+  let v = 0
+  for (let dc = -VALUE_RADIUS; dc <= VALUE_RADIUS; dc++) {
+    for (let dr = -VALUE_RADIUS; dr <= VALUE_RADIUS; dr++) {
+      const id = `${prefix}${col + dc},${row + dr}`
+      if (!graph.nodes.has(id)) continue
+      const t = paint.teamOf(id)
+      v += t === 0 ? 1 : t === myTeam ? 0 : 2
+    }
+  }
+  return v
+}
+
+export function makeValueTarget(paint: PaintReader, myTeam: number): PickTarget {
+  return (self, graph) => {
+    const here = graph.worldPos.get(self.currentCell)
+    const cands = sampleNodes(graph, VALUE_SAMPLE_K)
+    if (paint.sampleEnemy) cands.push(...paint.sampleEnemy(myTeam, VALUE_ENEMY_K))
+    const scored: Array<{ id: string; s: number }> = []
+    const seen = new Set<string>()
+    for (const c of cands) {
+      if (c === self.currentCell || seen.has(c) || !isDeepCentre(c, graph)) continue
+      seen.add(c)
+      const v = stampValue(c, graph, paint, myTeam)
+      if (v <= 0) continue
+      const p = graph.worldPos.get(c)
+      const d = here && p
+        ? Math.hypot(p[0] - here[0], p[2] - here[2]) + (Math.abs(p[1] - here[1]) > 1.5 ? VALUE_LEVEL_PENALTY_M : 0)
+        : 30
+      scored.push({ id: c, s: v / (d + VALUE_DIST_BIAS_M) })
+    }
+    if (scored.length === 0) return makeSmartTarget(paint, myTeam)(self, graph)
+    scored.sort((a, b) => b.s - a.s)
+    return scored[Math.floor(Math.random() * Math.min(VALUE_TOP_N, scored.length))].id
+  }
+}
+
 export interface BotOpts {
   team: number                  // 1 = Red, 2 = Blue (matches Team enum)
   startCell: string

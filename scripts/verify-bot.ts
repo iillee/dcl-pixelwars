@@ -10,7 +10,7 @@
 
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
-import { Bot, makeSmartTarget, PaintReader } from '../src/server/bots/bot'
+import { Bot, makeSmartTarget, makeValueTarget, PaintReader } from '../src/server/bots/bot'
 
 const seed = generateWithRetry(42, 50)
 if (seed === null) { console.error('gen failed'); process.exit(1) }
@@ -67,32 +67,44 @@ for (const id of allNodes) {
   const u = h(id.slice(0, id.indexOf(':')))
   if (u < 0.5) fakePaint.set(id, 2); else if (u < 0.75) fakePaint.set(id, 1)
 }
+const seedPaint = new Map(fakePaint)
 const reader: PaintReader = { teamOf: (id) => fakePaint.get(id) ?? 0 }
 
-const smart = new Bot({
-  team: 1,
-  startCell: start,
-  pickTarget: makeSmartTarget(reader, 1),
-})
-let neutralHits = 0, enemyHits = 0, mineHits = 0
-simMs = 0
-while (simMs < 20000) {
-  for (const s of smart.tick(TICK_MS, graph)) {
-    const t = reader.teamOf(s)
-    if (t === 0) neutralHits++
-    else if (t === 2) enemyHits++
-    else mineHits++
-    if (!baseTeamOfCellId(s)) fakePaint.set(s, 1) // the bot paints what it walks on
+// Same 20 s, same start, same paint: cells flipped to the bot's team with the live 3×3 stamp.
+function paintRun(pick: 'smart' | 'value'): { gained: number; neutral: number; enemy: number; mine: number } {
+  fakePaint.clear(); for (const [k, v] of seedPaint) fakePaint.set(k, v)
+  const bot = new Bot({ team: 1, startCell: start, stepsPerSec: 5, pickTarget: pick === 'smart' ? makeSmartTarget(reader, 1) : makeValueTarget(reader, 1) })
+  let gained = 0, neutral = 0, enemy = 0, mine = 0, ms = 0
+  while (ms < 20000) {
+    for (const s of bot.tick(TICK_MS, graph)) {
+      const t = reader.teamOf(s)
+      if (t === 0) neutral++; else if (t === 2) enemy++; else mine++
+      const colon = s.indexOf(':'), prefix = s.slice(0, colon + 1)
+      const [cs, rs] = s.slice(colon + 1).split(',')
+      for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+        const id = `${prefix}${parseInt(cs, 10) + dc},${parseInt(rs, 10) + dr}`
+        if (!graph.nodes.has(id) || baseTeamOfCellId(id) || fakePaint.get(id) === 1) continue
+        fakePaint.set(id, 1); gained++
+      }
+    }
+    ms += TICK_MS
   }
-  simMs += TICK_MS
+  return { gained, neutral, enemy, mine }
 }
+const runs = (pick: 'smart' | 'value') => { let g = 0, n = 0, e = 0, m = 0; for (let i = 0; i < 5; i++) { const r = paintRun(pick); g += r.gained; n += r.neutral; e += r.enemy; m += r.mine } return { g: g / 5, n, e, m } }
+const old = runs('smart'), val = runs('value')
+console.log(`  old random target: ${old.g.toFixed(0)} cells gained / 20 s (avg of 5)`)
+console.log(`  value target (live): ${val.g.toFixed(0)} cells gained / 20 s (avg of 5)`)
+// Walk speed caps gain (~1.7 cells/step either way); the margin is small and seed-noisy.
+if (val.g < old.g * 0.9) { console.error('✗ value targeting paints less than the old random targeting'); process.exit(1) }
+const neutralHits = val.n, enemyHits = val.e, mineHits = val.m
+// With the 3×3 stamp the cell stepped onto is usually already painted by the
+// previous step, so judge by cells gained per step: a straight run through
+// fresh floor gains 3; ≥ 1.2 means it mostly walks where there is paint to take.
 const total = neutralHits + enemyHits + mineHits
-console.log(`✓ smart bot 20s trace: neutral=${neutralHits} (${(100*neutralHits/total).toFixed(0)}%) enemy=${enemyHits} (${(100*enemyHits/total).toFixed(0)}%) mine=${mineHits} (${(100*mineHits/total).toFixed(0)}%) of ${total} steps`)
-console.log('  (smart target = any non-own deep cell, so neutral+enemy should dominate; mine = own trail / base walk-through)')
-// 0.35, not 0.5: on the 6×6 map the bot re-crosses its own fresh trail often
-// (seed 42 gave 47% neutral / 53% own). Still catches a bot stuck on own paint.
-if ((neutralHits + enemyHits) / total < 0.35) { console.error('✗ smart bot spends most steps on its own paint'); process.exit(1) }
-if (neutralHits === 0) { console.error('✗ smart bot never reached a neutral cell'); process.exit(1) }
+const perStep = (val.g * 5) / Math.max(1, total)
+console.log(`✓ value bot: ${perStep.toFixed(2)} cells gained per step over ${total} steps (5 runs)`)
+if (perStep < 1.2) { console.error('✗ value bot mostly walks its own paint'); process.exit(1) }
 
 // ─── Ghost spawn: always on the base opposite the solo human ─────────
 import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
