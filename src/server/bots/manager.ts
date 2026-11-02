@@ -25,11 +25,12 @@ import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { KnockSpec } from '../../shared/knocks'
-import { inBurst, burstFootprint } from '../../shared/burst'
+import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
 import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
+  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE,
 } from '../../shared/pvp'
 import { Bot, makeValueTarget, PaintReader } from './bot'
 
@@ -42,9 +43,17 @@ type Combat = {
   ids: number
   /** Own lunge in flight: who it is aimed at, for the round-stats hit (reported positions). */
   sweep: { target: string; left: number } | null
+  /** Crouch before the dash. lungeStarted waits until this hits zero. */
+  windup: { left: number; dx: number; dz: number; target: string; at: V3 } | null
+  /** Human we jumped to spike. Cleared when the dive fires or we land. */
+  spikeFor: string | null
+  /** Air spike in the air. A miss paints when the body settles; a hit does not. */
+  dive: { id: number; hit: boolean; fx: number; fz: number } | null
 }
 type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat }
-const newCombat = (): Combat => ({ think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null })
+const newCombat = (): Combat => ({
+  think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null,
+})
 
 // Solo-mode: exactly one bot appears when there is exactly one human,
 // always on the OPPOSITE team so the solo player has an opponent. Two+
@@ -70,8 +79,10 @@ export interface ManagerDeps {
   abilities?: () => { lunge: boolean; burst: boolean }
   /** Bot started lunge `lungeId` at `at` along (dx, dz): broadcast it like a player's. */
   onLunge?: (id: number, lungeId: number, dx: number, dz: number, at: V3) => void
-  /** Bot fired grounded burst `burstId` at `at`: paint (no leaderboard) and broadcast. */
-  onBurst?: (id: number, burstId: number, team: number, at: V3) => void
+  /** Bot fired burst `burstId` at `at`. air 1 is a spike (no paint yet); air 0 paints now. */
+  onBurst?: (id: number, burstId: number, team: number, at: V3, air?: number, fx?: number, fz?: number) => void
+  /** Air spike missed and the body met a floor: one ground footprint, like a player's burstLand. */
+  onBurstLand?: (id: number, burstId: number, team: number, at: V3, fx: number, fz: number) => void
   /** Bot's lunge reached `human` by reported positions (round stats only; the victim's client knocks itself). */
   onBotHit?: (id: number, human: string) => void
 }
@@ -249,10 +260,18 @@ export function tickBots(dtSec: number): void {
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'settled') {
+        const dive = b.combat.dive
+        b.combat.dive = null
+        b.combat.spikeFor = null
+        b.combat.windup = null
+        if (dive && !dive.hit) deps?.onBurstLand?.(b.botId, dive.id, b.team, { ...b.body.pos }, dive.fx, dive.fz)
         const c = cellNear(b.body.pos)
         if (c) { b.currentCell = c; b.clearPath(); b.body.follow(cellPos(c)!) }
         else placeAtBase(b)
       } else if (ev.type === 'fell') {
+        b.combat.dive = null
+        b.combat.spikeFor = null
+        b.combat.windup = null
         console.log(`[Bots] ghost ${b.botId} fell at ${ev.catch.x.toFixed(1)},${ev.catch.y.toFixed(1)},${ev.catch.z.toFixed(1)} - cloud home`)
         deps.onFell?.(b.botId, ev.catch, world.base)
       } else if (ev.type === 'landed') {
@@ -265,8 +284,16 @@ export function tickBots(dtSec: number): void {
     fight(b, dtSec)
     if (!b.body.canWalk()) continue
     const stepped = b.tick(dtMs, graph)
-    const vp = b.visualPosition(graph)
-    if (vp) b.body.follow({ x: vp[0], y: vp[1], z: vp[2] })
+    const leap = b.takeLeap()
+    if (leap) {
+      const pos = cellPos(leap.to)
+      if (!pos || !b.body.leap(pos)) b.clearPath()
+      else console.log(`[Bots] ghost ${b.botId} ${leap.kind}s toward ${leap.to}`)
+    }
+    if (b.body.canWalk()) {
+      const vp = b.visualPosition(graph)
+      if (vp) b.body.follow({ x: vp[0], y: vp[1], z: vp[2] })
+    }
     for (const stepId of stepped) {
       // Paint the full 3x3 stamp around the stepped cell (matches human
       // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
@@ -292,6 +319,31 @@ export function tickBots(dtSec: number): void {
  * human on its level within BOT_ENGAGE_RANGE → lunge if close, burst if inside
  * the radius, otherwise chase. Players' cooldowns; one roll per ability per think.
  */
+/** Airborne, past the top of the hop: spike the human in the cylinder, or dive the miss. */
+function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: number; y: number; z: number }>): void {
+  const c = b.combat
+  if (!b.body.isAirborne() || b.body.verticalSpeed() > 1) return
+  const can = deps?.abilities?.() ?? { lunge: false, burst: false }
+  if (!can.burst || c.burstCd > 0 || c.dive) return
+  const p = b.body.pos
+  let aim: (typeof humans)[number] | null = null
+  for (const h of humans) {
+    if (h.team !== b.team && inAirSpike(p, h)) { aim = h; break }
+  }
+  if (!aim && c.spikeFor) aim = humans.find(h => h.id === c.spikeFor) ?? null
+  if (!aim && !c.spikeFor) return
+  const dx = (aim?.x ?? p.x) - p.x, dz = (aim?.z ?? p.z) - p.z
+  const fl = Math.hypot(dx, dz) || 1
+  b.body.dive(dx, dz)
+  c.burstCd = BURST_COOLDOWN_S
+  const id = ++c.ids
+  const hit = !!aim && inAirSpike(p, aim)
+  c.dive = { id, hit, fx: dx / fl, fz: dz / fl }
+  c.spikeFor = null
+  deps?.onBurst?.(b.botId, id, b.team, { ...p }, 1, c.dive.fx, c.dive.fz)
+  console.log(`[Bots] ghost ${b.botId} spikes${hit ? ` ${aim!.id.slice(0, 8)}` : ' (miss)'}`)
+}
+
 function fight(b: LiveBot, dt: number): void {
   const c = b.combat
   c.lungeCd -= dt; c.burstCd -= dt; c.chaseLeft -= dt; c.think -= dt
@@ -305,7 +357,22 @@ function fight(b: LiveBot, dt: number): void {
       c.sweep = null
     } else if (c.sweep.left <= 0) c.sweep = null
   }
-  if (c.think > 0 || !b.body.canWalk() || !graph) return
+  if (c.windup) {
+    c.windup.left -= dt
+    if (c.windup.left > 0) return
+    const w = c.windup
+    c.windup = null
+    if (b.body.dash(w.dx, w.dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)) {
+      c.lungeCd = LUNGE_COOLDOWN_S
+      c.sweep = { target: w.target, left: LUNGE_ACTIVE_S + 0.4 }
+      b.clearPath()
+      deps?.onLunge?.(b.botId, ++c.ids, w.dx, w.dz, w.at)
+      console.log(`[Bots] ghost ${b.botId} lunges at ${w.target.slice(0, 8)}`)
+    }
+    return
+  }
+  if (!b.body.canWalk()) { trySpike(b, humans); return }
+  if (c.think > 0 || !graph) return
   c.think = BOT_THINK_S
   const p = b.body.pos
   let tgt: (typeof humans)[number] | null = null, best = BOT_ENGAGE_RANGE
@@ -327,18 +394,24 @@ function fight(b: LiveBot, dt: number): void {
     console.log(`[Bots] ghost ${b.botId} bursts for paint (${gain}/${fp.length} cells)`)
     return
   }
+  if (can.burst && c.burstCd <= 0 && best <= BOT_SPIKE_HOP_RANGE && Math.random() < BOT_SPIKE_CHANCE) {
+    const dx = tgt.x - p.x, dz = tgt.z - p.z
+    if (b.body.jump(dx, dz)) {
+      c.spikeFor = tgt.id
+      b.clearPath()
+      console.log(`[Bots] ghost ${b.botId} jumps to spike ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
+      return
+    }
+  }
   if (can.lunge && c.lungeCd <= 0 && best <= BOT_LUNGE_RANGE && Math.random() < BOT_LUNGE_CHANCE) {
     const err = (Math.random() * 2 - 1) * BOT_AIM_ERROR_DEG * Math.PI / 180
     const ax = (tgt.x - p.x) / Math.max(best, 1e-3), az = (tgt.z - p.z) / Math.max(best, 1e-3)
     const dx = ax * Math.cos(err) - az * Math.sin(err), dz = ax * Math.sin(err) + az * Math.cos(err)
-    const at = { ...p }
-    if (b.body.dash(dx, dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)) {
-      c.lungeCd = LUNGE_COOLDOWN_S
-      c.sweep = { target: tgt.id, left: LUNGE_ACTIVE_S + 0.4 }
-      b.clearPath()
-      deps?.onLunge?.(b.botId, ++c.ids, dx, dz, at)
-      console.log(`[Bots] ghost ${b.botId} lunges at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
-    }
+    c.lungeCd = LUNGE_COOLDOWN_S
+    c.windup = { left: BOT_LUNGE_WINDUP_S, dx, dz, target: tgt.id, at: { ...p } }
+    b.stun(BOT_LUNGE_WINDUP_S * 1000)
+    b.clearPath()
+    console.log(`[Bots] ghost ${b.botId} winds up a lunge at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
     return
   }
   if (can.burst && c.burstCd <= 0 && inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC) && Math.random() < BOT_BURST_CHANCE) {
@@ -365,8 +438,16 @@ export function getWalkableGraph(): WalkableGraph | null { return graph }
  * 2 Hz botPositions broadcast tick. Empty array = no bots (broadcast
  * skipped by the caller so we don't fan out zero-payloads).
  */
-/** Body state on the wire: 0 walking, 1 knocked/airborne, 2 riding or dropping from the cloud. */
-export type BotWireState = 0 | 1 | 2
+/** Body state on the wire: 0 walking, 1 knocked/airborne, 2 riding or dropping from the cloud,
+ *  3 lunge wind-up (standing, facing the target), 4 gliding a recovery. */
+export type BotWireState = 0 | 1 | 2 | 3 | 4
+
+function wireOf(b: LiveBot): BotWireState {
+  if (b.combat.windup) return 3
+  if (b.body.isGliding()) return 4
+  if (b.body.mode === 'walk') return 0
+  return b.body.mode === 'knock' ? 1 : 2
+}
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {
   if (!graph) return []
@@ -375,8 +456,7 @@ export function getBotPositions(): Array<{ id: number; team: number; x: number; 
     // Walking: the body follows Bot.visualPosition() (sub-step lerp between
     // cells). Knocked / rescued: the body's own simulated position.
     const p = b.body.pos
-    const st: BotWireState = b.body.mode === 'walk' ? 0 : b.body.mode === 'knock' ? 1 : 2
-    out.push({ id: b.botId, team: b.team, x: p.x, y: p.y, z: p.z, st })
+    out.push({ id: b.botId, team: b.team, x: p.x, y: p.y, z: p.z, st: wireOf(b) })
   }
   return out
 }
@@ -392,6 +472,11 @@ export function getBotBroadcast(): Array<ReturnType<typeof getBotPositions>[numb
     const prev = lastSent.get(b.id)
     const dt = prev ? (now - prev.t) / 1000 : 0
     lastSent.set(b.id, { x: b.x, y: b.y, z: b.z, t: now })
+    // Wind-up: the ghost is still. vx/vz carry the facing so the client yaws before the dash.
+    if (b.st === 3) {
+      const aim = bots.find(x => x.botId === b.id)?.combat.windup
+      if (aim) return { ...b, vx: aim.dx * 3, vy: 0, vz: aim.dz * 3 }
+    }
     if (!prev || dt < 0.02 || dt > 0.5) return { ...b, vx: 0, vy: 0, vz: 0 }
     return { ...b, vx: (b.x - prev.x) / dt, vy: (b.y - prev.y) / dt, vz: (b.z - prev.z) / dt }
   })
@@ -420,6 +505,9 @@ export function hitBot(id: number, ax: number, ay: number, az: number,
   const spec = specFor(b.body.isGrounded())
   if (!b.body.knock(spec)) return false
   b.clearPath()
+  b.combat.windup = null
+  b.combat.spikeFor = null
+  b.combat.dive = null
   console.log(`[Bots] ghost ${id} hit: ${spec.kind}`)
   return true
 }

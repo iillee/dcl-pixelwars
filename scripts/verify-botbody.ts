@@ -111,5 +111,24 @@ for (const [dName, dx, dz] of [['+x', 1, 0], ['-x', -1, 0]] as Array<[string, nu
 }
 
 console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and were rescued`)
+
+// Ground hop then dive: the spike's two moves. The hop leaves the floor; the dive comes back down.
+{
+  const body = new BotBody(base)
+  if (!body.jump(1, 0)) fail('jump refused')
+  let peak = base.y
+  for (let i = 0; i < 10; i++) { body.tick(0.05, world); peak = Math.max(peak, body.pos.y) }
+  if (peak < base.y + 0.8) fail(`jump peaked only ${(peak - base.y).toFixed(2)} m`)
+  if (!body.isAirborne()) fail('jump was not airborne')
+  body.dive(1, 0)
+  let down = false
+  for (let i = 0; i < 40 && !down; i++) {
+    body.tick(0.05, world)
+    if (body.pos.y < peak - 0.5) down = true
+  }
+  if (!down) fail('dive did not descend')
+  else console.log(`✓ jump then dive: peak +${(peak - base.y).toFixed(2)} m, then down`)
+}
+
 if (failed) process.exit(1)
 console.log('✓ bot body checks passed')

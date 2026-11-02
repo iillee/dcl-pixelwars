@@ -18,7 +18,7 @@
  * cell.
  */
 
-import { WalkableGraph, findPath, DEEP_MARGIN } from '../../shared/mazeGraph'
+import { WalkableGraph, findPath, DEEP_MARGIN, AirKind } from '../../shared/mazeGraph'
 import { GRID_W, GRID_H } from '../../maze/generator'
 
 /**
@@ -258,6 +258,8 @@ export interface BotOpts {
    *  trail (the visible backtracking we saw in playtest). Enemy paint
    *  and neutral cells keep the base cost of 1. */
   paint?: PaintReader
+  /** Level drops and jumps. The walk-only verify turns this off. */
+  useAir?: boolean
 }
 
 export class Bot {
@@ -271,6 +273,9 @@ export class Bot {
   private pauseRemainingMs = 0         // if >0, bot is holding for a "look around" pause
   private pick: PickTarget
   private paint?: PaintReader
+  private readonly useAir: boolean
+  /** Next path step leaves the floor. The manager hands it to the body; the legs do not step it. */
+  private pendingLeap: { to: string; kind: AirKind } | null = null
 
   /** Safety cap: never step more than this many cells in a single tick,
    *  even if the server stalled and dt is huge. Prevents "teleport paint"
@@ -285,6 +290,14 @@ export class Bot {
     this.stepIntervalMs = this.jitteredInterval()
     this.pick = opts.pickTarget ?? randomTarget
     this.paint = opts.paint
+    this.useAir = opts.useAir !== false
+  }
+
+  /** A drop or jump the last tick pulled off the path, once. */
+  takeLeap(): { to: string; kind: AirKind } | null {
+    const l = this.pendingLeap
+    this.pendingLeap = null
+    return l
   }
 
   /** Base interval ±JITTER_FRAC. Recomputed per step so consecutive
@@ -356,7 +369,7 @@ export class Bot {
         const costOf = paint
           ? (id: string) => (paint.teamOf(id) === myTeam ? 3 : 1)
           : undefined
-        const p = findPath(graph, this.currentCell, target, 20000, onDeep, costOf)
+        const p = findPath(graph, this.currentCell, target, 20000, onDeep, costOf, this.useAir)
         if (!p || p.length < 2) break
         this.path = p.slice(1) // drop index 0 (currentCell)
         if (!this.fixedPace) {
@@ -365,7 +378,19 @@ export class Bot {
         }
       }
 
-      const next = this.path.shift()!
+      const next = this.path[0]
+      if (!next) break
+      const onDeep = graph.deepNodes.has(this.currentCell)
+      const edge = (onDeep ? graph.deepAir : graph.air).get(this.currentCell)?.find(e => e.to === next)
+      const walk = (onDeep ? graph.deepAdj : graph.adj).get(this.currentCell) ?? []
+      if (edge && !walk.includes(next)) {
+        // The body flies this one. Don't paint it and don't snap currentCell across the gap.
+        this.pendingLeap = { to: next, kind: edge.kind }
+        this.path.shift()
+        this.stepAccumMs = 0
+        break
+      }
+      this.path.shift()
       this.currentCell = next
       stepped.push(next)
     }

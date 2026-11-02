@@ -21,7 +21,7 @@ import { IS_SKY, LEVEL_MODE } from '../src/maze/level'
 const start = (IS_SKY ? [...graph.nodes].find(id => baseTeamOfCellId(id) === 1) : undefined) ?? [...graph.nodes][0]
 console.log(`LEVEL_MODE=${LEVEL_MODE}`)
 
-const bot = new Bot({ team: 1, startCell: start })
+const bot = new Bot({ team: 1, startCell: start, useAir: false })
 console.log(`bot starting at ${start}, graph has ${graph.nodes.size} cells`)
 
 const TICK_MS = 200 // server broadcast tick
@@ -73,7 +73,7 @@ const reader: PaintReader = { teamOf: (id) => fakePaint.get(id) ?? 0 }
 // Same 20 s, same start, same paint: cells flipped to the bot's team with the live 3×3 stamp.
 function paintRun(pick: 'smart' | 'value'): { gained: number; neutral: number; enemy: number; mine: number } {
   fakePaint.clear(); for (const [k, v] of seedPaint) fakePaint.set(k, v)
-  const bot = new Bot({ team: 1, startCell: start, stepsPerSec: 5, pickTarget: pick === 'smart' ? makeSmartTarget(reader, 1) : makeValueTarget(reader, 1) })
+  const bot = new Bot({ team: 1, startCell: start, stepsPerSec: 5, useAir: false, pickTarget: pick === 'smart' ? makeSmartTarget(reader, 1) : makeValueTarget(reader, 1) })
   let gained = 0, neutral = 0, enemy = 0, mine = 0, ms = 0
   while (ms < 20000) {
     for (const s of bot.tick(TICK_MS, graph)) {
@@ -126,4 +126,41 @@ import { baseSpawn } from '../src/maze/generator'
   for (let i = 0; i < 40; i++) tickBots(0.2)
   rebuildBotGraph(43); const c = near(1)
   console.log(`✓ ghost spawns opposite: human RED → ${a}; human BLUE → ${b}; new round → ${c}`)
+}
+
+// ─── Level drops: the path uses one, and the body lands on that floor ──
+import { findPath } from '../src/shared/mazeGraph'
+import { BotBody } from '../src/shared/botBody'
+import { TILES } from '../src/maze/tiles'
+{
+  let drops = 0, jumps = 0, sample: { from: string; to: string } | null = null
+  for (const [from, list] of graph.deepAir) {
+    for (const e of list) {
+      if (e.kind === 'drop') { drops++; if (!sample) sample = { from, to: e.to } }
+      else jumps++
+    }
+  }
+  console.log(`air links on seed 42: ${drops} drops, ${jumps} jumps`)
+  if (drops === 0) { console.error('✗ sky maze produced no one-level drop'); process.exit(1) }
+  const from = graph.worldPos.get(sample!.from)!
+  const to = graph.worldPos.get(sample!.to)!
+  const walk = findPath(graph, sample!.from, sample!.to, 20000, true, () => 1, false)
+  const air = findPath(graph, sample!.from, sample!.to, 20000, true, () => 1, true)
+  if (!air || air.length < 2 || air[1] !== sample!.to) { console.error('✗ drop edge was not the path\'s first step'); process.exit(1) }
+  if (walk && air.length >= walk.length) console.log(`(drop path ${air.length} is not shorter than the walk ${walk.length}; cost may still prefer the ramp)`)
+  const body = new BotBody({ x: from[0], y: from[1], z: from[2] })
+  if (!body.leap({ x: to[0], y: to[1], z: to[2] })) { console.error('✗ leap refused'); process.exit(1) }
+  const world = { graph, rampTiles: getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp), base: { x: from[0], y: from[1], z: from[2] } }
+  let settled = false
+  for (let t = 0; t < 8 && !settled; t += 0.05) {
+    for (const e of body.tick(0.05, world)) if (e.type === 'settled') settled = true
+    if (body.inRescue()) break
+  }
+  const d = Math.hypot(body.pos.x - to[0], body.pos.z - to[2])
+  const dy = Math.abs(body.pos.y - to[1])
+  if (!settled || body.inRescue() || d > 4 || dy > 2) {
+    console.error(`✗ drop landed ${d.toFixed(1)} m off, dy ${dy.toFixed(1)}, settled=${settled}, mode=${body.mode}`)
+    process.exit(1)
+  }
+  console.log(`✓ drop ${sample!.from} → ${sample!.to}: path step 1, landed ${d.toFixed(1)} m from the cell (down ${(from[1] - to[1]).toFixed(1)} m)`)
 }

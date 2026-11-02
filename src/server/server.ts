@@ -128,19 +128,41 @@ export async function setupServer(): Promise<void> {
     onLunge: (id, lungeId, dx, dz, at) => {
       room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z })
     },
-    onBurst: (id, burstId, team, at) => {
+    onBurst: (id, burstId, team, at, air = 0, _fx = 0, _fz = 1) => {
+      const by = `bot:${id}`
+      const now = Date.now()
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air, lx: 0, ly: 0, lz: 0 })
+      if (air) {
+        // The victim's client knocks itself from this broadcast. Stats only, here.
+        for (const e of rosterEntries()) {
+          const a = botAim.get(e.userId.toLowerCase())
+          if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inAirSpike(at, a)) noteHit(by, e.userId)
+        }
+        return
+      }
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
       // Bots never earn leaderboard credit: paint directly, like their footsteps.
-      for (const cid of fp) applyPaint(cid, team, `bot:${id}`)
-      room.send('burstFired', { attacker: `bot:${id}`, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
+      for (const cid of fp) applyPaint(cid, team, by)
+      for (const e of rosterEntries()) {
+        const a = botAim.get(e.userId.toLowerCase())
+        if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
+      }
+    },
+    onBurstLand: (id, burstId, team, at, fx, fz) => {
+      const graph = getWalkableGraph()
+      const centre = graph ? burstCentre(graph, '', at) : null
+      const fp = graph && centre ? burstFootprint(graph, centre) : []
       const by = `bot:${id}`
+      for (const cid of fp) applyPaint(cid, team, by)
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
       const now = Date.now()
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
         if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
       }
+      console.log(`[Server] ghost ${id} spike landed, footprint=${fp.length} face=${fx.toFixed(2)},${fz.toFixed(2)}`)
     },
     onBotHit: (id, human) => noteHit(`bot:${id}`, human),
   })

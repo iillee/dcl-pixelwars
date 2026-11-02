@@ -456,6 +456,18 @@ export const BOT_GLIDE_SPEED = 7 // m/s horizontal
 export const BOT_GLIDE_FALL = 3 // m/s
 /** The one air (double) jump it spends to start the recovery (m/s up; ≈ 1.2 m at BOT_GRAVITY). */
 export const BOT_AIR_JUMP_V = 7
+/** Ground hop: up a low ledge, or the jump that starts a spike (m/s). Apex ≈ 1.6 m at BOT_GRAVITY — a player hop, not a whole level. */
+export const BOT_JUMP_V = 8
+/** Horizontal cap when the bot leaps off a ledge (player run, m/s). */
+export const BOT_LEAP_SPEED = 10
+/** Path cost of a drop or jump, in walk-steps. Beats a ramp detour; loses to a short walk. */
+export const BOT_LEAP_COST = 5
+/** Telegraph before the dash (s). The ghost crouches; lungeStarted fires when the dash actually starts. */
+export const BOT_LUNGE_WINDUP_S = 0.32
+/** Per think, chance to jump and spike a nearby human instead of lunging. */
+export const BOT_SPIKE_CHANCE = 0.28
+/** Horizontal range (m) at which the bot bothers jumping for a spike. The hit itself is the AIR_SPIKE cylinder. */
+export const BOT_SPIKE_HOP_RANGE = 4.5
 
 // ─── Ghost bot combat (server/bots/manager.ts) ──────────────────────
 /** Clients report their position this often while a ghost is in the round (botAim). */

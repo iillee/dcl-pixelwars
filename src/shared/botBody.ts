@@ -11,13 +11,14 @@
  *   drop    the cloud let go above the base: falls onto it, then a land hold and
  *           respawn immunity, like a human arriving home.
  */
-import { WalkableGraph } from './mazeGraph'
+import { WalkableGraph, leapPlan } from './mazeGraph'
 import { graphFloorAt } from './anvilSim'
 import { MIN_Y, Placed } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_S, BOT_AIR_ACCEL, BOT_GLIDE_SPEED, BOT_GLIDE_FALL, BOT_AIR_JUMP_V,
+  BOT_JUMP_V, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
 } from './pvp'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
 import { RESCUE_PATH, rescueCloudPose, RescueVec } from './rescuePath'
@@ -106,6 +107,54 @@ export class BotBody {
   private dashKeep = 0
   /** Mid-dash (its own lunge). */
   isDashing(): boolean { return this.mode === 'knock' && this.dashLeft > 0 }
+  /** In the air and not inside its own dash. A spike can fire here. */
+  isAirborne(): boolean { return this.mode === 'knock' && !this.grounded && this.dashLeft <= 0 }
+  verticalSpeed(): number { return this.vel.y }
+
+  /** Leave the floor on a planned drop or jump. The existing knock physics lands it. */
+  leap(target: V3): boolean {
+    if (this.mode !== 'walk' || this.holdLeft > 0) return false
+    const plan = leapPlan([this.pos.x, this.pos.y, this.pos.z], [target.x, target.y, target.z])
+    if (!plan) return false
+    this.beginAir(plan.vx, plan.vy, plan.vz)
+    return true
+  }
+
+  /** Ground hop toward (dx, dz), the wind-up of a spike. Short drift so the cylinder can cover the target. */
+  jump(dx: number, dz: number): boolean {
+    if (this.mode !== 'walk' || this.holdLeft > 0) return false
+    const l = Math.hypot(dx, dz)
+    const s = l > 1e-3 ? 3 / l : 0
+    this.beginAir(dx * s, BOT_JUMP_V, dz * s)
+    return true
+  }
+
+  /** The attacker's dive. Same impulse the player's airborne Burst applies, through BOT_KNOCK_UNIT. */
+  dive(fx: number, fz: number): void {
+    if (this.mode !== 'knock' || this.grounded) return
+    const u = BOT_KNOCK_UNIT
+    const fl = Math.hypot(fx, fz) || 1
+    this.vel.x += (fx / fl) * AIR_SPIKE_DIVE_FORWARD * u
+    this.vel.y = -AIR_SPIKE_DIVE_IMPULSE * u
+    this.vel.z += (fz / fl) * AIR_SPIKE_DIVE_FORWARD * u
+    this.force = { x: 0, y: -AIR_SPIKE_DIVE_FORCE * u, z: 0 }
+    this.forceLeft = AIR_SPIKE_DIVE_FORCE_S
+    this.dashLeft = 0
+    this.willRecover = false
+    this.recoverTo = null
+  }
+
+  private beginAir(vx: number, vy: number, vz: number): void {
+    this.mode = 'knock'
+    this.grounded = false
+    this.vel = { x: vx, y: vy, z: vz }
+    this.forceLeft = 0
+    this.lockLeft = 0
+    this.dashLeft = 0
+    this.willRecover = false
+    this.recoverTo = null
+    this.reactLeft = 0
+  }
 
   /** Apply a hit. Returns false if the body can't be hit right now. */
   knock(spec: KnockSpec): boolean {

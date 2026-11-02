@@ -17,6 +17,7 @@
 
 import { Placed, CELL, MAZE_ORIGIN, STEP } from '../maze/generator'
 import { TILES, TileType, Dir, rotDir, N, E, S, W, highDirAt, openingsAt } from '../maze/tiles'
+import { BOT_GRAVITY, BOT_JUMP_V, BOT_LEAP_COST, BOT_LEAP_SPEED } from './pvp'
 
 // ─── Cell-resolution constants ──────────────────────────────────────
 // SIZE = cells per tile edge. 16 → 2m cells at CELL=32m. See paint.ts
@@ -207,12 +208,178 @@ export interface WalkableGraph {
    */
   deepNodes: Set<string>
   deepAdj: Map<string, string[]>
+  /**
+   * One-way drop and jump edges a player can take besides walking: fall one
+   * level off a ledge, or hop up a rise the ground jump can clear. Not in
+   * `adj` — wall distance and the walk stepper stay on the floor. findPath
+   * prices them at BOT_LEAP_COST. The body flies them (shared/botBody.ts).
+   */
+  air: Map<string, AirEdge[]>
+  deepAir: Map<string, AirEdge[]>
+}
+
+export type AirKind = 'drop' | 'jump'
+export interface AirEdge { to: string; kind: AirKind; cost: number }
+
+/** Ballistic launch from `from` onto `to` at the bot's hop / run limits, or null if it can't. */
+export function leapPlan(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+): { vx: number; vy: number; vz: number } | null {
+  const dy = to[1] - from[1]
+  const dx = to[0] - from[0]
+  const dz = to[2] - from[2]
+  const dist = Math.hypot(dx, dz)
+  if (dist < 1.2) return null
+  // Jump off the lip. Landing within half a cell of the target still counts:
+  // deep cells sit ~16 m from the next level's near edge, a hair past a 10 m/s hop.
+  const vy = BOT_JUMP_V
+  const disc = vy * vy - 2 * BOT_GRAVITY * dy
+  if (disc < 0) return null
+  const A = 0.5 * BOT_GRAVITY
+  const s = Math.sqrt(disc)
+  const roots = [(vy - s) / (2 * A), (vy + s) / (2 * A)].filter(t => t > 0.12).sort((a, b) => b - a)
+  // Deep cells on the next level are ~18 m away; a 10 m/s hop covers ~15 m and still
+  // meets that floor, short of the cell centre.
+  const SLACK = 3.2
+  for (const t of roots) {
+    const vh = Math.min(BOT_LEAP_SPEED, dist / t)
+    if (dist - vh * t <= SLACK) {
+      const inv = 1 / dist
+      return { vx: dx * inv * vh, vy, vz: dz * inv * vh }
+    }
+  }
+  return null
+}
+
+const AIR_BUCKET = 8
+
+/** True when the straight run from `p` to `q` leaves the floor at `p`'s height, so it is a drop off a lip and not a fall through the deck. */
+function crossesLip(
+  p: readonly [number, number, number],
+  q: readonly [number, number, number],
+  buckets: Map<string, string[]>,
+  worldPos: Map<string, [number, number, number]>,
+): boolean {
+  const dist = Math.hypot(q[0] - p[0], q[2] - p[2])
+  const steps = Math.max(2, Math.ceil(dist / 2))
+  const over = (x: number, z: number): boolean => {
+    const cx = Math.floor(x / AIR_BUCKET), cz = Math.floor(z / AIR_BUCKET)
+    for (let ix = cx - 1; ix <= cx + 1; ix++) {
+      for (let iz = cz - 1; iz <= cz + 1; iz++) {
+        for (const id of buckets.get(`${ix},${iz}`) ?? []) {
+          const c = worldPos.get(id)
+          if (!c || Math.abs(c[1] - p[1]) > 1.5) continue
+          if (Math.hypot(c[0] - x, c[2] - z) <= 1.7) return true
+        }
+      }
+    }
+    return false
+  }
+  let gap = false
+  for (let i = 1; i < steps; i++) {
+    const u = i / steps
+    if (u > 0.9) break
+    const on = over(p[0] + (q[0] - p[0]) * u, p[2] + (q[2] - p[2]) * u)
+    if (!on) gap = true
+    else if (gap) return false // upper floor again: this line crosses a gap onto more deck, not a drop
+  }
+  return gap
+}
+
+/**
+ * Nearest one-level drop and nearest hop-up from each source, when leapPlan can
+ * reach the landing and the line actually leaves the floor. Landings may be a
+ * wider set than sources (a deep bot can drop onto the next level's near edge).
+ */
+function linkAir(
+  sources: Set<string>,
+  landings: Set<string>,
+  worldPos: Map<string, [number, number, number]>,
+): Map<string, AirEdge[]> {
+  const out = new Map<string, AirEdge[]>()
+  const buckets = new Map<string, string[]>()
+  const bkey = (x: number, z: number) => `${Math.floor(x / AIR_BUCKET)},${Math.floor(z / AIR_BUCKET)}`
+  for (const [id, p] of worldPos) {
+    const k = bkey(p[0], p[2])
+    const list = buckets.get(k) ?? []
+    list.push(id)
+    buckets.set(k, list)
+  }
+  const dropLo = STEP * 0.75
+  const dropHi = STEP * 1.2
+  const apex = (BOT_JUMP_V * BOT_JUMP_V) / (2 * BOT_GRAVITY) - 0.05
+  const reach = BOT_LEAP_SPEED * 1.6 + 4
+  const rad = Math.ceil(reach / AIR_BUCKET)
+  for (const id of sources) {
+    const p = worldPos.get(id)
+    if (!p) continue
+    const drops: Array<{ id: string; dist: number; q: [number, number, number] }> = []
+    const jumps: Array<{ id: string; dist: number; q: [number, number, number] }> = []
+    const cx = Math.floor(p[0] / AIR_BUCKET), cz = Math.floor(p[2] / AIR_BUCKET)
+    for (let ix = cx - rad; ix <= cx + rad; ix++) {
+      for (let iz = cz - rad; iz <= cz + rad; iz++) {
+        for (const cand of buckets.get(`${ix},${iz}`) ?? []) {
+          if (cand === id || !landings.has(cand)) continue
+          const q = worldPos.get(cand)
+          if (!q) continue
+          const dist = Math.hypot(q[0] - p[0], q[2] - p[2])
+          if (dist < 4 || dist > reach) continue
+          const down = p[1] - q[1]
+          if (down >= dropLo && down <= dropHi) drops.push({ id: cand, dist, q })
+          else if (q[1] - p[1] >= 0.7 && q[1] - p[1] <= apex) jumps.push({ id: cand, dist, q })
+        }
+      }
+    }
+    // Nearest that the hop can reach and that actually leaves the floor. Testing
+    // in distance order stops at the first success instead of lip-testing the
+    // whole neighbourhood (that scan was ~0.5 s per maze).
+    const nearest = (list: Array<{ id: string; dist: number; q: [number, number, number] }>): string | null => {
+      list.sort((a, b) => a.dist - b.dist)
+      for (const c of list) {
+        if (leapPlan(p, c.q) && crossesLip(p, c.q, buckets, worldPos)) return c.id
+      }
+      return null
+    }
+    const bestDrop = nearest(drops)
+    const bestJump = nearest(jumps)
+    // Aim at a cell the bot is allowed to stand on (deep, when that's the source set)
+    // so the path can keep walking after the landing.
+    const stand = (cand: string): string | null => {
+      const q = worldPos.get(cand)
+      if (!q || !leapPlan(p, q)) return null
+      if (sources.has(cand)) return cand
+      let best: string | null = null, bestD = 4
+      const sx = Math.floor(q[0] / AIR_BUCKET), sz = Math.floor(q[2] / AIR_BUCKET)
+      for (let ix = sx - 1; ix <= sx + 1; ix++) {
+        for (let iz = sz - 1; iz <= sz + 1; iz++) {
+          for (const sid of buckets.get(`${ix},${iz}`) ?? []) {
+            if (!sources.has(sid)) continue
+            const c = worldPos.get(sid)
+            if (!c || Math.abs(c[1] - q[1]) > 1.5) continue
+            const d = Math.hypot(c[0] - q[0], c[2] - q[2])
+            if (d < bestD && leapPlan(p, c)) { bestD = d; best = sid }
+          }
+        }
+      }
+      return best
+    }
+    const edges: AirEdge[] = []
+    const dropTo = bestDrop ? stand(bestDrop) : null
+    const jumpTo = bestJump ? stand(bestJump) : null
+    if (dropTo) edges.push({ to: dropTo, kind: 'drop', cost: BOT_LEAP_COST })
+    if (jumpTo) edges.push({ to: jumpTo, kind: 'jump', cost: BOT_LEAP_COST })
+    if (edges.length) out.set(id, edges)
+  }
+  return out
 }
 
 /** Minimum distToWall for a cell to be considered "deep centre" and
  *  safe for the bot to occupy. 2 keeps the 3x3 paint stamp fully off
  *  the wall. Exported so bot.ts / manager.ts share the definition. */
 export const DEEP_MARGIN = 1
+
+const NO_AIR: Map<string, AirEdge[]> = new Map()
 
 // Height offset above tile origin so bot boxes / paint discs sit clear of
 // the floor mesh. Must match paint.ts FLAT_OFFSET so bots stand on the same
@@ -580,9 +747,14 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
   const histStr = [...hist.entries()].sort((a, b) => a[0] - b[0])
     .map(([d, n]) => `${d}:${n}`).join(' ')
   const pct = nodes.size === 0 ? 0 : Math.round(100 * deepNodes.size / nodes.size)
-  console.log(`[Bots] distToWall hist: ${histStr} | maxDist=${maxDist} | deep(≥${DEEP_MARGIN})=${deepNodes.size}/${nodes.size} (${pct}%) reachable=${deepReachable}`)
+  // Deep bots can aim a drop at any floor cell; they reseat on the landing.
+  const air = linkAir(nodes, nodes, worldPos)
+  const deepAir = linkAir(deepNodes, nodes, worldPos)
+  let drops = 0, jumps = 0
+  for (const list of deepAir.values()) for (const e of list) { if (e.kind === 'drop') drops++; else jumps++ }
+  console.log(`[Bots] distToWall hist: ${histStr} | maxDist=${maxDist} | deep(≥${DEEP_MARGIN})=${deepNodes.size}/${nodes.size} (${pct}%) reachable=${deepReachable} | air drop=${drops} jump=${jumps}`)
 
-  return { nodes, adj, worldPos, distToWall, deepNodes, deepAdj }
+  return { nodes, adj, worldPos, distToWall, deepNodes, deepAdj, air, deepAir }
 }
 
 /**
@@ -604,10 +776,9 @@ export function reachableCount(graph: WalkableGraph, start: string): number {
 }
 
 /**
- * BFS shortest path between two cells. Uniform edge cost (every step is
- * one cell), so BFS gives optimal path with no priority-queue overhead.
- * A* would only help if we later add non-uniform costs (e.g. "avoid
- * enemy paint").
+ * Shortest path between two cells. Walk edges are uniform, so that case is
+ * BFS. A per-cell cost (avoid own paint) or a drop/jump (BOT_LEAP_COST)
+ * switches to Dijkstra.
  *
  * Returns the path as [start, ..., goal] inclusive, or null if goal is
  * unreachable (should be impossible on a valid maze but bots must fail
@@ -629,12 +800,15 @@ export function findPath(
    *  un-owned tiles (own-team paint costs more → avoided unless the
    *  detour would be longer). Default cost = 1. */
   costOf?: (cellId: string) => number,
+  /** Level drops and jumps. Off when the caller wants the walk graph only. */
+  useAir: boolean = true,
 ): string[] | null {
   // When useDeepOnly is set, pathfind on the eroded subgraph — bot can't
   // traverse wall cells even to reach a deep target. If start/goal aren't
   // in the deep set, we fail here and the bot picks a new target.
   const nodeSet = useDeepOnly ? graph.deepNodes : graph.nodes
   const adj     = useDeepOnly ? graph.deepAdj   : graph.adj
+  const airMap  = useAir ? (useDeepOnly ? graph.deepAir : graph.air) : NO_AIR
   if (start === goal) return [start]
   if (!nodeSet.has(start) || !nodeSet.has(goal)) return null
 
@@ -643,7 +817,7 @@ export function findPath(
   // order produces "drain one axis then the other" L-shaped paths (the
   // roomba look). Randomising the expansion order interleaves the axes
   // so paths zig-zag naturally toward the goal at no extra cost.
-  const shuffled = (list: string[]): string[] => {
+  const shuffled = <T>(list: T[]): T[] => {
     const a = list.slice()
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
@@ -654,8 +828,9 @@ export function findPath(
 
   const parent = new Map<string, string>()
 
-  // ── Fast path: unweighted BFS when no cost function is supplied ─────
-  if (!costOf) {
+  // ── Fast path: unweighted BFS when every edge is one walk step ─────
+  // A drop or jump costs BOT_LEAP_COST, so those graphs take the heap below.
+  if (!costOf && airMap.size === 0) {
     const visited = new Set<string>([start])
     const queue: string[] = [start]
     let head = 0
@@ -750,14 +925,7 @@ export function findPath(
     // Direction of the step that brought us into cur (null at start).
     const prev = parent.get(cur.id)
     const inDir = prev ? dirOf(prev, cur.id) : null
-    for (const nb of shuffled(adj.get(cur.id) ?? [])) {
-      let w = Math.max(1, costOf(nb))
-      if (inDir) {
-        const outDir = dirOf(cur.id, nb)
-        if (outDir && outDir[0] === inDir[0] && outDir[1] === inDir[1]) {
-          w += STRAIGHT_PENALTY
-        }
-      }
+    const relax = (nb: string, w: number) => {
       const ng = cur.g + w
       const old = dist.get(nb)
       if (old === undefined || ng < old) {
@@ -765,6 +933,22 @@ export function findPath(
         parent.set(nb, cur.id)
         push(nb, ng)
       }
+    }
+    for (const nb of shuffled(adj.get(cur.id) ?? [])) {
+      let w = Math.max(1, costOf ? costOf(nb) : 1)
+      if (inDir) {
+        const outDir = dirOf(cur.id, nb)
+        if (outDir && outDir[0] === inDir[0] && outDir[1] === inDir[1]) {
+          w += STRAIGHT_PENALTY
+        }
+      }
+      relax(nb, w)
+    }
+    for (const edge of shuffled(airMap.get(cur.id) ?? [])) {
+      if (!nodeSet.has(edge.to)) continue
+      let w = edge.cost
+      if (costOf) w += Math.max(0, costOf(edge.to) - 1)
+      relax(edge.to, w)
     }
   }
   return null

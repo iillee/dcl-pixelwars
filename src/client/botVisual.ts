@@ -126,6 +126,8 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  pose: 'walk' | 'wind' | 'glide' // wind = lunge telegraph (st 3), glide = recovery (st 4)
+  lightI: number
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -202,6 +204,8 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
+    pose: 'walk',
+    lightI: LIGHT_INTENSITY,
   }
 }
 
@@ -265,6 +269,7 @@ export function initBotVisual(): void {
       }
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
+      rec.pose = b.st === 3 ? 'wind' : b.st === 4 ? 'glide' : 'walk'
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -346,11 +351,26 @@ export function initBotVisual(): void {
         rec.renderPos.y + bob,
         rec.renderPos.z + drZ,
       )
+      // Wind-up: crouch and flare. Glide: flatten and spread, a stand-in until the ghost models land.
+      const wind = rec.pose === 'wind'
+      const glide = rec.pose === 'glide'
+      const wide = wind ? 1.35 : glide ? 1.75 : 1
+      const tall = wind ? 0.62 : glide ? 0.4 : 1
       tf.scale = Vector3.create(
-        GHOST_SCALE * pulse,
-        GHOST_SCALE * pulse,
-        GHOST_SCALE * pulse,
+        GHOST_SCALE * pulse * wide,
+        GHOST_SCALE * pulse * tall,
+        GHOST_SCALE * pulse * wide,
       )
+      const wantI = wind ? LIGHT_INTENSITY * 2.4 : LIGHT_INTENSITY
+      if (rec.lightI !== wantI) {
+        rec.lightI = wantI
+        LightSource.createOrReplace(rec.lightEntity, {
+          type: LightSource.Type.Point({}),
+          color: lightColor(rec.team),
+          intensity: wantI,
+          range: LIGHT_RANGE,
+        })
+      }
 
       // Yaw from smoothed VELOCITY, not from renderPos -> lastServerPos.
       // The old approach flipped 180° the instant renderPos overshot its
