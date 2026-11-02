@@ -6,10 +6,12 @@
  * calls, so client/dash and client/paintBomb don't each track them.
  */
 
-import { engine, PlayerIdentityData } from '@dcl/sdk/ecs'
+import { engine, Entity, Physics, PlayerIdentityData, Transform } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { RESPAWN_IMMUNITY_S } from '../shared/pvp'
+import { KnockSpec, KNOCK_TRACE, KnockTrace } from '../shared/knocks'
 
 let myTeam: Team = Team.None
 const teamByUser = new Map<string, Team>() // lowercased userId → team
@@ -29,6 +31,20 @@ export function safePhysics(what: string, fn: () => void): void {
   try { fn() } catch (err) { console.log(`[PvP] ${what} failed (Physics unsupported?):`, err) }
 }
 
+let trace: KnockTrace | null = null
+
+/** Push the local player with a shared knock (shared/knocks.ts). `forceEnt` owns the held force. */
+export function applyKnock(spec: KnockSpec, forceEnt: Entity, what: string): void {
+  safePhysics(what, () => {
+    Physics.applyImpulseToPlayer(Vector3.create(spec.impulse.x, spec.impulse.y, spec.impulse.z))
+    if (spec.force > 0) {
+      Physics.applyForceToPlayerForDuration(forceEnt, spec.forceS, Vector3.create(spec.forceDir.x, spec.forceDir.y, spec.forceDir.z), spec.force)
+    }
+  })
+  const p = Transform.getOrNull(engine.PlayerEntity)?.position
+  if (KNOCK_TRACE && p) trace = new KnockTrace(spec.kind, 'human', p)
+}
+
 export function initKnockbackState(): void {
   if (installed) return
   installed = true
@@ -40,5 +56,10 @@ export function initKnockbackState(): void {
   events.on('player:respawned', () => { immuneLeft = RESPAWN_IMMUNITY_S })
   engine.addSystem((dt: number) => {
     if (immuneLeft > 0) immuneLeft -= dt
+    if (trace) {
+      const p = Transform.getOrNull(engine.PlayerEntity)?.position
+      const line = trace.sample(dt, p ?? null)
+      if (line) { console.log(line); trace = null }
+    }
   })
 }

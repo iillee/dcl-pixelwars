@@ -78,29 +78,18 @@ import { playFallRescueSfx } from './audio'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
+import { RESCUE_PATH, rescueCloudPose } from '../shared/rescuePath'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
-  /** Floater swoops in. Panel stays put so they can fall onto it. The rise does the lift. */
-  GRAB_S: 0.4,
-  /** Rise from the catch to cruise height (~95 m from the fall line at ~12.5; ~45 m/s, the old 0.9 s climb speed). */
-  RISE_S: 2.1,
-  /** Cruise across, above the top floor, to the base's XZ. */
-  CRUISE_S: 1.7,
-  /** Descend so the panel top sits just above the base. */
-  DESCEND_S: 0.8,
+  /** Trip timings, hang height and path clearances live in shared/rescuePath.ts (bots ride the same path). */
+  ...RESCUE_PATH,
   /** Rise-and-shrink after arrival. */
   PEEL_S: 0.3,
-  /** Walk only / no abilities after arrival, before full control. Target 0.5–0.8s. */
-  LAND_LOCK_S: 0.65,
   /** If a teleport hasn't put us back above the fall line, allow another trip after this. */
   REARM_S: 2,
   /** Don't wait longer than this for a snap teleport before peeling the floater. */
   PEEL_WAIT_S: 0.45,
-  /** Floater root height above the panel surface while carrying. */
-  HANG_Y: 2.65,
-  /** Extra height at the start of the grab swoop. */
-  APPROACH_EXTRA_Y: 4.5,
   /** How far the floater climbs while it peels off. */
   PEEL_RISE: 2.2,
   /** Seconds of current velocity used to place the pad ahead of the fall, so they meet it. */
@@ -113,13 +102,6 @@ export const FALL_RESCUE = {
   PAD_SIZE: 20,
   /** Invisible pad thickness (m). Thick so a fast fall doesn't tunnel through before they land. */
   PAD_THICK: 2,
-  /** Panel surface this many meters above SKY_TOP_Y while cruising, so the trip clears the roof. */
-  CRUISE_CLEAR: 8,
-  /**
-   * Panel surface above the base feet (baseSpawn y). High enough that the
-   * thick box stays clear of the base slab; removing the panel is the drop.
-   */
-  ARRIVE_ABOVE: 1.5,
   /** Metres past the panel edge, or off its surface, before the one snap teleport. */
   SLIP_M: 3,
   /** Ignore slip at the start of the move so landing on the pad can finish. */
@@ -847,35 +829,9 @@ function hangAt(p: Vec, extraY = 0): Vec {
   return { x: p.x, y: p.y + FALL_RESCUE.HANG_Y + extraY, z: p.z }
 }
 
-/** Mobile observers: the real avatar freezes, so the cloud flies the same three legs. */
+/** Mobile riders and bots: the cloud flies the three legs (the server moves a bot along the same path). */
 function mobileCloudPose(c: RemoteCloud, age: number): { pos: Vec; scale: number } {
-  if (age < c.grab) {
-    const u = age / Math.max(0.05, c.grab)
-    return {
-      pos: hangAt(c.catch, (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y),
-      scale: 0.2 + 0.8 * u,
-    }
-  }
-  let t = age - c.grab
-  const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR + FALL_RESCUE.HANG_Y
-  const arriveY = c.base.y + FALL_RESCUE.ARRIVE_ABOVE + FALL_RESCUE.HANG_Y
-  const start = hangAt(c.catch)
-  const riseTo = { x: c.catch.x, y: cruiseY, z: c.catch.z }
-  const cruiseTo = { x: c.base.x, y: cruiseY, z: c.base.z }
-  const landTo = { x: c.base.x, y: arriveY, z: c.base.z }
-  const legs: Array<{ from: Vec; to: Vec; s: number }> = [
-    { from: start, to: riseTo, s: c.rise },
-    { from: riseTo, to: cruiseTo, s: c.cruise },
-    { from: cruiseTo, to: landTo, s: c.descend },
-  ]
-  for (const leg of legs) {
-    if (t <= leg.s) {
-      const u = leg.s <= 0.001 ? 1 : Math.min(1, t / leg.s)
-      return { pos: lerp(leg.from, leg.to, u), scale: 1 }
-    }
-    t -= leg.s
-  }
-  return { pos: landTo, scale: 1 }
+  return rescueCloudPose(c.catch, c.base, age, c)
 }
 
 function placeRemote(c: RemoteCloud, pos: Vec, scale: number): void {

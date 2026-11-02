@@ -43,6 +43,23 @@ const STEP_UP = 0.6
 const SNAP_DOWN = 0.6
 const CELL_SIZE = 2 // CELL 32 / SIZE 16
 
+/** Highest walkable floor within `r` of (x, z) that is no more than `maxUp` above `y`, or null over the void.
+ *  Shared by the anvils and the bot bodies (shared/botBody.ts). */
+export function graphFloorAt(graph: WalkableGraph, rampTiles: Placed[], x: number, z: number, y: number,
+  r = CELL_SIZE * 0.6, maxUp = STEP_UP): number | null {
+  let best: number | null = null
+  for (const p of graph.worldPos.values()) {
+    if (Math.abs(p[0] - x) > r || Math.abs(p[2] - z) > r) continue
+    // Ramp node: continuous slope height at (x, z), not the stepped cell height.
+    const ramp = rampTiles.find(t => p[1] > t.y && p[1] < t.y + STEP + 1 &&
+      Math.abs(p[0] - (t.x * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2 && Math.abs(p[2] - (t.z * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2)
+    const fy = (ramp ? rampSurfaceY(ramp, x, z) : p[1]) + FLOOR_FROM_NODE
+    if (fy > y + maxUp) continue
+    if (best === null || fy > best) best = fy
+  }
+  return best
+}
+
 function shuffle<T>(a: T[]): T[] {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
   return a
@@ -73,18 +90,7 @@ export class AnvilWorld {
   }
 
   floorAt(x: number, z: number, y: number, r = CELL_SIZE * 0.6, maxUp = STEP_UP): number | null {
-    if (!this.graph) return null
-    let best: number | null = null
-    for (const p of this.graph.worldPos.values()) {
-      if (Math.abs(p[0] - x) > r || Math.abs(p[2] - z) > r) continue
-      // Ramp node: continuous slope height at (x, z), not the stepped cell height.
-      const ramp = this.rampTiles.find(t => p[1] > t.y && p[1] < t.y + STEP + 1 &&
-        Math.abs(p[0] - (t.x * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2 && Math.abs(p[2] - (t.z * CELL + MAZE_ORIGIN + CELL / 2)) < CELL / 2)
-      const fy = (ramp ? rampSurfaceY(ramp, x, z) : p[1]) + FLOOR_FROM_NODE
-      if (fy > y + maxUp) continue
-      if (best === null || fy > best) best = fy
-    }
-    return best
+    return this.graph ? graphFloorAt(this.graph, this.rampTiles, x, z, y, r, maxUp) : null
   }
 
   private centreFloor(cx: number, cz: number, tileY: number, ramp: boolean): number | null {

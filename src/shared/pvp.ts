@@ -149,9 +149,6 @@ export const BURST_EMOTE_S = 0.467
 export const BURST_EMOTE_FREEZE_S = 0.3
 /** Victim drops an impact this long after it saw the burst fire (ms). Was 600; widened for high-RTT. */
 export const BURST_IMPACT_MAX_AGE_MS = 900
-/** Ghost bots inside the radius: server-side shove (cells) + stun. */
-export const BURST_BOT_SHOVE = 4
-export const BURST_BOT_STUN_S = 1.0
 /** One-time paint on activation (server, immediate): footprint shape and size (cells, 1 cell = 2 m).
  *  'circle' = cells whose centre is within R cells of the centre cell's centre (R=3.5 → 37 cells,
  *  ≈ the 7×7 square's size, Luke). 'square' = |dx|,|dz| ≤ R (R=3 or 3.5 → 7×7). 'cross' = |dx|+|dz| ≤ R. */
@@ -211,8 +208,6 @@ export const AIR_SPIKE_HANG_FORCE = 10
 export const AIR_SPIKE_RECOVER_GLIDE = false
 /** How long the attacker's glider stays shut when RECOVER_GLIDE is false. */
 export const AIR_SPIKE_RECOVER_GLIDE_S = 0.35
-/** Ghost bot in the cylinder: small horizontal shove (bots cannot fall). Metres. */
-export const AIR_SPIKE_BOT_SHOVE = 2
 /** Attacker dive on an airborne press only (Yoshi Down-B style commit, not a freefall mode).
  *  Downward impulse plus a short downward force. A small forward component sells the body commit
  *  without leaving the 2 m cylinder. Ground Burst does not use these. */
@@ -442,9 +437,15 @@ export const LUNGE_IMPACT_MAX_AGE_MS = 800
  *  Residual risk: rare false knock if we look in-volume but the attacker never reports us. */
 export const VICTIM_SPECULATIVE_KNOCK = true
 
-// ─── Ghost bot (server-shoved; it walks a graph and can't fall) ─────
-export const LUNGE_BOT_SHOVE = 7 // was 6; tracks the modest knock bump
-export const LUNGE_BOT_STUN_S = 1.2
+// ─── Ghost bot body (shared/botBody.ts, run by the server) ──────────
+/** Bots take the same knocks as players (shared/knocks.ts) through a server body sim. These convert
+ *  Physics-API units to the body's m/s and set its gravity and ground friction. Tune them until the
+ *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit. */
+export const BOT_KNOCK_UNIT = 0.15 // m/s per impulse unit (guess: lunge ≈ 12 m on flat floor; the anvil's 0.25 gave ≈ 49 m)
+export const BOT_GRAVITY = 20 // m/s²
+export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
+/** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */
+export const BOT_RECOVER_SPEED = 1.5
 
 // ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
 /** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */

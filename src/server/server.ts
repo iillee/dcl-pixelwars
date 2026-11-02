@@ -17,7 +17,9 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, punchBot, getWalkableGraph } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, hitBot, getWalkableGraph } from './bots/manager'
+import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
+import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
   loadFromStorage as loadLeaderboard,
   saveToStorage as saveLeaderboard,
@@ -36,9 +38,8 @@ import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
-  LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S,
-  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_BOT_SHOVE, BURST_BOT_STUN_S,
-  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_BOT_SHOVE,
+  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, shockwaveHits } from '../shared/burst'
@@ -94,6 +95,15 @@ export async function setupServer(): Promise<void> {
     // invisible scraper accounts that connect but never touch the ground.
     humanCount: activeHumanCount,
     soloHumanTeam: activeSoloHumanTeam,
+    // A knocked-off ghost rides the same cloud a player does: every client
+    // flies it along the shared path (mobile 1) while the bot body follows it.
+    onFell: (id, at, base) => {
+      const who = `bot:${id}`
+      const by = noteFell(who)
+      room.send('rescueStart', { who, x: at.x, y: at.y, z: at.z, bx: base.x, by: base.y, bz: base.z, mobile: 1, ...RESCUE_TIMES })
+      console.log(`[Server] ghost ${id} fell${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
+    },
+    onRescueEnd: id => room.send('rescueEnd', { who: `bot:${id}` }),
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()
@@ -489,8 +499,8 @@ export async function setupServer(): Promise<void> {
       return
     }
     if (victimId.startsWith('bot:')) {
-      if (!punchBot(parseInt(victimId.slice(4), 10), x, y, z, ux, uz, Math.hypot(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D, LUNGE_HITBOX_W / 2) + 2 + SERVER_LUNGE_BOT_SLACK,
-        LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, LUNGE_BOT_SHOVE, LUNGE_BOT_STUN_S * 1000)) return
+      if (!hitBot(parseInt(victimId.slice(4), 10), x, y, z, Math.hypot(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D, LUNGE_HITBOX_W / 2) + 2 + SERVER_LUNGE_BOT_SLACK,
+        LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, () => lungeKnock(ux, uz))) return
     }
     console.log(`[Server] lungeImpact ${from.slice(0, 8)} #${id} → ${victimId.slice(0, 8)}`)
     noteHit(from, victimId)
@@ -509,8 +519,9 @@ export async function setupServer(): Promise<void> {
     for (const h of shockwaveHits(origin, targets, fx, fz, BURST_RADIUS + 1)) {
       // A spike that already connected this bot must not shove it again when the miss lands.
       if (bursts.hasHit(from, id, `bot:${h.id}`)) continue
-      if (punchBot(h.id, origin.x, origin.y, origin.z, h.x, h.z, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, BURST_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+      if (hitBot(h.id, origin.x, origin.y, origin.z, BURST_RADIUS + 2, BURST_HIT_MAX_DY + 1, () => burstKnock(h.x, h.z))) {
         bursts.hit(from, id, `bot:${h.id}`, now)
+        noteHit(from, `bot:${h.id}`)
         room.send('burstImpact', { attacker: from, id, target: `bot:${h.id}`, dx: h.x, dz: h.z, air: 0 })
       }
     }
@@ -573,8 +584,9 @@ export async function setupServer(): Promise<void> {
         const l = Math.hypot(dx, dz)
         if (l < 0.2) { dx = fx; dz = fz } else { dx /= l; dz /= l }
         const dl = Math.hypot(dx, dz) || 1
-        if (punchBot(b.id, x, y, z, dx / dl, dz / dl, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, AIR_SPIKE_BOT_SHOVE, BURST_BOT_STUN_S * 1000)) {
+        if (hitBot(b.id, x, y, z, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, grounded => spikeKnock(dx / dl, dz / dl, grounded))) {
           bursts.hit(from, id, `bot:${b.id}`, now)
+          noteHit(from, `bot:${b.id}`)
           room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl, air: 1 })
         }
       }

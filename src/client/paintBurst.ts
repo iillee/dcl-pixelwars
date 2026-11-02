@@ -34,7 +34,6 @@ import {
   BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
-  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_GROUND_OUT, AIR_SPIKE_GROUND_LIFT,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
@@ -62,7 +61,8 @@ import {
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
-import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
+import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock } from './knockback'
+import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
 
@@ -563,10 +563,7 @@ function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: 
     console.log(`[Burst] ${why} #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
     return false
   }
-  safePhysics('burst knockback', () => {
-    Physics.applyImpulseToPlayer(Vector3.create(dx * BURST_KNOCKBACK, BURST_KNOCK_LIFT, dz * BURST_KNOCKBACK))
-    if (BURST_KNOCK_FORCE > 0) Physics.applyForceToPlayerForDuration(knockForceEnt, BURST_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), BURST_KNOCK_FORCE)
-  })
+  applyKnock(burstKnock(dx, dz), knockForceEnt, 'burst knockback')
   playDashHitSfx()
   console.log(`[Burst] ${why} by ${att.slice(0, 8)} #${id}`)
   return true
@@ -586,19 +583,7 @@ function applyAirKnock(att: string, id: number, dx: number, dz: number, why: str
   startGlideLock(AIR_SPIKE_GLIDE_LOCK_S)
   startKnockLock()
   const grounded = !!sampleBurstStance()?.grounded
-  const ox = dx * 0.35, oz = dz * 0.35
-  const fl = Math.hypot(ox, oz, 1)
-  safePhysics('air spike knockback', () => {
-    if (grounded) {
-      Physics.applyImpulseToPlayer(Vector3.create(dx * AIR_SPIKE_GROUND_OUT, AIR_SPIKE_GROUND_LIFT, dz * AIR_SPIKE_GROUND_OUT))
-      if (BURST_KNOCK_FORCE > 0) Physics.applyForceToPlayerForDuration(knockForceEnt, BURST_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), BURST_KNOCK_FORCE)
-      return
-    }
-    Physics.applyImpulseToPlayer(Vector3.create(dx * AIR_SPIKE_OUT, -AIR_SPIKE_DOWN, dz * AIR_SPIKE_OUT))
-    if (AIR_SPIKE_FORCE > 0) {
-      Physics.applyForceToPlayerForDuration(knockForceEnt, AIR_SPIKE_FORCE_S, Vector3.create(ox / fl, -1 / fl, oz / fl), AIR_SPIKE_FORCE)
-    }
-  })
+  applyKnock(spikeKnock(dx, dz, grounded), knockForceEnt, 'air spike knockback')
   playAirHitSfx()
   const self = Transform.getOrNull(engine.PlayerEntity)?.position
   if (self) showAirHit({ x: self.x, y: self.y, z: self.z }, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att))

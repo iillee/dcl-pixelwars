@@ -20,9 +20,15 @@
  * human roster split.
  */
 
-import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../../maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, Placed } from '../../maze/generator'
+import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
+import { BotBody } from '../../shared/botBody'
+import { KnockSpec } from '../../shared/knocks'
 import { Bot, makeSmartTarget, PaintReader } from './bot'
+
+type V3 = { x: number; y: number; z: number }
+type LiveBot = Bot & { botId: number; body: BotBody }
 
 // Solo-mode: exactly one bot appears when there is exactly one human,
 // always on the OPPOSITE team so the solo player has an opponent. Two+
@@ -38,11 +44,16 @@ export interface ManagerDeps {
   humanCount: () => number
   /** Team (1 or 2) of the sole human when humanCount===1, else null. */
   soloHumanTeam: () => number | null
+  /** Bot crossed the fall line at `at`; the cloud carries it to `base` (broadcast rescueStart, count the death). */
+  onFell?: (id: number, at: V3, base: V3) => void
+  /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
+  onRescueEnd?: (id: number) => void
 }
 
 let deps: ManagerDeps | null = null
 let graph: WalkableGraph | null = null
-let bots: Array<Bot & { botId: number }> = []
+let rampTiles: Placed[] = []
+let bots: LiveBot[] = []
 let botIdCounter = 0
 
 export function initBots(d: ManagerDeps): void {
@@ -63,16 +74,44 @@ export function rebuildBotGraph(seed: number): void {
     return
   }
   const t0 = Date.now()
-  graph = buildWalkableGraph(getPlacedTilesInOrder())
+  const tiles = getPlacedTilesInOrder()
+  graph = buildWalkableGraph(tiles)
+  rampTiles = tiles.filter(t => TILES[t.type].isRamp)
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
 
   // New round: send any surviving ghost back to its own base (the old
   // cellIds are stale). tickBots() then re-checks its team next tick.
-  for (const b of bots) {
-    b.currentCell = baseStartCell(b.team)
-    b.clearPath()
+  for (const b of bots) placeAtBase(b)
+}
+
+/** Stand a bot on its base: legs and body both, ending any cloud trip. */
+function placeAtBase(b: LiveBot): void {
+  if (b.body.inRescue()) deps?.onRescueEnd?.(b.botId)
+  b.currentCell = baseStartCell(b.team)
+  b.clearPath()
+  b.body.reset(cellPos(b.currentCell) ?? baseSpawn(b.team).pos)
+}
+
+function cellPos(id: string): V3 | null {
+  const p = graph?.worldPos.get(id)
+  return p ? { x: p[0], y: p[1], z: p[2] } : null
+}
+
+/** Graph cell under a body that just stopped: deep cells first, within ~one cell and a step of height. */
+function cellNear(p: V3): string | null {
+  const g = graph!
+  for (const pool of [g.deepNodes, g.nodes]) {
+    let best: string | null = null, bestD = 2.5
+    for (const id of pool) {
+      const q = g.worldPos.get(id)
+      if (!q || Math.abs(q[1] - p.y) > 1.5) continue
+      const d = Math.hypot(q[0] - p.x, q[2] - p.z)
+      if (d < bestD) { bestD = d; best = id }
+    }
+    if (best) return best
   }
+  return null
 }
 
 /**
@@ -118,9 +157,10 @@ function spawnBot(): void {
     startCell,
     pickTarget: makeSmartTarget(deps.paint, team),
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
-  }) as Bot & { botId: number }
+  }) as LiveBot
   botIdCounter++
   bot.botId = botIdCounter
+  bot.body = new BotBody(cellPos(startCell) ?? baseSpawn(team).pos)
   bots.push(bot)
   console.log(`[Bots] spawn #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
 }
@@ -128,6 +168,7 @@ function spawnBot(): void {
 function retireBot(): void {
   const removed = bots.pop()
   if (!removed) return
+  if (removed.body.inRescue()) deps?.onRescueEnd?.(removed.botId)
   console.log(`[Bots] retire: team ${removed.team === 1 ? 'RED' : 'BLUE'} (pop ${bots.length})`)
 }
 
@@ -155,25 +196,44 @@ export function tickBots(dtSec: number): void {
     spawnBot()
   }
 
-  // Ghost off the map (its cell no longer exists, e.g. the tile under it
-  // went away): respawn on its own base. Server bots walk the graph and
-  // can't physically fall, so this is the equivalent of a fall respawn.
+  // Walking ghost whose cell no longer exists (e.g. the tile under it went
+  // away): back to its own base.
   for (const b of bots) {
-    if (!graph.nodes.has(b.currentCell)) {
+    if (b.body.mode === 'walk' && !graph.nodes.has(b.currentCell)) {
       console.log(`[Bots] ghost ${b.team === 1 ? 'RED' : 'BLUE'} lost its cell - back to its base`)
-      b.currentCell = baseStartCell(b.team)
-      b.clearPath()
+      placeAtBase(b)
     }
   }
 
   // ── 2. Tick each bot ───────────────────────────────────────────────
-  // Each step paints the stepped cell AND its walkable neighbors, matching
-  // the ~3x3 footprint human players apply via paintTick. Without this, a
-  // bot painted 1 cell vs the human's 9 per stride — ~9x weaker, and it
-  // felt like the bots weren't really contesting territory.
+  // Body first (knock flight, cloud ride, landing), then the legs if the
+  // body lets them walk. Each step paints the stepped cell AND its walkable
+  // neighbors, matching the ~3x3 footprint human players apply via
+  // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
   for (const b of bots) {
-    for (const stepId of b.tick(dtMs, graph)) {
+    const world = { graph, rampTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
+    for (const ev of b.body.tick(dtSec, world)) {
+      if (ev.type === 'trace') console.log(ev.line)
+      else if (ev.type === 'settled') {
+        const c = cellNear(b.body.pos)
+        if (c) { b.currentCell = c; b.clearPath(); b.body.follow(cellPos(c)!) }
+        else placeAtBase(b)
+      } else if (ev.type === 'fell') {
+        console.log(`[Bots] ghost ${b.botId} fell at ${ev.catch.x.toFixed(1)},${ev.catch.y.toFixed(1)},${ev.catch.z.toFixed(1)} - cloud home`)
+        deps.onFell?.(b.botId, ev.catch, world.base)
+      } else if (ev.type === 'landed') {
+        b.currentCell = baseStartCell(b.team)
+        b.clearPath()
+        deps.onRescueEnd?.(b.botId)
+        console.log(`[Bots] ghost ${b.botId} home`)
+      }
+    }
+    if (!b.body.canWalk()) continue
+    const stepped = b.tick(dtMs, graph)
+    const vp = b.visualPosition(graph)
+    if (vp) b.body.follow({ x: vp[0], y: vp[1], z: vp[2] })
+    for (const stepId of stepped) {
       // Paint the full 3x3 stamp around the stepped cell (matches human
       // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
       // off-corridor positions are filtered.
@@ -205,59 +265,43 @@ export function getWalkableGraph(): WalkableGraph | null { return graph }
  * 2 Hz botPositions broadcast tick. Empty array = no bots (broadcast
  * skipped by the caller so we don't fan out zero-payloads).
  */
-export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number }> {
+/** Body state on the wire: 0 walking, 1 knocked/airborne, 2 riding or dropping from the cloud. */
+export type BotWireState = 0 | 1 | 2
+
+export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {
   if (!graph) return []
-  const out: Array<{ id: number; team: number; x: number; y: number; z: number }> = []
+  const out: Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> = []
   for (const b of bots) {
-    // Sub-step interpolated position — lerps between currentCell and
-    // path[0] based on step accumulator. Turns the broadcast into
-    // continuous motion instead of teleport-then-hold. See Bot.visualPosition().
-    const pos = b.visualPosition(graph)
-    if (!pos) continue
-    out.push({ id: b.botId, team: b.team, x: pos[0], y: pos[1], z: pos[2] })
+    // Walking: the body follows Bot.visualPosition() (sub-step lerp between
+    // cells). Knocked / rescued: the body's own simulated position.
+    const p = b.body.pos
+    const st: BotWireState = b.body.mode === 'walk' ? 0 : b.body.mode === 'knock' ? 1 : 2
+    out.push({ id: b.botId, team: b.team, x: p.x, y: p.y, z: p.z, st })
   }
   return out
 }
 
 /**
- * Punch on a ghost bot. Range-checks the puncher's reported position, then
- * slides the bot up to `shove` m along (dx, dz), stopping where the floor
- * it stands on ends (samples every 0.5 m, nearest walkable node within
- * ~one cell at the same height). Server bots walk the graph and can't fall,
- * so the ghost is pushed to the edge, not off it. Returns false if rejected.
+ * A hit on a ghost bot. Range-checks the attacker's reported position against
+ * the bot's body, then applies the same KnockSpec a human victim would get
+ * (`specFor` gets whether the bot is on a floor, for the spike). The body
+ * flies, can be knocked off the map and is rescued like a player.
+ * Returns false if rejected (no such bot, out of range, immune / riding).
  */
-export function punchBot(id: number, ax: number, ay: number, az: number, dx: number, dz: number,
-  maxRange: number, maxDy: number, shove: number, stunMs: number): boolean {
+export function hitBot(id: number, ax: number, ay: number, az: number,
+  maxRange: number, maxDy: number, specFor: (grounded: boolean) => KnockSpec): boolean {
   if (!graph) return false
   const b = bots.find(x => x.botId === id)
   if (!b) return false
-  const pos = b.visualPosition(graph)
-  if (!pos) return false
-  if (Math.hypot(pos[0] - ax, pos[2] - az) > maxRange || Math.abs(pos[1] - ay) > maxDy) {
-    console.log(`[Bots] punch on ghost ${id} rejected: range`)
+  const p = b.body.pos
+  if (Math.hypot(p.x - ax, p.z - az) > maxRange || Math.abs(p.y - ay) > maxDy) {
+    console.log(`[Bots] hit on ghost ${id} rejected: range`)
     return false
   }
-  const NODE_TOL = 2.5
-  const nearest = (x: number, y: number, z: number): string | null => {
-    let best: string | null = null
-    let bestD = NODE_TOL
-    for (const nid of graph!.deepNodes) {
-      const p = graph!.worldPos.get(nid)
-      if (!p || Math.abs(p[1] - y) > 1.5) continue
-      const d = Math.hypot(p[0] - x, p[2] - z)
-      if (d < bestD) { bestD = d; best = nid }
-    }
-    return best
-  }
-  let dest = b.currentCell
-  for (let s = 0.5; s <= shove + 1e-6; s += 0.5) {
-    const n = nearest(pos[0] + dx * s, pos[1], pos[2] + dz * s)
-    if (!n) break
-    dest = n
-  }
-  b.currentCell = dest
+  if (!b.body.canBeHit()) return false
+  const spec = specFor(b.body.isGrounded())
+  if (!b.body.knock(spec)) return false
   b.clearPath()
-  b.stun(stunMs)
-  console.log(`[Bots] ghost ${id} punched → ${dest}`)
+  console.log(`[Bots] ghost ${id} hit: ${spec.kind}`)
   return true
 }

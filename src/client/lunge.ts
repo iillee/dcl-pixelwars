@@ -57,7 +57,8 @@ import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
-import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState } from './knockback'
+import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock } from './knockback'
+import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
@@ -443,12 +444,7 @@ function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: 
     console.log(`[Lunge] ${why} #${id} from ${att.slice(0, 8)} dropped (${verdict}, immune=${isKnockbackImmune()})`)
     return false
   }
-  safePhysics('lunge knockback', () => {
-    Physics.applyImpulseToPlayer(Vector3.create(dx * LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, dz * LUNGE_KNOCKBACK))
-    if (LUNGE_KNOCK_FORCE > 0) {
-      Physics.applyForceToPlayerForDuration(knockForceEnt, LUNGE_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), LUNGE_KNOCK_FORCE)
-    }
-  })
+  applyKnock(lungeKnock(dx, dz), knockForceEnt, 'lunge knockback')
   startKnockLock()
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   if (p) {

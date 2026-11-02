@@ -148,6 +148,7 @@ export const Messages = {
       x: Schemas.Number,
       y: Schemas.Number,
       z: Schemas.Number,
+      st: Schemas.Int,       // 0 walking, 1 knocked / airborne, 2 on (or dropping from) the rescue cloud
     })),
   }),
 

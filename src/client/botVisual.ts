@@ -92,6 +92,11 @@ const PULSE_HZ        = 0.8
 // lerping, so a round-reseat doesn't send the ghost sliding across the
 // whole map through walls.
 const TELEPORT_THRESHOLD = 8
+// Knocked or riding the cloud (st != 0): the server body moves fast
+// (launches, falls, 45 m/s cloud rise), so chase it harder and only snap
+// on a genuine reseat.
+const LERP_SPEED_FAST_PER_SEC = 18.0
+const TELEPORT_THRESHOLD_FAST = 60
 
 interface BotVisual {
   root: Entity          // moves each frame (ghost.glb + parent for light+audio)
@@ -102,6 +107,7 @@ interface BotVisual {
   renderPos: Vector3    // smoothed position we actually draw at
   lastYawDeg: number    // last committed yaw — held when velocity too low
   lightEntity: Entity   // child, for team-recolour on restart
+  fast: boolean         // last server state was knocked / rescue (st != 0)
 }
 
 // Keyed by bot id (stable per bot, server-assigned).
@@ -153,6 +159,7 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     renderPos: Vector3.clone(pos),
     lastYawDeg: 0,
     lightEntity: light,
+    fast: false,
   }
 }
 
@@ -183,8 +190,11 @@ export function initBotVisual(): void {
       const dy = serverPos.y - rec.lastServerPos.y
       const dz = serverPos.z - rec.lastServerPos.z
       const distSq = dx * dx + dy * dy + dz * dz
+      const wasFast = rec.fast
+      rec.fast = (b.st ?? 0) !== 0
+      const snapAt = rec.fast || wasFast ? TELEPORT_THRESHOLD_FAST : TELEPORT_THRESHOLD
 
-      if (distSq > TELEPORT_THRESHOLD * TELEPORT_THRESHOLD) {
+      if (distSq > snapAt * snapAt) {
         // Snap. Kills accumulated velocity so we don't overshoot the target.
         rec.renderPos = Vector3.clone(serverPos)
         rec.lastServerPos = Vector3.clone(serverPos)
@@ -224,7 +234,7 @@ export function initBotVisual(): void {
       const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
 
       // Per-frame lerp — adapts to dt automatically.
-      const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
+      const k = Math.min(1, (rec.fast ? LERP_SPEED_FAST_PER_SEC : LERP_SPEED_PER_SEC) * dt)
       rec.renderPos = Vector3.create(
         rec.renderPos.x + (predX - rec.renderPos.x) * k,
         rec.renderPos.y + (predY - rec.renderPos.y) * k,
