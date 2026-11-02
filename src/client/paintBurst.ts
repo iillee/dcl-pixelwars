@@ -61,7 +61,7 @@ import {
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
-import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock } from './knockback'
+import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
@@ -410,6 +410,7 @@ function knockAirAnvils(p: V3, fx: number, fz: number, id: number): number {
 
 function posOf(who: string): V3 | null {
   if (who === '') return Transform.getOrNull(engine.PlayerEntity)?.position ?? null
+  if (who.startsWith('bot:')) return botFeet(who)
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
     if (pid.address.toLowerCase() === who) return tr.position

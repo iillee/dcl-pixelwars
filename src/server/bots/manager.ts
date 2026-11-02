@@ -25,10 +25,26 @@ import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { KnockSpec } from '../../shared/knocks'
+import { inBurst } from '../../shared/burst'
+import {
+  BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
+  BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
+  BURST_COOLDOWN_S, BURST_RADIUS,
+} from '../../shared/pvp'
 import { Bot, makeSmartTarget, PaintReader } from './bot'
 
 type V3 = { x: number; y: number; z: number }
-type LiveBot = Bot & { botId: number; body: BotBody }
+type Combat = {
+  think: number
+  lungeCd: number
+  burstCd: number
+  chaseLeft: number
+  ids: number
+  /** Own lunge in flight: who it is aimed at, for the round-stats hit (reported positions). */
+  sweep: { target: string; left: number } | null
+}
+type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat }
+const newCombat = (): Combat => ({ think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null })
 
 // Solo-mode: exactly one bot appears when there is exactly one human,
 // always on the OPPOSITE team so the solo player has an opponent. Two+
@@ -48,6 +64,16 @@ export interface ManagerDeps {
   onFell?: (id: number, at: V3, base: V3) => void
   /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
   onRescueEnd?: (id: number) => void
+  /** Combat. Humans with a fresh reported position (feet); omit to keep bots passive. */
+  humans?: () => Array<{ id: string; team: number; x: number; y: number; z: number }>
+  /** Which abilities this round allows (players get the same). */
+  abilities?: () => { lunge: boolean; burst: boolean }
+  /** Bot started lunge `lungeId` at `at` along (dx, dz): broadcast it like a player's. */
+  onLunge?: (id: number, lungeId: number, dx: number, dz: number, at: V3) => void
+  /** Bot fired grounded burst `burstId` at `at`: paint (no leaderboard) and broadcast. */
+  onBurst?: (id: number, burstId: number, team: number, at: V3) => void
+  /** Bot's lunge reached `human` by reported positions (round stats only; the victim's client knocks itself). */
+  onBotHit?: (id: number, human: string) => void
 }
 
 let deps: ManagerDeps | null = null
@@ -161,6 +187,7 @@ function spawnBot(): void {
   botIdCounter++
   bot.botId = botIdCounter
   bot.body = new BotBody(cellPos(startCell) ?? baseSpawn(team).pos)
+  bot.combat = newCombat()
   bots.push(bot)
   console.log(`[Bots] spawn #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
 }
@@ -235,6 +262,7 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} home`)
       }
     }
+    fight(b, dtSec)
     if (!b.body.canWalk()) continue
     const stepped = b.tick(dtMs, graph)
     const vp = b.visualPosition(graph)
@@ -256,6 +284,61 @@ export function tickBots(dtSec: number): void {
         }
       }
     }
+  }
+}
+
+/**
+ * Combat brain, every BOT_THINK_S while the bot is on its feet: nearest enemy
+ * human on its level within BOT_ENGAGE_RANGE → lunge if close, burst if inside
+ * the radius, otherwise chase. Players' cooldowns; one roll per ability per think.
+ */
+function fight(b: LiveBot, dt: number): void {
+  const c = b.combat
+  c.lungeCd -= dt; c.burstCd -= dt; c.chaseLeft -= dt; c.think -= dt
+  const humans = deps?.humans?.() ?? []
+  if (c.sweep) {
+    c.sweep.left -= dt
+    const h = humans.find(x => x.id === c.sweep!.target)
+    const p = b.body.pos
+    if (h && Math.hypot(h.x - p.x, h.z - p.z) < 2 && Math.abs(h.y - p.y) < BOT_SAME_LEVEL_DY) {
+      deps?.onBotHit?.(b.botId, h.id)
+      c.sweep = null
+    } else if (c.sweep.left <= 0) c.sweep = null
+  }
+  if (c.think > 0 || !b.body.canWalk() || !graph) return
+  c.think = BOT_THINK_S
+  const p = b.body.pos
+  let tgt: (typeof humans)[number] | null = null, best = BOT_ENGAGE_RANGE
+  for (const h of humans) {
+    if (h.team === b.team || Math.abs(h.y - p.y) > BOT_SAME_LEVEL_DY) continue
+    const d = Math.hypot(h.x - p.x, h.z - p.z)
+    if (d < best) { best = d; tgt = h }
+  }
+  if (!tgt) return
+  const can = deps?.abilities?.() ?? { lunge: false, burst: false }
+  if (can.lunge && c.lungeCd <= 0 && best <= BOT_LUNGE_RANGE && Math.random() < BOT_LUNGE_CHANCE) {
+    const err = (Math.random() * 2 - 1) * BOT_AIM_ERROR_DEG * Math.PI / 180
+    const ax = (tgt.x - p.x) / Math.max(best, 1e-3), az = (tgt.z - p.z) / Math.max(best, 1e-3)
+    const dx = ax * Math.cos(err) - az * Math.sin(err), dz = ax * Math.sin(err) + az * Math.cos(err)
+    const at = { ...p }
+    if (b.body.dash(dx, dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)) {
+      c.lungeCd = LUNGE_COOLDOWN_S
+      c.sweep = { target: tgt.id, left: LUNGE_ACTIVE_S + 0.4 }
+      b.clearPath()
+      deps?.onLunge?.(b.botId, ++c.ids, dx, dz, at)
+      console.log(`[Bots] ghost ${b.botId} lunges at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
+    }
+    return
+  }
+  if (can.burst && c.burstCd <= 0 && inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC) && Math.random() < BOT_BURST_CHANCE) {
+    c.burstCd = BURST_COOLDOWN_S
+    deps?.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    console.log(`[Bots] ghost ${b.botId} bursts at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
+    return
+  }
+  if (c.chaseLeft <= 0) {
+    const cell = cellNear(tgt)
+    if (cell && cell !== b.currentCell) { b.chase(cell); c.chaseLeft = 0.5 }
   }
 }
 

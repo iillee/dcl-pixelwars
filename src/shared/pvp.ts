@@ -457,6 +457,27 @@ export const BOT_GLIDE_FALL = 3 // m/s
 /** The one air (double) jump it spends to start the recovery (m/s up; ≈ 1.2 m at BOT_GRAVITY). */
 export const BOT_AIR_JUMP_V = 7
 
+// ─── Ghost bot combat (server/bots/manager.ts) ──────────────────────
+/** Clients report their position this often while a ghost is in the round (botAim). */
+export const BOT_AIM_REPORT_HZ = 5
+/** Reported positions older than this are ignored (s). */
+export const BOT_AIM_STALE_S = 1.0
+/** The bot decides how often (s). Each decision is one roll per ability, so chance × rate = aggression. */
+export const BOT_THINK_S = 0.25
+/** Chase a human this close (m, horizontal) and within BOT_SAME_LEVEL_DY. */
+export const BOT_ENGAGE_RANGE = 14
+export const BOT_SAME_LEVEL_DY = 1.5
+/** Lunge when the target is this close (m): the dash covers LUNGE_DISTANCE 9.2 m, so well inside it. */
+export const BOT_LUNGE_RANGE = 5.5
+export const BOT_LUNGE_CHANCE = 0.35
+/** Burst when the target is inside this share of BURST_RADIUS. */
+export const BOT_BURST_RANGE_FRAC = 0.75
+export const BOT_BURST_CHANCE = 0.25
+/** Aim error on a lunge, ± degrees (uniform). */
+export const BOT_AIM_ERROR_DEG = 12
+/** Bot dash speed and length for its lunge (m/s, s): LUNGE_DISTANCE over LUNGE_ACTIVE_S, then it brakes. */
+export const BOT_LUNGE_BRAKE = 0.15 // fraction of the dash speed kept after the active window
+
 // ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
 /** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */
 export const LUNGE_TEST_DUMMY = true

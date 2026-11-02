@@ -19,7 +19,18 @@ let immuneLeft = 0
 let installed = false
 
 export function localTeam(): Team { return myTeam }
-export function teamOfUser(userId: string): Team { return teamByUser.get(userId.toLowerCase()) ?? Team.None }
+export function teamOfUser(userId: string): Team {
+  const id = userId.toLowerCase()
+  if (id.startsWith('bot:')) return botLookup?.team(id) ?? Team.None
+  return teamByUser.get(id) ?? Team.None
+}
+
+/** Ghost bots as attackers: client/botVisual registers where each one is drawn (feet) and its team,
+ *  so lunge / burst handle "bot:N" like any enemy avatar. */
+type BotLookup = { team: (id: string) => Team; feet: (id: string) => { x: number; y: number; z: number } | null }
+let botLookup: BotLookup | null = null
+export function registerBotLookup(l: BotLookup): void { botLookup = l }
+export function botFeet(id: string): { x: number; y: number; z: number } | null { return botLookup?.feet(id.toLowerCase()) ?? null }
 export function isKnockbackImmune(): boolean { return immuneLeft > 0 }
 
 export function myAddress(): string {

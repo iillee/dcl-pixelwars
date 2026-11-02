@@ -57,7 +57,7 @@ import { getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
-import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock } from './knockback'
+import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
 
@@ -180,6 +180,7 @@ function spawnStreak(p: V3, team: Team): void {
 
 function avatarPos(addrLower: string): V3 | null {
   if (addrLower === '') return Transform.getOrNull(engine.PlayerEntity)?.position ?? null
+  if (addrLower.startsWith('bot:')) return botFeet(addrLower)
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
     if (pid.address.toLowerCase() === addrLower) return tr.position
@@ -432,7 +433,8 @@ function onStarted(attacker: string, id: number, dx: number, dz: number, x: numb
   const key = `${att}#${id}`
   pendingVictim.set(key, {
     att, id, dx, dz, start,
-    left: LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S + 0.2, // slack for avatar interpolation
+    // Slack for avatar interpolation; a ghost's dash is drawn ~0.25 s late (botVisual), so more.
+    left: LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S + (att.startsWith('bot:') ? 0.7 : 0.2),
     prevAtt: p ? { x: p.x, y: p.y, z: p.z } : start,
   })
 }

@@ -156,6 +156,10 @@ export const Messages = {
     t: Schemas.Number,       // server bot-simulation clock (s) when these positions were taken
   }),
 
+  // Client → Server: my feet position, ~BOT_AIM_REPORT_HZ, only while a ghost
+  // bot is in the round (client/botVisual.ts). Lets the bot chase and aim.
+  botAim: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+
   // Dash PvP prototype (shared/pvp.ts, design/pvp-prototype.md).
   // Client → Server: the sender's dash touched `target` (PlayerIdentityData
   // address) on the sender's screen. dx/dz = horizontal push direction.

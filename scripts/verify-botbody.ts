@@ -9,6 +9,7 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody, BotBodyEvent } from '../src/shared/botBody'
 import { lungeKnock, burstKnock, spikeKnock, KnockSpec } from '../src/shared/knocks'
 import { rescueTripSeconds } from '../src/shared/rescuePath'
+import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE } from '../src/shared/pvp'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -81,6 +82,22 @@ for (const strength of [85, 95, 105, 115]) {
     res.push(`${recover ? 'tries' : 'no try'}: ${out}`)
   }
   console.log(`shove ${strength} -x | ${res.join(' | ')}`)
+}
+
+// The bot's own lunge dash: about LUNGE_DISTANCE on a floor; off an edge it falls (it rolled no recovery).
+for (const [dName, dx, dz] of [['+x', 1, 0], ['-x', -1, 0]] as Array<[string, number, number]>) {
+  const body = new BotBody(base)
+  body.rng = () => 1
+  if (!body.dash(dx, dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)) { fail(`dash ${dName} refused`); continue }
+  let out = 'unresolved'
+  for (let t = 0; t < 15 && out === 'unresolved'; t += 0.05) {
+    for (const e of body.tick(0.05, world)) {
+      if (e.type === 'settled') out = `settled ${Math.hypot(body.pos.x - base.x, body.pos.z - base.z).toFixed(1)} m`
+      if (e.type === 'fell') out = 'fell'
+    }
+  }
+  console.log(`dash ${dName}: ${out} (LUNGE_DISTANCE ${LUNGE_DISTANCE} m)`)
+  if (out === 'unresolved') fail(`dash ${dName} never resolved`)
 }
 
 // Riding the cloud: hits are ignored.

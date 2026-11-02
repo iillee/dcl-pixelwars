@@ -39,10 +39,10 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY,
-  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
-import { BurstLedger, burstFootprint, burstCentre, inAirSpike, shockwaveHits } from '../shared/burst'
+import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHits } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
@@ -78,6 +78,15 @@ export async function setupServer(): Promise<void> {
   bindNameResolver(leaderboardGetName)
   await initDiscord()
 
+  // Players' own feet positions (client botAim, ~5 Hz while a ghost is in the
+  // round), so ghost bots can aim. Keyed by lower-case address.
+  const botAim = new Map<string, { x: number; y: number; z: number; t: number }>()
+  room.onMessage('botAim', ({ x, y, z }, context) => {
+    const from = context?.from
+    if (!from || ![x, y, z].every(n => typeof n === 'number' && isFinite(n))) return
+    botAim.set(from.toLowerCase(), { x, y, z, t: Date.now() })
+  })
+
   // Bot subsystem — Phase 5a. Server-side virtual painters that keep the
   // scene alive when human count < TARGET_ACTIVE. Retire gracefully as
   // humans join; never appear on the leaderboard.
@@ -104,6 +113,36 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] ghost ${id} fell${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
     },
     onRescueEnd: id => room.send('rescueEnd', { who: `bot:${id}` }),
+    // Combat: bots attack with players' broadcasts; each victim's client judges
+    // the hit on its own screen and knocks itself, as against a player.
+    humans: () => {
+      const now = Date.now()
+      const out: Array<{ id: string; team: number; x: number; y: number; z: number }> = []
+      for (const e of rosterEntries()) {
+        const a = botAim.get(e.userId.toLowerCase())
+        if (a && now - a.t <= BOT_AIM_STALE_S * 1000) out.push({ id: e.userId.toLowerCase(), team: e.team, x: a.x, y: a.y, z: a.z })
+      }
+      return out
+    },
+    abilities: () => ({ lunge: lungeEnabledForRound(currentRoundIndex()), burst: burstEnabledForRound(currentRoundIndex()) }),
+    onLunge: (id, lungeId, dx, dz, at) => {
+      room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z })
+    },
+    onBurst: (id, burstId, team, at) => {
+      const graph = getWalkableGraph()
+      const centre = graph ? burstCentre(graph, '', at) : null
+      const fp = graph && centre ? burstFootprint(graph, centre) : []
+      // Bots never earn leaderboard credit: paint directly, like their footsteps.
+      for (const cid of fp) applyPaint(cid, team, `bot:${id}`)
+      room.send('burstFired', { attacker: `bot:${id}`, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
+      const by = `bot:${id}`
+      const now = Date.now()
+      for (const e of rosterEntries()) {
+        const a = botAim.get(e.userId.toLowerCase())
+        if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
+      }
+    },
+    onBotHit: (id, human) => noteHit(`bot:${id}`, human),
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()

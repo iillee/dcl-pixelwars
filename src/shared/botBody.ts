@@ -82,6 +82,31 @@ export class BotBody {
     this.trace = null
   }
 
+  /** The bot's own lunge: hold `speed` along (dx, dz) for `s`, then brake to `keep` of it.
+   *  Floors and falls apply as in a knock, so it can dash itself off an edge like a player. */
+  dash(dx: number, dz: number, speed: number, s: number, keep: number): boolean {
+    if (this.mode !== 'walk' || this.holdLeft > 0) return false
+    this.mode = 'knock'
+    this.grounded = true
+    this.dashDir = { x: dx, y: 0, z: dz }
+    this.dashSpeed = speed
+    this.dashLeft = s
+    this.dashKeep = keep
+    this.vel = { x: dx * speed, y: 0, z: dz * speed }
+    this.forceLeft = 0
+    this.lockLeft = 0
+    this.willRecover = this.rng() < BOT_RECOVER_CHANCE
+    this.reactLeft = BOT_RECOVER_REACT_S
+    this.recoverTo = null
+    return true
+  }
+  private dashDir: V3 = { x: 0, y: 0, z: 0 }
+  private dashSpeed = 0
+  private dashLeft = 0
+  private dashKeep = 0
+  /** Mid-dash (its own lunge). */
+  isDashing(): boolean { return this.mode === 'knock' && this.dashLeft > 0 }
+
   /** Apply a hit. Returns false if the body can't be hit right now. */
   knock(spec: KnockSpec): boolean {
     if (!this.canBeHit()) return false
@@ -93,6 +118,7 @@ export class BotBody {
       this.forceLeft = spec.forceS
     }
     this.lockLeft = Math.max(this.lockLeft, spec.lockS)
+    this.dashLeft = 0
     // Each hit re-rolls the attempt and restarts the reaction, like a player re-reacting.
     this.willRecover = this.rng() < BOT_RECOVER_CHANCE
     this.reactLeft = Math.max(spec.lockS, spec.kind === 'spike' ? AIR_SPIKE_GLIDE_LOCK_S : 0) + BOT_RECOVER_REACT_S
@@ -125,7 +151,16 @@ export class BotBody {
         if (this.holdLeft > 0) this.holdLeft -= dt
         return
       case 'knock':
-        if (this.reactLeft > 0) this.reactLeft -= dt
+        if (this.dashLeft > 0) {
+          this.dashLeft -= dt
+          if (this.dashLeft > 0) {
+            this.vel.x = this.dashDir.x * this.dashSpeed
+            this.vel.z = this.dashDir.z * this.dashSpeed
+          } else {
+            this.vel.x = this.dashDir.x * this.dashSpeed * this.dashKeep
+            this.vel.z = this.dashDir.z * this.dashSpeed * this.dashKeep
+          }
+        } else if (this.reactLeft > 0) this.reactLeft -= dt
         this.steerRecovery(dt, world)
         this.physics(dt, world)
         if (this.lockLeft > 0) this.lockLeft -= dt

@@ -22,8 +22,9 @@ import { WalkableGraph, findPath, DEEP_MARGIN } from '../../shared/mazeGraph'
 import { GRID_W, GRID_H } from '../../maze/generator'
 
 /**
- * Steps per second the bot walks. Cells are 1m at paint SIZE=16 per 16m
- * tile, so this maps 1:1 to m/s. Tuning:
+ * Steps per second when a caller fixes the pace (scripts); live bots use the
+ * jog/run pace below. Cells are 2 m (CELL 32 / SIZE 16), so m/s = 2× this.
+ * Old tuning notes (written when cells were 1 m):
  *   4.0 = DCL walk pace, feels sluggish; player outruns easily
  *   4.5 = a hair faster than walk. Player has to sprint to catch it but
  *         it doesn't feel frantic. Current setting.
@@ -31,6 +32,14 @@ import { GRID_W, GRID_H } from '../../maze/generator'
  * Actual per-step time is jittered ±JITTER_FRAC to break the metronome.
  */
 export const DEFAULT_STEPS_PER_SEC = 4.8
+
+/** Player pace on 2 m cells: jog 8 m/s, run 10 m/s (client defaults, client/speed.ts).
+ *  Without a fixed stepsPerSec the bot picks one per route: long routes run, short
+ *  ones mostly jog, like a player sprinting across and easing in to paint. */
+const JOG_STEPS_PER_SEC = 4
+const RUN_STEPS_PER_SEC = 5
+const RUN_ROUTE_CELLS = 10
+const SHORT_ROUTE_RUN_CHANCE = 0.25
 
 /** Randomise each step by ±this fraction of the base interval. 0.15 =
  *  ±15%. Too high and the bot looks laggy; too low and it looks robotic. */
@@ -197,7 +206,8 @@ export class Bot {
   readonly team: number
   currentCell: string
   path: string[] = []              // future cells not yet stepped onto (public for visual interp)
-  private baseStepIntervalMs: number   // mean step interval (from stepsPerSec)
+  private baseStepIntervalMs: number   // mean step interval (from stepsPerSec, or this route's pace)
+  private readonly fixedPace: boolean
   private stepIntervalMs: number       // current step's actual interval (jittered)
   private stepAccumMs = 0              // grows with dt, drained by stepIntervalMs per step
   private pauseRemainingMs = 0         // if >0, bot is holding for a "look around" pause
@@ -212,6 +222,7 @@ export class Bot {
   constructor(opts: BotOpts) {
     this.team = opts.team
     this.currentCell = opts.startCell
+    this.fixedPace = opts.stepsPerSec !== undefined
     this.baseStepIntervalMs = 1000 / (opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC)
     this.stepIntervalMs = this.jitteredInterval()
     this.pick = opts.pickTarget ?? randomTarget
@@ -260,13 +271,14 @@ export class Bot {
       // Refill path if exhausted (reached target, or first step).
       if (this.path.length === 0) {
         // Chance to pause here — "human looking around at a junction"
-        // feel. Skips this whole step; resumes on next tick.
-        if (Math.random() < PAUSE_CHANCE) {
+        // feel. Skips this whole step; resumes on next tick. Never mid-chase.
+        if (this.chaseCell === null && Math.random() < PAUSE_CHANCE) {
           this.pauseRemainingMs = PAUSE_MIN_MS + Math.random() * (PAUSE_MAX_MS - PAUSE_MIN_MS)
           this.stepAccumMs = 0
           break
         }
-        const target = this.pick(this, graph)
+        const target = this.chaseCell ?? this.pick(this, graph)
+        this.chaseCell = null
         if (target === null || target === this.currentCell) break
         // useDeepOnly=true: the pathfinder cannot traverse wall cells
         // even to reach a deep target. If currentCell has drifted off the
@@ -289,6 +301,10 @@ export class Bot {
         const p = findPath(graph, this.currentCell, target, 20000, onDeep, costOf)
         if (!p || p.length < 2) break
         this.path = p.slice(1) // drop index 0 (currentCell)
+        if (!this.fixedPace) {
+          const run = this.path.length >= RUN_ROUTE_CELLS || Math.random() < SHORT_ROUTE_RUN_CHANCE
+          this.baseStepIntervalMs = 1000 / (run ? RUN_STEPS_PER_SEC : JOG_STEPS_PER_SEC)
+        }
       }
 
       const next = this.path.shift()!
@@ -309,6 +325,14 @@ export class Bot {
   stun(ms: number): void {
     this.pauseRemainingMs = Math.max(this.pauseRemainingMs, ms)
     this.stepAccumMs = 0
+  }
+
+  private chaseCell: string | null = null
+  /** Head for `cell` now (re-paths on the next step, skips the look-around pause). */
+  chase(cell: string): void {
+    this.chaseCell = cell
+    this.path = []
+    this.pauseRemainingMs = 0
   }
 
   /** Manager can call this to force target re-selection (e.g. round reset). */

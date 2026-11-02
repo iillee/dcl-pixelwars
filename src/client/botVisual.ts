@@ -47,6 +47,10 @@ import {
 import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
+import { registerBotLookup } from './knockback'
+import { room } from '../shared/messages'
+import { BOT_AIM_REPORT_HZ } from '../shared/pvp'
+import { Team } from '../shared/team'
 
 // Paths relative to the deployed scene root (matches teleportOrbs.ts convention).
 const GHOST_MODEL_SRC = 'assets/models/bots/ghost.glb'
@@ -202,6 +206,24 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
 }
 
 export function initBotVisual(): void {
+  registerBotLookup({
+    team: id => { const r = bots.get(parseInt(id.slice(4), 10)); return r ? (r.team as Team) : Team.None },
+    feet: id => {
+      const r = bots.get(parseInt(id.slice(4), 10))
+      return r ? { x: r.renderPos.x, y: r.renderPos.y - FLOAT_HEIGHT, z: r.renderPos.z } : null
+    },
+  })
+  // While a ghost is in the round, tell the server where we stand so it can chase and aim.
+  let aimClock = 0
+  engine.addSystem((dt: number) => {
+    if (bots.size === 0) return
+    aimClock += dt
+    if (aimClock < 1 / BOT_AIM_REPORT_HZ) return
+    aimClock = 0
+    const p = Transform.getOrNull(engine.PlayerEntity)?.position
+    if (!p) return
+    try { room.send('botAim', { x: p.x, y: p.y, z: p.z }) } catch (err) { console.log('[Bots] botAim send failed', err) }
+  })
   // ── Server updates: dead-reckoning inputs ────────────────────────
   events.on('bots:positions', ({ bots: msg, t }) => {
     const seen = new Set<number>()
