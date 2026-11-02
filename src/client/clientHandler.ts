@@ -101,8 +101,8 @@ function wireInbound(): void {
     events.emit('team:roster', { entries: entries.map(e => ({ userId: e.userId, team: e.team as Team })) })
   })
 
-  room.onMessage('botPositions', ({ bots }) => {
-    events.emit('bots:positions', { bots })
+  room.onMessage('botPositions', ({ bots, t }) => {
+    events.emit('bots:positions', { bots, t })
   })
 
   room.onMessage('roundClock', ({ idx, remainingMs, active }) => {

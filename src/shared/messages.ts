@@ -153,6 +153,7 @@ export const Messages = {
       vy: Schemas.Number,
       vz: Schemas.Number,
     })),
+    t: Schemas.Number,       // server bot-simulation clock (s) when these positions were taken
   }),
 
   // Dash PvP prototype (shared/pvp.ts, design/pvp-prototype.md).

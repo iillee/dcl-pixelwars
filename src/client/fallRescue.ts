@@ -816,6 +816,17 @@ type RemoteCloud = {
 }
 const remotes = new Map<string, RemoteCloud>()
 
+/** Where `who`'s rider hangs (feet) on the cloud this client is drawing, once the grab is
+ *  over and until the descend ends; null otherwise. client/botVisual pins a rescued ghost here. */
+export function remoteRiderFeet(who: string): Vec | null {
+  const c = remotes.get(who.toLowerCase())
+  if (!c || !c.mobile) return null
+  const age = (Date.now() - c.started) / 1000
+  if (age < c.grab || age > c.grab + c.rise + c.cruise + c.descend) return null
+  const p = Transform.getOrNull(c.root)?.position
+  return p ? { x: p.x, y: p.y - FALL_RESCUE.HANG_Y, z: p.z } : null
+}
+
 function remoteFeet(who: string): Vec | null {
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue

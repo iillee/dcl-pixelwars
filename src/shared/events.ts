@@ -80,6 +80,8 @@ export type Events = {
   // Subscriber: client/botVisual renders one box per entry.
   'bots:positions': {
     bots: Array<{ id: number; team: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number }>
+    /** Server bot-simulation clock (s) for these positions. */
+    t: number
   }
 
   // Broadcast: server accepted a dash hit. Subscriber: client/dash

@@ -46,6 +46,7 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
+import { remoteRiderFeet } from './fallRescue'
 
 // Paths relative to the deployed scene root (matches teleportOrbs.ts convention).
 const GHOST_MODEL_SRC = 'assets/models/bots/ghost.glb'
@@ -93,11 +94,21 @@ const PULSE_HZ        = 0.8
 // whole map through walls.
 const TELEPORT_THRESHOLD = 8
 // Knocked or riding the cloud (st != 0): the server body moves fast
-// (launches, falls, 45 m/s cloud rise), so chase it harder and only snap
-// on a genuine reseat.
-const LERP_SPEED_FAST_PER_SEC = 18.0
+// (launches, falls, 45 m/s cloud rise) and the server sim advances in
+// uneven chunks, so chasing the latest packet lurches and stops. Instead
+// draw INTERP_DELAY_S in the past on the server's sim clock (botPositions
+// t), between the two snapshots around that moment.
 const TELEPORT_THRESHOLD_FAST = 60
-const FAST_EXTRAPOLATE_MAX_S = 0.25
+const INTERP_DELAY_S = 0.25
+const SNAP_KEEP = 16
+/** Past the newest snapshot, extrapolate at most this long. */
+const INTERP_EXTRAPOLATE_MAX_S = 0.1
+/** Keep interpolating this long after the last fast packet (covers the delay). */
+const FAST_HOLD_S = INTERP_DELAY_S + 0.15
+
+type Snap = { t: number; pos: Vector3 }
+/** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
+let clockOffset: number | null = null
 
 interface BotVisual {
   root: Entity          // moves each frame (ghost.glb + parent for light+audio)
@@ -108,9 +119,31 @@ interface BotVisual {
   renderPos: Vector3    // smoothed position we actually draw at
   lastYawDeg: number    // last committed yaw — held when velocity too low
   lightEntity: Entity   // child, for team-recolour on restart
-  fast: boolean         // last server state was knocked / rescue (st != 0)
-  serverVel: Vector3    // server-measured velocity at the last packet
-  lastMsgAt: number     // Date.now() of the last packet
+  fastUntil: number     // Date.now() until which the snapshot interpolation draws it
+  snaps: Snap[]         // recent server snapshots on the sim clock
+  riding: boolean       // last packet said rescue (st 2)
+}
+
+/** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
+function interpDelay(snaps: Snap[]): number {
+  if (snaps.length < 2) return INTERP_DELAY_S
+  const gap = (snaps[snaps.length - 1].t - snaps[0].t) / (snaps.length - 1)
+  return Math.min(0.6, Math.max(INTERP_DELAY_S, gap * 1.5 + 0.05))
+}
+
+function interpolate(snaps: Snap[], rt: number): Vector3 | null {
+  if (snaps.length === 0) return null
+  if (rt <= snaps[0].t) return snaps[0].pos
+  for (let i = 1; i < snaps.length; i++) {
+    const a = snaps[i - 1], b = snaps[i]
+    if (rt <= b.t) return Vector3.lerp(a.pos, b.pos, (rt - a.t) / Math.max(1e-4, b.t - a.t))
+  }
+  const last = snaps[snaps.length - 1]
+  if (snaps.length < 2) return last.pos
+  const prev = snaps[snaps.length - 2]
+  const ahead = Math.min(INTERP_EXTRAPOLATE_MAX_S, rt - last.t)
+  const s = ahead / Math.max(1e-4, last.t - prev.t)
+  return Vector3.create(last.pos.x + (last.pos.x - prev.pos.x) * s, last.pos.y + (last.pos.y - prev.pos.y) * s, last.pos.z + (last.pos.z - prev.pos.z) * s)
 }
 
 // Keyed by bot id (stable per bot, server-assigned).
@@ -162,16 +195,23 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     renderPos: Vector3.clone(pos),
     lastYawDeg: 0,
     lightEntity: light,
-    fast: false,
-    serverVel: Vector3.Zero(),
-    lastMsgAt: Date.now(),
+    fastUntil: 0,
+    snaps: [],
+    riding: false,
   }
 }
 
 export function initBotVisual(): void {
   // ── Server updates: dead-reckoning inputs ────────────────────────
-  events.on('bots:positions', ({ bots: msg }) => {
+  events.on('bots:positions', ({ bots: msg, t }) => {
     const seen = new Set<number>()
+    const now = Date.now()
+    const simT = Number.isFinite(t) ? t : null
+    if (simT !== null) {
+      const sample = now / 1000 - simT
+      if (clockOffset === null || sample < clockOffset || Math.abs(sample - clockOffset) > 5) clockOffset = sample
+      else clockOffset += (sample - clockOffset) * 0.05
+    }
     for (const b of msg) {
       seen.add(b.id)
       // Server positions come in at ground level; ghost floats above.
@@ -195,19 +235,22 @@ export function initBotVisual(): void {
       const dy = serverPos.y - rec.lastServerPos.y
       const dz = serverPos.z - rec.lastServerPos.z
       const distSq = dx * dx + dy * dy + dz * dz
-      const wasFast = rec.fast
-      rec.fast = (b.st ?? 0) !== 0
-      rec.serverVel = Vector3.create(b.vx ?? 0, b.vy ?? 0, b.vz ?? 0)
-      rec.lastMsgAt = Date.now()
-      if (rec.fast) {
-        // Knocked / riding: extrapolate from this packet with the server's own
-        // velocity (render system below); no delta-based estimate.
+      if (simT !== null) {
+        const lastT = rec.snaps.length > 0 ? rec.snaps[rec.snaps.length - 1].t : -Infinity
+        if (simT < lastT - 1) rec.snaps = [] // server restarted its clock
+        if (simT > lastT + 1e-4) rec.snaps.push({ t: simT, pos: serverPos })
+        if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
+      }
+      const wasFast = now < rec.fastUntil
+      rec.riding = b.st === 2
+      if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
+      if (now < rec.fastUntil) {
+        // Knocked / riding: the render system interpolates the snapshots.
         rec.lastServerPos = Vector3.clone(serverPos)
-        rec.velocity = Vector3.clone(rec.serverVel)
-        if (distSq > TELEPORT_THRESHOLD_FAST * TELEPORT_THRESHOLD_FAST) rec.renderPos = Vector3.clone(serverPos)
+        rec.velocity = Vector3.create(b.vx ?? 0, b.vy ?? 0, b.vz ?? 0)
         continue
       }
-      const snapAt = rec.fast || wasFast ? TELEPORT_THRESHOLD_FAST : TELEPORT_THRESHOLD
+      const snapAt = wasFast ? TELEPORT_THRESHOLD_FAST : TELEPORT_THRESHOLD
 
       if (distSq > snapAt * snapAt) {
         // Snap. Kills accumulated velocity so we don't overshoot the target.
@@ -238,31 +281,35 @@ export function initBotVisual(): void {
 
   // ── Per-frame render: lerp toward predicted position + ambient motion ─
   engine.addSystem((dt: number) => {
-    for (const rec of bots.values()) {
+    for (const [id, rec] of bots) {
       rec.timeSec += dt
 
       // Predicted position = last server position + velocity * lookAhead.
       // Puts us one broadcast ahead of the arriving packets so we stop
       // chasing them.
-      let predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
-      let predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
-      let predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
-      if (rec.fast) {
-        // Where the server body is now: last packet + its velocity × packet age
-        // (capped so a dropped packet doesn't fling the ghost).
-        const age = Math.min(FAST_EXTRAPOLATE_MAX_S, (Date.now() - rec.lastMsgAt) / 1000)
-        predX = rec.lastServerPos.x + rec.serverVel.x * age
-        predY = rec.lastServerPos.y + rec.serverVel.y * age
-        predZ = rec.lastServerPos.z + rec.serverVel.z * age
+      const now = Date.now()
+      // On the cloud: hang from the cloud this client draws (it runs on local
+      // time, so a past-time interpolation would trail it by metres on the rise).
+      const ride = rec.riding ? remoteRiderFeet(`bot:${id}`) : null
+      const interp = ride ? null : now < rec.fastUntil && clockOffset !== null
+        ? interpolate(rec.snaps, now / 1000 - clockOffset - interpDelay(rec.snaps))
+        : null
+      if (ride) {
+        rec.renderPos = Vector3.create(ride.x, ride.y + FLOAT_HEIGHT, ride.z)
+      } else if (interp) {
+        rec.renderPos = Vector3.clone(interp)
+      } else {
+        const predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
+        const predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
+        const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
+        // Per-frame lerp — adapts to dt automatically.
+        const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
+        rec.renderPos = Vector3.create(
+          rec.renderPos.x + (predX - rec.renderPos.x) * k,
+          rec.renderPos.y + (predY - rec.renderPos.y) * k,
+          rec.renderPos.z + (predZ - rec.renderPos.z) * k,
+        )
       }
-
-      // Per-frame lerp — adapts to dt automatically.
-      const k = Math.min(1, (rec.fast ? LERP_SPEED_FAST_PER_SEC : LERP_SPEED_PER_SEC) * dt)
-      rec.renderPos = Vector3.create(
-        rec.renderPos.x + (predX - rec.renderPos.x) * k,
-        rec.renderPos.y + (predY - rec.renderPos.y) * k,
-        rec.renderPos.z + (predZ - rec.renderPos.z) * k,
-      )
 
       // Ambient sine motion on top so idle ghosts still feel alive.
       const t = rec.timeSec

@@ -17,7 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, hitBot, getWalkableGraph } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, botSimTime, hitBot, getWalkableGraph } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -359,13 +359,16 @@ export async function setupServer(): Promise<void> {
   const BROADCAST_HZ = 5
   const BROADCAST_INTERVAL = 1 / BROADCAST_HZ
   let broadcastClock = 0
+  // Bots run every server frame (registered before the drain below, so a
+  // frame's bot paint rides out on that frame's broadcast). Ticking them only
+  // at 5 Hz made the 10 Hz botPositions repeat every other packet: knocked and
+  // rescued ghosts lurched and stopped.
+  engine.addSystem((dt: number) => {
+    if (isRoundActive()) tickBots(dt) // bots idle while no round runs
+  })
   engine.addSystem((dt: number) => {
     broadcastClock += dt
     if (broadcastClock < BROADCAST_INTERVAL) return
-    // Tick bots BEFORE draining, so any paint they generate this frame
-    // rides out on the same broadcast — no extra latency and no wasted
-    // "skip empty" checks.
-    if (isRoundActive()) tickBots(broadcastClock) // bots idle while no round runs
     broadcastClock = 0
     const changes = drainDelta()
     if (changes.length === 0) return
@@ -400,7 +403,7 @@ export async function setupServer(): Promise<void> {
     const positions = getBotBroadcast()
     if (positions.length === 0 && lastBotCount === 0) return
     lastBotCount = positions.length
-    room.send('botPositions', { bots: positions })
+    room.send('botPositions', { bots: positions, t: botSimTime() })
   })
 
   // Coverage log tick (5s). Kept as a low-frequency health signal;

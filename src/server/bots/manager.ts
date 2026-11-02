@@ -177,7 +177,13 @@ function retireBot(): void {
  * population adjustment AND bot movement/paint in one pass so callers
  * only wire one system.
  */
+/** Seconds of bot simulation so far. Stamped on every broadcast so clients can
+ *  interpolate by simulation time instead of packet arrival time. */
+let simClock = 0
+export function botSimTime(): number { return simClock }
+
 export function tickBots(dtSec: number): void {
+  if (Number.isFinite(dtSec) && dtSec > 0) simClock += dtSec
   if (!graph || !deps) return
 
   // ── 1. Population control ──────────────────────────────────────────
