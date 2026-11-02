@@ -16,7 +16,7 @@
 
 import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
 import { events } from '../shared/events'
-import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL } from '../shared/pvp'
+import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_BOOM_VOL } from '../shared/pvp'
 
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
@@ -191,12 +191,14 @@ export function playBurstSfx(): void {
 export const AIR_DIVE_SRC = 'assets/sounds/air_spike_dive.wav'
 export const AIR_HIT_SRC = 'assets/sounds/air_spike_hit.wav'
 export const AIR_STAMP_SRC = 'assets/sounds/air_spike_stamp.wav'
+export const AIR_BOOM_SRC = 'assets/sounds/bomb_exploding.mp3'
 let airDiveEnt: Entity | null = null
 let airHitEnt: Entity | null = null
+let airBoomEnt: Entity | null = null
 let airStampEnt: Entity | null = null
 function initAirSpikeSfx(): void {
   const pre = engine.addEntity()
-  AssetLoad.create(pre, { assets: [AIR_DIVE_SRC, AIR_HIT_SRC, AIR_STAMP_SRC] })
+  AssetLoad.create(pre, { assets: [AIR_DIVE_SRC, AIR_HIT_SRC, AIR_STAMP_SRC, AIR_BOOM_SRC] })
   const make = (src: string) => {
     const e = engine.addEntity()
     Transform.create(e, { parent: engine.CameraEntity })
@@ -206,6 +208,7 @@ function initAirSpikeSfx(): void {
   airDiveEnt = make(AIR_DIVE_SRC)
   airHitEnt = make(AIR_HIT_SRC)
   airStampEnt = make(AIR_STAMP_SRC)
+  airBoomEnt = make(AIR_BOOM_SRC)
 }
 function playGlobal(ent: Entity | null, src: string, volume: number): void {
   if (!ent) return
@@ -216,6 +219,7 @@ export function playAirDiveSfx(): void {
 }
 export function playAirHitSfx(): void {
   playGlobal(airHitEnt, AIR_HIT_SRC, AIR_SPIKE_HIT_VOL)
+  playGlobal(airBoomEnt, AIR_BOOM_SRC, AIR_SPIKE_BOOM_VOL)
 }
 export function playAirStampSfx(): void {
   playGlobal(airStampEnt, AIR_STAMP_SRC, AIR_SPIKE_STAMP_VOL)

@@ -178,9 +178,14 @@ export const AIR_SPIKE_MIN_ABOVE = 1.0 // m, attacker feet must be at least this
  *  AIR_SPIKE_GLIDE_LOCK_S shuts it (disableGliding) before the impulse and holds it
  *  shut so the victim cannot reopen and float out of the external downward velocity. */
 export const AIR_SPIKE_DOWN = 110
-export const AIR_SPIKE_OUT = 18
+export const AIR_SPIKE_OUT = 36 // was 18 (Luke: launch the target more)
 export const AIR_SPIKE_FORCE = 40
 export const AIR_SPIKE_FORCE_S = 0.28
+/** Victim standing on a floor: a downward impulse just meets the ground, so the spike launches
+ *  them instead — outward plus lift, harder than a ground Burst (70 / 12) since the dive is the
+ *  riskier commit. The outward hold reuses the Burst knock force. */
+export const AIR_SPIKE_GROUND_OUT = 85
+export const AIR_SPIKE_GROUND_LIFT = 16
 export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
 /**
  * Attacker recovery after a connect. One block so a playtest can tune the risk.
@@ -231,6 +236,8 @@ export const AIR_SPIKE_TRAIL_SIZE = 0.32 // m, starting diameter
  *  later than the window. */
 export const AIR_SPIKE_DIVE_VOL = 0.95
 export const AIR_SPIKE_HIT_VOL = 1
+/** Heavy boom layered under the connect (the Lunge hit's bomb_exploding layer) so a spike lands with weight. */
+export const AIR_SPIKE_BOOM_VOL = 0.9
 export const AIR_SPIKE_STAMP_VOL = 0.92
 export const AIR_SPIKE_STAMP_WINDOW_S = 1.4
 /** Server: accept burstHit this long after the shockwave opens (s).

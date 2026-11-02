@@ -34,8 +34,8 @@ import {
   BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
-  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S,
-  AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
+  AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_GROUND_OUT, AIR_SPIKE_GROUND_LIFT,
+  AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
   BURST_PAINT_RETRY_S, BURST_PAINT_RETRY_GAP_S, BURST_USE_RETRY_S,
@@ -57,7 +57,7 @@ import { sampleBurstStance } from '../paint'
 import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirHitSfx,
-  BURST_SFX_SRC, AIR_HIT_SRC,
+  BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { getBotRenderPositions } from './botVisual'
@@ -360,7 +360,10 @@ function partialStopDive(fx: number, fz: number): void {
 /** Hit pop on the victim. Team sphere, not a ground disc. `positional` plays the sharp hit there. */
 function showAirHit(p: V3, team: Team, positional = false): void {
   const rgb = rgbOf(team)
-  if (positional) playPositional(p, AIR_HIT_SRC, AIR_SPIKE_HIT_VOL)
+  if (positional) {
+    playPositional(p, AIR_HIT_SRC, AIR_SPIKE_HIT_VOL)
+    playPositional(p, AIR_BOOM_SRC, AIR_SPIKE_BOOM_VOL)
+  }
   addFx(0.28, e => {
     Transform.create(e, { position: Vector3.create(p.x, p.y + 1, p.z), scale: Vector3.create(0.35, 0.35, 0.35) })
     MeshRenderer.setSphere(e)
@@ -582,9 +585,15 @@ function applyAirKnock(att: string, id: number, dx: number, dz: number, why: str
   }
   startGlideLock(AIR_SPIKE_GLIDE_LOCK_S)
   startKnockLock()
+  const grounded = !!sampleBurstStance()?.grounded
   const ox = dx * 0.35, oz = dz * 0.35
   const fl = Math.hypot(ox, oz, 1)
   safePhysics('air spike knockback', () => {
+    if (grounded) {
+      Physics.applyImpulseToPlayer(Vector3.create(dx * AIR_SPIKE_GROUND_OUT, AIR_SPIKE_GROUND_LIFT, dz * AIR_SPIKE_GROUND_OUT))
+      if (BURST_KNOCK_FORCE > 0) Physics.applyForceToPlayerForDuration(knockForceEnt, BURST_KNOCK_FORCE_S, Vector3.create(dx, 0, dz), BURST_KNOCK_FORCE)
+      return
+    }
     Physics.applyImpulseToPlayer(Vector3.create(dx * AIR_SPIKE_OUT, -AIR_SPIKE_DOWN, dz * AIR_SPIKE_OUT))
     if (AIR_SPIKE_FORCE > 0) {
       Physics.applyForceToPlayerForDuration(knockForceEnt, AIR_SPIKE_FORCE_S, Vector3.create(ox / fl, -1 / fl, oz / fl), AIR_SPIKE_FORCE)
@@ -593,7 +602,7 @@ function applyAirKnock(att: string, id: number, dx: number, dz: number, why: str
   playAirHitSfx()
   const self = Transform.getOrNull(engine.PlayerEntity)?.position
   if (self) showAirHit({ x: self.x, y: self.y, z: self.z }, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att))
-  console.log(`[Burst] air ${why} by ${att.slice(0, 8)} #${id} glide locked ${AIR_SPIKE_GLIDE_LOCK_S}s`)
+  console.log(`[Burst] air ${why} by ${att.slice(0, 8)} #${id} ${grounded ? 'grounded launch' : 'spiked down'}, glide locked ${AIR_SPIKE_GLIDE_LOCK_S}s`)
   return true
 }
 
