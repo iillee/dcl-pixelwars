@@ -51,13 +51,18 @@ import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
 import { BOT_AIM_REPORT_HZ } from '../shared/pvp'
 import { Team } from '../shared/team'
+import { createGhostFace, poseGhostFace, recolorGhostFace, GhostFace, GhostMood } from './ghostFace'
 
 // Paths relative to the deployed scene root (matches teleportOrbs.ts convention).
-const GHOST_MODEL_SRC = 'assets/models/bots/ghost.glb'
+const GHOST_RED = 'assets/models/bots/ghost-red.glb'
+const GHOST_BLUE = 'assets/models/bots/ghost-blue.glb'
 const GHOST_SOUND_SRC = 'assets/sounds/ghost.mp3'
 
-const GHOST_SCALE   = 1.2   // matches flagtag — reads well against player scale
-const FLOAT_HEIGHT  = 1.0   // metres above surface (ghost floats at head height)
+const GHOST_SCALE = 1 // the mesh is already about player height
+/** Hem sits this far above the floor. Hit tests subtract it to get the feet. */
+export const FLOAT_HEIGHT = 0.5
+/** Extra lift while the cloud has it, so the crown reaches the hook. Not part of the feet offset. */
+const RESCUE_LIFT = 0.55
 
 // Team signal is now a coloured LightSource attached to the ghost.
 // Why not a visible halo sphere: the sphere read as a floating orb next
@@ -65,8 +70,8 @@ const FLOAT_HEIGHT  = 1.0   // metres above surface (ghost floats at head height
 // nearby geometry, gives an atmospheric glow at distance, and adds no
 // visible geometry. Range/intensity tuned to be visible without
 // washing the maze.
-const LIGHT_INTENSITY = 250
-const LIGHT_RANGE     = 8
+const LIGHT_INTENSITY = 90
+const LIGHT_RANGE     = 6
 const RED_LIGHT  = Color3.create(1.00, 0.25, 0.28)
 const BLUE_LIGHT = Color3.create(0.30, 0.55, 1.00)
 
@@ -126,7 +131,8 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
-  pose: 'walk' | 'wind' | 'glide' // wind = lunge telegraph (st 3), glide = recovery (st 4)
+  pose: 'walk' | 'wind' | 'glide' | 'hurt' // wind = lunge telegraph (st 3), glide = recovery (st 4)
+  face: GhostFace
   lightI: number
 }
 
@@ -155,6 +161,18 @@ function interpolate(snaps: Snap[], rt: number): Vector3 | null {
 // Keyed by bot id (stable per bot, server-assigned).
 const bots = new Map<number, BotVisual>()
 
+function ghostSrc(team: number): string {
+  return team === 1 ? GHOST_RED : GHOST_BLUE
+}
+
+function moodOf(riding: boolean, pose: BotVisual['pose']): GhostMood {
+  if (riding) return 'down'
+  if (pose === 'wind') return 'focus'
+  if (pose === 'glide') return 'glide'
+  if (pose === 'hurt') return 'hurt'
+  return 'calm'
+}
+
 function lightColor(team: number): Color3 {
   return team === 1 ? RED_LIGHT : BLUE_LIGHT
 }
@@ -168,7 +186,7 @@ function paintLight(entity: Entity, team: number): void {
   })
 }
 
-/** Build root (ghost.glb + spatial audio) + child point light. */
+/** Build root (team ghost + eyes + spatial audio) + child point light. */
 function createBotVisual(team: number, pos: Vector3): BotVisual {
   const root = engine.addEntity()
   Transform.create(root, {
@@ -176,7 +194,8 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     scale: Vector3.create(GHOST_SCALE, GHOST_SCALE, GHOST_SCALE),
     rotation: Quaternion.Identity(),
   })
-  GltfContainer.create(root, { src: GHOST_MODEL_SRC })
+  GltfContainer.create(root, { src: ghostSrc(team) })
+  const face = createGhostFace(root, team)
 
   // Spatial looping ghost audio — solo-mode = only ever one bot at a
   // time, so no risk of a chorus. Attenuates naturally with distance.
@@ -205,6 +224,7 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     snaps: [],
     riding: false,
     pose: 'walk',
+    face,
     lightI: LIGHT_INTENSITY,
   }
 }
@@ -254,6 +274,8 @@ export function initBotVisual(): void {
         // Team mismatch — happens after server restart (ids reset while
         // client still has stale entities). Recolour light in place.
         paintLight(rec.lightEntity, b.team)
+        GltfContainer.createOrReplace(rec.root, { src: ghostSrc(b.team) })
+        recolorGhostFace(rec.face, b.team)
         rec.team = b.team
       }
 
@@ -269,7 +291,7 @@ export function initBotVisual(): void {
       }
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
-      rec.pose = b.st === 3 ? 'wind' : b.st === 4 ? 'glide' : 'walk'
+      rec.pose = b.st === 3 ? 'wind' : b.st === 4 ? 'glide' : b.st === 1 ? 'hurt' : 'walk'
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -348,14 +370,15 @@ export function initBotVisual(): void {
       const tf = Transform.getMutable(rec.root)
       tf.position = Vector3.create(
         rec.renderPos.x + drX,
-        rec.renderPos.y + bob,
+        rec.renderPos.y + bob + (rec.riding ? RESCUE_LIFT : 0),
         rec.renderPos.z + drZ,
       )
-      // Wind-up: crouch and flare. Glide: flatten and spread, a stand-in until the ghost models land.
+      poseGhostFace(rec.face, moodOf(rec.riding, rec.pose), dt, t)
+      // Wind-up: crouch and flare. Glide: a slight spread. The face carries the rest.
       const wind = rec.pose === 'wind'
       const glide = rec.pose === 'glide'
-      const wide = wind ? 1.35 : glide ? 1.75 : 1
-      const tall = wind ? 0.62 : glide ? 0.4 : 1
+      const wide = wind ? 1.35 : glide ? 1.15 : 1
+      const tall = wind ? 0.62 : glide ? 0.88 : 1
       tf.scale = Vector3.create(
         GHOST_SCALE * pulse * wide,
         GHOST_SCALE * pulse * tall,

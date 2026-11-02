@@ -59,12 +59,12 @@ import {
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
-import { getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
-const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
+const BOT_FLOAT = FLOAT_HEIGHT
 
 let cooldownLeft = 0
 let burstId = 0

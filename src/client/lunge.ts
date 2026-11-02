@@ -53,7 +53,7 @@ import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
 import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
-import { getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
@@ -62,7 +62,7 @@ import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
-const BOT_FLOAT = 1 // botVisual FLOAT_HEIGHT
+const BOT_FLOAT = FLOAT_HEIGHT
 const LAST_HIT_S = 5
 
 type State = 'ready' | 'active' | 'recovery' | 'cooldown'
