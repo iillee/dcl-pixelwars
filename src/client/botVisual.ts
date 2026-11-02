@@ -97,6 +97,7 @@ const TELEPORT_THRESHOLD = 8
 // on a genuine reseat.
 const LERP_SPEED_FAST_PER_SEC = 18.0
 const TELEPORT_THRESHOLD_FAST = 60
+const FAST_EXTRAPOLATE_MAX_S = 0.25
 
 interface BotVisual {
   root: Entity          // moves each frame (ghost.glb + parent for light+audio)
@@ -108,6 +109,8 @@ interface BotVisual {
   lastYawDeg: number    // last committed yaw — held when velocity too low
   lightEntity: Entity   // child, for team-recolour on restart
   fast: boolean         // last server state was knocked / rescue (st != 0)
+  serverVel: Vector3    // server-measured velocity at the last packet
+  lastMsgAt: number     // Date.now() of the last packet
 }
 
 // Keyed by bot id (stable per bot, server-assigned).
@@ -160,6 +163,8 @@ function createBotVisual(team: number, pos: Vector3): BotVisual {
     lastYawDeg: 0,
     lightEntity: light,
     fast: false,
+    serverVel: Vector3.Zero(),
+    lastMsgAt: Date.now(),
   }
 }
 
@@ -192,6 +197,16 @@ export function initBotVisual(): void {
       const distSq = dx * dx + dy * dy + dz * dz
       const wasFast = rec.fast
       rec.fast = (b.st ?? 0) !== 0
+      rec.serverVel = Vector3.create(b.vx ?? 0, b.vy ?? 0, b.vz ?? 0)
+      rec.lastMsgAt = Date.now()
+      if (rec.fast) {
+        // Knocked / riding: extrapolate from this packet with the server's own
+        // velocity (render system below); no delta-based estimate.
+        rec.lastServerPos = Vector3.clone(serverPos)
+        rec.velocity = Vector3.clone(rec.serverVel)
+        if (distSq > TELEPORT_THRESHOLD_FAST * TELEPORT_THRESHOLD_FAST) rec.renderPos = Vector3.clone(serverPos)
+        continue
+      }
       const snapAt = rec.fast || wasFast ? TELEPORT_THRESHOLD_FAST : TELEPORT_THRESHOLD
 
       if (distSq > snapAt * snapAt) {
@@ -229,9 +244,17 @@ export function initBotVisual(): void {
       // Predicted position = last server position + velocity * lookAhead.
       // Puts us one broadcast ahead of the arriving packets so we stop
       // chasing them.
-      const predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
-      const predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
-      const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
+      let predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
+      let predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
+      let predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
+      if (rec.fast) {
+        // Where the server body is now: last packet + its velocity × packet age
+        // (capped so a dropped packet doesn't fling the ghost).
+        const age = Math.min(FAST_EXTRAPOLATE_MAX_S, (Date.now() - rec.lastMsgAt) / 1000)
+        predX = rec.lastServerPos.x + rec.serverVel.x * age
+        predY = rec.lastServerPos.y + rec.serverVel.y * age
+        predZ = rec.lastServerPos.z + rec.serverVel.z * age
+      }
 
       // Per-frame lerp — adapts to dt automatically.
       const k = Math.min(1, (rec.fast ? LERP_SPEED_FAST_PER_SEC : LERP_SPEED_PER_SEC) * dt)

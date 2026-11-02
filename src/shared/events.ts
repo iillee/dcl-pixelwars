@@ -79,7 +79,7 @@ export type Events = {
   // 2 Hz broadcast: current bot positions (empty when no bots active).
   // Subscriber: client/botVisual renders one box per entry.
   'bots:positions': {
-    bots: Array<{ id: number; team: number; x: number; y: number; z: number; st: number }>
+    bots: Array<{ id: number; team: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number }>
   }
 
   // Broadcast: server accepted a dash hit. Subscriber: client/dash

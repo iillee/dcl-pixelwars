@@ -281,6 +281,24 @@ export function getBotPositions(): Array<{ id: number; team: number; x: number; 
   return out
 }
 
+const lastSent = new Map<number, { x: number; y: number; z: number; t: number }>()
+
+/** The botPositions broadcast: positions plus velocity over the real time since
+ *  the previous broadcast, so clients can extrapolate fast motion between
+ *  uneven packets. Only the broadcast tick may call this (it owns lastSent). */
+export function getBotBroadcast(): Array<ReturnType<typeof getBotPositions>[number] & { vx: number; vy: number; vz: number }> {
+  const now = Date.now()
+  const out = getBotPositions().map(b => {
+    const prev = lastSent.get(b.id)
+    const dt = prev ? (now - prev.t) / 1000 : 0
+    lastSent.set(b.id, { x: b.x, y: b.y, z: b.z, t: now })
+    if (!prev || dt < 0.02 || dt > 0.5) return { ...b, vx: 0, vy: 0, vz: 0 }
+    return { ...b, vx: (b.x - prev.x) / dt, vy: (b.y - prev.y) / dt, vz: (b.z - prev.z) / dt }
+  })
+  for (const id of [...lastSent.keys()]) if (!out.some(b => b.id === id)) lastSent.delete(id)
+  return out
+}
+
 /**
  * A hit on a ghost bot. Range-checks the attacker's reported position against
  * the bot's body, then applies the same KnockSpec a human victim would get

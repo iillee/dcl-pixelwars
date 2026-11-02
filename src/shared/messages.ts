@@ -149,6 +149,9 @@ export const Messages = {
       y: Schemas.Number,
       z: Schemas.Number,
       st: Schemas.Int,       // 0 walking, 1 knocked / airborne, 2 on (or dropping from) the rescue cloud
+      vx: Schemas.Number,    // m/s over the real time since the previous broadcast
+      vy: Schemas.Number,
+      vz: Schemas.Number,
     })),
   }),
 

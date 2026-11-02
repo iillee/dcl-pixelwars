@@ -17,7 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, hitBot, getWalkableGraph } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, hitBot, getWalkableGraph } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -397,7 +397,7 @@ export async function setupServer(): Promise<void> {
     botPosClock += dt
     if (botPosClock < BOT_POS_INTERVAL) return
     botPosClock = 0
-    const positions = getBotPositions()
+    const positions = getBotBroadcast()
     if (positions.length === 0 && lastBotCount === 0) return
     lastBotCount = positions.length
     room.send('botPositions', { bots: positions })
