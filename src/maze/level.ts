@@ -24,7 +24,7 @@ export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 export const SKY_TOP_Y = 100
 /** L0 world Y = top minus one level rise (generator STEP = 5.3835 x TILE_SCALE 2
  *  = 10.767; keep in sync). L-1 78.466 / L0 89.233 / L+1 100; spawns at L0 + 1.5
- *  = 90.733; fall respawn below MIN_Y - FALL_RESPAWN_DROP = ~66.47. Was 32. */
+ *  = 90.733; fall respawn below MIN_Y - FALL_RESPAWN_DROP = ~12.47. Was 32. */
 export const SKY_ALTITUDE = SKY_TOP_Y - 5.3835 * 2
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
@@ -64,5 +64,7 @@ export const BASE_PAINT_LOCK = false
 /** Spawn the teleport orb pair in-world? Off (Luke): playtesters found them unclear. The generator still
  *  places and fairness-checks the pair, so layouts are unchanged and turning this back on is one flag. */
 export const TELEPORT_ORBS = false
-/** Respawn at the team base when the player drops this far below the base floor. */
-export const FALL_RESPAWN_DROP = 12
+/** The fall rescue (and anvil respawn) triggers this far below the lowest floor (MIN_Y 78.466 → line ~12.5).
+ *  Luke: was 12 (line ~66.5); lowered so a fall costs a couple more seconds of free fall. Keep the line
+ *  above the ground (y 0) and MIN_Y > this value, or the rescue disables itself. */
+export const FALL_RESPAWN_DROP = 66

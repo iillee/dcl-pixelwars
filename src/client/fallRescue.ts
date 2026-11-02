@@ -47,7 +47,7 @@
  *   peel           floater rises off and despawns
  *   land           walk only, abilities still off, then normal play
  *
- * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 3.8s).
+ * Trip → landing = GRAB_S + RISE_S + CRUISE_S + DESCEND_S (about 5.0s).
  * Round reset / team / initial teleports call cancelFallRescue via teleportHome
  * and drop the panel and the tween. player:respawned fires only on arrival.
  *
@@ -83,8 +83,8 @@ import { exitOverview, pinOverviewClosed } from './overviewCamera'
 export const FALL_RESCUE = {
   /** Floater swoops in. Panel stays put so they can fall onto it. The rise does the lift. */
   GRAB_S: 0.4,
-  /** Rise from the catch to cruise height. */
-  RISE_S: 0.9,
+  /** Rise from the catch to cruise height (~95 m from the fall line at ~12.5; ~45 m/s, the old 0.9 s climb speed). */
+  RISE_S: 2.1,
   /** Cruise across, above the top floor, to the base's XZ. */
   CRUISE_S: 1.7,
   /** Descend so the panel top sits just above the base. */
