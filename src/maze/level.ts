@@ -61,5 +61,8 @@ export const SKY_MAX_TILES = 0
 
 /** Bases locked to their team colour (unpaintable)? Off (Luke): base cells start unpainted and can be painted/captured like any cell. */
 export const BASE_PAINT_LOCK = false
+/** Spawn the teleport orb pair in-world? Off (Luke): playtesters found them unclear. The generator still
+ *  places and fairness-checks the pair, so layouts are unchanged and turning this back on is one flag. */
+export const TELEPORT_ORBS = false
 /** Respawn at the team base when the player drops this far below the base floor. */
 export const FALL_RESPAWN_DROP = 12

@@ -26,7 +26,7 @@ import { movePlayerTo } from '~system/RestrictedActions'
 
 import { Placed, CELL, MAZE_ORIGIN, GRID_W, GRID_H, baseTeamOfTile, teleportPairs } from './maze/generator'
 import { rand } from './maze/rng'
-import { IS_SKY } from './maze/level'
+import { IS_SKY, TELEPORT_ORBS } from './maze/level'
 import { exitOverview } from './client/overviewCamera'
 
 // ─── Tuning ─────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ function teardown(): void {
 export function spawnTeleportOrbsForMaze(tiles: Placed[]): void {
   teardown()
   tpTiles = []
+  if (!TELEPORT_ORBS) return
   const ends: Array<[{ tile: Placed; land: V; look: V | null }, { tile: Placed; land: V; look: V | null }]> = []
   if (IS_SKY) {
     for (const [a, b] of teleportPairs()) ends.push([a, b])
