@@ -15,7 +15,10 @@ import { WalkableGraph } from './mazeGraph'
 import { graphFloorAt } from './anvilSim'
 import { MIN_Y, Placed } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED } from './pvp'
+import {
+  RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
+  BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_S, BOT_AIR_ACCEL, BOT_GLIDE_SPEED, BOT_GLIDE_FALL, BOT_AIR_JUMP_V,
+} from './pvp'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
 import { RESCUE_PATH, rescueCloudPose, RescueVec } from './rescuePath'
 
@@ -45,8 +48,17 @@ export class BotBody {
   private holdLeft = 0
   private immuneLeft = 0
   private trace: KnockTrace | null = null
+  /** This knock: will the bot try to glide back, after how long, toward which floor point. */
+  private willRecover = false
+  private reactLeft = 0
+  private recoverTo: V3 | null = null
+  /** Random source for the recover roll (scripts pass a fixed one). */
+  rng: () => number = Math.random
 
   constructor(pos: V3) { this.pos = { ...pos } }
+
+  /** Gliding back toward a floor right now. */
+  isGliding(): boolean { return this.mode === 'knock' && this.recoverTo !== null && !this.grounded }
 
   /** Open to hits: walking or already flying from one, and not inside respawn immunity. */
   canBeHit(): boolean { return (this.mode === 'walk' || this.mode === 'knock') && this.immuneLeft <= 0 }
@@ -81,6 +93,10 @@ export class BotBody {
       this.forceLeft = spec.forceS
     }
     this.lockLeft = Math.max(this.lockLeft, spec.lockS)
+    // Each hit re-rolls the attempt and restarts the reaction, like a player re-reacting.
+    this.willRecover = this.rng() < BOT_RECOVER_CHANCE
+    this.reactLeft = Math.max(spec.lockS, spec.kind === 'spike' ? AIR_SPIKE_GLIDE_LOCK_S : 0) + BOT_RECOVER_REACT_S
+    this.recoverTo = null
     if (this.mode === 'walk') this.grounded = true
     this.mode = 'knock'
     if (KNOCK_TRACE) this.trace = new KnockTrace(spec.kind, 'bot', this.pos)
@@ -109,6 +125,8 @@ export class BotBody {
         if (this.holdLeft > 0) this.holdLeft -= dt
         return
       case 'knock':
+        if (this.reactLeft > 0) this.reactLeft -= dt
+        this.steerRecovery(dt, world)
         this.physics(dt, world)
         if (this.lockLeft > 0) this.lockLeft -= dt
         if (this.pos.y < MIN_Y - FALL_RESPAWN_DROP) {
@@ -120,6 +138,7 @@ export class BotBody {
           out.push({ type: 'fell', catch: { ...this.catchP } })
           return
         }
+        if (this.grounded) this.recoverTo = null
         if (this.grounded && this.forceLeft <= 0 && this.lockLeft <= 0 && Math.hypot(this.vel.x, this.vel.z) < BOT_RECOVER_SPEED) {
           this.mode = 'walk'
           this.vel = { x: 0, y: 0, z: 0 }
@@ -148,6 +167,45 @@ export class BotBody {
         }
         return
     }
+  }
+
+  /** Player-style recovery: over the void, once the reaction is up, spend the air jump,
+   *  open the glider (fall capped at BOT_GLIDE_FALL) and steer toward the nearest floor.
+   *  Gives up once it has sunk below that floor; then it just falls. */
+  private steerRecovery(dt: number, world: BotWorld): void {
+    if (!this.willRecover || this.reactLeft > 0 || this.grounded) return
+    if (!this.recoverTo) {
+      if (graphFloorAt(world.graph, world.rampTiles, this.pos.x, this.pos.z, this.pos.y, 1.2, 0) !== null) return
+      this.recoverTo = this.nearestFloor(world)
+      if (!this.recoverTo) { this.willRecover = false; return }
+      this.vel.y = Math.max(this.vel.y, BOT_AIR_JUMP_V)
+    }
+    const t = this.recoverTo
+    if (this.pos.y < t.y - 1.5) { this.willRecover = false; this.recoverTo = null; return }
+    const dx = t.x - this.pos.x, dz = t.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d > 0.05) {
+      // Desired velocity toward the floor point; air control closes the gap at BOT_AIR_ACCEL.
+      const want = Math.min(BOT_GLIDE_SPEED, d * 3)
+      const ex = (dx / d) * want - this.vel.x, ez = (dz / d) * want - this.vel.z
+      const el = Math.hypot(ex, ez)
+      const a = Math.min(el, BOT_AIR_ACCEL * dt)
+      if (el > 1e-4) { this.vel.x += (ex / el) * a; this.vel.z += (ez / el) * a }
+    }
+    if (this.vel.y < -BOT_GLIDE_FALL) this.vel.y = -BOT_GLIDE_FALL
+  }
+
+  /** Nearest deep walkable cell not above the air-jump apex. */
+  private nearestFloor(world: BotWorld): V3 | null {
+    const apex = (BOT_AIR_JUMP_V * BOT_AIR_JUMP_V) / (2 * BOT_GRAVITY)
+    let best: V3 | null = null, bestD = Infinity
+    for (const id of world.graph.deepNodes) {
+      const p = world.graph.worldPos.get(id)
+      if (!p || p[1] > this.pos.y + apex - 0.2) continue
+      const d = Math.hypot(p[0] - this.pos.x, p[2] - this.pos.z)
+      if (d < bestD) { bestD = d; best = { x: p[0], y: p[1], z: p[2] } }
+    }
+    return best
   }
 
   /** Anvil-style integration: held force, gravity, floor snap, floor friction. */

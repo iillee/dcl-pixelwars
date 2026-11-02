@@ -446,6 +446,16 @@ export const BOT_GRAVITY = 20 // m/s²
 export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
 /** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */
 export const BOT_RECOVER_SPEED = 1.5
+/** Knocked out over the void, a bot tries to glide back like a player: chance per knock it tries
+ *  (skill knob: 0 never, 1 always), reaction after its control lock (spike: after the glide lock),
+ *  air steering, top glide speed, and the glider's capped fall speed. Guesses until playtested. */
+export const BOT_RECOVER_CHANCE = 0.5
+export const BOT_RECOVER_REACT_S = 0.35
+export const BOT_AIR_ACCEL = 14 // m/s²
+export const BOT_GLIDE_SPEED = 7 // m/s horizontal
+export const BOT_GLIDE_FALL = 3 // m/s
+/** The one air (double) jump it spends to start the recovery (m/s up; ≈ 1.2 m at BOT_GRAVITY). */
+export const BOT_AIR_JUMP_V = 7
 
 // ─── Test dummy (client-local box, client/lungeDummy.ts) ────────────
 /** Spawn a local opponent box near our base to practise on (+ "Respawn dummy" chip, key 2). */

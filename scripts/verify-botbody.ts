@@ -26,9 +26,12 @@ const kinds: Array<[string, (dx: number, dz: number) => KnockSpec]> = [
 ]
 
 let fellCount = 0
+for (const recover of [false, true]) {
+console.log(recover ? '\n-- always tries to glide back (BOT_RECOVER roll forced on) --' : '-- never tries to recover --')
 for (const [kName, make] of kinds) {
   for (const [dName, dx, dz] of dirs) {
     const body = new BotBody(base)
+    body.rng = () => (recover ? 0 : 1)
     if (!body.knock(make(dx, dz))) { fail(`${kName} ${dName}: knock refused`); continue }
     const log: string[] = []
     let t = 0, fellAt = -1, landedAt = -1, settledAt = -1
@@ -53,19 +56,43 @@ for (const [kName, make] of kinds) {
       if (body.canBeHit()) fail(`${kName} ${dName}: hittable right after landing`)
       if (body.canWalk()) fail(`${kName} ${dName}: walking during the land hold`)
     } else { what = `still ${body.mode} after 15 s`; fail(`${kName} ${dName}: never resolved`) }
+    if (recover && settledAt >= 0 && !graph.nodes.has([...graph.nodes].find(id => {
+      const q = graph.worldPos.get(id)!; return Math.hypot(q[0] - p.x, q[2] - p.z) < 1.5 && Math.abs(q[1] - p.y) < 1.5
+    }) ?? '')) fail(`${kName} ${dName}: recovered onto no walkable cell`)
     console.log(`${kName.padEnd(16)} ${dName}: ${log[0] ?? '(no trace)'} | ${what}`)
   }
+}
+}
+
+// A light shove off the same edge: a bot that tries should glide back; one that doesn't falls.
+for (const strength of [85, 95, 105, 115]) {
+  const res: string[] = []
+  for (const recover of [false, true]) {
+    const body = new BotBody(base)
+    body.rng = () => (recover ? 0 : 1)
+    body.knock({ kind: 'lunge', impulse: { x: -strength, y: 8, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0.3 })
+    let out = 'unresolved'
+    for (let t = 0; t < 15 && out === 'unresolved'; t += 0.1) {
+      for (const e of body.tick(0.1, world)) {
+        if (e.type === 'settled') out = `settled ${Math.hypot(body.pos.x - base.x, body.pos.z - base.z).toFixed(1)} m out`
+        if (e.type === 'fell') out = 'fell'
+      }
+    }
+    res.push(`${recover ? 'tries' : 'no try'}: ${out}`)
+  }
+  console.log(`shove ${strength} -x | ${res.join(' | ')}`)
 }
 
 // Riding the cloud: hits are ignored.
 {
   const body = new BotBody(base)
-  body.knock(spikeKnock(1, 0, true))
+  body.rng = () => 1
+  body.knock(spikeKnock(-1, 0, true))
   let guard = 0
   while (!body.inRescue() && guard++ < 200) body.tick(0.1, world)
   if (body.inRescue() && body.knock(lungeKnock(1, 0))) fail('a riding bot took a hit')
 }
 
-console.log(`${fellCount} of ${kinds.length * dirs.length} knocks off the base fell and were rescued`)
+console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and were rescued`)
 if (failed) process.exit(1)
 console.log('✓ bot body checks passed')
