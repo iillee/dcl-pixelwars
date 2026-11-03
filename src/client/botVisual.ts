@@ -38,6 +38,7 @@ import {
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
+import { stepCarry } from './botCarry'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
@@ -105,6 +106,8 @@ interface BotVisual {
   mover: Entity
   /** Avatar is parented to `mover` and its local transform is left at the origin. */
   carried: boolean
+  /** Seconds st has stayed 0 while still parented. Unparent only after the hold. */
+  groundHeld: number
   /** Last wire state. 0 is on the ground. */
   st: number
   wing: Entity | null
@@ -201,6 +204,7 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     root,
     mover,
     carried: false,
+    groundHeld: 0,
     st: 0,
     wing: null,
     id,
@@ -222,45 +226,38 @@ function yawOf(deg: number) {
 /**
  * World pose. In the air the parent moves and the avatar stays at local origin.
  *
- * The ground tween's end point is a world position. Parenting turns the next
- * tween write into a local offset, so the avatar jumps to parent+world and
- * then rides that offset. Zero the local pose and retarget the finished tween
- * to the origin every airborne frame. On the ground the avatar is unparented
- * and the tween sits on the world position, which is what plays the run cycle.
+ * Parent and AvatarShape are written only when the carry state changes.
+ * Rewriting them every frame makes the explorer fade the avatar in and out.
+ * A one-frame return to st=0 does not unparent; the body has to stay grounded
+ * for CARRY_GROUND_HOLD_S. The ground tween is removed on the way up so its
+ * world end cannot become a local offset, and put back only on the way down.
  */
-function placeAvatar(rec: BotVisual): void {
+function placeAvatar(rec: BotVisual, dt: number): void {
   const yaw = yawOf(rec.lastYawDeg)
-  if (rec.st !== 0) {
+  const step = stepCarry(rec.carried, rec.groundHeld, rec.st, dt)
+  rec.groundHeld = step.groundHeld
+  if (step.carried) {
     const mover = Transform.getMutable(rec.mover)
     mover.position = rec.renderPos
     mover.rotation = yaw
-    if (!rec.carried) {
+    if (step.parentChanged) {
+      if (Tween.has(rec.root)) Tween.deleteFrom(rec.root)
       Transform.createOrReplace(rec.root, {
         parent: rec.mover,
         position: Vector3.Zero(),
         rotation: Quaternion.Identity(),
       })
-      rec.carried = true
-    } else {
-      const child = Transform.getMutable(rec.root)
-      child.position = Vector3.Zero()
-      child.rotation = Quaternion.Identity()
     }
-    holdWalker(rec.root, Vector3.Zero())
-    return
-  }
-  if (rec.carried) {
-    Transform.createOrReplace(rec.root, {
-      position: rec.renderPos,
-      rotation: yaw,
-    })
-    rec.carried = false
+  } else if (step.parentChanged) {
+    Transform.createOrReplace(rec.root, { position: rec.renderPos, rotation: yaw })
+    holdWalker(rec.root, rec.renderPos)
   } else {
     const tf = Transform.getMutable(rec.root)
     tf.position = rec.renderPos
     tf.rotation = yaw
+    holdWalker(rec.root, rec.renderPos)
   }
-  holdWalker(rec.root, rec.renderPos)
+  rec.carried = step.carried
 }
 
 function syncWing(rec: BotVisual): void {
@@ -426,7 +423,7 @@ export function initBotVisual(): void {
       if (speedSq > 0.25) {
         rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
       }
-      placeAvatar(rec)
+      placeAvatar(rec, dt)
       syncWing(rec)
     }
   })

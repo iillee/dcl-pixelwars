@@ -8,6 +8,7 @@
  * Covers a ramp walk, a platform leap, and a knock that glides. The client
  * copy is headless: same thresholds, same snapshot buffer, same walk lerp.
  */
+import { readFileSync } from 'node:fs'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
@@ -15,6 +16,7 @@ import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
+import { stepCarry } from '../src/client/botCarry'
 
 const PREDICT_AHEAD_SEC = 0.1
 const LERP_SPEED_PER_SEC = 4
@@ -292,11 +294,15 @@ const pushK = (sim: number, st: number) => {
 }
 for (let i = 0; i < 5; i++) pushK(i * 0.1, 0)
 knocked.knock(lungeKnock(-1, 0))
+let landedAt = -1
 for (let i = 5, sim = 0.5; i < 90 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
   knocked.tick(0.1, world)
   const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
   pushK(sim, st)
-  if (knocked.mode === 'walk' && sim > 1) break
+  if (knocked.mode === 'walk' && sim > 1) {
+    if (landedAt < 0) landedAt = sim
+    if (sim - landedAt >= 0.5) break
+  }
 }
 if (knocked.mode === 'rescue') {
   for (let i = 0; i < 8; i++) {
@@ -308,10 +314,11 @@ if (knocked.mode === 'rescue') {
 const knockReport = replay('dash knock → air → land/rescue', knockPackets)
 
 /**
- * Avatar world position is parent * local. The bug: the ground tween's world
- * end is written once into the child after reparent and left there, so the
- * avatar sits at parent+that point and flies away. The fix zeros local every
- * airborne frame, so world stays on the parent.
+ * Avatar world position is parent * local. The knock bug left the ground
+ * position in the child's local transform, so the avatar sat at parent+that
+ * point. Zeroing local on the parent change keeps world on the draw. Doing
+ * that zero again every airborne frame matches the same world position and
+ * is what made the explorer fade the avatar; the write counter forbids it.
  */
 function hierarchyWorld(draws: V[], packets: Packet[], zeroEveryAirFrame: boolean): { maxOffDraw: number; maxExtraJump: number } {
   let carried = false
@@ -359,10 +366,10 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   console.error('✗ non-finite position in a stream')
   process.exit(1)
 }
-const fixed = hierarchyWorld(knockReport.draws, knockPackets, true)
+const attached = hierarchyWorld(knockReport.draws, knockPackets, true)
 const stale = hierarchyWorld(knockReport.draws, knockPackets, false)
-console.log(`dash parent*local: fixed offDraw=${fixed.maxOffDraw.toFixed(2)} m extraJump=${fixed.maxExtraJump.toFixed(2)} m; stale-local offDraw=${stale.maxOffDraw.toFixed(2)} m`)
-if (fixed.maxOffDraw > 0.01) {
+console.log(`dash parent*local: attached offDraw=${attached.maxOffDraw.toFixed(2)} m extraJump=${attached.maxExtraJump.toFixed(2)} m; stale-local offDraw=${stale.maxOffDraw.toFixed(2)} m`)
+if (attached.maxOffDraw > 0.01) {
   console.error('✗ avatar world position left the draw during knock/air/rescue')
   process.exit(1)
 }
@@ -370,4 +377,55 @@ if (stale.maxOffDraw < 1) {
   console.error('✗ the stale-local bug would not have shown up on this trace')
   process.exit(1)
 }
-console.log('✓ walking draw stays within 3 m; airborne parent*local stays on the draw, no jump > 1 m')
+
+function placeAvatarSource(): string {
+  const src = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+  const start = src.indexOf('function placeAvatar')
+  const end = src.indexOf('function syncWing')
+  if (start < 0 || end < start) throw new Error('placeAvatar source not found')
+  return src.slice(start, end)
+}
+
+/**
+ * Writes placeAvatar performs on the avatar. AvatarShape stays at spawn
+ * (and a team change). While carried, the child transform is not touched
+ * again: a dirty Transform resends parent and the explorer fades the mesh.
+ */
+function avatarShapeWritesIn(place: string): number {
+  const carried = place.slice(place.indexOf('if (step.carried)'), place.indexOf('} else if (step.parentChanged)'))
+  const guard = carried.indexOf('if (step.parentChanged)')
+  const beforeGuard = guard < 0 ? carried : carried.slice(0, guard)
+  const shape = (place.match(/AvatarShape|paintAvatar/g) ?? []).length
+  const childDirty = /rec\.root/.test(beforeGuard) || /getMutable\(rec\.root\)|holdWalker\(rec\.root/.test(carried) ? 1 : 0
+  return shape + childDirty
+}
+
+function countWrites(packets: Packet[], flap: boolean): { parentChanges: number; shapeWrites: number; seconds: number } {
+  let carried = false
+  let held = 0
+  let parentChanges = 0
+  const shapeWrites = avatarShapeWritesIn(placeAvatarSource())
+  for (let i = 0; i < packets.length; i++) {
+    let st = packets[i].st
+    if (flap && st === 4 && i % 7 === 0) st = 0
+    for (let f = 0; f < 3; f++) {
+      const step = stepCarry(carried, held, st, 0.033)
+      if (step.parentChanged) parentChanges++
+      carried = step.carried
+      held = step.groundHeld
+    }
+  }
+  return { parentChanges, shapeWrites, seconds: packets.length * 0.1 }
+}
+const writes = countWrites(knockPackets, false)
+const flappy = countWrites(knockPackets, true)
+console.log(`carry writes: parentChanges=${writes.parentChanges} (${(writes.parentChanges / writes.seconds).toFixed(2)}/s) avatarShapeWrites=${writes.shapeWrites}; with a one-packet ground blip parentChanges=${flappy.parentChanges}`)
+if (writes.parentChanges !== 2 || writes.shapeWrites !== 0) {
+  console.error(`✗ want 2 parent changes and 0 AvatarShape writes per knock, got ${writes.parentChanges} and ${writes.shapeWrites}`)
+  process.exit(1)
+}
+if (flappy.parentChanges !== 2) {
+  console.error(`✗ a one-frame st=0 during the glide changed parent ${flappy.parentChanges} times`)
+  process.exit(1)
+}
+console.log('✓ walking draw stays within 3 m; one parent enter and one leave per knock; AvatarShape is not rewritten')
