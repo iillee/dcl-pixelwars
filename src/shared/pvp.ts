@@ -476,8 +476,11 @@ export const VICTIM_SPECULATIVE_KNOCK = true
 // ─── Ghost bot body (shared/botBody.ts, run by the server) ──────────
 /** Bots take the same knocks as players (shared/knocks.ts) through a server body sim. These convert
  *  Physics-API units to the body's m/s and set its gravity and ground friction. Tune them until the
- *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit. */
-export const BOT_KNOCK_UNIT = 0.15 // m/s per impulse unit (guess: lunge ≈ 12 m on flat floor; the anvil's 0.25 gave ≈ 49 m)
+ *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit.
+ *  0.15 guessed a 12 m lunge. A human gets the raw impulse; the anvil stand-in for that impulse
+ *  (LUNGE_DUMMY_UNIT) is 0.25 and slides about 40 m. Same number here. Motion stays the body's
+ *  normal steps — no extra snap. */
+export const BOT_KNOCK_UNIT = 0.25 // m/s per impulse unit; matches LUNGE_DUMMY_UNIT
 export const BOT_GRAVITY = 20 // m/s²
 export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
 /** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */
