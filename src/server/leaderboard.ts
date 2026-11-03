@@ -35,6 +35,11 @@ const entries = new Map<string, LeaderboardEntry>()
 const STORAGE_KEY = 'leaderboard-v1'
 const TOP_N = 20  // synced payload size cap — keep the broadcast small
 
+/** Bots (`bot:<id>`) are live/round scoreboard only. Never store or publish them. */
+function isBotId(userId: string): boolean {
+  return userId.toLowerCase().startsWith('bot:')
+}
+
 // ─── Persistence ────────────────────────────────────────────────────
 
 /** Load persisted leaderboard on server boot. Safe on parse errors. */
@@ -51,6 +56,7 @@ export async function loadFromStorage(): Promise<void> {
     entries.clear()
     for (const e of parsed) {
       if (typeof e?.userId !== 'string' || typeof e?.cellsPainted !== 'number') continue
+      if (isBotId(e.userId)) continue
       entries.set(e.userId.toLowerCase(), {
         userId: e.userId.toLowerCase(),
         name: typeof e.name === 'string' ? e.name : e.userId.slice(0, 8),
@@ -69,6 +75,7 @@ export async function loadFromStorage(): Promise<void> {
 /** Persist current state. Called on round boundaries. */
 export async function saveToStorage(): Promise<void> {
   try {
+    for (const key of [...entries.keys()]) if (isBotId(key)) entries.delete(key)
     const arr = [...entries.values()]
     await Storage.set(STORAGE_KEY, JSON.stringify(arr))
     console.log(`[Leaderboard] persisted ${arr.length} entries`)
@@ -85,7 +92,7 @@ export async function saveToStorage(): Promise<void> {
  * server dedupes cell writes at the paint layer (last-write-wins).
  */
 export function incrementPaint(userId: string, count: number): void {
-  if (count <= 0) return
+  if (count <= 0 || isBotId(userId)) return
   const key = userId.toLowerCase()
   const e = entries.get(key)
   if (e) {
@@ -106,7 +113,7 @@ export function incrementPaint(userId: string, count: number): void {
  * name capture always succeeds regardless of ordering.
  */
 export function updateName(userId: string, name: string): void {
-  if (!name || typeof name !== 'string') return
+  if (!name || typeof name !== 'string' || isBotId(userId)) return
   const key = userId.toLowerCase()
   const trimmed = name.slice(0, 32)  // display cap
   const e = entries.get(key)
@@ -130,6 +137,7 @@ export function getName(userId: string): string | null {
 /** Top-N entries sorted by cellsPainted desc. Used for publish + on-demand replies. */
 export function getTopN(n: number = TOP_N): LeaderboardEntry[] {
   return [...entries.values()]
+    .filter(e => !isBotId(e.userId))
     .sort((a, b) => b.cellsPainted - a.cellsPainted)
     .slice(0, n)
 }

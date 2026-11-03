@@ -32,7 +32,8 @@ function isActive(uid: string, now = Date.now()): boolean {
   return (lastActiveAt.get(uid) ?? 0) >= now - ACTIVE_WINDOW_MS
 }
 
-/** Active human count per team, optionally excluding one userId. */
+/** Active human count per team, optionally excluding one userId.
+ *  Humans only — bots are not in this map. They fill the gap afterwards. */
 export function activeTeamCounts(exclude?: string): { red: number; blue: number } {
   const now = Date.now()
   let red = 0, blue = 0
@@ -44,7 +45,8 @@ export function activeTeamCounts(exclude?: string): { red: number; blue: number 
   return { red, blue }
 }
 
-/** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue). */
+/** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue).
+ *  New joiners take the side with fewer active humans (this map, not bots). */
 export function assignTeam(userId: string): number {
   const existing = teamOf.get(userId)
   if (existing !== undefined) return existing

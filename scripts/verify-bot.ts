@@ -106,26 +106,46 @@ const perStep = (val.g * 5) / Math.max(1, total)
 console.log(`✓ value bot: ${perStep.toFixed(2)} cells gained per step over ${total} steps (5 runs)`)
 if (perStep < 1.2) { console.error('✗ value bot mostly walks its own paint'); process.exit(1) }
 
-// ─── Ghost spawn: always on the base opposite the solo human ─────────
+// ─── Short-team fill: bots = active-human gap, one side only, own base ─
 import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
 import { baseSpawn } from '../src/maze/generator'
 {
-  let humanTeam = 1
-  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, humanCount: () => 1, soloHumanTeam: () => humanTeam })
+  let counts = { red: 1, blue: 0 }
+  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
   rebuildBotGraph(42)
-  const near = (team: number) => {
+  const expect = (n: number, team: number, label: string) => {
     const p = getBotPositions()
-    if (p.length !== 1) { console.error(`✗ expected 1 ghost, got ${p.length}`); process.exit(1) }
+    if (p.length !== n) { console.error(`✗ ${label}: expected ${n} bots, got ${p.length}`); process.exit(1) }
+    if (n === 0) return label
     const s = baseSpawn(team).pos
-    const d = Math.hypot(p[0].x - s.x, p[0].z - s.z)
-    if (p[0].team !== team || d > 3 || Math.abs(p[0].y - (s.y - 1.5)) > 1.5) { console.error(`✗ ghost team ${p[0].team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)}), want team ${team} near (${s.x}, ${s.z})`); process.exit(1) }
-    return `team ${team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)})`
+    for (const b of p) {
+      const d = Math.hypot(b.x - s.x, b.z - s.z)
+      if (b.team !== team || d > 3 || Math.abs(b.y - (s.y - 1.5)) > 1.5) {
+        console.error(`✗ ${label}: bot ${b.id} team ${b.team} at (${b.x.toFixed(1)}, ${b.y.toFixed(1)}, ${b.z.toFixed(1)}), want team ${team} near (${s.x}, ${s.z})`)
+        process.exit(1)
+      }
+    }
+    const ids = new Set(p.map(b => b.id))
+    if (ids.size !== n) { console.error(`✗ ${label}: duplicate bot ids`); process.exit(1) }
+    return `${label}: ${n}× team ${team}`
   }
-  tickBots(0); const a = near(2)
-  humanTeam = 2; tickBots(0); const b = near(1)
+  tickBots(0)
+  const a = expect(1, 2, '1 red human')
+  counts = { red: 0, blue: 1 }; tickBots(0)
+  const b = expect(1, 1, 'short side flipped')
+  counts = { red: 3, blue: 1 }; tickBots(0)
+  const c = expect(2, 2, '3v1')
+  counts = { red: 3, blue: 2 }; tickBots(0)
+  const d = expect(1, 2, 'excess retired')
+  counts = { red: 2, blue: 2 }; tickBots(0)
+  const e = expect(0, 0, '2v2')
+  counts = { red: 0, blue: 0 }; tickBots(0)
+  const f = expect(0, 0, 'zero humans')
+  counts = { red: 0, blue: 1 }; tickBots(0)
   for (let i = 0; i < 40; i++) tickBots(0.2)
-  rebuildBotGraph(43); const c = near(1)
-  console.log(`✓ ghost spawns opposite: human RED → ${a}; human BLUE → ${b}; new round → ${c}`)
+  rebuildBotGraph(43)
+  const g = expect(1, 1, 'new round, still short red')
+  console.log(`✓ short-team fill: ${a}; ${b}; ${c}; ${d}; ${e}; ${f}; ${g}`)
 }
 
 // ─── Level drops: the path uses one, and the body lands on that floor ──

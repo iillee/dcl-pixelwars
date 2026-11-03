@@ -2,22 +2,22 @@
  * manager.ts — bot population control + tick loop.
  *
  * Owns the pool of active Bot instances. On each server tick:
- *   1. Adjust population to hit `targetActive` humans + bots
- *   2. Tick every bot; apply resulting paint via the injected callback
+ *   1. Fill the short team: bot count = how many fewer ACTIVE humans that
+ *      team has. All bots sit on that team only (bots never fight bots).
+ *      1 red human → 1 blue bot; 3 red vs 1 blue → 2 blue bots; even or
+ *      zero humans → no bots. No cap.
+ *   2. Tick every bot; apply resulting paint via the injected callback.
  *
- * Spawning: the ghost always starts on its OWN base tile centre (the base
- * opposite the solo human). On a round boundary the graph is rebuilt and
- * the ghost is sent back to its base; if the solo human changes team the
- * ghost is respawned for the other side on the other base.
+ * Spawning: each bot starts on its OWN base tile centre. A round rebuild
+ * sends survivors back to that base. If the short team flips, bots on the
+ * old side retire immediately and new ones spawn on the new base.
  *
- * Bots do NOT flow through the paintTick / leaderboard code paths — they
- * call applyPaint directly. That's intentional:
- *   - No wire message (they're already server-side)
- *   - No leaderboard credit (bot names must never appear in top-painters)
+ * Paint is applied here (no paintTick wire message) and attributed to
+ * `bot:<id>`. The server credits that id on the live / round scoreboard
+ * only — never the persisted top-painters board.
  *
- * Team assignment: whichever team currently has fewer bots. Ties go to
- * Red. Keeps team distribution balanced without needing to poll the
- * human roster split.
+ * Active humans come from the roster (60s window). Bots are not part of
+ * that count; they fill the gap after humans are assigned.
  */
 
 import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, Placed } from '../../maze/generator'
@@ -55,20 +55,13 @@ const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null,
 })
 
-// Solo-mode: exactly one bot appears when there is exactly one human,
-// always on the OPPOSITE team so the solo player has an opponent. Two+
-// humans = no bots; zero humans = no bots.
-const SOLO_HUMAN_COUNT = 1
-
 export interface ManagerDeps {
   /** Attribute paint to a team. Returns true if the cell actually flipped. */
   applyPaint: (cellId: string, team: number, painter: string) => boolean
   /** Read paint state to power smart-target heuristics. */
   paint: PaintReader
-  /** Currently-connected (or ever-connected) human count. */
-  humanCount: () => number
-  /** Team (1 or 2) of the sole human when humanCount===1, else null. */
-  soloHumanTeam: () => number | null
+  /** Active humans per team (roster idle rule). Humans only — never bots. */
+  activeHumans: () => { red: number; blue: number }
   /** Bot crossed the fall line at `at`; the cloud carries it to `base` (broadcast rescueStart, count the death). */
   onFell?: (id: number, at: V3, base: V3) => void
   /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
@@ -85,6 +78,8 @@ export interface ManagerDeps {
   onBurstLand?: (id: number, burstId: number, team: number, at: V3, fx: number, fz: number) => void
   /** Bot's lunge reached `human` by reported positions (round stats only; the victim's client knocks itself). */
   onBotHit?: (id: number, human: string) => void
+  /** A bot just entered the round (live scoreboard row). */
+  onSpawn?: (id: number, team: number) => void
 }
 
 let deps: ManagerDeps | null = null
@@ -95,7 +90,7 @@ let botIdCounter = 0
 
 export function initBots(d: ManagerDeps): void {
   deps = d
-  console.log('[Bots] initialised (solo-mode: 1 bot when 1 human, opposite team)')
+  console.log('[Bots] initialised (short-team fill: bots = active-human gap, one side only)')
 }
 
 /**
@@ -174,20 +169,48 @@ function baseStartCell(team: number): string {
   return [...g.nodes][0]
 }
 
-/** Solo-mode: bot team is opposite of the sole human. Defaults to Blue
- *  if soloHumanTeam is somehow unavailable at spawn time. */
-function pickTeamForNewBot(): number {
-  const humanTeam = deps?.soloHumanTeam() ?? 1
-  return humanTeam === 1 ? 2 : 1
+function teamName(team: number): string {
+  return team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'NONE'
 }
 
-function spawnBot(): void {
+function countLabel(c: { red: number; blue: number }): string {
+  return `red=${c.red} blue=${c.blue} bots=${bots.length}`
+}
+
+/** Short team and how many bots it needs. Even or empty lobbies need none. */
+function desiredFill(c: { red: number; blue: number }): { team: number; count: number } {
+  if (c.red + c.blue === 0 || c.red === c.blue) return { team: 0, count: 0 }
+  if (c.red < c.blue) return { team: 1, count: c.blue - c.red }
+  return { team: 2, count: c.red - c.blue }
+}
+
+/** Bot whose nearest human is farthest. No reported positions → newest id. */
+function pickFarthest(pool: LiveBot[]): LiveBot {
+  const humans = deps?.humans?.() ?? []
+  let best = pool[0]
+  let bestD = -1
+  for (const b of pool) {
+    const p = b.body.pos
+    let d = 0
+    if (humans.length > 0) {
+      d = Infinity
+      for (const h of humans) {
+        const dd = Math.hypot(p.x - h.x, p.y - h.y, p.z - h.z)
+        if (dd < d) d = dd
+      }
+    }
+    if (d > bestD + 1e-3 || (Math.abs(d - bestD) <= 1e-3 && b.botId > best.botId)) {
+      best = b
+      bestD = d
+    }
+  }
+  return best
+}
+
+function spawnBot(team: number, reason: string, counts: { red: number; blue: number }): void {
   if (!graph || !deps) return
-  // Spawn on the deep (eroded) subgraph so the bot's very first path
-  // stays off walls. Fall back to full nodes only in the pathological
-  // case where the deep set is empty (shouldn't happen with ARM=10).
-  // Spawn on the ghost's OWN base — the opposite base from the solo human.
-  const team = pickTeamForNewBot()
+  // Own base, deep cells first (baseStartCell). Each bot is its own instance:
+  // path, combat cooldowns, and `bot:<id>` paint / hit credit.
   const startCell = baseStartCell(team)
   const bot = new Bot({
     team,
@@ -200,14 +223,37 @@ function spawnBot(): void {
   bot.body = new BotBody(cellPos(startCell) ?? baseSpawn(team).pos)
   bot.combat = newCombat()
   bots.push(bot)
-  console.log(`[Bots] spawn #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
+  deps.onSpawn?.(bot.botId, team)
+  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${startCell} (${reason}, ${countLabel(counts)})`)
 }
 
-function retireBot(): void {
-  const removed = bots.pop()
-  if (!removed) return
-  if (removed.body.inRescue()) deps?.onRescueEnd?.(removed.botId)
-  console.log(`[Bots] retire: team ${removed.team === 1 ? 'RED' : 'BLUE'} (pop ${bots.length})`)
+function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
+  const i = bots.indexOf(b)
+  if (i < 0) return
+  bots.splice(i, 1)
+  if (b.body.inRescue()) deps?.onRescueEnd?.(b.botId)
+  console.log(`[Bots] retire #${b.botId} team ${teamName(b.team)} (${reason}, ${countLabel(counts)})`)
+}
+
+/** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
+function balanceBots(): void {
+  if (!graph || !deps) return
+  const counts = deps.activeHumans()
+  const want = desiredFill(counts)
+  if (want.count === 0) {
+    const why = counts.red + counts.blue === 0 ? 'zero humans' : 'teams even'
+    while (bots.length > 0) retireBot(pickFarthest(bots), why, counts)
+    return
+  }
+  for (const b of bots.filter(x => x.team !== want.team)) {
+    retireBot(b, `wrong team, short side is ${teamName(want.team)}`, counts)
+  }
+  while (bots.length > want.count) retireBot(pickFarthest(bots), 'excess, farthest from a human', counts)
+  while (bots.length < want.count) {
+    const before = bots.length
+    spawnBot(want.team, 'fill short team', counts)
+    if (bots.length === before) break
+  }
 }
 
 /**
@@ -225,20 +271,10 @@ export function tickBots(dtSec: number): void {
   if (!graph || !deps) return
 
   // ── 1. Population control ──────────────────────────────────────────
-  const humans = deps.humanCount()
-  const desired = humans === SOLO_HUMAN_COUNT ? 1 : 0
-  while (bots.length < desired) spawnBot()
-  while (bots.length > desired) retireBot()
-
-  // Solo human switched team (or was re-assigned at a new round): the ghost
-  // must play the other side, so retire it and respawn on the opposite base.
-  // Bot.team is fixed per instance (its smart target is bound to it).
-  const solo = deps.soloHumanTeam()
-  if (solo !== null && bots.length === 1 && bots[0].team === solo) {
-    console.log(`[Bots] solo human is now ${solo === 1 ? 'RED' : 'BLUE'} - respawning ghost on the opposite base`)
-    retireBot()
-    spawnBot()
-  }
+  // Immediate: a human joining or waking drops the excess this tick, not at
+  // the round boundary. Bot.team is fixed per instance (target is bound to it),
+  // so a side flip retires the old bots and spawns on the new base.
+  balanceBots()
 
   // Walking ghost whose cell no longer exists (e.g. the tile under it went
   // away): back to its own base.

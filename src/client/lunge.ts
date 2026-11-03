@@ -233,6 +233,8 @@ function dbgLog(msg: string): void { if (LUNGE_DEBUG) console.log(`[Lunge dbg] $
 let recoveryOn = false
 let lockLeft = 0
 let glideLockLeft = 0
+/** Victim / post-connect portion of glideLockLeft. A dive landing must not eat this. */
+let victimGlideLeft = 0
 let sparkAccum = 0
 function applyControl(): void {
   const noGlide = glideLockLeft > 0
@@ -284,16 +286,33 @@ export function startKnockLock(): void {
   applyControl()
 }
 /** Keep the glider shut for `seconds` (extends, never stacks down). Closes an
- *  already-open glide via disableGliding. Shares applyControl with the knock lock. */
+ *  already-open glide via disableGliding. Shares applyControl with the knock lock.
+ *  Counts as a victim lock: an attacker landing will not clear it early. */
 export function startGlideLock(seconds: number): void {
+  if (seconds <= 0) return
+  victimGlideLeft = Math.max(victimGlideLeft, seconds)
+  glideLockLeft = Math.max(glideLockLeft, seconds)
+  applyControl()
+}
+/** Attacker aerial Burst. Same disableGliding shut as startGlideLock, released
+ *  on landing (clearDiveGlideLock) without dropping a victim lock. */
+export function startDiveGlideLock(seconds: number): void {
   if (seconds <= 0) return
   glideLockLeft = Math.max(glideLockLeft, seconds)
   applyControl()
 }
+/** Feet met the floor. Drop the dive extension; leave any victim lock running. */
+export function clearDiveGlideLock(): void {
+  const keep = victimGlideLeft
+  if (glideLockLeft <= keep) return
+  glideLockLeft = keep
+  applyControl()
+}
 function clearKnockLock(): void {
-  if (lockLeft <= 0 && glideLockLeft <= 0) return
+  if (lockLeft <= 0 && glideLockLeft <= 0 && victimGlideLeft <= 0) return
   lockLeft = 0
   glideLockLeft = 0
+  victimGlideLeft = 0
   applyControl()
 }
 
@@ -516,9 +535,10 @@ export function initLunge(): void {
   // Glide lock is owned here (applyControl) but aerial Burst uses it even if a
   // future change turns the lunge off, so the timer is not inside that early-out.
   engine.addSystem((dt: number) => {
-    if (glideLockLeft <= 0) return
-    glideLockLeft -= dt
-    if (glideLockLeft <= 0) { glideLockLeft = 0; applyControl() }
+    if (glideLockLeft <= 0 && victimGlideLeft <= 0) return
+    if (glideLockLeft > 0) glideLockLeft = Math.max(0, glideLockLeft - dt)
+    if (victimGlideLeft > 0) victimGlideLeft = Math.min(glideLockLeft, Math.max(0, victimGlideLeft - dt))
+    if (glideLockLeft <= 0) { glideLockLeft = 0; victimGlideLeft = 0; applyControl() }
   })
   if (LUNGE_MODE === 'off') return
   initKnockbackState()

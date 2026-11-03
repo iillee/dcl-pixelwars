@@ -184,6 +184,10 @@ export const AIR_SPIKE_FORCE_S = 0.28
 export const AIR_SPIKE_GROUND_OUT = 85
 export const AIR_SPIKE_GROUND_LIFT = 16
 export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
+/** Attacker aerial Burst: same glider shut as a spiked victim, held for the dive.
+ *  Long enough to fall from the top of the sky maze if the landing clear is missed.
+ *  The client clears it when the feet land. Ground Burst does not use this. */
+export const AIR_SPIKE_DIVE_GLIDE_LOCK_S = 4
 /**
  * Attacker recovery after a connect. One block so a playtest can tune the risk.
  * A miss does not use these: the full dive (impulse + downward force) keeps going,

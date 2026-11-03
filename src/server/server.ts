@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, botSimTime, hitBot, getWalkableGraph } from './bots/manager'
@@ -87,12 +87,26 @@ export async function setupServer(): Promise<void> {
     botAim.set(from.toLowerCase(), { x, y, z, t: Date.now() })
   })
 
-  // Bot subsystem — Phase 5a. Server-side virtual painters that keep the
-  // scene alive when human count < TARGET_ACTIVE. Retire gracefully as
-  // humans join; never appear on the leaderboard.
-  //
+  // Per-player cells flipped this round. Bots use `bot:<id>` and are cleared
+  // with the round. Same 'gained' count humans get; bots are not persisted.
+  const roundCells = new Map<string, number>()
+  /** Team of each `bot:<id>` seen this round, including bots retired after scoring. */
+  const botTeams = new Map<string, number>()
+  // Bot paint: live/round scoreboard only. Never leaderboardIncrement (that map is persisted).
+  const applyBotPaint = (cellId: string, team: number, painter: string): boolean => {
+    const gained = applyPaint(cellId, team, painter)
+    if (gained) {
+      roundCells.set(painter, (roundCells.get(painter) ?? 0) + 1)
+      botTeams.set(painter, team)
+    }
+    return gained
+  }
+
+  // Bots fill the active-human gap on the short team only. Paint is credited
+  // to `bot:<id>` on the live scoreboard; the persisted top-painters board
+  // stays human-only.
   initBots({
-    applyPaint,
+    applyPaint: applyBotPaint,
     paint: {
       teamOf: teamOfCell,
       // Enables the bot's enemy-hunter target tier (bot.ts ENEMY_BIAS).
@@ -100,10 +114,8 @@ export async function setupServer(): Promise<void> {
       // pure defense — easy to counter by camping its trail.
       sampleEnemy: sampleEnemyCells,
     },
-    // "Active" = has painted (or joined) within the last 60s. Filters out
-    // invisible scraper accounts that connect but never touch the ground.
-    humanCount: activeHumanCount,
-    soloHumanTeam: activeSoloHumanTeam,
+    // Active = roster idle rule (60s). Humans only; AFK humans drop out and a bot fills.
+    activeHumans: activeTeamCounts,
     // A knocked-off ghost rides the same cloud a player does: every client
     // flies it along the shared path (mobile 1) while the bot body follows it.
     onFell: (id, at, base) => {
@@ -143,8 +155,7 @@ export async function setupServer(): Promise<void> {
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
-      // Bots never earn leaderboard credit: paint directly, like their footsteps.
-      for (const cid of fp) applyPaint(cid, team, by)
+      for (const cid of fp) applyBotPaint(cid, team, by)
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
         if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
@@ -155,7 +166,7 @@ export async function setupServer(): Promise<void> {
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
       const by = `bot:${id}`
-      for (const cid of fp) applyPaint(cid, team, by)
+      for (const cid of fp) applyBotPaint(cid, team, by)
       room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
       const now = Date.now()
       for (const e of rosterEntries()) {
@@ -165,6 +176,7 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] ghost ${id} spike landed, footprint=${fp.length} face=${fx.toFixed(2)},${fz.toFixed(2)}`)
     },
     onBotHit: (id, human) => noteHit(`bot:${id}`, human),
+    onSpawn: (id, team) => { botTeams.set(`bot:${id}`, team) },
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()
@@ -182,10 +194,6 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] teamRoster (${why}) → ${entries.length} player(s): ${entries.map(e => `${e.userId.slice(0, 8)}=${e.team === 1 ? 'R' : 'B'}`).join(' ')}`)
     room.send('teamRoster', { entries })
   }
-
-  // Per-player contribution this round (cells flipped to their team).
-  // Same 'gained' count the leaderboard uses. Cleared at each boundary.
-  const roundCells = new Map<string, number>()
 
   const SNAPSHOT_COOLDOWN_MS = 5000
   const lastSnapshotAt = new Map<string, number>()
@@ -276,12 +284,9 @@ export async function setupServer(): Promise<void> {
     const from = context?.from
     if (!from) return
     lastPingAt.set(from, Date.now())
-    // Presence counts as activity: the bot manager's human count (60 s activity window) otherwise
-    // dropped a human who wasn't painting, kept the bot alive with 2 humans, and balanced joiners wrongly.
-    if (getTeam(from) !== null) {
-      markActive(from)
-      if (!isRoundActive() && intermission === 'idle') ensureRoundStarted(from)
-    }
+    // Ping keeps the round alive. It does not refresh the 60s idle window:
+    // a connected human with no paint (or fight) for 60s is AFK, and a bot fills for them.
+    if (getTeam(from) !== null && !isRoundActive() && intermission === 'idle') ensureRoundStarted(from)
   })
 
 
@@ -326,8 +331,9 @@ export async function setupServer(): Promise<void> {
     }
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     let team = assignTeam(from)
-    // Second human joins a solo human (+ bot): always the opposite team, so it's 1v1 and the bot retires
-    // on the next bot tick. Covers a rejoiner whose kept team matches the other human's.
+    // Rejoiner kept the same colour as the only other active human: flip them so
+    // the sides even out and the fill bots retire on the next tick. New joiners
+    // already take the side with fewer active humans (humans only, not bots).
     const other = activeSoloHumanTeam(from)
     if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
     markActive(from) // count them as present immediately; paint activity will refresh it
@@ -860,7 +866,14 @@ export async function setupServer(): Promise<void> {
     }
     for (const { userId, team } of rosterEntries()) if (!rows.has(userId)) rows.set(userId, { id: userId, team, cells: 0 })
     for (const b of getBotPositions()) if (!rows.has(`bot:${b.id}`)) rows.set(`bot:${b.id}`, { id: `bot:${b.id}`, team: b.team, cells: 0 })
-    for (const id of [...statIds(), ...painted.keys()]) if (!rows.has(id)) { const t = getTeam(id); if (t !== null) rows.set(id, { id, team: t, cells: 0 }) }
+    // Retired bots are gone from getBotPositions. Keep a row when they still have
+    // paint, KOs, or deaths this round (botTeams holds the colour). Zero-score
+    // retirees are omitted. Humans resolve through the roster.
+    for (const id of [...statIds(), ...painted.keys()]) {
+      if (rows.has(id)) continue
+      const t = id.startsWith('bot:') ? (botTeams.get(id) ?? null) : getTeam(id)
+      if (t !== null) rows.set(id, { id, team: t, cells: 0 })
+    }
     const owners = [...rows.values()].sort((a, b) => b.cells - a.cells).slice(0, 60).map(o => {
       const raw = o.id.startsWith('bot:') ? `Bot ${o.id.slice(4)}`
         : leaderboardGetName(o.id) ?? (o.id.length > 10 ? `${o.id.slice(0, 6)}…${o.id.slice(-4)}` : o.id)
@@ -920,7 +933,7 @@ export async function setupServer(): Promise<void> {
     // Personal results + owners BEFORE summary UI.
     const teamCells: Record<number, number> = { 1: 0, 2: 0 }
     for (const [uid, n] of roundCells) {
-      const t = getTeam(uid)
+      const t = uid.startsWith('bot:') ? (botTeams.get(uid) ?? null) : getTeam(uid)
       if (t !== null) teamCells[t] = (teamCells[t] ?? 0) + n
     }
     for (const { userId, team } of rosterEntries()) {
@@ -930,6 +943,7 @@ export async function setupServer(): Promise<void> {
     roundCells.clear()
     pendingBombs.length = 0
     const owners = buildStandings(painted)
+    botTeams.clear()
     clearRoundStats()
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)

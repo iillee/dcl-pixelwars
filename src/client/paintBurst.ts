@@ -16,7 +16,9 @@
  *     through the same radial path as a ground Burst (radialKnock → burstHit).
  *     A connect does not play, paint, or knock with it: the landing stays disarmed,
  *     most of the downward speed is cancelled, nothing is added upward, and the
- *     victim is spiked with the glider forced shut. Ground Burst does not dive.
+ *     victim is spiked with the glider forced shut. The attacker's own glider
+ *     is forced shut for the dive (startDiveGlideLock) and cleared on landing.
+ *     Ground Burst does not dive.
  *   The hotbar only queues the press. Ground vs air uses a live stance sample
  *   (BURST_STANCE_SLACK), not the previous frame's grounded flag. A shockwave
  *   keeps resending its paint until the server confirms the footprint.
@@ -38,14 +40,14 @@ import {
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
   BURST_PAINT_RETRY_S, BURST_PAINT_RETRY_GAP_S, BURST_USE_RETRY_S,
-  AIR_SPIKE_GLIDE_LOCK_S,
+  AIR_SPIKE_GLIDE_LOCK_S, AIR_SPIKE_DIVE_GLIDE_LOCK_S,
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
-import { holdForEmote, startKnockLock, startGlideLock } from './lunge'
+import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
@@ -524,11 +526,22 @@ export function triggerBurst(): void {
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
+/** Local aerial Burst: glider stays shut until the feet land (or the lock times out).
+ *  sawAir ignores a grounded sample on the frame the press is still at the jump. */
+let attackerDiveGlide = false
+let attackerDiveSawAir = false
+
 /** Airborne F: downward spike. A player or bot in the cylinder is combat.
  *  Hit: keep a fraction of the fall, no landing shockwave, no landing knock, no burst paint.
  *  Miss: full dive (a void miss keeps falling). The landing shockwave, its knock,
  *  and its paint wait until the feet meet the floor. */
 function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
+  // Close the glider before the impulse. An open glider clamps fall to ~1 m/s
+  // and swallows the downward force. Ground Burst never reaches here.
+  startDiveGlideLock(AIR_SPIKE_DIVE_GLIDE_LOCK_S)
+  attackerDiveGlide = true
+  attackerDiveSawAir = false
+  console.log(`[Burst] air dive — glider shut ${AIR_SPIKE_DIVE_GLIDE_LOCK_S}s`)
   // No press clip. A miss plays burst_impact once, at the landing, the same
   // single sound as a ground Burst. Playing air_spike_dive here as well made
   // the local player hear the burst twice. A connect has no landing; its sound
@@ -688,6 +701,16 @@ export function initPaintBurst(): void {
 
   engine.addSystem((dt: number) => {
     sampleFall(dt)
+    if (attackerDiveGlide) {
+      const stance = sampleBurstStance()
+      if (stance && !stance.grounded) attackerDiveSawAir = true
+      else if (stance?.grounded && attackerDiveSawAir) {
+        attackerDiveGlide = false
+        attackerDiveSawAir = false
+        clearDiveGlideLock()
+        console.log('[Burst] dive landed — glider lock cleared')
+      }
+    }
     if (cooldownLeft > 0) cooldownLeft -= dt
     // Key and hotbar share this call, after the paint system has run. One press, one burst.
     if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {
