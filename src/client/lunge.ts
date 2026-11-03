@@ -254,8 +254,11 @@ function applyControl(): void {
         }),
       })
     } else if (noGlide) {
+      // disableGliding alone does not close an already-open glider on every Explorer
+      // build: player body force-closes when jump_disabled OR glide_disabled, and
+      // is_glide_disabled() is also true for disable_jump. Write both, on the press.
       InputModifier.createOrReplace(engine.PlayerEntity, {
-        mode: InputModifier.Mode.Standard({ disableGliding: true }),
+        mode: InputModifier.Mode.Standard({ disableJump: true, disableDoubleJump: true, disableGliding: true }),
       })
     } else if (InputModifier.has(engine.PlayerEntity)) {
       InputModifier.deleteFrom(engine.PlayerEntity)
@@ -300,6 +303,7 @@ export function startDiveGlideLock(seconds: number): void {
   if (seconds <= 0) return
   glideLockLeft = Math.max(glideLockLeft, seconds)
   applyControl()
+  console.log(`[Burst] glide lock ${glideLockLeft.toFixed(2)}s — InputModifier disableJump + disableGliding`)
 }
 /** Feet met the floor. Drop the dive extension; leave any victim lock running. */
 export function clearDiveGlideLock(): void {

@@ -91,6 +91,7 @@ export interface ManagerDeps {
 let deps: ManagerDeps | null = null
 let graph: WalkableGraph | null = null
 let rampTiles: Placed[] = []
+let placedTiles: Placed[] = []
 let bots: LiveBot[] = []
 let botIdCounter = 0
 
@@ -127,6 +128,8 @@ export function rebuildBotGraph(seed: number): void {
   if (winning === null) {
     console.log('[Bots] graph rebuild failed: no valid maze from seed ' + seed)
     graph = null
+    rampTiles = []
+    placedTiles = []
     baseCellCache[1] = []
     baseCellCache[2] = []
     return
@@ -135,6 +138,7 @@ export function rebuildBotGraph(seed: number): void {
   const tiles = getPlacedTilesInOrder()
   graph = buildWalkableGraph(tiles)
   rampTiles = tiles.filter(t => TILES[t.type].isRamp)
+  placedTiles = tiles
   cacheBaseCells()
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
@@ -403,7 +407,7 @@ export function tickBots(dtSec: number): void {
   // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
   for (const b of bots) {
-    const world = { graph, rampTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
+    const world = { graph, rampTiles, tiles: placedTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'settled') {
@@ -594,6 +598,13 @@ function wireOf(b: LiveBot): BotWireState {
   if (b.body.isGliding()) return 4
   if (b.body.mode === 'walk') return 0
   return b.body.mode === 'knock' ? 1 : 2
+}
+
+/** Feet plus the graph cell the bot last stood on. Hit tests use the feet; the cell is only
+ *  a footprint fallback for a ground Burst (a bot standing on a painted cell). */
+export function getBotHitPoints(): Array<{ id: number; team: number; x: number; y: number; z: number; cell: string }> {
+  if (!graph) return []
+  return bots.map(b => ({ id: b.botId, team: b.team, x: b.body.pos.x, y: b.body.pos.y, z: b.body.pos.z, cell: b.currentCell }))
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {

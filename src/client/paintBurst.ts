@@ -33,7 +33,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_STANCE_SLACK, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
@@ -391,12 +391,15 @@ function airPlayerHits(p: V3, team: Team, fx: number, fz: number): Array<{ addr:
   return out
 }
 
-function airBotBelow(p: V3, team: Team): boolean {
+function airBotHits(p: V3, team: Team, fx: number, fz: number): Array<{ id: number; pos: V3; k: { x: number; z: number } }> {
+  const out: Array<{ id: number; pos: V3; k: { x: number; z: number } }> = []
   for (const b of getBotRenderPositions()) {
     if (b.team === team) continue
-    if (inAirSpike(p, { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })) return true
+    const feet: V3 = { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }
+    if (!inAirSpike(p, feet)) continue
+    out.push({ id: b.id, pos: feet, k: burstDir(p, feet, fx, fz) })
   }
-  return false
+  return out
 }
 
 function knockAirAnvils(p: V3, fx: number, fz: number, id: number): number {
@@ -487,6 +490,20 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
   for (const h of shockwaveHits(p, dummies, fx, fz)) {
     losThen(p, h.at, () => hitDummy(h.id, h.x, h.z, 1, id), DUMMY_LOS_SLACK)
   }
+  // Same cylinder and outward burstKnock as players. Feet, not the avatar origin.
+  // The server range-checks those feet (with lunge slack) and applies the knock.
+  const bots: Array<V3 & { id: string }> = []
+  for (const b of getBotRenderPositions()) {
+    if (b.team === team) continue
+    bots.push({ id: `bot:${b.id}`, x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
+  }
+  for (const h of shockwaveHits(p, bots, fx, fz)) {
+    losThen(p, h.at, () => {
+      sendBurstHit(id, h.id, h.x, h.z)
+      playDashHitSfx()
+      playAt(h.at)
+    })
+  }
 }
 
 /** Hotbar press (mobile circle, desktop slot). The gameplay system fires it, so the
@@ -506,7 +523,11 @@ export function triggerBurst(): void {
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
   cooldownLeft = BURST_COOLDOWN_S
-  if (!stance.grounded) {
+  // Gliding just above the slab is still inside BURST_STANCE_SLACK (1.15 m), so a
+  // height-only check calls it a ground Burst and never closes the glider. The
+  // glider holds fall at ~1 m/s; a real stand, and a walk down a ramp, sit on the surface.
+  const gliding = stance.lift > 0.45 && stance.lift <= BURST_STANCE_SLACK && fallVy < -0.55 && fallVy > -1.8
+  if (!stance.grounded || gliding) {
     fireAirSpike(id, team, p, f.x, f.z)
     return
   }
@@ -551,8 +572,8 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
   if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1))) kickUse(id)
   const anvils = knockAirAnvils(p, fx, fz, id)
   const hits = airPlayerHits(p, team, fx, fz)
-  const bot = airBotBelow(p, team)
-  if (hits.length > 0 || bot || anvils > 0) {
+  const bots = airBotHits(p, team, fx, fz)
+  if (hits.length > 0 || bots.length > 0 || anvils > 0) {
     partialStopDive(fx, fz)
     disarmLandingStamp('')
     if (hits.length === 0) playAirHitSfx()
@@ -561,7 +582,11 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
       playAirHitSfx()
       showAirHit(h.pos, team)
     }
-    console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} anvils=${anvils} pos=${p.y.toFixed(2)}`)
+    for (const b of bots) {
+      sendBurstHit(id, `bot:${b.id}`, b.k.x, b.k.z)
+      showAirHit(b.pos, team)
+    }
+    console.log(`[Burst] #${id} air spike hit players=${hits.length} bots=${bots.length} anvils=${anvils} pos=${p.y.toFixed(2)}`)
     return
   }
   // Full dive, including the sustained downward force. Nothing cancels this.
@@ -702,9 +727,13 @@ export function initPaintBurst(): void {
   engine.addSystem((dt: number) => {
     sampleFall(dt)
     if (attackerDiveGlide) {
+      // 1.15 m slack still counts as "ground" while a glider is open just over the
+      // slab. Clearing on that flag dropped the lock a frame after the press, before
+      // Explorer applied it. Only a real stand (paint tolerance) ends the dive lock.
       const stance = sampleBurstStance()
-      if (stance && !stance.grounded) attackerDiveSawAir = true
-      else if (stance?.grounded && attackerDiveSawAir) {
+      const lift = stance?.lift ?? Infinity
+      if (lift > 0.45) attackerDiveSawAir = true
+      else if (lift <= 0.35 && attackerDiveSawAir) {
         attackerDiveGlide = false
         attackerDiveSawAir = false
         clearDiveGlideLock()

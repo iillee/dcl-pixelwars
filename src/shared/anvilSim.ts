@@ -10,7 +10,9 @@
  *
  * Knockback: v += impulse × LUNGE_DUMMY_UNIT, held force for LUNGE_KNOCK_FORCE_S, gravity, ground
  * friction; floor = highest walkable cell within ~1 cell under it (ramps: continuous slope height
- * via rampSurfaceY), grounded anvils snap down ≤ SNAP_DOWN (down-ramps), none → it falls.
+ * via rampSurfaceY), grounded anvils snap down ≤ SNAP_DOWN (down-ramps). The tile's non-walkable
+ * margin is a wall: a step into it is stopped. A body that has sunk through the slab (less than a
+ * level) is snapped back up. None of that under it, or already below the fall line → it falls.
  */
 import {
   LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
@@ -43,6 +45,13 @@ const STEP_UP = 0.6
 const SNAP_DOWN = 0.6
 const CELL_SIZE = 2 // CELL 32 / SIZE 16
 
+/** How far below a walkable surface still counts as "inside the slab", not the next level (~10.8 m). */
+const RECOVER_UP = 2.5
+/** Above a wall top by this much, a body may fly over the margin instead of being stopped. */
+const WALL_OVER = 0.4
+/** A walkable node covers its own 2 m cell (centre to edge is 1 m). Past that is the wall margin. */
+const WALL_REACH = 1.05
+
 /** Highest walkable floor within `r` of (x, z) that is no more than `maxUp` above `y`, or null over the void.
  *  Shared by the anvils and the bot bodies (shared/botBody.ts). */
 export function graphFloorAt(graph: WalkableGraph, rampTiles: Placed[], x: number, z: number, y: number,
@@ -58,6 +67,81 @@ export function graphFloorAt(graph: WalkableGraph, rampTiles: Placed[], x: numbe
     if (best === null || fy > best) best = fy
   }
   return best
+}
+
+/** Walkable-surface Y of a tile at (x, z): flat slab top, or the ramp slope. Feet frame (FLOOR_FROM_NODE). */
+function tileSurfaceY(tile: Placed, x: number, z: number): number {
+  const nodeY = TILES[tile.type].isRamp ? rampSurfaceY(tile, x, z) : tile.y + 0.55
+  return nodeY + FLOOR_FROM_NODE
+}
+
+/** Tile whose footprint contains (x, z) and whose slab could still contain a body at `y`.
+ *  Highest such tile. Null in the void and when `y` is clearly above that slab (flying over). */
+function tileContaining(tiles: Placed[], x: number, z: number, y: number): Placed | null {
+  let best: Placed | null = null
+  for (const t of tiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    const top = tileSurfaceY(t, x, z)
+    if (y > top + WALL_OVER) continue
+    if (y < t.y - 2) continue
+    if (!best || t.y > best.y) best = t
+  }
+  return best
+}
+
+/** Wall margin: inside a tile, at or below its top, and not on a walkable cell.
+ *  Returns the lip height, or null when the body may occupy this point. */
+function wallTopAt(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): number | null {
+  if (!tiles.length) return null
+  const tile = tileContaining(tiles, x, z, y)
+  if (!tile) return null
+  // Still on a walkable cell (the node covers the whole 2 m cell). Not a wall.
+  if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return null
+  return tileSurfaceY(tile, x, z)
+}
+
+/** Stop a horizontal step at the corridor wall. Axis slide, so a graze keeps the free component.
+ *  Already inside the margin: hold the previous XZ and let gravity carry the body out (rescue). */
+function clampWall(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
+  prev: { x: number; y: number; z: number }, nx: number, nz: number): { x: number; z: number } {
+  const blocked = (x: number, z: number) => wallTopAt(graph, rampTiles, tiles, x, z, prev.y) !== null
+  if (!blocked(nx, nz)) return { x: nx, z: nz }
+  if (!blocked(nx, prev.z)) return { x: nx, z: prev.z }
+  if (!blocked(prev.x, nz)) return { x: prev.x, z: nz }
+  return { x: prev.x, z: prev.z }
+}
+
+/**
+ * One integration step for a server body (bot or anvil), after velocity was updated.
+ * Lands on the walkable surface, refuses the wall margin, and snaps a body that has
+ * sunk through a slab (less than a level) back onto it. A floor a full level up is
+ * out of RECOVER_UP, so an open gap under a bridge is still a fall.
+ */
+export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
+  prev: { x: number; y: number; z: number }, nx: number, ny: number, nz: number, velY: number, wasGrounded: boolean,
+): { x: number; y: number; z: number; velY: number; grounded: boolean } {
+  const stopped = clampWall(graph, rampTiles, tiles, prev, nx, nz)
+  let y = ny
+  let vy = velY
+  let grounded = false
+  const floor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y)
+  if (floor !== null && (y <= floor || (wasGrounded && y - floor <= SNAP_DOWN))) {
+    y = floor
+    if (vy < 0) vy = 0
+    grounded = true
+  } else {
+    // Below a surface we should be standing on. The 0.6 m step limit hides it once
+    // a step has already dropped through; a level gap is still too far to grab.
+    const overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, RECOVER_UP)
+    if (overhead !== null && overhead > y && vy <= 0) {
+      y = overhead
+      vy = 0
+      grounded = true
+    }
+  }
+  return { x: stopped.x, y, z: stopped.z, velY: vy, grounded }
 }
 
 function shuffle<T>(a: T[]): T[] {
@@ -207,11 +291,16 @@ export class AnvilWorld {
     const wasGrounded = a.vel.y === 0
     a.vel.y -= LUNGE_DUMMY_GRAVITY * dt
     const nx = a.pos.x + a.vel.x * dt + px, nz = a.pos.z + a.vel.z * dt + pz
-    let ny = a.pos.y + a.vel.y * dt
-    const floor = this.floorAt(nx, nz, a.pos.y)
+    const ny = a.pos.y + a.vel.y * dt
     let grounded = false
-    if (floor !== null && (ny <= floor || (wasGrounded && ny - floor <= SNAP_DOWN))) { ny = floor; a.vel.y = 0; grounded = true }
-    a.pos = { x: nx, y: ny, z: nz }
+    if (this.graph) {
+      const hit = resolveSupport(this.graph, this.rampTiles, this.tiles, a.pos, nx, ny, nz, a.vel.y, wasGrounded)
+      a.pos = { x: hit.x, y: hit.y, z: hit.z }
+      a.vel.y = hit.velY
+      grounded = hit.grounded
+    } else {
+      a.pos = { x: nx, y: ny, z: nz }
+    }
     if (grounded) {
       const h = Math.hypot(a.vel.x, a.vel.z)
       const nh = Math.max(0, h - LUNGE_DUMMY_FRICTION * dt)

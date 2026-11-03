@@ -189,7 +189,7 @@ import { TILES } from '../src/maze/tiles'
   if (walk && air.length >= walk.length) console.log(`(drop path ${air.length} is not shorter than the walk ${walk.length}; cost may still prefer the ramp)`)
   const body = new BotBody({ x: from[0], y: from[1], z: from[2] })
   if (!body.leap({ x: to[0], y: to[1], z: to[2] })) { console.error('✗ leap refused'); process.exit(1) }
-  const world = { graph, rampTiles: getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp), base: { x: from[0], y: from[1], z: from[2] } }
+  const world = { graph, rampTiles: getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp), tiles: getPlacedTilesInOrder(), base: { x: from[0], y: from[1], z: from[2] } }
   let settled = false
   for (let t = 0; t < 8 && !settled; t += 0.05) {
     for (const e of body.tick(0.05, world)) if (e.type === 'settled') settled = true
@@ -324,4 +324,45 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   console.log(`  15-bot tick warm-up ${warm.n}: ${(warm.ms / warm.n).toFixed(2)} ms/tick (worst ${warm.worst} ms)`)
   console.log(`  15-bot tick steady ${steady.n}: ${(steady.ms / steady.n).toFixed(2)} ms/tick (worst ${steady.worst} ms, ${steady.slow} ticks > 30 ms)`)
   if (steady.ms / steady.n > 30) { console.error('✗ 15-bot steady tick averages over a 30 Hz frame'); process.exit(1) }
+}
+
+// A knock into the corridor wall stays on the slab. A body left below that
+// slab is snapped back up, not left to walk inside the mesh.
+{
+  const tiles = getPlacedTilesInOrder()
+  const world = {
+    graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles,
+    base: { x: 0, y: 0, z: 0 },
+  }
+  let spot: { p: [number, number, number] } | null = null
+  for (const [id, p] of graph.worldPos) {
+    const [head, tail] = id.split(':')
+    const [tx, tz, ty] = head.split(',').map(Number)
+    const col = parseInt(tail.split(',')[0], 10)
+    if (col !== 3) continue
+    const tile = tiles.find(t => t.x === tx && t.z === tz && Math.abs(t.y - ty) < 0.05)
+    if (!tile || TILES[tile.type].isRamp) continue
+    spot = { p }
+    break
+  }
+  if (!spot) { console.error('✗ no flat corridor-edge cell to shove into a wall'); process.exit(1) }
+  const body = new BotBody({ x: spot.p[0], y: spot.p[1], z: spot.p[2] })
+  body.rng = () => 1
+  body.knock({ kind: 'lunge', impulse: { x: -80, y: 0, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 40, forceS: 0.3, lockS: 0.2 })
+  for (let t = 0; t < 1.2; t += 0.05) body.tick(0.05, world)
+  const intoWall = spot.p[0] - body.pos.x
+  if (body.pos.y < spot.p[1] - 0.4 || intoWall > 2.2) {
+    console.error(`✗ wall shove sank or crossed the margin: Δx ${intoWall.toFixed(2)} y ${body.pos.y.toFixed(2)} (node ${spot.p[1].toFixed(2)}) mode=${body.mode}`)
+    process.exit(1)
+  }
+  console.log(`✓ wall shove stayed on the slab (${intoWall.toFixed(2)} m toward the wall)`)
+  const sunk = new BotBody({ x: spot.p[0], y: spot.p[1] - 1.2, z: spot.p[2] })
+  sunk.rng = () => 1
+  sunk.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
+  for (let t = 0; t < 0.5 && sunk.pos.y < spot.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
+  if (sunk.pos.y < spot.p[1] - 0.25) {
+    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${spot.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ sunk body snapped up to ${sunk.pos.y.toFixed(2)}`)
 }
