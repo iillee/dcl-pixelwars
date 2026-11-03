@@ -102,8 +102,6 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
-  /** Local hit, shown until the server's knocked snapshot arrives. */
-  knock?: { vx: number; vy: number; vz: number; t0: number }
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -252,8 +250,6 @@ export function initBotVisual(): void {
       }
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
-      // Server has the knock (or the rescue). Drop the local guess so it isn't applied twice.
-      if ((b.st ?? 0) !== 0) rec.knock = undefined
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -320,19 +316,6 @@ export function initBotVisual(): void {
         )
       }
 
-      if (rec.knock && !ride) {
-        const age = (now - rec.knock.t0) / 1000
-        if (age > 0.45) rec.knock = undefined
-        else {
-          const g = 20
-          rec.renderPos = Vector3.create(
-            rec.renderPos.x + rec.knock.vx * age,
-            rec.renderPos.y + rec.knock.vy * age - 0.5 * g * age * age,
-            rec.renderPos.z + rec.knock.vz * age,
-          )
-        }
-      }
-
       const tf = Transform.getMutable(rec.root)
       tf.position = rec.renderPos
       holdWalker(rec.root, rec.renderPos)
@@ -354,15 +337,6 @@ export function initBotVisual(): void {
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
     }
   })
-}
-
-/** Show a hit immediately. The server body catches up on the next knocked snapshot. */
-export function anticipateBotKnock(id: number, vx: number, vy: number, vz: number): void {
-  const rec = bots.get(id)
-  if (!rec) return
-  rec.knock = { vx, vy, vz, t0: Date.now() }
-  rec.velocity = Vector3.create(vx, vy, vz)
-  if (vx * vx + vz * vz > 0.25) rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
 }
 
 /** Where each bot is drawn right now (id → smoothed feet position). */

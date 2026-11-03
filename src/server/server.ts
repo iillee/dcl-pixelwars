@@ -37,7 +37,7 @@ import { getRoundIndex as currentRoundIndex, getRoundEndMs, isRoundActive, setRo
 import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
-  lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK, BOT_DRAW_LAG_M,
+  lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   nextRoundFormat, pvbBotCount, pvbHumanTeam,
@@ -600,9 +600,8 @@ export async function setupServer(): Promise<void> {
       return
     }
     if (victimId.startsWith('bot:')) {
-      // Draw lag: the ghost the attacker hit can sit well behind the server body.
-      if (!hitBot(parseInt(victimId.slice(4), 10), x, y, z, Math.hypot(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D, LUNGE_HITBOX_W / 2) + 2 + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M,
-        LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK + 4, () => lungeKnock(ux, uz))) return
+      if (!hitBot(parseInt(victimId.slice(4), 10), x, y, z, Math.hypot(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D, LUNGE_HITBOX_W / 2) + 2 + SERVER_LUNGE_BOT_SLACK,
+        LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK, () => lungeKnock(ux, uz))) return
     }
     console.log(`[Server] lungeImpact ${from.slice(0, 8)} #${id} → ${victimId.slice(0, 8)}`)
     noteHit(from, victimId)
@@ -826,8 +825,8 @@ export async function setupServer(): Promise<void> {
       // Claim before the knock so a spike and the landing shockwave cannot both land.
       if (bursts.hit(from, id, key, Date.now()) !== 'ok') return
       const ux = dx / len, uz = dz / len
-      const reach = (spike ? AIR_SPIKE_RADIUS : BURST_RADIUS) + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M
-      const maxDy = (spike ? AIR_SPIKE_DEPTH : BURST_HIT_MAX_DY) + 6
+      const reach = (spike ? AIR_SPIKE_RADIUS : BURST_RADIUS) + SERVER_LUNGE_BOT_SLACK
+      const maxDy = (spike ? AIR_SPIKE_DEPTH : BURST_HIT_MAX_DY) + 2
       if (!hitBot(bid, origin.x, origin.y, origin.z, reach, maxDy, grounded =>
         spike ? spikeKnock(ux, uz, grounded) : burstKnock(ux, uz))) return
       noteHit(from, key)

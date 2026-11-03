@@ -43,7 +43,7 @@ import {
   AIR_SPIKE_GLIDE_LOCK_S, AIR_SPIKE_DIVE_GLIDE_LOCK_S,
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
-  LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK, BOT_KNOCK_UNIT,
+  LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
@@ -61,18 +61,12 @@ import {
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
-import { FLOAT_HEIGHT, getBotRenderPositions, anticipateBotKnock } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = FLOAT_HEIGHT
-
-function shoveBot(id: number, dx: number, dz: number, air: boolean): void {
-  const spec = air ? spikeKnock(dx, dz, true) : burstKnock(dx, dz)
-  const u = BOT_KNOCK_UNIT
-  anticipateBotKnock(id, spec.impulse.x * u, spec.impulse.y * u, spec.impulse.z * u)
-}
 
 let cooldownLeft = 0
 let burstId = 0
@@ -506,7 +500,6 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
   for (const h of shockwaveHits(p, bots, fx, fz)) {
     losThen(p, h.at, () => {
       sendBurstHit(id, h.id, h.x, h.z)
-      if (typeof h.id === 'string' && h.id.startsWith('bot:')) shoveBot(parseInt(h.id.slice(4), 10), h.x, h.z, false)
       playDashHitSfx()
       playAt(h.at)
     })
@@ -591,7 +584,6 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
     }
     for (const b of bots) {
       sendBurstHit(id, `bot:${b.id}`, b.k.x, b.k.z)
-      shoveBot(b.id, b.k.x, b.k.z, true)
       showAirHit(b.pos, team)
     }
     console.log(`[Burst] #${id} air spike hit players=${hits.length} bots=${bots.length} anvils=${anvils} pos=${p.y.toFixed(2)}`)

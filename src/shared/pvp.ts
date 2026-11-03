@@ -583,9 +583,6 @@ export const SERVER_MIN_LUNGE_GAP_S = LUNGE_COOLDOWN_S - 0.25
 export const SERVER_LUNGE_HIT_WINDOW_S = 0.6
 /** Slack on the ghost range check (lag, float height). */
 export const SERVER_LUNGE_BOT_SLACK = 3
-/** The ghost is drawn up to ~0.25 s behind a dash. A hit on that drawing is still
- *  this close to the server body, so the server accepts it. */
-export const BOT_DRAW_LAG_M = 12
 
 export const LUNGE_MODE: AbilityMode = 'on'
 export function lungeEnabledForRound(roundIndex: number): boolean {

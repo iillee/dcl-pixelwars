@@ -46,7 +46,6 @@ import {
   LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
-  BOT_KNOCK_UNIT,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
   VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
@@ -54,7 +53,7 @@ import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
 import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
-import { FLOAT_HEIGHT, getBotRenderPositions, anticipateBotKnock } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
@@ -401,14 +400,7 @@ function checkHits(a0: V3, a1: V3): void {
     hitThis.add(id)
     const k = knockDir(a1, t, dir.x, dir.z)
     if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z, 0, lungeId) // shared anvil: server applies it
-    else {
-      sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
-      if (id.startsWith('bot:')) {
-        const spec = lungeKnock(k.x, k.z)
-        const u = BOT_KNOCK_UNIT
-        anticipateBotKnock(parseInt(id.slice(4), 10), spec.impulse.x * u, spec.impulse.y * u, spec.impulse.z * u)
-      }
-    }
+    else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
     impactFx(t, myTeam, true) // optimistic: the attacker feels it now
     flashSlash('')
     flashHitbox('')
