@@ -86,6 +86,12 @@ const SNAP_KEEP = 16
 const INTERP_EXTRAPOLATE_MAX_S = 0.1
 /** Keep interpolating this long after the last fast packet (covers the delay). */
 const FAST_HOLD_S = INTERP_DELAY_S + 0.15
+/** Built-in stumble. A position write on the avatar cancels it, so the knock moves a parent. */
+const HIT_EMOTE = 'getHit'
+const HIT_EMOTE_REPEAT_MS = 1100
+/** Visual hop on top of the server arc (the body's own lift is only a few centimetres). */
+const KNOCK_ARC_H = 0.55
+const KNOCK_ARC_S = 0.5
 
 type Snap = { t: number; pos: Vector3 }
 /** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
@@ -102,8 +108,13 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  st: number            // last wire state (1 = knocked)
   /** Local hit, shown until the server's knocked snapshot arrives. */
   knock?: { vx: number; vy: number; vz: number; t0: number }
+  carrier: Entity | null // moved during a knock so the avatar's own position stays put
+  knockT0: number
+  knockYaw: number | null // locked toward the attacker for the whole shove
+  emoteAt: number
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -191,7 +202,70 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
+    st: 0,
+    carrier: null,
+    knockT0: 0,
+    knockYaw: null,
+    emoteAt: 0,
   }
+}
+
+/** Yaw that looks back along the shove, toward whoever hit the bot. */
+function yawTowardAttacker(vx: number, vz: number): number | null {
+  if (vx * vx + vz * vz < 0.04) return null
+  return Math.atan2(-vx, -vz) * (180 / Math.PI)
+}
+
+/** Park the avatar on a carrier so per-frame moves don't play a run cycle or cancel the emote. */
+function beginKnockLook(rec: BotVisual, now: number): void {
+  if (rec.knockYaw === null) rec.knockYaw = yawTowardAttacker(rec.velocity.x, rec.velocity.z)
+  if (rec.carrier) return
+  const yaw = rec.knockYaw ?? rec.lastYawDeg
+  rec.carrier = engine.addEntity()
+  Transform.create(rec.carrier, {
+    position: Vector3.clone(rec.renderPos),
+    rotation: Quaternion.fromEulerDegrees(0, yaw, 0),
+  })
+  if (Tween.has(rec.root)) Tween.deleteFrom(rec.root)
+  Transform.createOrReplace(rec.root, {
+    parent: rec.carrier,
+    position: Vector3.Zero(),
+    rotation: Quaternion.Identity(),
+  })
+  AvatarShape.getMutable(rec.root).expressionTriggerId = HIT_EMOTE
+  rec.knockT0 = now
+  rec.emoteAt = now
+}
+
+function placeKnock(rec: BotVisual, now: number): void {
+  if (!rec.carrier) return
+  if (rec.knockYaw === null) rec.knockYaw = yawTowardAttacker(rec.velocity.x, rec.velocity.z)
+  const age = (now - rec.knockT0) / 1000
+  const u = Math.min(1, age / KNOCK_ARC_S)
+  const hop = Math.sin(Math.PI * u) * KNOCK_ARC_H
+  const yaw = rec.knockYaw ?? rec.lastYawDeg
+  const tf = Transform.getMutable(rec.carrier)
+  tf.position = Vector3.create(rec.renderPos.x, rec.renderPos.y + hop, rec.renderPos.z)
+  tf.rotation = Quaternion.fromEulerDegrees(0, yaw, 0)
+  if (now - rec.emoteAt >= HIT_EMOTE_REPEAT_MS) {
+    AvatarShape.getMutable(rec.root).expressionTriggerId = HIT_EMOTE
+    rec.emoteAt = now
+  }
+}
+
+function endKnockLook(rec: BotVisual): void {
+  if (!rec.carrier) return
+  const yaw = rec.knockYaw ?? rec.lastYawDeg
+  rec.lastYawDeg = yaw
+  Transform.createOrReplace(rec.root, {
+    position: Vector3.clone(rec.renderPos),
+    rotation: Quaternion.fromEulerDegrees(0, yaw, 0),
+  })
+  engine.removeEntity(rec.carrier)
+  rec.carrier = null
+  rec.knockYaw = null
+  AvatarShape.getMutable(rec.root).expressionTriggerId = ''
+  holdWalker(rec.root, rec.renderPos)
 }
 
 export function initBotVisual(): void {
@@ -231,6 +305,7 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
+        rec.st = b.st ?? 0
         bots.set(b.id, rec)
         continue
       }
@@ -251,6 +326,7 @@ export function initBotVisual(): void {
         if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
       }
       const wasFast = now < rec.fastUntil
+      rec.st = b.st ?? 0
       rec.riding = b.st === 2
       // Server has the knock (or the rescue). Drop the local guess so it isn't applied twice.
       if ((b.st ?? 0) !== 0) rec.knock = undefined
@@ -285,6 +361,7 @@ export function initBotVisual(): void {
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
         engine.removeEntity(rec.root)
+        if (rec.carrier) engine.removeEntity(rec.carrier)
         bots.delete(id)
       }
     }
@@ -333,6 +410,15 @@ export function initBotVisual(): void {
         }
       }
 
+      // st 1 is the server knock. The local guess covers the frames before that packet.
+      const inKnock = !ride && (rec.st === 1 || rec.knock !== undefined)
+      if (inKnock) {
+        beginKnockLook(rec, now)
+        placeKnock(rec, now)
+        continue
+      }
+      if (rec.carrier) endKnockLook(rec)
+
       const tf = Transform.getMutable(rec.root)
       tf.position = rec.renderPos
       holdWalker(rec.root, rec.renderPos)
@@ -342,7 +428,7 @@ export function initBotVisual(): void {
       // target (the delta reversed sign each frame), which produced the
       // "facing forward then backward" flicker. Velocity is smoothed by
       // the broadcast cadence and only reverses on a genuine direction
-      // change, so yaw stays stable.
+      // change, so yaw stays stable. A knock locks the other way (see placeKnock).
       const vx = rec.velocity.x
       const vz = rec.velocity.z
       const speedSq = vx * vx + vz * vz
@@ -362,7 +448,8 @@ export function anticipateBotKnock(id: number, vx: number, vy: number, vz: numbe
   if (!rec) return
   rec.knock = { vx, vy, vz, t0: Date.now() }
   rec.velocity = Vector3.create(vx, vy, vz)
-  if (vx * vx + vz * vz > 0.25) rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
+  const face = yawTowardAttacker(vx, vz)
+  if (face !== null) rec.knockYaw = face
 }
 
 /** Where each bot is drawn right now (id → smoothed feet position). */
