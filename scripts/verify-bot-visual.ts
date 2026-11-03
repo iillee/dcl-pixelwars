@@ -8,6 +8,7 @@
  * Covers a ramp walk, a platform leap, and a knock that glides. The client
  * copy is headless: same thresholds, same snapshot buffer, same walk lerp.
  */
+import { readFileSync } from 'node:fs'
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
@@ -15,6 +16,7 @@ import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
+import { stepCarry } from '../src/client/botCarry'
 
 const PREDICT_AHEAD_SEC = 0.1
 const LERP_SPEED_PER_SEC = 4
@@ -134,7 +136,7 @@ class Client {
   }
 }
 
-type Report = { name: string; max: number; stuck: number; nans: number; sts: string; samples: number }
+type Report = { name: string; max: number; stuck: number; nans: number; sts: string; samples: number; draws: V[] }
 
 function replay(name: string, packets: Packet[]): Report {
   const c = new Client()
@@ -144,6 +146,7 @@ function replay(name: string, packets: Packet[]): Report {
   const sts = new Map<number, number>()
   let prevRender: V | null = null
   let prevServer: V | null = null
+  const draws: V[] = []
   for (const p of packets) {
     if (![p.x, p.y, p.z, p.vx, p.vy, p.vz, p.t].every(Number.isFinite)) nans++
     sts.set(p.st, (sts.get(p.st) ?? 0) + 1)
@@ -156,10 +159,11 @@ function replay(name: string, packets: Packet[]): Report {
     if (prevRender && prevServer && sub(prevRender, c.render) < 0.05 && sub(prevServer, server) > 1.5) stuck++
     prevRender = { ...c.render }
     prevServer = server
+    draws.push({ ...c.render })
   }
   const stText = [...sts.entries()].map(([k, n]) => `${k}:${n}`).join(' ')
   console.log(`${name}: packets=${packets.length} maxDrawError=${max.toFixed(2)} m  frozenWhileServerMoved=${stuck}  nans=${nans}  st[${stText}]`)
-  return { name, max, stuck, nans, sts: stText, samples: packets.length }
+  return { name, max, stuck, nans, sts: stText, samples: packets.length, draws }
 }
 
 function finite(p: Packet[]): boolean {
@@ -271,16 +275,14 @@ if (chain) {
 }
 const rampReport = rampPackets.length ? replay('ramp walk/leap', rampPackets) : null
 
-// ── Knock off a lip, the recovery glide the wire marks st=4 ─────────
+// ── Dash knock, glide, then the cloud if it falls. Ground frames first so
+//    the pre-parent world position is not the origin. ──────────────────
 const from = chain ? graph.worldPos.get(chain[0])! : [...graph.worldPos.values()][0]
 const knocked = new BotBody({ x: from[0], y: from[1], z: from[2] }, () => 0)
-knocked.knock(lungeKnock(-1, 0))
 const world = { graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles, base: { x: from[0], y: from[1], z: from[2] } }
 const knockPackets: Packet[] = []
 let prevK: Packet | null = null
-for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
-  knocked.tick(0.1, world)
-  const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
+const pushK = (sim: number, st: number) => {
   const pkt: Packet = { t: sim, x: knocked.pos.x, y: knocked.pos.y, z: knocked.pos.z, st, vx: 0, vy: 0, vz: 0 }
   if (prevK) {
     pkt.vx = (pkt.x - prevK.x) / 0.1
@@ -289,9 +291,67 @@ for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
   }
   knockPackets.push(pkt)
   prevK = pkt
-  if (knocked.mode === 'walk' && sim > 0.4) break
 }
-const knockReport = replay('knock+glide', knockPackets)
+for (let i = 0; i < 5; i++) pushK(i * 0.1, 0)
+knocked.knock(lungeKnock(-1, 0))
+let landedAt = -1
+for (let i = 5, sim = 0.5; i < 90 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
+  knocked.tick(0.1, world)
+  const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
+  pushK(sim, st)
+  if (knocked.mode === 'walk' && sim > 1) {
+    if (landedAt < 0) landedAt = sim
+    if (sim - landedAt >= 0.5) break
+  }
+}
+if (knocked.mode === 'rescue') {
+  for (let i = 0; i < 8; i++) {
+    knocked.pos.x += 2
+    knocked.pos.y += 3
+    pushK(20 + i * 0.1, 2)
+  }
+}
+const knockReport = replay('dash knock → air → land/rescue', knockPackets)
+
+/**
+ * Avatar world position is parent * local. The knock bug left the ground
+ * position in the child's local transform, so the avatar sat at parent+that
+ * point. Zeroing local on the parent change keeps world on the draw. Doing
+ * that zero again every airborne frame matches the same world position and
+ * is what made the explorer fade the avatar; the write counter forbids it.
+ */
+function hierarchyWorld(draws: V[], packets: Packet[], zeroEveryAirFrame: boolean): { maxOffDraw: number; maxExtraJump: number } {
+  let carried = false
+  let local: V = { x: 0, y: 0, z: 0 }
+  let prevWorld: V | null = null
+  let prevServer: V | null = null
+  let maxOffDraw = 0
+  let maxExtraJump = 0
+  for (let i = 0; i < packets.length; i++) {
+    const air = packets[i].st !== 0
+    const parent = draws[i]
+    if (air) {
+      if (!carried && !zeroEveryAirFrame) local = i > 0 ? draws[i - 1] : parent
+      else local = { x: 0, y: 0, z: 0 }
+      carried = true
+    } else {
+      local = parent
+      carried = false
+    }
+    const world = carried
+      ? { x: parent.x + local.x, y: parent.y + local.y, z: parent.z + local.z }
+      : local
+    maxOffDraw = Math.max(maxOffDraw, sub(world, draws[i]))
+    const server = { x: packets[i].x, y: packets[i].y, z: packets[i].z }
+    if (prevWorld && prevServer) {
+      const extra = sub(world, prevWorld) - sub(server, prevServer)
+      if (extra > maxExtraJump) maxExtraJump = extra
+    }
+    prevWorld = world
+    prevServer = server
+  }
+  return { maxOffDraw, maxExtraJump }
+}
 
 const walkBad = [liveReport, rampReport].filter((r): r is Report => !!r && (r.max > 3 || r.stuck > 0 || r.nans > 0))
 if (live.some(p => p.st !== 0)) {
@@ -306,4 +366,66 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   console.error('✗ non-finite position in a stream')
   process.exit(1)
 }
-console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
+const attached = hierarchyWorld(knockReport.draws, knockPackets, true)
+const stale = hierarchyWorld(knockReport.draws, knockPackets, false)
+console.log(`dash parent*local: attached offDraw=${attached.maxOffDraw.toFixed(2)} m extraJump=${attached.maxExtraJump.toFixed(2)} m; stale-local offDraw=${stale.maxOffDraw.toFixed(2)} m`)
+if (attached.maxOffDraw > 0.01) {
+  console.error('✗ avatar world position left the draw during knock/air/rescue')
+  process.exit(1)
+}
+if (stale.maxOffDraw < 1) {
+  console.error('✗ the stale-local bug would not have shown up on this trace')
+  process.exit(1)
+}
+
+function placeAvatarSource(): string {
+  const src = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+  const start = src.indexOf('function placeAvatar')
+  const end = src.indexOf('function syncWing')
+  if (start < 0 || end < start) throw new Error('placeAvatar source not found')
+  return src.slice(start, end)
+}
+
+/**
+ * Writes placeAvatar performs on the avatar. AvatarShape stays at spawn
+ * (and a team change). While carried, the child transform is not touched
+ * again: a dirty Transform resends parent and the explorer fades the mesh.
+ */
+function avatarShapeWritesIn(place: string): number {
+  const carried = place.slice(place.indexOf('if (step.carried)'), place.indexOf('} else if (step.parentChanged)'))
+  const guard = carried.indexOf('if (step.parentChanged)')
+  const beforeGuard = guard < 0 ? carried : carried.slice(0, guard)
+  const shape = (place.match(/AvatarShape|paintAvatar/g) ?? []).length
+  const childDirty = /rec\.root/.test(beforeGuard) || /getMutable\(rec\.root\)|holdWalker\(rec\.root/.test(carried) ? 1 : 0
+  return shape + childDirty
+}
+
+function countWrites(packets: Packet[], flap: boolean): { parentChanges: number; shapeWrites: number; seconds: number } {
+  let carried = false
+  let held = 0
+  let parentChanges = 0
+  const shapeWrites = avatarShapeWritesIn(placeAvatarSource())
+  for (let i = 0; i < packets.length; i++) {
+    let st = packets[i].st
+    if (flap && st === 4 && i % 7 === 0) st = 0
+    for (let f = 0; f < 3; f++) {
+      const step = stepCarry(carried, held, st, 0.033)
+      if (step.parentChanged) parentChanges++
+      carried = step.carried
+      held = step.groundHeld
+    }
+  }
+  return { parentChanges, shapeWrites, seconds: packets.length * 0.1 }
+}
+const writes = countWrites(knockPackets, false)
+const flappy = countWrites(knockPackets, true)
+console.log(`carry writes: parentChanges=${writes.parentChanges} (${(writes.parentChanges / writes.seconds).toFixed(2)}/s) avatarShapeWrites=${writes.shapeWrites}; with a one-packet ground blip parentChanges=${flappy.parentChanges}`)
+if (writes.parentChanges !== 2 || writes.shapeWrites !== 0) {
+  console.error(`✗ want 2 parent changes and 0 AvatarShape writes per knock, got ${writes.parentChanges} and ${writes.shapeWrites}`)
+  process.exit(1)
+}
+if (flappy.parentChanges !== 2) {
+  console.error(`✗ a one-frame st=0 during the glide changed parent ${flappy.parentChanges} times`)
+  process.exit(1)
+}
+console.log('✓ walking draw stays within 3 m; one parent enter and one leave per knock; AvatarShape is not rewritten')
