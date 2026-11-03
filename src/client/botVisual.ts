@@ -281,7 +281,8 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. Halo is parented → root removal reaps both.
+    // Reap dropped bots. The glider child is removed by the pose system when
+    // this id leaves the draw set; removeEntity does not reap children.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
         engine.removeEntity(rec.root)
@@ -344,26 +345,18 @@ export function initBotVisual(): void {
 }
 
 /**
- * Round reset: throw the bot entity away and stand a new AvatarShape at the
- * same smoothed feet. AvatarEmoteCommand is grow-only, so the scene cannot
- * delete a value it appended; the explorer keeps the emote mesh it spawned
- * for that entity. Removing the entity drops that mesh. The new shape has
- * no emote, so it follows the transform the lerp writes. The lerp itself
- * is unchanged. Snaps from the previous round are dropped so a reseat uses
- * the walk snap instead of blending through the old airborne trail.
+ * Round reset: keep the same entity and put a fresh AvatarShape on it.
+ * Replacing the entity left the previous one in the explorer (AvatarShape
+ * nodes are not torn down with the scene entity) and the new one shared
+ * that avatar id, so one body kept moving and a second had no mesh.
+ * createOrReplace clears any expression on this entity. Dropping the
+ * airborne snapshots makes the reseat use the walk snap. The lerp and the
+ * entity hierarchy stay as they are.
  */
 export function refreshBotAvatars(): void {
   for (const rec of bots.values()) {
-    const pos = Vector3.clone(rec.renderPos)
-    engine.removeEntity(rec.root)
-    const root = engine.addEntity()
-    Transform.create(root, {
-      position: pos,
-      rotation: Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0),
-    })
-    paintAvatar(root, rec.team, rec.id)
-    holdWalker(root, pos)
-    rec.root = root
+    paintAvatar(rec.root, rec.team, rec.id)
+    holdWalker(rec.root, rec.renderPos)
     rec.pose = 0
     rec.snaps = []
     rec.fastUntil = 0

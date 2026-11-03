@@ -13,8 +13,11 @@
  * already sit about 2.4 m up, and it inherits the entity transform, so it
  * turns with the avatar and cannot detach it. No extra yaw: the mesh faces
  * the avatar's forward, and an added half-turn made the wings look backwards.
- * Jump, fall, and slide stay on the run cycle. A pose that lets go of the
- * transform is worse than no pose.
+ * Jump, fall, and slide stay on the run cycle. The explorer's own jump
+ * locomotion is driven by the player motor, and a one-shot expression
+ * trigger is cancelled by the transform write that moves the bot. Playing
+ * one would not survive the flight, and parenting the avatar under a mover
+ * so its own transform stays put would change the hierarchy.
  */
 import { engine, Entity, GltfContainer, Transform } from '@dcl/sdk/ecs'
 import { Quaternion, Vector3 } from '@dcl/sdk/math'
