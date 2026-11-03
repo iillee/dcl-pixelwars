@@ -22,10 +22,11 @@ import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_MIN_S, BOT_RECOVER_REACT_MAX_S, BOT_RECOVER_SKIP_DOUBLE_CHANCE,
   BOT_RECOVER_MISJUDGE_CHANCE, BOT_RECOVER_MISJUDGE_M, BOT_RECOVER_STEER_ACCEL,
-  BOT_RECOVER_EDGE_SPEED, BOT_RECOVER_RUN_JUMP_AT, BOT_RECOVER_GIVE_UP_M,
+  BOT_RECOVER_EDGE_SPEED, BOT_RECOVER_RUN_JUMP_AT, BOT_RECOVER_GIVE_UP_M, BOT_GLIDE_TURN,
   BOT_RECOVER_MAX_S, BOT_RECOVER_MAX_SEEK_M, BOT_JUMP_V, botJumpSpeed,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT, HUMAN_GLIDE_SPEED, HUMAN_GLIDE_FALL,
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
+  LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_COOLDOWN_S,
 } from './pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE } from './botAnim'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
@@ -74,6 +75,10 @@ export class BotBody {
   private jumpTime = 0
   private glideTime = 0
   private recoverTo: V3 | null = null
+  /** Player lunge while the glider is open: same length and cooldown, aimed at the floor. */
+  private glideDashLeft = 0
+  private glideDashCd = 0
+  private glideDashDir: V3 = { x: 0, y: 0, z: 0 }
   /** Random source for the recover roll (scripts pass a fixed one). */
   rng: () => number = Math.random
 
@@ -232,6 +237,7 @@ export class BotBody {
 
   private step(dt: number, world: BotWorld, out: BotBodyEvent[]): void {
     if (this.immuneLeft > 0) this.immuneLeft -= dt
+    if (this.glideDashCd > 0) this.glideDashCd = Math.max(0, this.glideDashCd - dt)
     switch (this.mode) {
       case 'walk':
         if (this.holdLeft > 0) this.holdLeft -= dt
@@ -321,6 +327,7 @@ export class BotBody {
     this.jumped = false
     this.jumpTime = 0
     this.glideTime = 0
+    this.glideDashLeft = 0
   }
 
   /**
@@ -380,7 +387,8 @@ export class BotBody {
     const t = this.recoverTo
     if (!t) { this.clearRecovery(); return }
     if (this.pos.y < t.y - BOT_RECOVER_GIVE_UP_M) { this.abortGlide(); return }
-    this.steerToward(t, dt)
+    if (this.phase === 'glide') this.steerGlide(t, dt)
+    else this.steerToward(t, dt)
     if (this.phase === 'jump') {
       this.jumpTime += dt
       const apex = this.vel.y <= 0.4 || this.jumpTime > 0.55
@@ -418,6 +426,54 @@ export class BotBody {
     return budget <= 0 || time > budget / Math.max(0.25, HUMAN_GLIDE_FALL)
   }
 
+  /**
+   * Glide like a player who is steering home. The open glider caps speed near
+   * HUMAN_GLIDE_SPEED and the heading turns toward the floor, so a hard knock
+   * arcs back instead of keeping its launch direction. A lunge (the player's
+   * dash) fires toward that floor on the same cooldown and active time, and
+   * only when the floor is still out of a plain glide's reach.
+   */
+  private steerGlide(t: V3, dt: number): void {
+    const dx = t.x - this.pos.x, dz = t.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d <= 0.3) return
+    const wantX = dx / d, wantZ = dz / d
+    if (this.glideDashLeft > 0) {
+      this.glideDashLeft -= dt
+      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
+      this.vel.x = this.glideDashDir.x * sp
+      this.vel.z = this.glideDashDir.z * sp
+      return
+    }
+    const toward = (this.vel.x * wantX + this.vel.z * wantZ)
+    // Same window a player has: one lunge, then LUNGE_COOLDOWN_S. Skip it when
+    // the floor is already coming in, or so far that the boost cannot matter.
+    if (this.glideDashCd <= 0 && d > 6 && d < 20 && toward < HUMAN_GLIDE_SPEED) {
+      this.glideDashLeft = LUNGE_ACTIVE_S
+      this.glideDashCd = LUNGE_COOLDOWN_S
+      this.glideDashDir = { x: wantX, y: 0, z: wantZ }
+      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
+      this.vel.x = wantX * sp
+      this.vel.z = wantZ * sp
+      return
+    }
+    let vx = this.vel.x, vz = this.vel.z
+    let sp = Math.hypot(vx, vz)
+    const dirx = sp > 0.4 ? vx / sp : wantX
+    const dirz = sp > 0.4 ? vz / sp : wantZ
+    const ang = Math.atan2(dirx * wantZ - dirz * wantX, dirx * wantX + dirz * wantZ)
+    const step = Math.max(-BOT_GLIDE_TURN * dt, Math.min(BOT_GLIDE_TURN * dt, ang))
+    const c = Math.cos(step), s = Math.sin(step)
+    const ndx = dirx * c - dirz * s
+    const ndz = dirx * s + dirz * c
+    const spWant = d < 2.5 ? Math.min(HUMAN_GLIDE_SPEED, d * 2) : HUMAN_GLIDE_SPEED
+    // Excess over the glide cap decays like the player's external-velocity drag.
+    const excess = sp - spWant
+    sp = excess > 0 ? spWant + excess * Math.exp(-1.5 * dt) : sp + (spWant - sp) * Math.min(1, 8 * dt)
+    this.vel.x = ndx * sp
+    this.vel.z = ndz * sp
+  }
+
   private steerToward(t: V3, dt: number): void {
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z
     const d = Math.hypot(dx, dz)
@@ -434,6 +490,7 @@ export class BotBody {
     this.willRecover = false
     this.phase = 'idle'
     this.recoverTo = null
+    this.glideDashLeft = 0
   }
 
   /**
@@ -448,8 +505,16 @@ export class BotBody {
         const p = world.graph.worldPos.get(id)
         if (!p || p[1] > this.pos.y + rise) continue
         const d = Math.hypot(p[0] - this.pos.x, p[2] - this.pos.z)
+        if (d > BOT_RECOVER_MAX_SEEK_M) continue
         const pen = Math.max(0, this.pos.y - p[1]) * 0.35
-        if (d + pen < bestD) { bestD = d + pen; best = { x: p[0], y: p[1], z: p[2] } }
+        // A knock's nearest cell is often the lip still ahead. Prefer floor
+        // back along the launch, which is the level they just left.
+        const sp = Math.hypot(this.vel.x, this.vel.z)
+        const align = sp > 1 && d > 0.5
+          ? -((p[0] - this.pos.x) * this.vel.x + (p[2] - this.pos.z) * this.vel.z) / (d * sp)
+          : 0
+        const score = d + pen - Math.max(0, align) * 8
+        if (score < bestD) { bestD = score; best = { x: p[0], y: p[1], z: p[2] } }
       }
       return best
     }

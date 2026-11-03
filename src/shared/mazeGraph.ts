@@ -812,18 +812,21 @@ export function findPath(
   if (start === goal) return [start]
   if (!nodeSet.has(start) || !nodeSet.has(goal)) return null
 
-  // Shuffle a neighbour list in place. Cheap Fisher–Yates. Used to give
-  // paths an organic, non-axis-aligned feel: BFS with a fixed neighbour
-  // order produces "drain one axis then the other" L-shaped paths (the
-  // roomba look). Randomising the expansion order interleaves the axes
-  // so paths zig-zag naturally toward the goal at no extra cost.
-  const shuffled = <T>(list: T[]): T[] => {
-    const a = list.slice()
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      const t = a[i]; a[i] = a[j]; a[j] = t
-    }
-    return a
+  // Neighbours most aligned with the goal first. A random order, and the
+  // old straight-step penalty, interleaved the axes every cell: the bot
+  // flipped between left and right each step. Ties keep the graph's order.
+  const towardGoal = (fromId: string, list: string[]): string[] => {
+    const g = graph.worldPos.get(goal)
+    const f = graph.worldPos.get(fromId)
+    if (!g || !f || list.length < 2) return list
+    const gx = g[0] - f[0], gz = g[2] - f[2]
+    return list.slice().sort((a, b) => {
+      const pa = graph.worldPos.get(a), pb = graph.worldPos.get(b)
+      if (!pa || !pb) return 0
+      const sa = (pa[0] - f[0]) * gx + (pa[2] - f[2]) * gz
+      const sb = (pb[0] - f[0]) * gx + (pb[2] - f[2]) * gz
+      return sb - sa
+    })
   }
 
   const parent = new Map<string, string>()
@@ -838,7 +841,7 @@ export function findPath(
     while (head < queue.length) {
       const cur = queue[head++]
       if (++expanded > maxNodes) return null
-      for (const nb of shuffled(adj.get(cur) ?? [])) {
+      for (const nb of towardGoal(cur, adj.get(cur) ?? [])) {
         if (visited.has(nb)) continue
         visited.add(nb)
         parent.set(nb, cur)
@@ -893,22 +896,6 @@ export function findPath(
     return top
   }
 
-  // Zig-zag bias: a tiny extra cost applied when the next step continues
-  // in the same direction as the previous step. Both directions are
-  // read from worldPos so this works across tile boundaries and ramps.
-  // Value chosen so N alternating steps cost less than N-1 straight +
-  // 1 turn ONLY when Manhattan-equivalent — never lets the pathfinder
-  // pick a genuinely longer route. On open stretches this converts
-  // "straight line then 90°" into a diagonal-looking staircase, which
-  // is exactly the organic look we want.
-  const STRAIGHT_PENALTY = 0.15
-  const dirOf = (fromId: string, toId: string): [number, number] | null => {
-    const a = graph.worldPos.get(fromId)
-    const b = graph.worldPos.get(toId)
-    if (!a || !b) return null
-    return [Math.sign(b[0] - a[0]), Math.sign(b[2] - a[2])]
-  }
-
   push(start, 0)
   let expanded = 0
   while (heap.length > 0) {
@@ -922,9 +909,6 @@ export function findPath(
       return path
     }
     if (++expanded > maxNodes) return null
-    // Direction of the step that brought us into cur (null at start).
-    const prev = parent.get(cur.id)
-    const inDir = prev ? dirOf(prev, cur.id) : null
     const relax = (nb: string, w: number) => {
       const ng = cur.g + w
       const old = dist.get(nb)
@@ -934,17 +918,10 @@ export function findPath(
         push(nb, ng)
       }
     }
-    for (const nb of shuffled(adj.get(cur.id) ?? [])) {
-      let w = Math.max(1, costOf ? costOf(nb) : 1)
-      if (inDir) {
-        const outDir = dirOf(cur.id, nb)
-        if (outDir && outDir[0] === inDir[0] && outDir[1] === inDir[1]) {
-          w += STRAIGHT_PENALTY
-        }
-      }
-      relax(nb, w)
+    for (const nb of towardGoal(cur.id, adj.get(cur.id) ?? [])) {
+      relax(nb, Math.max(1, costOf ? costOf(nb) : 1))
     }
-    for (const edge of shuffled(airMap.get(cur.id) ?? [])) {
+    for (const edge of airMap.get(cur.id) ?? []) {
       if (!nodeSet.has(edge.to)) continue
       let w = edge.cost
       if (costOf) w += Math.max(0, costOf(edge.to) - 1)

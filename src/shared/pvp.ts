@@ -531,6 +531,8 @@ export const BOT_RECOVER_MISJUDGE_M = 3.5
  * horizontal speed to that number, which would erase a knock; this accel does not.
  */
 export const BOT_RECOVER_STEER_ACCEL = 4.5
+/** How fast a glide's heading can swing toward the floor (rad/s). ~180°/s, an arc not a snap. */
+export const BOT_GLIDE_TURN = 3.2
 /** Below this horizontal speed a grounded bot is not "heading off" (m/s). */
 export const BOT_RECOVER_EDGE_SPEED = 2.5
 /** At or above this horizontal speed the first jump is the run jump; below it, the standing jump. */

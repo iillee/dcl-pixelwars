@@ -449,6 +449,8 @@ export class Bot {
   }
 
   nextRand(): number { return this.rng() }
+  /** Current step rate, after the route picked jog or run. */
+  stepsPerSec(): number { return 1000 / this.baseStepIntervalMs }
   /** Cell this bot is walking toward, if it has one. */
   goalOf(): string | null { return this.goal }
 

@@ -142,7 +142,7 @@ def bone_nodes(js):
     return nodes
 
 
-def emote_from(src: Path, anim_name: str, dest: Path, hold: float | None = None) -> float:
+def emote_from(src: Path, anim_name: str, dest: Path, hold: float | None = None, at: float = 1.0) -> float:
     js, blob = load_glb(src)
     anim = next(a for a in js['animations'] if a['name'] == anim_name)
     pack = Repack(js, blob)
@@ -163,7 +163,10 @@ def emote_from(src: Path, anim_name: str, dest: Path, hold: float | None = None)
         comps = COMPONENTS[out_acc['type']]
         elem = comps * 4
         step = stride or elem
-        last = raw[(out_acc['count'] - 1) * step:(out_acc['count'] - 1) * step + elem]
+        # A moving AvatarShape drops a playing emote, so the clip is restarted
+        # every frame and only its first key is seen. That key is the pose.
+        idx = min(out_acc['count'] - 1, max(0, round(at * (out_acc['count'] - 1))))
+        last = raw[idx * step:idx * step + elem]
         last_vals = list(struct.unpack('<' + 'f' * comps, last))
         times = struct.pack('<ff', 0.0, hold)
         samplers.append({
@@ -290,16 +293,17 @@ def main() -> None:
     loco = fetch(LOCO_URL, 'loco.glb')
     double = fetch(DOUBLE_URL, 'double_jump.glb')
     glide = fetch(GLIDE_URL, 'glide.glb')
+    # (src, clip, dest, hold seconds, sample fraction). Held so a per-frame
+    # restart still shows the pose, not frame 0 of a run-in.
     jobs = [
-        (loco, 'Jump_Rise_Loop', OUT_EMOTES / 'bot_jump_emote.glb', None),
-        (loco, 'Jump_Fall_Loop', OUT_EMOTES / 'bot_fall_emote.glb', None),
-        (loco, 'Slide', OUT_EMOTES / 'bot_slide_emote.glb', None),
-        (double, 'Double_Jump_Base', OUT_EMOTES / 'bot_double_emote.glb', None),
-        # Final frame held for a second: the clip itself is a 0.17 s settle.
-        (glide, 'Glide_Avatar', OUT_EMOTES / 'bot_glide_emote.glb', 1.0),
+        (loco, 'Jump_Rise_Loop', OUT_EMOTES / 'bot_jump_emote.glb', 1.0, 0.55),
+        (loco, 'Jump_Fall_Loop', OUT_EMOTES / 'bot_fall_emote.glb', 1.0, 0.45),
+        (loco, 'Slide', OUT_EMOTES / 'bot_slide_emote.glb', 1.0, 0.4),
+        (double, 'Double_Jump_Base', OUT_EMOTES / 'bot_double_emote.glb', 1.0, 0.42),
+        (glide, 'Glide_Avatar', OUT_EMOTES / 'bot_glide_emote.glb', 1.0, 1.0),
     ]
-    for src, name, dest, hold in jobs:
-        dur = emote_from(src, name, dest, hold)
+    for src, name, dest, hold, at in jobs:
+        dur = emote_from(src, name, dest, hold, at)
         print(f'{dest.name}  {name}  {dur:.3f}s  {dest.stat().st_size} bytes')
     gdest = OUT_MODELS / 'glider.glb'
     build_glider(glide, gdest)
