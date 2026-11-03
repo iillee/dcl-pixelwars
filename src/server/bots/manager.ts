@@ -649,31 +649,23 @@ export function getBotBroadcast(): Array<ReturnType<typeof getBotPositions>[numb
  * flies, can be knocked off the map and is rescued like a player.
  * Returns false if rejected (no such bot, out of range, immune / riding).
  */
-/** Why a human hit would not move this bot, or null if it would. Does not apply the knock. */
-export function rejectBotHit(id: number, ax: number, ay: number, az: number, maxRange: number, maxDy: number): string | null {
-  if (!graph) return 'no graph'
-  const b = bots.find(x => x.botId === id)
-  if (!b) return 'no bot'
-  const p = b.body.pos
-  const dist = Math.hypot(p.x - ax, p.z - az)
-  const dy = Math.abs(p.y - ay)
-  if (dist > maxRange || dy > maxDy) return `range ${dist.toFixed(1)} m dy ${dy.toFixed(1)} (max ${maxRange.toFixed(1)}/${maxDy.toFixed(1)})`
-  if (!b.body.canBeHit()) return `not hittable mode=${b.body.mode}`
-  return null
-}
-
 export function hitBot(id: number, ax: number, ay: number, az: number,
   maxRange: number, maxDy: number, specFor: (grounded: boolean) => KnockSpec): boolean {
-  const why = rejectBotHit(id, ax, ay, az, maxRange, maxDy)
-  if (why) { console.log(`[Bots] hit on ghost ${id} rejected: ${why}`); return false }
-  const b = bots.find(x => x.botId === id)!
+  if (!graph) return false
+  const b = bots.find(x => x.botId === id)
+  if (!b) return false
+  const p = b.body.pos
+  if (Math.hypot(p.x - ax, p.z - az) > maxRange || Math.abs(p.y - ay) > maxDy) {
+    console.log(`[Bots] hit on ghost ${id} rejected: range`)
+    return false
+  }
+  if (!b.body.canBeHit()) return false
   const spec = specFor(b.body.isGrounded())
-  if (!b.body.knock(spec)) { console.log(`[Bots] hit on ghost ${id} rejected: knock refused`); return false }
+  if (!b.body.knock(spec)) return false
   b.clearPath()
   b.combat.windup = null
   b.combat.spikeFor = null
   b.combat.dive = null
-  const dist = Math.hypot(b.body.pos.x - ax, b.body.pos.z - az)
-  console.log(`[Bots] ghost ${id} hit: ${spec.kind} at ${dist.toFixed(1)} m`)
+  console.log(`[Bots] ghost ${id} hit: ${spec.kind}`)
   return true
 }

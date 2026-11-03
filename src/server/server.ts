@@ -17,7 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, rejectBotHit, getWalkableGraph, setPopulation } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -584,13 +584,7 @@ export async function setupServer(): Promise<void> {
     if (target.startsWith('bot:')) {
       const bid = parseInt(target.slice(4), 10)
       const bot = getBotPositions().find(b => b.id === bid)
-      if (!bot) { console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} bot ${target} rejected: no bot`); return }
-      if (bot.team === attackerTeam) { console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: same team`); return }
-      // Checked before the ledger so a miss does not burn the one hit on this lunge.
-      const reach = Math.hypot(LUNGE_HITBOX_FORWARD + LUNGE_HITBOX_D, LUNGE_HITBOX_W / 2) + 2 + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M
-      const maxDy = LUNGE_HIT_MAX_DY + SERVER_LUNGE_BOT_SLACK + 4
-      const why = rejectBotHit(bid, x, y, z, reach, maxDy)
-      if (why) { console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: ${why}`); return }
+      if (!bot || bot.team === attackerTeam) return
     } else {
       const want = target.toLowerCase()
       const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
@@ -818,28 +812,22 @@ export async function setupServer(): Promise<void> {
     if (want.startsWith('bot:')) {
       const bid = parseInt(want.slice(4), 10)
       const bot = getBotHitPoints().find(b => b.id === bid)
-      if (!bot) { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: no bot`); return }
-      if (bot.team === attackerTeam) { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: same team`); return }
+      if (!bot || bot.team === attackerTeam) return
       const origin = bursts.origin(from, id)
       if (!origin) { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: no origin`); return }
       const feet = { x: bot.x, y: bot.y, z: bot.z }
       const spike = bursts.impactAir(from, id) !== 0
       // Rendered feet (what the attacker swung at) vs the server body. Same slack as a lunge.
       if (!burstBotInRange(origin, feet, spike)) {
-        const dist = Math.hypot(feet.x - origin.x, feet.z - origin.z)
-        console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: range ${dist.toFixed(1)} m dy ${Math.abs(feet.y - origin.y).toFixed(1)}`)
+        console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: range`)
         return
       }
       const key = `bot:${bid}`
+      // Claim before the knock so a spike and the landing shockwave cannot both land.
+      if (bursts.hit(from, id, key, Date.now()) !== 'ok') return
       const ux = dx / len, uz = dz / len
       const reach = (spike ? AIR_SPIKE_RADIUS : BURST_RADIUS) + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M
       const maxDy = (spike ? AIR_SPIKE_DEPTH : BURST_HIT_MAX_DY) + 6
-      // Before the ledger, so a miss can be retried and the log shows why.
-      const why = rejectBotHit(bid, origin.x, origin.y, origin.z, reach, maxDy)
-      if (why) { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: ${why}`); return }
-      // Claim before the knock so a spike and the landing shockwave cannot both land.
-      const claimed = bursts.hit(from, id, key, Date.now())
-      if (claimed !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: ${claimed}`); return }
       if (!hitBot(bid, origin.x, origin.y, origin.z, reach, maxDy, grounded =>
         spike ? spikeKnock(ux, uz, grounded) : burstKnock(ux, uz))) return
       noteHit(from, key)
