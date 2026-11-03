@@ -16,6 +16,7 @@ import {
   BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
 } from '../src/shared/pvp'
+import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP } from '../src/shared/botAnim'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -88,10 +89,14 @@ function weakKnock(dx: number, dz: number): KnockSpec {
 }
 
 type Outcome = 'saved' | 'fell' | 'open'
-function run(spot: Spot, spec: KnockSpec, rng: () => number): { outcome: Outcome; jump: boolean; doubled: boolean; peak: number } {
+function run(spot: Spot, spec: KnockSpec, rng: () => number): {
+  outcome: Outcome; jump: boolean; doubled: boolean; peak: number
+  sawJump: boolean; sawDouble: boolean; sawGlide: boolean; sawFall: boolean
+} {
   const body = new BotBody({ x: spot.x, y: spot.y, z: spot.z }, rng)
   body.knock(spec)
   let jump = false, doubled = false, peak = body.pos.y
+  let sawJump = false, sawDouble = false, sawGlide = false, sawFall = false
   let outcome: Outcome = 'open'
   for (let t = 0; t < 12 && outcome === 'open'; t += 0.05) {
     for (const e of body.tick(0.05, world)) {
@@ -100,9 +105,14 @@ function run(spot: Spot, spec: KnockSpec, rng: () => number): { outcome: Outcome
       if (e.type === 'settled') outcome = 'saved'
       if (e.type === 'fell') outcome = 'fell'
     }
+    const pose = body.animCode()
+    if (pose === BOT_ANIM_JUMP) sawJump = true
+    if (pose === BOT_ANIM_DOUBLE) sawDouble = true
+    if (pose === BOT_ANIM_GLIDE) sawGlide = true
+    if (pose === BOT_ANIM_FALL) sawFall = true
     if (body.pos.y > peak) peak = body.pos.y
   }
-  return { outcome, jump, doubled, peak }
+  return { outcome, jump, doubled, peak, sawJump, sawDouble, sawGlide, sawFall }
 }
 
 /** Fresh stream: willRecover, fast reaction, take the double jump, aim true. */
@@ -136,6 +146,12 @@ console.log(`lunge perfect: ${strongPerfect.outcome}`)
 if (weakNever.outcome !== 'fell') fail(`weak knock with recovery off should leave the level, got ${weakNever.outcome}`)
 if (weakPerfect.outcome !== 'saved' || !weakPerfect.jump) fail('perfect recovery should jump and save the weak knock')
 if (!weakPerfect.doubled) fail('perfect recovery should spend the double jump when the first arc is short')
+if (!weakPerfect.sawJump || !weakPerfect.sawDouble || !weakPerfect.sawGlide) {
+  fail(`perfect recovery poses jump=${weakPerfect.sawJump} double=${weakPerfect.sawDouble} glide=${weakPerfect.sawGlide}`)
+}
+if (!weakNever.sawFall || weakNever.sawGlide || weakNever.sawJump) {
+  fail(`no-recovery poses fall=${weakNever.sawFall} jump=${weakNever.sawJump} glide=${weakNever.sawGlide}`)
+}
 if (weakPerfect.peak < spot.y + HUMAN_RUN_JUMP_HEIGHT) fail(`recovery arc peaked only ${(weakPerfect.peak - spot.y).toFixed(2)} m`)
 if (strongPerfect.outcome !== 'fell') fail(`a full lunge should still fall when recovery is perfect, got ${strongPerfect.outcome}`)
 

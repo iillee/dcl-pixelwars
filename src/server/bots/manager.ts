@@ -41,6 +41,7 @@ import {
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
 type Combat = {
@@ -711,19 +712,21 @@ const lastSent = new Map<number, { x: number; y: number; z: number; t: number }>
 /** The botPositions broadcast: positions plus velocity over the real time since
  *  the previous broadcast, so clients can extrapolate fast motion between
  *  uneven packets. Only the broadcast tick may call this (it owns lastSent). */
-export function getBotBroadcast(): Array<ReturnType<typeof getBotPositions>[number] & { vx: number; vy: number; vz: number }> {
+export function getBotBroadcast(): Array<ReturnType<typeof getBotPositions>[number] & { vx: number; vy: number; vz: number; an: number }> {
   const now = Date.now()
+  const animOf = new Map(bots.map(b => [b.botId, b.combat.windup ? BOT_ANIM_LOCO : b.body.animCode()]))
   const out = getBotPositions().map(b => {
     const prev = lastSent.get(b.id)
     const dt = prev ? (now - prev.t) / 1000 : 0
     lastSent.set(b.id, { x: b.x, y: b.y, z: b.z, t: now })
+    const an = animOf.get(b.id) ?? BOT_ANIM_LOCO
     // Wind-up: the ghost is still. vx/vz carry the facing so the client yaws before the dash.
     if (b.st === 3) {
       const aim = bots.find(x => x.botId === b.id)?.combat.windup
-      if (aim) return { ...b, vx: aim.dx * 3, vy: 0, vz: aim.dz * 3 }
+      if (aim) return { ...b, vx: aim.dx * 3, vy: 0, vz: aim.dz * 3, an }
     }
-    if (!prev || dt < 0.02 || dt > 0.5) return { ...b, vx: 0, vy: 0, vz: 0 }
-    return { ...b, vx: (b.x - prev.x) / dt, vy: (b.y - prev.y) / dt, vz: (b.z - prev.z) / dt }
+    if (!prev || dt < 0.02 || dt > 0.5) return { ...b, vx: 0, vy: 0, vz: 0, an }
+    return { ...b, vx: (b.x - prev.x) / dt, vy: (b.y - prev.y) / dt, vz: (b.z - prev.z) / dt, an }
   })
   for (const id of [...lastSent.keys()]) if (!out.some(b => b.id === id)) lastSent.delete(id)
   return out

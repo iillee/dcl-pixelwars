@@ -102,6 +102,7 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  pose: number          // shared/botAnim.ts, from the broadcast `an` field
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -189,6 +190,7 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
+    pose: 0,
   }
 }
 
@@ -229,6 +231,7 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
+        rec.pose = b.an ?? 0
         bots.set(b.id, rec)
         continue
       }
@@ -250,6 +253,7 @@ export function initBotVisual(): void {
       }
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
+      rec.pose = b.an ?? 0
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -337,6 +341,13 @@ export function initBotVisual(): void {
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
     }
   })
+}
+
+/** Smoothed feet, facing, and the pose code. The pose renderer reads this; it does not move the avatar. */
+export function getBotDrawState(): Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> {
+  const out: Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> = []
+  for (const [id, rec] of bots) out.push({ id, root: rec.root, pos: rec.renderPos, yawDeg: rec.lastYawDeg, pose: rec.pose })
+  return out
 }
 
 /** Where each bot is drawn right now (id → smoothed feet position). */

@@ -27,6 +27,7 @@ import {
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT, HUMAN_GLIDE_SPEED, HUMAN_GLIDE_FALL,
   AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
 } from './pvp'
+import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE } from './botAnim'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
 import { RESCUE_PATH, rescueCloudPose, RescueVec } from './rescuePath'
 
@@ -83,6 +84,23 @@ export class BotBody {
 
   /** Gliding back toward a floor right now. */
   isGliding(): boolean { return this.mode === 'knock' && this.phase === 'glide' && !this.grounded }
+
+  /**
+   * Pose for the client. Does not affect the integrator.
+   * A dash keeps locomotion: the lunge is its own tell. A hit that is still
+   * on the floor slides. Rising is a jump (the knock's lift, a hop, a leap).
+   * Coming down without a glide is a fall.
+   */
+  animCode(): number {
+    if (this.mode === 'drop') return this.grounded ? BOT_ANIM_LOCO : BOT_ANIM_FALL
+    if (this.mode !== 'knock') return BOT_ANIM_LOCO
+    if (this.isDashing()) return BOT_ANIM_LOCO
+    if (this.phase === 'glide' && !this.grounded) return BOT_ANIM_GLIDE
+    if (this.phase === 'jump' && !this.grounded) return this.didDouble ? BOT_ANIM_DOUBLE : BOT_ANIM_JUMP
+    if (!this.grounded) return this.vel.y > 0.4 ? BOT_ANIM_JUMP : BOT_ANIM_FALL
+    if (this.forceLeft > 0 || this.lockLeft > 0 || Math.hypot(this.vel.x, this.vel.z) >= BOT_RECOVER_SPEED) return BOT_ANIM_SLIDE
+    return BOT_ANIM_LOCO
+  }
   /** Jump or double jump of the current attempt, not yet gliding. */
   isRecoveryJump(): boolean { return this.mode === 'knock' && this.phase === 'jump' && !this.grounded }
 
