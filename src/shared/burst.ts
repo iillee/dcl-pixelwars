@@ -4,7 +4,7 @@
  */
 import {
   BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
-  SERVER_BURST_HIT_WINDOW_S, SERVER_LUNGE_BOT_SLACK,
+  SERVER_BURST_HIT_WINDOW_S, SERVER_LUNGE_BOT_SLACK, BOT_DRAW_LAG_M,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE,
 } from './pvp'
 import type { WalkableGraph } from './mazeGraph'
@@ -28,19 +28,19 @@ export function shockwaveHitsBot(origin: V3, feet: V3, onFootprint: boolean): bo
     && Math.abs(feet.y - origin.y) <= BURST_HIT_MAX_DY + 2.5
 }
 
-/** Client reported a bot hit from the rendered feet. Server feet can lag that draw
- *  (snapshot interpolation), so the same slack a lunge uses is allowed. Air keeps
- *  the "attacker is above" gate so a sideways report is not a spike. */
+/** Client reported a bot hit from the rendered feet. The drawing lags the server
+ *  body (snapshot delay, worst on a dash), so the check is the hit radius plus
+ *  that lag. Air keeps the "attacker is above" gate so a sideways report is not a spike. */
 export function burstBotInRange(origin: V3, feet: V3, air: boolean): boolean {
   if (air) {
     return inAirSpike(
       origin, feet,
-      AIR_SPIKE_RADIUS + SERVER_LUNGE_BOT_SLACK,
-      AIR_SPIKE_DEPTH + 1,
+      AIR_SPIKE_RADIUS + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M,
+      AIR_SPIKE_DEPTH + 1 + 4,
       Math.max(0.35, AIR_SPIKE_MIN_ABOVE - 0.5),
     )
   }
-  return inBurst(origin, feet, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 2)
+  return inBurst(origin, feet, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK + BOT_DRAW_LAG_M, BURST_HIT_MAX_DY + 6)
 }
 
 /** Air spike volume: attacker is clearly above the target, inside a short vertical cylinder.
