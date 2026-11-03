@@ -27,7 +27,7 @@
  */
 
 import {
-  engine, Entity, Transform, AvatarShape, Tween, EasingFunction,
+  engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
@@ -140,13 +140,21 @@ function paintAvatar(entity: Entity, team: number, id: number): void {
   const suffix = String(id).padStart(4, '0').slice(-4)
   AvatarShape.createOrReplace(entity, {
     id: `${red ? 'red' : 'blue'}-${suffix}`,
-    name: '',
+    name: red ? 'RED' : 'BLUE',
     bodyShape: BODY,
     skinColor: rgb(red ? Team.Blue : Team.Red),
     hairColor: rgb(red ? Team.Red : Team.Blue),
     eyeColor: Color3.create(0.93, 0.96, 1),
     wearables: FACE.concat(red ? RED_CLOTHES : BLUE_CLOTHES),
     emotes: [],
+  })
+  // Same red/blue plate as players (client/nametags.ts).
+  const bg = rgb(team)
+  AvatarNametag.createOrReplace(entity, {
+    label: red ? 'RED' : 'BLUE',
+    labelColor: Color3.White(),
+    backgroundColor: bg,
+    borderColor: bg,
   })
 }
 
