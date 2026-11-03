@@ -109,8 +109,8 @@ interface BotVisual {
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
   st: number            // last wire state (1 = knocked)
-  /** Local hit, shown until the server's knocked snapshot arrives. */
-  knock?: { vx: number; vy: number; vz: number; t0: number }
+  /** Local hit, drawn from where the bot was until the server knock is on the wire. */
+  knock?: { vx: number; vy: number; vz: number; t0: number; ox: number; oy: number; oz: number }
   carrier: Entity | null // moved during a knock so the avatar's own position stays put
   knockT0: number
   knockYaw: number | null // locked toward the attacker for the whole shove
@@ -326,11 +326,18 @@ export function initBotVisual(): void {
         if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
       }
       const wasFast = now < rec.fastUntil
-      rec.st = b.st ?? 0
+      const nextSt = b.st ?? 0
+      // First knocked packet: the delay buffer is still the walk. Drop it so the
+      // draw cannot rewind onto the run cycle when the local shove hands off.
+      if (nextSt === 1 && rec.st !== 1) {
+        rec.snaps = simT !== null ? [{ t: simT, pos: serverPos }] : []
+      }
+      rec.st = nextSt
       rec.riding = b.st === 2
-      // Server has the knock (or the rescue). Drop the local guess so it isn't applied twice.
-      if ((b.st ?? 0) !== 0) rec.knock = undefined
-      if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
+      // Rescue / wind-up / glide replace the guess. A knock (st 1) keeps it until
+      // the render hands off, or the 0.25 s delay would show the pre-hit pose.
+      if (nextSt !== 0 && nextSt !== 1) rec.knock = undefined
+      if (nextSt !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
         rec.lastServerPos = Vector3.clone(serverPos)
@@ -377,36 +384,53 @@ export function initBotVisual(): void {
       // On the cloud: hang from the cloud this client draws (it runs on local
       // time, so a past-time interpolation would trail it by metres on the rise).
       const ride = rec.riding ? remoteRiderFeet(`bot:${id}`) : null
-      const interp = ride ? null : now < rec.fastUntil && clockOffset !== null
-        ? interpolate(rec.snaps, now / 1000 - clockOffset - interpDelay(rec.snaps))
-        : null
-      if (ride) {
-        rec.renderPos = Vector3.create(ride.x, ride.y + FLOAT_HEIGHT, ride.z)
-      } else if (interp) {
-        rec.renderPos = Vector3.clone(interp)
-      } else {
-        const predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
-        const predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
-        const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
-        // Per-frame lerp — adapts to dt automatically.
-        const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
-        rec.renderPos = Vector3.create(
-          rec.renderPos.x + (predX - rec.renderPos.x) * k,
-          rec.renderPos.y + (predY - rec.renderPos.y) * k,
-          rec.renderPos.z + (predZ - rec.renderPos.z) * k,
-        )
-      }
-
+      // A local shove is drawn from where the bot was hit, not from the delayed
+      // snapshots. Those are still the walk for the first quarter-second, which
+      // snapped the body back and made the hit look like it did nothing.
       if (rec.knock && !ride) {
         const age = (now - rec.knock.t0) / 1000
-        if (age > 0.45) rec.knock = undefined
+        const handoff = age > 0.55 && rec.st === 1
+        const giveUp = age > 0.55 && rec.st !== 1
+        if (handoff || giveUp) rec.knock = undefined
         else {
+          const k = rec.knock
           const g = 20
           rec.renderPos = Vector3.create(
-            rec.renderPos.x + rec.knock.vx * age,
-            rec.renderPos.y + rec.knock.vy * age - 0.5 * g * age * age,
-            rec.renderPos.z + rec.knock.vz * age,
+            k.ox + k.vx * age,
+            k.oy + k.vy * age - 0.5 * g * age * age,
+            k.oz + k.vz * age,
           )
+        }
+      }
+      if (!rec.knock) {
+        if (ride) {
+          rec.renderPos = Vector3.create(ride.x, ride.y + FLOAT_HEIGHT, ride.z)
+        } else if (rec.st === 1 && rec.snaps.length > 0) {
+          // Newest knocked pose, not the 0.25 s-behind buffer (that buffer was the run).
+          const last = rec.snaps[rec.snaps.length - 1]
+          const ahead = clockOffset !== null ? Math.min(0.12, Math.max(0, now / 1000 - clockOffset - last.t)) : 0
+          rec.renderPos = Vector3.create(
+            last.pos.x + rec.velocity.x * ahead,
+            last.pos.y + rec.velocity.y * ahead,
+            last.pos.z + rec.velocity.z * ahead,
+          )
+        } else {
+          const interp = !ride && now < rec.fastUntil && clockOffset !== null
+            ? interpolate(rec.snaps, now / 1000 - clockOffset - interpDelay(rec.snaps))
+            : null
+          if (interp) {
+            rec.renderPos = Vector3.clone(interp)
+          } else {
+            const predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
+            const predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
+            const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
+            const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
+            rec.renderPos = Vector3.create(
+              rec.renderPos.x + (predX - rec.renderPos.x) * k,
+              rec.renderPos.y + (predY - rec.renderPos.y) * k,
+              rec.renderPos.z + (predZ - rec.renderPos.z) * k,
+            )
+          }
         }
       }
 
@@ -446,7 +470,7 @@ export function initBotVisual(): void {
 export function anticipateBotKnock(id: number, vx: number, vy: number, vz: number): void {
   const rec = bots.get(id)
   if (!rec) return
-  rec.knock = { vx, vy, vz, t0: Date.now() }
+  rec.knock = { vx, vy, vz, t0: Date.now(), ox: rec.renderPos.x, oy: rec.renderPos.y, oz: rec.renderPos.z }
   rec.velocity = Vector3.create(vx, vy, vz)
   const face = yawTowardAttacker(vx, vz)
   if (face !== null) rec.knockYaw = face
