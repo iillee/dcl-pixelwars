@@ -561,9 +561,22 @@ export const BOT_AIM_REPORT_HZ = 5
 export const BOT_AIM_STALE_S = 1.0
 /** The bot decides how often (s). Each decision is one roll per ability, so chance × rate = aggression. */
 export const BOT_THINK_S = 0.25
-/** Chase a human this close (m, horizontal) and within BOT_SAME_LEVEL_DY. */
+/** Chase a human this close (m, horizontal) and within BOT_SAME_LEVEL_DY. Bots roll their own inside the band below. */
 export const BOT_ENGAGE_RANGE = 14
 export const BOT_SAME_LEVEL_DY = 1.5
+/** Seeded pace: each bot's step rate is multiplied by 1 ± this. */
+export const BOT_SPEED_SPREAD = 0.10
+/** How often a bot drops its path and picks again, before the per-bot jitter. */
+export const BOT_RETARGET_S = 5.5
+/** Retarget interval is multiplied by 1 ± this. */
+export const BOT_RETARGET_SPREAD = 0.35
+/** Preferred engagement distance is rolled inside this band (m). */
+export const BOT_ENGAGE_MIN_M = 8
+export const BOT_ENGAGE_MAX_M = 18
+/** Keep walking bots about this far apart (m). 3.5 sits in the 3–4 m band. */
+export const BOT_SEPARATE_M = 3.5
+/** Hard cap on how far separation may pull a bot off its path point (m). Two bots can sit ~3.6 m apart. */
+export const BOT_SEPARATE_MAX_M = 1.8
 /** Lunge when the target is this close (m): the dash covers LUNGE_DISTANCE 9.2 m, so well inside it. */
 export const BOT_LUNGE_RANGE = 5.5
 export const BOT_LUNGE_CHANCE = 0.35

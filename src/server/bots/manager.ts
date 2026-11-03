@@ -30,6 +30,7 @@ import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, 
 import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
+import { graphFloorAt } from '../../shared/anvilSim'
 import { KnockSpec } from '../../shared/knocks'
 import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
 import {
@@ -37,8 +38,9 @@ import {
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount,
+  BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
-import { Bot, makeValueTarget, PaintReader } from './bot'
+import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
 
 type V3 = { x: number; y: number; z: number }
 type Combat = {
@@ -53,12 +55,14 @@ type Combat = {
   windup: { left: number; dx: number; dz: number; target: string; at: V3 } | null
   /** Human we jumped to spike. Cleared when the dive fires or we land. */
   spikeFor: string | null
+  /** Human this bot is chasing or swinging at, so a teammate can pick someone else. */
+  chaseHuman: string | null
   /** Air spike in the air. A miss paints when the body settles; a hit does not. */
   dive: { id: number; hit: boolean; fx: number; fz: number } | null
 }
 type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat }
 const newCombat = (): Combat => ({
-  think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null,
+  think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null, chaseHuman: null,
 })
 
 export interface ManagerDeps {
@@ -292,19 +296,25 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   // Own base, spread across the base cells. Each bot is its own instance:
   // path, combat cooldowns, and `bot:<id>` paint / hit credit.
   const spot = pickSpawn(team)
+  botIdCounter++
+  const botId = botIdCounter
+  const personality = rollPersonality(mulberry32(botId * 0x9e3779b9), botId)
   const bot = new Bot({
     team,
     startCell: spot.cell,
-    pickTarget: makeValueTarget(deps.paint, team),
+    pickTarget: makeWeightedTarget(deps.paint, team),
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
+    personality,
+    rng: mulberry32(botId * 0x85ebca6b),
   }) as LiveBot
-  botIdCounter++
-  bot.botId = botIdCounter
-  bot.body = new BotBody(spot.pos)
+  bot.botId = botId
+  bot.body = new BotBody(spot.pos, mulberry32(botId * 0xc2b2ae35))
   bot.combat = newCombat()
   bots.push(bot)
   deps.onSpawn?.(bot.botId, team)
-  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)})`)
+  const w = personality.weights
+  const focus = (['paint', 'enemy', 'chase', 'roam'] as const).reduce((a, k) => w[k] > w[a] ? k : a, 'paint' as const)
+  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)}) pace ${personality.speedMul.toFixed(2)} engage ${personality.engageM.toFixed(1)}m retarget ${personality.retargetS.toFixed(1)}s ${focus}`)
 }
 
 function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
@@ -416,6 +426,7 @@ export function tickBots(dtSec: number): void {
         b.combat.dive = null
         b.combat.spikeFor = null
         b.combat.windup = null
+        b.combat.chaseHuman = null
         if (dive && !dive.hit) deps?.onBurstLand?.(b.botId, dive.id, b.team, { ...b.body.pos }, dive.fx, dive.fz)
         const c = cellNear(b.body.pos)
         if (c) { b.currentCell = c; b.clearPath(); b.body.follow(cellPos(c)!) }
@@ -424,6 +435,7 @@ export function tickBots(dtSec: number): void {
         b.combat.dive = null
         b.combat.spikeFor = null
         b.combat.windup = null
+        b.combat.chaseHuman = null
         console.log(`[Bots] ghost ${b.botId} fell at ${ev.catch.x.toFixed(1)},${ev.catch.y.toFixed(1)},${ev.catch.z.toFixed(1)} - cloud home`)
         deps.onFell?.(b.botId, ev.catch, world.base)
       } else if (ev.type === 'landed') {
@@ -433,6 +445,7 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} home`)
       }
     }
+    fillSense(b)
     fight(b, dtSec)
     if (!b.body.canWalk()) continue
     const stepped = b.tick(dtMs, graph)
@@ -444,7 +457,10 @@ export function tickBots(dtSec: number): void {
     }
     if (b.body.canWalk()) {
       const vp = b.visualPosition(graph)
-      if (vp) b.body.follow({ x: vp[0], y: vp[1], z: vp[2] })
+      if (vp) {
+        const at = { x: vp[0], y: vp[1], z: vp[2] }
+        b.body.follow(b.path.length > 0 ? separate(b, at) : at)
+      }
     }
     for (const stepId of stepped) {
       // Paint the full 3x3 stamp around the stepped cell (matches human
@@ -496,6 +512,45 @@ function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: numbe
   console.log(`[Bots] ghost ${b.botId} spikes${hit ? ` ${aim!.id.slice(0, 8)}` : ' (miss)'}`)
 }
 
+function fillSense(b: LiveBot): void {
+  const avoidCells = new Set<string>()
+  const avoidHumans = new Set<string>()
+  for (const o of bots) {
+    if (o === b || o.team !== b.team) continue
+    const g = o.goalOf()
+    if (g) avoidCells.add(g)
+    if (o.combat.chaseHuman) avoidHumans.add(o.combat.chaseHuman)
+  }
+  b.sense.humans = deps?.humans?.() ?? []
+  b.sense.avoidCells = avoidCells
+  b.sense.avoidHumans = avoidHumans
+}
+
+/** Nudge a walking bot off a teammate. Stays on a floor, and never more than SEPARATE_MAX off the path. */
+function separate(b: LiveBot, pos: V3): V3 {
+  if (!graph) return pos
+  let x = 0, z = 0
+  for (const o of bots) {
+    if (o === b) continue
+    const dx = pos.x - o.body.pos.x
+    const dz = pos.z - o.body.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d < 1e-3 || d >= BOT_SEPARATE_M) continue
+    const deficit = BOT_SEPARATE_M - d
+    const same = o.team === b.team ? 1 : 0.65
+    x += (dx / d) * deficit * same
+    z += (dz / d) * deficit * same
+  }
+  const mag = Math.hypot(x, z)
+  if (mag < 1e-3) return pos
+  const scale = Math.min(BOT_SEPARATE_MAX_M, mag) / mag
+  const nx = pos.x + x * scale
+  const nz = pos.z + z * scale
+  const floor = graphFloorAt(graph, rampTiles, nx, nz, pos.y, 1.3, 0.7)
+  if (floor === null || Math.abs(floor - pos.y) > 0.8) return pos
+  return { x: nx, y: pos.y, z: nz }
+}
+
 function fight(b: LiveBot, dt: number): void {
   const c = b.combat
   c.lungeCd -= dt; c.burstCd -= dt; c.chaseLeft -= dt; c.think -= dt
@@ -527,12 +582,20 @@ function fight(b: LiveBot, dt: number): void {
   if (c.think > 0 || !graph) return
   c.think = BOT_THINK_S
   const p = b.body.pos
-  let tgt: (typeof humans)[number] | null = null, best = BOT_ENGAGE_RANGE
-  for (const h of humans) {
-    if (h.team === b.team || Math.abs(h.y - p.y) > BOT_SAME_LEVEL_DY) continue
-    const d = Math.hypot(h.x - p.x, h.z - p.z)
-    if (d < best) { best = d; tgt = h }
+  const engage = b.personality?.engageM ?? BOT_ENGAGE_RANGE
+  const nearestHuman = (skipTaken: boolean) => {
+    let tgt: (typeof humans)[number] | null = null, best = engage
+    for (const h of humans) {
+      if (h.team === b.team || Math.abs(h.y - p.y) > BOT_SAME_LEVEL_DY) continue
+      if (skipTaken && b.sense.avoidHumans.has(h.id)) continue
+      const d = Math.hypot(h.x - p.x, h.z - p.z)
+      if (d < best) { best = d; tgt = h }
+    }
+    return { tgt, best }
   }
+  let { tgt, best } = nearestHuman(true)
+  if (!tgt) ({ tgt, best } = nearestHuman(false))
+  c.chaseHuman = tgt ? tgt.id : null
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
   if (!tgt) {
     // Nobody to fight: Burst for paint, like a player does, where most of the footprint isn't ours yet.
@@ -606,6 +669,29 @@ function wireOf(b: LiveBot): BotWireState {
 export function getBotHitPoints(): Array<{ id: number; team: number; x: number; y: number; z: number; cell: string }> {
   if (!graph) return []
   return bots.map(b => ({ id: b.botId, team: b.team, x: b.body.pos.x, y: b.body.pos.y, z: b.body.pos.z, cell: b.currentCell }))
+}
+
+/** Pace, focus, and current goal. The separation verify reads this; playtest logs the same numbers at spawn. */
+export function getBotProfiles(): Array<{
+  id: number
+  team: number
+  speedMul: number
+  engageM: number
+  retargetS: number
+  weights: { paint: number; enemy: number; chase: number; roam: number }
+  goal: string | null
+  chaseHuman: string | null
+}> {
+  return bots.map(b => ({
+    id: b.botId,
+    team: b.team,
+    speedMul: b.personality?.speedMul ?? 1,
+    engageM: b.personality?.engageM ?? BOT_ENGAGE_RANGE,
+    retargetS: b.personality?.retargetS ?? 0,
+    weights: b.personality?.weights ?? { paint: 0, enemy: 0, chase: 0, roam: 0 },
+    goal: b.goalOf(),
+    chaseHuman: b.combat.chaseHuman,
+  }))
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {
