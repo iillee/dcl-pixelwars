@@ -1,34 +1,29 @@
 /**
  * botPose.ts — jump, double jump, glide, fall, and slide on a bot avatar.
  *
- * Human players get those poses from the explorer locomotion tree (rise / fall /
- * slide / double-jump / glide) plus the glider prop on the avatar. A scene
- * AvatarShape does not. Unity's SDK avatar mover forces every scene avatar
- * grounded and plays run from how far the entity moved. Godot leaves the
- * locomotion flags at idle and hides the built-in glider on AvatarShapes.
- * Neither client exposes jump count or glide state on PBAvatarShape.
+ * A position write makes the scene-avatar mover play run, and it cancels a
+ * full-body emote. Refreshing expressionTriggerTimestamp every frame never
+ * let the clip take: the client restarted it before the state could blend,
+ * and AvatarShape's expression trigger does not register the scene file the
+ * way AvatarEmoteCommand does, so the glide clip often never loaded. The run
+ * cycle kept playing under a glider that was a separate entity.
  *
- * The server sends `an` (shared/botAnim.ts) beside `st`. This file maps `an`
- * onto the same clips, as scene emotes, and draws the explorer glider mesh
- * while `an` is glide. A position write cancels the emote, and this system
- * runs after the lerp, so the trigger timestamp advances every frame and the
- * held pose stays up for the whole glide, jump, fall, or slide.
+ * The command is sent once per pose (and again only if a one-shot clip would
+ * have ended). loop is true, so the explorer holds it. The glider mesh is a
+ * prop inside that emote (Armature_Prop). The client shows the prop only
+ * while the emote is playing and hides it when the emote is cancelled, so a
+ * run cycle and the glider cannot be on screen together. No extra 180° yaw:
+ * the prop inherits the avatar's facing, and the added turn made it look
+ * backwards.
  *
  * It does not write the avatar transform, parent it, or touch the lerp.
  */
-import { engine, Entity, AvatarShape, GltfContainer, Transform } from '@dcl/sdk/ecs'
-import { Quaternion, Vector3 } from '@dcl/sdk/math'
+import { engine, Entity, AvatarShape, AvatarEmoteCommand } from '@dcl/sdk/ecs'
 import { getBotDrawState } from './botVisual'
 import {
   BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE,
 } from '../shared/botAnim'
 
-/**
- * Moving an AvatarShape cancels a playing emote and the run cycle comes back
- * (Unity's scene-avatar mover, and any client that treats a position write as
- * locomotion). The clip is a held pose and the timestamp bumps every frame, so
- * the pose is what stays on screen for the whole jump, fall, slide, or glide.
- */
 const POSE_EMOTE: Record<number, string> = {
   [BOT_ANIM_SLIDE]: 'assets/emotes/bot_slide_emote.glb',
   [BOT_ANIM_JUMP]: 'assets/emotes/bot_jump_emote.glb',
@@ -37,18 +32,22 @@ const POSE_EMOTE: Record<number, string> = {
   [BOT_ANIM_FALL]: 'assets/emotes/bot_fall_emote.glb',
 }
 
-/** Explorer GliderProp sits on the avatar origin, turned 180° around Y. */
-const GLIDER_SRC = 'assets/models/glider.glb'
+/** A one-shot hold is 1 s. Re-arm before it ends; do not restart every frame. */
+const REARM_MS = 800
 
 type Track = { pose: number; stamp: number }
 const tracks = new Map<number, Track>()
-const gliders = new Map<number, Entity>()
 
-function showPose(root: Entity, src: string, stamp: number): void {
-  if (!AvatarShape.has(root)) return
-  const av = AvatarShape.getMutable(root)
-  av.expressionTriggerId = src
-  av.expressionTriggerTimestamp = stamp
+function playPose(root: Entity, src: string, stamp: number): void {
+  if (AvatarShape.has(root)) {
+    const av = AvatarShape.getMutable(root)
+    av.expressionTriggerId = src
+    // Strictly increasing. A per-frame bump restarts the clip before it blends.
+    av.expressionTriggerTimestamp = stamp
+  }
+  // Registers the scene file and honours loop. expressionTriggerId alone
+  // hardcodes loop off and does not register the glb for the avatar.
+  AvatarEmoteCommand.addValue(root, { emoteUrn: src, loop: true, timestamp: stamp })
 }
 
 function clearPose(root: Entity): void {
@@ -59,29 +58,10 @@ function clearPose(root: Entity): void {
   av.expressionTriggerTimestamp = Date.now()
 }
 
-function placeGlider(id: number, pos: Vector3, yawDeg: number): void {
-  let wing = gliders.get(id)
-  if (wing === undefined) {
-    wing = engine.addEntity()
-    gliders.set(id, wing)
-    GltfContainer.create(wing, { src: GLIDER_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
-    Transform.create(wing)
-  }
-  const tf = Transform.getMutable(wing)
-  tf.position = Vector3.create(pos.x, pos.y, pos.z)
-  tf.rotation = Quaternion.fromEulerDegrees(0, yawDeg + 180, 0)
-}
-
-function dropGlider(id: number): void {
-  const wing = gliders.get(id)
-  if (wing === undefined) return
-  engine.removeEntity(wing)
-  gliders.delete(id)
-}
-
 export function initBotPose(): void {
   engine.addSystem(() => {
     const seen = new Set<number>()
+    const now = Date.now()
     for (const bot of getBotDrawState()) {
       seen.add(bot.id)
       const src = POSE_EMOTE[bot.pose]
@@ -89,16 +69,13 @@ export function initBotPose(): void {
       if (!src) {
         if (track && track.pose !== BOT_ANIM_LOCO) clearPose(bot.root)
         tracks.set(bot.id, { pose: BOT_ANIM_LOCO, stamp: 0 })
-        dropGlider(bot.id)
         continue
       }
-      const stamp = (track && track.pose === bot.pose ? track.stamp : 0) + 1
-      showPose(bot.root, src, stamp)
-      tracks.set(bot.id, { pose: bot.pose, stamp })
-      if (bot.pose === BOT_ANIM_GLIDE) placeGlider(bot.id, bot.pos, bot.yawDeg)
-      else dropGlider(bot.id)
+      if (!track || track.pose !== bot.pose || now - track.stamp >= REARM_MS) {
+        playPose(bot.root, src, now)
+        tracks.set(bot.id, { pose: bot.pose, stamp: now })
+      }
     }
     for (const id of [...tracks.keys()]) if (!seen.has(id)) tracks.delete(id)
-    for (const id of [...gliders.keys()]) if (!seen.has(id)) dropGlider(id)
   })
 }

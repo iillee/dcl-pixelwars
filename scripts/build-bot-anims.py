@@ -289,6 +289,97 @@ def build_glider(src: Path, dest: Path) -> None:
     save_glb(dest, out, bytes(pack.out))
 
 
+def merge_prop(emote_path: Path, glider_path: Path) -> None:
+    """Hang the glider off Armature_Prop so it only exists while the emote plays."""
+    ejs, eblob = load_glb(emote_path)
+    gjs, gblob = load_glb(glider_path)
+    # The locomotion file already has an empty prop armature. Godot binds the
+    # first Armature_Prop it finds, so the empty one must not keep that name.
+    for n in ejs['nodes']:
+        name = n.get('name', '')
+        if name.startswith('Armature_Prop') or name in ('Glider_Final', 'Root'):
+            n['name'] = 'Unused_' + name
+    base = bytearray(eblob)
+    while len(base) % 4:
+        base.append(0)
+    shift = len(base)
+    base += gblob
+
+    def shift_view(view: dict) -> dict:
+        copied = dict(view)
+        copied['byteOffset'] = view.get('byteOffset', 0) + shift
+        return copied
+
+    view_base = len(ejs['bufferViews'])
+    acc_base = len(ejs['accessors'])
+    mesh_base = len(ejs.get('meshes', []))
+    mat_base = len(ejs.get('materials', []))
+    tex_base = len(ejs.get('textures', []))
+    img_base = len(ejs.get('images', []))
+    node_base = len(ejs['nodes'])
+
+    def shift_acc(acc: dict) -> dict:
+        copied = dict(acc)
+        copied['bufferView'] = acc['bufferView'] + view_base
+        return copied
+
+    meshes = []
+    for mesh in gjs.get('meshes', []):
+        prims = []
+        for prim in mesh['primitives']:
+            p = {
+                'attributes': {k: v + acc_base for k, v in prim['attributes'].items()},
+                'indices': prim['indices'] + acc_base,
+            }
+            if 'material' in prim:
+                p['material'] = prim['material'] + mat_base
+            prims.append(p)
+        meshes.append({'name': mesh.get('name', 'Glider'), 'primitives': prims})
+
+    images = []
+    for im in gjs.get('images', []):
+        images.append({
+            'mimeType': im.get('mimeType', 'image/png'),
+            'name': im.get('name', 'glider'),
+            'bufferView': im['bufferView'] + view_base,
+        })
+    textures = []
+    for tex in gjs.get('textures', []):
+        textures.append({'sampler': 0, 'source': tex['source'] + img_base})
+
+    nodes = []
+    for n in gjs['nodes']:
+        node = {'name': n.get('name', '')}
+        for k in ('translation', 'rotation', 'scale'):
+            if k in n:
+                node[k] = n[k]
+        if 'mesh' in n:
+            node['mesh'] = n['mesh'] + mesh_base
+        if 'children' in n:
+            node['children'] = [c + node_base for c in n['children']]
+        nodes.append(node)
+
+    ejs['bufferViews'] = ejs['bufferViews'] + [shift_view(v) for v in gjs['bufferViews']]
+    ejs['accessors'] = ejs['accessors'] + [shift_acc(a) for a in gjs['accessors']]
+    ejs['meshes'] = ejs.get('meshes', []) + meshes
+    ejs['materials'] = ejs.get('materials', []) + gjs.get('materials', [])
+    ejs['textures'] = ejs.get('textures', []) + textures
+    ejs['images'] = ejs.get('images', []) + images
+    if gjs.get('samplers'):
+        ejs['samplers'] = gjs['samplers']
+    ejs['nodes'] = ejs['nodes'] + nodes
+    # Keep the avatar armature. Drop empty prop roots. Add the meshed prop.
+    scene_nodes = [i for i in ejs['scenes'][0]['nodes'] if not ejs['nodes'][i].get('name', '').startswith('Unused_')]
+    ejs['scenes'][0]['nodes'] = scene_nodes + [len(ejs['nodes']) - 1]
+    used = list(ejs.get('extensionsUsed', []))
+    for ext in gjs.get('extensionsUsed', []):
+        if ext not in used:
+            used.append(ext)
+    if used:
+        ejs['extensionsUsed'] = used
+    save_glb(emote_path, ejs, bytes(base))
+
+
 def main() -> None:
     loco = fetch(LOCO_URL, 'loco.glb')
     double = fetch(DOUBLE_URL, 'double_jump.glb')
@@ -307,7 +398,9 @@ def main() -> None:
         print(f'{dest.name}  {name}  {dur:.3f}s  {dest.stat().st_size} bytes')
     gdest = OUT_MODELS / 'glider.glb'
     build_glider(glide, gdest)
+    merge_prop(OUT_EMOTES / 'bot_glide_emote.glb', gdest)
     print(f'{gdest.name}  {gdest.stat().st_size} bytes')
+    print(f'bot_glide_emote.glb with prop  {(OUT_EMOTES / "bot_glide_emote.glb").stat().st_size} bytes')
 
 
 if __name__ == '__main__':

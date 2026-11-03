@@ -36,6 +36,16 @@ import {
  */
 export const DEFAULT_STEPS_PER_SEC = 4.8
 
+/** A walk step is one ~2 m cell. Anything farther, or a rise a ramp cell doesn't make, is a jump. */
+export function mustLeap(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+): boolean {
+  const dy = Math.abs(to[1] - from[1])
+  const dist = Math.hypot(to[0] - from[0], to[2] - from[2])
+  return dy > 1.2 || dist > 3.2
+}
+
 /** Player pace on 2 m cells: jog 8 m/s, run 10 m/s (client defaults, client/speed.ts).
  *  Without a fixed stepsPerSec the bot picks one per route: long routes run, short
  *  ones mostly jog, like a player sprinting across and easing in to paint. */
@@ -555,10 +565,13 @@ export class Bot {
       const onDeep = graph.deepNodes.has(this.currentCell)
       const edge = (onDeep ? graph.deepAir : graph.air).get(this.currentCell)?.find(e => e.to === next)
       const walk = (onDeep ? graph.deepAdj : graph.adj).get(this.currentCell) ?? []
-      if (edge && !walk.includes(next)) {
-        // The body flies this one. Don't paint it and don't snap currentCell across the gap.
-        this.pendingLeap = { to: next, kind: edge.kind }
-        this.path.shift()
+      const fromP = graph.worldPos.get(this.currentCell)
+      const toP = graph.worldPos.get(next)
+      const gap = !walk.includes(next) || (fromP && toP && mustLeap(fromP, toP))
+      if (edge || gap) {
+        // Leave the cell on the path until the body actually jumps, so a failed
+        // launch can walk back to the lip and try again instead of deleting the route.
+        this.pendingLeap = { to: next, kind: edge?.kind ?? ((toP && fromP && toP[1] > fromP[1] + 0.7) ? 'jump' : 'drop') }
         this.stepAccumMs = 0
         break
       }
@@ -611,6 +624,11 @@ export class Bot {
    * broadcast into continuous motion so the Tween only has to smooth
    * out network jitter.
    */
+  /** Drop the leap/gap cell once the body has actually left the floor toward it. */
+  commitLeap(): void {
+    if (this.path.length > 0) this.path.shift()
+  }
+
   visualPosition(graph: WalkableGraph): [number, number, number] | null {
     const cur = graph.worldPos.get(this.currentCell)
     if (!cur) return null
@@ -618,6 +636,9 @@ export class Bot {
     if (!nextId) return [cur[0], cur[1], cur[2]]
     const next = graph.worldPos.get(nextId)
     if (!next) return [cur[0], cur[1], cur[2]]
+    // A gap or a level change is a jump, not a slide. Lerping there is the
+    // teleport between platforms: the client snaps anything over 8 m.
+    if (mustLeap(cur, next)) return [cur[0], cur[1], cur[2]]
     // Fraction of the way to next cell. Clamped [0,1] — accum can briefly
     // exceed intervalMs when the server tick is late.
     const f = Math.max(0, Math.min(1, this.stepAccumMs / this.stepIntervalMs))

@@ -40,7 +40,7 @@ import {
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
-import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { Bot, mustLeap, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -455,15 +455,23 @@ export function tickBots(dtSec: number): void {
     }
     fillSense(b)
     fight(b, dtSec)
-    if (!b.body.canWalk()) continue
+    if (!b.body.canWalk()) { b.gait.walking = false; continue }
     const stepped = b.tick(dtMs, graph)
     const leap = b.takeLeap()
+    let holdLip = false
     if (leap) {
       const pos = cellPos(leap.to)
-      if (!pos || !b.body.leap(pos)) b.clearPath()
-      else console.log(`[Bots] ghost ${b.botId} ${leap.kind}s toward ${leap.to}`)
+      if (pos && b.body.leap(pos)) {
+        b.commitLeap()
+        console.log(`[Bots] ghost ${b.botId} ${leap.kind}s toward ${leap.to}`)
+      } else {
+        const lip = cellPos(b.currentCell)
+        const far = !!lip && Math.hypot(b.body.pos.x - lip.x, b.body.pos.z - lip.z) > 1.4
+        if (far && lip) { b.body.follow(lip); holdLip = true }
+        else b.clearPath()
+      }
     }
-    if (b.body.canWalk()) {
+    if (b.body.canWalk() && !holdLip) {
       const vp = b.visualPosition(graph)
       if (vp) b.body.follow(smoothWalk(b, { x: vp[0], y: vp[1], z: vp[2] }, dtSec))
     } else b.gait.walking = false
@@ -546,11 +554,15 @@ function segmentOnFloor(pos: V3, aim: V3): boolean {
   if (!graph) return false
   const len = Math.hypot(aim.x - pos.x, aim.z - pos.z)
   if (len < 0.6) return true
-  for (const t of [0.34, 0.67]) {
+  if (Math.abs(aim.y - pos.y) > 1.2) return false
+  const steps = Math.max(2, Math.ceil(len / 2))
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps
     const x = pos.x + (aim.x - pos.x) * t
     const z = pos.z + (aim.z - pos.z) * t
-    const floor = graphFloorAt(graph, rampTiles, x, z, aim.y, 1.5, 1)
-    if (floor === null || Math.abs(floor - aim.y) > 1.3) return false
+    const y = pos.y + (aim.y - pos.y) * t
+    const floor = graphFloorAt(graph, rampTiles, x, z, y, 1.3, 0.8)
+    if (floor === null || Math.abs(floor - y) > 0.9) return false
   }
   return true
 }
@@ -570,13 +582,15 @@ function pullAim(b: LiveBot, anchor: V3): V3 {
   }
   let bestId = ids[0]
   let best = graph.worldPos.get(ids[0])
+  let prev: V3 = { x: b.body.pos.x, y: b.body.pos.y, z: b.body.pos.z }
   for (const id of ids) {
     const p = graph.worldPos.get(id)
     if (!p) break
     const at = { x: p[0], y: p[1], z: p[2] }
-    if (!segmentOnFloor(b.body.pos, at)) break
+    if (mustLeap([prev.x, prev.y, prev.z], p) || !segmentOnFloor(prev, at)) break
     bestId = id
     best = p
+    prev = at
   }
   b.gait.aim = bestId
   return best ? { x: best[0], y: best[1], z: best[2] } : anchor
@@ -598,9 +612,13 @@ function smoothWalk(b: LiveBot, anchor: V3, dt: number): V3 {
   aim = { x: aim.x + b.gait.sepX, y: aim.y, z: aim.z + b.gait.sepZ }
   const dx = aim.x - pos.x, dz = aim.z - pos.z
   const dist = Math.hypot(dx, dz)
+  if (Math.abs(aim.y - pos.y) > 1.2) {
+    b.gait.aim = null
+    return pos
+  }
   if (dist < 0.08) {
     b.gait.walking = true
-    return { x: aim.x, y: anchor.y, z: aim.z }
+    return { x: aim.x, y: pos.y, z: aim.z }
   }
   const want = Math.atan2(dx, dz)
   if (!b.gait.walking) b.gait.heading = want
@@ -614,10 +632,10 @@ function smoothWalk(b: LiveBot, anchor: V3, dt: number): V3 {
   const nx = pos.x + Math.sin(b.gait.heading) * step
   const nz = pos.z + Math.cos(b.gait.heading) * step
   if (!graph) return { x: nx, y: anchor.y, z: nz }
-  const floor = graphFloorAt(graph, rampTiles, nx, nz, anchor.y, 1.6, 0.8)
-  if (floor === null || Math.abs(floor - anchor.y) > 0.75) {
+  const floor = graphFloorAt(graph, rampTiles, nx, nz, pos.y, 1.6, 0.8)
+  if (floor === null || Math.abs(floor - pos.y) > 0.9) {
     const u = Math.min(1, step / dist)
-    return { x: pos.x + (anchor.x - pos.x) * u, y: anchor.y, z: pos.z + (anchor.z - pos.z) * u }
+    return { x: pos.x + (anchor.x - pos.x) * u, y: pos.y, z: pos.z + (anchor.z - pos.z) * u }
   }
   return { x: nx, y: floor, z: nz }
 }
