@@ -130,30 +130,5 @@ console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and w
   else console.log(`✓ jump then dive: peak +${(peak - base.y).toFixed(2)} m, then down`)
 }
 
-// Open floor, no recovery: the same lunge/burst a human victim gets from the Physics impulse.
-// BOT_KNOCK_UNIT 0.15 stopped a lunge at ~14 m; the player-scale unit carries it ~43 m.
-{
-  const Y = 90
-  const nodes = new Map<string, [number, number, number]>()
-  for (let x = -4; x <= 120; x += 2) nodes.set('flat' + x, [x, Y, 0])
-  const flat = { graph: { worldPos: nodes } as typeof graph, rampTiles: [] as typeof rampTiles, tiles: [] as typeof tiles, base: { x: 0, y: Y, z: 0 } }
-  const slide = (spec: KnockSpec) => {
-    const body = new BotBody({ x: 0, y: Y - 0.05, z: 0 })
-    body.rng = () => 1
-    body.knock(spec)
-    let peak = body.pos.y
-    for (let t = 0; t < 8 && body.mode === 'knock'; t += 0.05) {
-      body.tick(0.05, flat)
-      if (body.pos.y > peak) peak = body.pos.y
-    }
-    return { d: body.pos.x, hop: peak - (Y - 0.05) }
-  }
-  const lunge = slide(lungeKnock(1, 0))
-  const burst = slide(burstKnock(1, 0))
-  console.log(`open floor: lunge ${lunge.d.toFixed(1)} m (hop ${lunge.hop.toFixed(2)}), burst ${burst.d.toFixed(1)} m (hop ${burst.hop.toFixed(2)})`)
-  if (lunge.d < 30) fail(`lunge on open floor only ${lunge.d.toFixed(1)} m; player-scale knock is ~40 m`)
-  if (burst.d < 14) fail(`burst on open floor only ${burst.d.toFixed(1)} m; player-scale knock is ~19 m`)
-}
-
 if (failed) process.exit(1)
 console.log('✓ bot body checks passed')
