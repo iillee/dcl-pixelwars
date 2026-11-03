@@ -546,6 +546,10 @@ export const BOT_RECOVER_MAX_SEEK_M = 36
 /** Ground hop: up a low ledge, or the jump that starts a spike (m/s). Apex ≈ 1.6 m at BOT_GRAVITY — a player hop, not a whole level. */
 export const BOT_JUMP_V = 8
 /** Horizontal cap when the bot leaps off a ledge (player run, m/s). */
+/** Planned platform hops. Off: a leap's airborne wire state (st=1) makes the
+ *  74cc09b client draw from its snapshot buffer, and the explorer's grounded
+ *  avatar stays on the ramp while that transform flies. Routes walk around. */
+export const BOT_LEAP_ROUTES = false
 export const BOT_LEAP_SPEED = 10
 /** Path cost of a drop or jump, in walk-steps. Beats a ramp detour; loses to a short walk. */
 export const BOT_LEAP_COST = 5

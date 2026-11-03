@@ -568,7 +568,7 @@ export class Bot {
       const fromP = graph.worldPos.get(this.currentCell)
       const toP = graph.worldPos.get(next)
       const gap = !walk.includes(next) || (fromP && toP && mustLeap(fromP, toP))
-      if (edge || gap) {
+      if (this.useAir && (edge || gap)) {
         // Leave the cell on the path until the body actually jumps, so a failed
         // launch can walk back to the lip and try again instead of deleting the route.
         this.pendingLeap = { to: next, kind: edge?.kind ?? ((toP && fromP && toP[1] > fromP[1] + 0.7) ? 'jump' : 'drop') }

@@ -37,10 +37,10 @@ import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
-  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount,
+  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount, BOT_LEAP_ROUTES,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
-import { Bot, mustLeap, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -64,10 +64,6 @@ type Combat = {
 type Gait = { heading: number; walking: boolean; sepX: number; sepZ: number; aim: string | null }
 type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait }
 const newGait = (): Gait => ({ heading: 0, walking: false, sepX: 0, sepZ: 0, aim: null })
-/** Heading change while walking (rad/s). A 90° corner takes about half a second. */
-const WALK_TURN = 3.4
-/** Separation offset eases over this long, so it cannot flip the heading in one tick. */
-const SEP_TAU = 0.4
 const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null, chaseHuman: null,
 })
@@ -313,6 +309,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
     personality,
     rng: mulberry32(botId * 0x85ebca6b),
+    useAir: BOT_LEAP_ROUTES,
   }) as LiveBot
   bot.botId = botId
   bot.body = new BotBody(spot.pos, mulberry32(botId * 0xc2b2ae35))
@@ -473,7 +470,14 @@ export function tickBots(dtSec: number): void {
     }
     if (b.body.canWalk() && !holdLip) {
       const vp = b.visualPosition(graph)
-      if (vp) b.body.follow(smoothWalk(b, { x: vp[0], y: vp[1], z: vp[2] }, dtSec))
+      // The cell lerp, plus a small separation nudge. smoothWalk's corner cut
+      // left this segment: the explorer avatar capsule stopped on the ramp
+      // mesh while the transform kept going. e3c774d followed this point and
+      // the mesh stayed on the entity.
+      if (vp) {
+        const at = { x: vp[0], y: vp[1], z: vp[2] }
+        b.body.follow(b.path.length > 0 ? separate(b, at) : at)
+      }
     } else b.gait.walking = false
     for (const stepId of stepped) {
       // Paint the full 3x3 stamp around the stepped cell (matches human
@@ -539,106 +543,6 @@ function fillSense(b: LiveBot): void {
   b.sense.avoidHumans = avoidHumans
 }
 
-/** Turn `from` toward `to` by at most `max` radians, both in atan2(x, z) space. */
-function turnTo(from: number, to: number, max: number): number {
-  let d = to - from
-  while (d > Math.PI) d -= Math.PI * 2
-  while (d < -Math.PI) d += Math.PI * 2
-  if (d > max) d = max
-  else if (d < -max) d = -max
-  return from + d
-}
-
-/** The straight line stays on a floor, so an open corner can be walked as a diagonal. */
-function segmentOnFloor(pos: V3, aim: V3): boolean {
-  if (!graph) return false
-  const len = Math.hypot(aim.x - pos.x, aim.z - pos.z)
-  if (len < 0.6) return true
-  if (Math.abs(aim.y - pos.y) > 1.2) return false
-  const steps = Math.max(2, Math.ceil(len / 2))
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps
-    const x = pos.x + (aim.x - pos.x) * t
-    const z = pos.z + (aim.z - pos.z) * t
-    const y = pos.y + (aim.y - pos.y) * t
-    const floor = graphFloorAt(graph, rampTiles, x, z, y, 1.3, 0.8)
-    if (floor === null || Math.abs(floor - y) > 0.9) return false
-  }
-  return true
-}
-
-/**
- * Furthest upcoming cell the bot can walk straight to, including a diagonal
- * across open floor. Held until that cell is reached or leaves the path, so
- * the aim does not flip every tick.
- */
-function pullAim(b: LiveBot, anchor: V3): V3 {
-  if (!graph) return anchor
-  const ids = [b.currentCell, ...b.path].slice(0, 8)
-  if (b.gait.aim && !ids.includes(b.gait.aim)) b.gait.aim = null
-  const held = b.gait.aim ? graph.worldPos.get(b.gait.aim) : null
-  if (held && Math.hypot(held[0] - b.body.pos.x, held[2] - b.body.pos.z) > 1.6) {
-    return { x: held[0], y: held[1], z: held[2] }
-  }
-  let bestId = ids[0]
-  let best = graph.worldPos.get(ids[0])
-  let prev: V3 = { x: b.body.pos.x, y: b.body.pos.y, z: b.body.pos.z }
-  for (const id of ids) {
-    const p = graph.worldPos.get(id)
-    if (!p) break
-    const at = { x: p[0], y: p[1], z: p[2] }
-    if (mustLeap([prev.x, prev.y, prev.z], p) || !segmentOnFloor(prev, at)) break
-    bestId = id
-    best = p
-    prev = at
-  }
-  b.gait.aim = bestId
-  return best ? { x: best[0], y: best[1], z: best[2] } : anchor
-}
-
-/**
- * Follow the cell lerp, but turn at a limited rate and cut a corner when the
- * straight line stays on the path. Separation is eased, not applied in full
- * each tick, so two bots cannot shove each other's heading back and forth.
- */
-function smoothWalk(b: LiveBot, anchor: V3, dt: number): V3 {
-  const pos = b.body.pos
-  let aim = b.path.length > 0 ? pullAim(b, anchor) : anchor
-  const raw = b.path.length > 0 ? separate(b, aim) : aim
-  const ox = raw.x - aim.x, oz = raw.z - aim.z
-  const k = Math.min(1, dt / SEP_TAU)
-  b.gait.sepX += (ox - b.gait.sepX) * k
-  b.gait.sepZ += (oz - b.gait.sepZ) * k
-  aim = { x: aim.x + b.gait.sepX, y: aim.y, z: aim.z + b.gait.sepZ }
-  const dx = aim.x - pos.x, dz = aim.z - pos.z
-  const dist = Math.hypot(dx, dz)
-  if (Math.abs(aim.y - pos.y) > 1.2) {
-    b.gait.aim = null
-    return pos
-  }
-  if (dist < 0.08) {
-    b.gait.walking = true
-    return { x: aim.x, y: pos.y, z: aim.z }
-  }
-  const want = Math.atan2(dx, dz)
-  if (!b.gait.walking) b.gait.heading = want
-  b.gait.walking = true
-  b.gait.heading = turnTo(b.gait.heading, want, WALK_TURN * dt)
-  const cell = b.path[0] && graph ? graph.worldPos.get(b.currentCell) : null
-  const nxt = b.path[0] && graph ? graph.worldPos.get(b.path[0]) : null
-  const spacing = cell && nxt ? Math.max(1.2, Math.hypot(nxt[0] - cell[0], nxt[2] - cell[2])) : 2
-  const speed = dist > 3 ? spacing * b.stepsPerSec() * 1.35 : spacing * b.stepsPerSec()
-  const step = Math.min(dist, speed * dt)
-  const nx = pos.x + Math.sin(b.gait.heading) * step
-  const nz = pos.z + Math.cos(b.gait.heading) * step
-  if (!graph) return { x: nx, y: anchor.y, z: nz }
-  const floor = graphFloorAt(graph, rampTiles, nx, nz, pos.y, 1.6, 0.8)
-  if (floor === null || Math.abs(floor - pos.y) > 0.9) {
-    const u = Math.min(1, step / dist)
-    return { x: pos.x + (anchor.x - pos.x) * u, y: pos.y, z: pos.z + (anchor.z - pos.z) * u }
-  }
-  return { x: nx, y: floor, z: nz }
-}
 
 /** Nudge a walking bot off a teammate. Stays on a floor, and never more than SEPARATE_MAX off the path. */
 function separate(b: LiveBot, pos: V3): V3 {
