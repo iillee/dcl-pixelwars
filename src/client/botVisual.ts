@@ -10,6 +10,10 @@
  * whatever position you write) does not drag the body off that target.
  * Locomotion from that setup is untested until a preview pass.
  *
+ * Off the ground the avatar stays on this entity. VisibilityComponent hides
+ * it, and a separate rigged mannequin (botStandin.ts) draws the recovery.
+ * The avatar is not reparented and AvatarShape is not rewritten to swap.
+ *
  * ── Why per-frame lerp ──────────────────────────────────────────────
  *
  * Tween durations are fixed at issue time, so any drift between the
@@ -28,9 +32,14 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
+  VisibilityComponent, Animator, GltfContainer, GltfNodeModifiers, MeshRenderer, Material,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
+import {
+  STANDIN_MODEL, STANDIN_CLIPS, STANDIN_BLEND_S, StandClip, MotionKind,
+  stepStandIn, standInFor, clipFor, motionFor, puffOnClip, gesturePose,
+} from './botStandin'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
@@ -102,7 +111,23 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  st: number
+  an: number
+  /** Mannequin entity. Not a child of the avatar. */
+  stand: Entity
+  showing: boolean
+  groundHeld: number
+  avatarShown: boolean
+  standShown: boolean
+  clip: string
+  prevClip: string
+  blend: number
+  gesture: MotionKind
+  gestureAge: number
+  puffs: Puff[]
 }
+
+type Puff = { e: Entity; age: number; ox: number; oz: number }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
 function interpDelay(snaps: Snap[]): number {
@@ -169,6 +194,39 @@ function holdWalker(entity: Entity, pos: Vector3): void {
   })
 }
 
+function tintStand(entity: Entity, team: number): void {
+  const c = TEAM_RGB[team] ?? TEAM_RGB[Team.Red]
+  GltfNodeModifiers.createOrReplace(entity, {
+    modifiers: [{
+      path: '',
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: {
+            albedoColor: Color4.create(c.r, c.g, c.b, 1),
+            metallic: 0.04,
+            roughness: 0.72,
+          },
+        },
+      },
+    }],
+  })
+}
+
+/**
+ * Hide or show one entity. VisibilityComponent is written only when the flag
+ * changes. On the Godot explorer that sets `visible` on the AvatarShape node
+ * (it is tagged as the entity's own visual) and does not free the node, so
+ * the mesh does not fade in again. A scale-0 hide was rejected: that client
+ * clamps a zero scale to a speck, and rewriting Transform is what made the
+ * parent-mover avatar flicker.
+ */
+function setShown(entity: Entity, show: boolean, was: boolean): boolean {
+  if (show === was) return was
+  VisibilityComponent.getMutable(entity).visible = show
+  return show
+}
+
 function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
   const root = engine.addEntity()
   Transform.create(root, {
@@ -176,7 +234,21 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     rotation: Quaternion.Identity(),
   })
   paintAvatar(root, team, id)
+  VisibilityComponent.create(root, { visible: true })
   holdWalker(root, pos)
+
+  const stand = engine.addEntity()
+  Transform.create(stand, { position: pos, rotation: Quaternion.Identity(), scale: Vector3.One() })
+  GltfContainer.create(stand, {
+    src: STANDIN_MODEL,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  Animator.create(stand, {
+    states: STANDIN_CLIPS.map(clip => ({ clip, playing: false, loop: true, weight: 0, speed: 1 })),
+  })
+  VisibilityComponent.create(stand, { visible: false })
+  tintStand(stand, team)
 
   return {
     root,
@@ -189,7 +261,111 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
+    st: 0,
+    an: 0,
+    stand,
+    showing: false,
+    groundHeld: 0,
+    avatarShown: true,
+    standShown: false,
+    clip: '',
+    prevClip: '',
+    blend: 1,
+    gesture: 'none',
+    gestureAge: 0,
+    puffs: [],
   }
+}
+
+const PUFF_LIFE = 0.35
+const PUFF_MAX = 12
+
+function spawnPuff(rec: BotVisual): void {
+  while (rec.puffs.length + 6 > PUFF_MAX) {
+    const old = rec.puffs.shift()
+    if (old) engine.removeEntity(old.e)
+  }
+  for (let i = 0; i < 6; i++) {
+    const e = engine.addEntity()
+    const ang = (i / 6) * Math.PI * 2
+    Transform.create(e, {
+      position: Vector3.create(rec.renderPos.x, rec.renderPos.y + 0.12, rec.renderPos.z),
+      scale: Vector3.create(0.08, 0.08, 0.08),
+    })
+    MeshRenderer.setSphere(e)
+    Material.setPbrMaterial(e, {
+      albedoColor: Color4.create(0.92, 0.93, 0.95, 0.9),
+      roughness: 1,
+      metallic: 0,
+      castShadows: false,
+    })
+    rec.puffs.push({ e, age: 0, ox: Math.cos(ang), oz: Math.sin(ang) })
+  }
+}
+
+function stepPuffs(rec: BotVisual, dt: number): void {
+  const keep: Puff[] = []
+  for (const p of rec.puffs) {
+    p.age += dt
+    if (p.age >= PUFF_LIFE) { engine.removeEntity(p.e); continue }
+    const u = p.age / PUFF_LIFE
+    const spread = 0.15 + u * 0.85
+    const tf = Transform.getMutable(p.e)
+    tf.position = Vector3.create(
+      rec.renderPos.x + p.ox * spread,
+      rec.renderPos.y + 0.1 + u * 0.7,
+      rec.renderPos.z + p.oz * spread,
+    )
+    const s = 0.1 + u * 0.28
+    tf.scale = Vector3.create(s, s * 0.6, s)
+    keep.push(p)
+  }
+  rec.puffs = keep
+}
+
+function blendClip(rec: BotVisual, clip: StandClip, dt: number): void {
+  if (rec.clip !== clip) {
+    rec.prevClip = rec.clip
+    rec.clip = clip
+    rec.blend = 0
+    rec.gesture = motionFor(clip)
+    rec.gestureAge = 0
+    if (puffOnClip(clip)) spawnPuff(rec)
+  }
+  if (rec.blend < 1) {
+    rec.blend = Math.min(1, rec.blend + dt / STANDIN_BLEND_S)
+    const anim = Animator.getMutable(rec.stand)
+    for (const state of anim.states) {
+      const on = state.clip === rec.clip
+      const prev = state.clip === rec.prevClip
+      state.weight = on ? rec.blend : prev ? 1 - rec.blend : 0
+      state.playing = (state.weight ?? 0) > 0.02
+      state.loop = true
+      state.shouldReset = on && rec.blend < dt / STANDIN_BLEND_S + 1e-4
+    }
+  }
+  rec.gestureAge += dt
+}
+
+/** One visible body. The mannequin tracks the interpolated feet and yaw. */
+function syncAirStandIn(rec: BotVisual, dt: number): void {
+  const step = stepStandIn(rec.showing, rec.groundHeld, rec.st, dt)
+  rec.groundHeld = step.groundHeld
+  if (step.changed) {
+    rec.avatarShown = setShown(rec.root, !step.showing, rec.avatarShown)
+    rec.standShown = setShown(rec.stand, step.showing, rec.standShown)
+  }
+  rec.showing = step.showing
+  if (rec.showing && standInFor(rec.st)) blendClip(rec, clipFor(rec.st, rec.an), dt)
+  else if (rec.showing) rec.gestureAge += dt
+  else rec.clip = ''
+
+  const pose = rec.showing ? gesturePose(rec.gesture, rec.gestureAge) : { pitch: 0, roll: 0, stretch: 1 }
+  const standTf = Transform.getMutable(rec.stand)
+  standTf.position = rec.renderPos
+  standTf.rotation = Quaternion.fromEulerDegrees(pose.pitch, rec.lastYawDeg, pose.roll)
+  standTf.scale = Vector3.create(1, pose.stretch, 1)
+  stepPuffs(rec, dt)
 }
 
 export function initBotVisual(): void {
@@ -229,14 +405,20 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
+        rec.st = b.st ?? 0
+        rec.an = b.an ?? 0
+        rec.riding = rec.st === 2
         bots.set(b.id, rec)
         continue
       }
 
       if (rec.team !== b.team) {
         paintAvatar(rec.root, b.team, rec.id)
+        tintStand(rec.stand, b.team)
         rec.team = b.team
       }
+      rec.st = b.st ?? 0
+      rec.an = b.an ?? 0
 
       const dx = serverPos.x - rec.lastServerPos.x
       const dy = serverPos.y - rec.lastServerPos.y
@@ -249,7 +431,7 @@ export function initBotVisual(): void {
         if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
       }
       const wasFast = now < rec.fastUntil
-      rec.riding = b.st === 2
+      rec.riding = rec.st === 2
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -277,9 +459,11 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. Halo is parented → root removal reaps both.
+    // Reap dropped bots. The mannequin and puffs are not children of the avatar.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
+        for (const puff of rec.puffs) engine.removeEntity(puff.e)
+        engine.removeEntity(rec.stand)
         engine.removeEntity(rec.root)
         bots.delete(id)
       }
@@ -335,6 +519,7 @@ export function initBotVisual(): void {
         rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
       }
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+      syncAirStandIn(rec, dt)
     }
   })
 }

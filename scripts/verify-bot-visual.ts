@@ -15,6 +15,11 @@ import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
+import { readFileSync } from 'node:fs'
+import {
+  STANDIN_CLIPS, STANDIN_MODEL, GLIDE_PITCH_DEG,
+  stepStandIn, standInFor, clipFor, gesturePose, motionFor, puffOnClip,
+} from '../src/client/botStandin'
 
 const PREDICT_AHEAD_SEC = 0.1
 const LERP_SPEED_PER_SEC = 4
@@ -27,7 +32,7 @@ const INTERP_EXTRAPOLATE_MAX_S = 0.1
 const FAST_HOLD_S = INTERP_DELAY_S + 0.15
 
 type V = { x: number; y: number; z: number }
-type Packet = { t: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number }
+type Packet = { t: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number; an?: number }
 type Snap = { t: number; pos: V }
 
 const sub = (a: V, b: V) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)
@@ -274,14 +279,12 @@ const rampReport = rampPackets.length ? replay('ramp walk/leap', rampPackets) : 
 // ── Knock off a lip, the recovery glide the wire marks st=4 ─────────
 const from = chain ? graph.worldPos.get(chain[0])! : [...graph.worldPos.values()][0]
 const knocked = new BotBody({ x: from[0], y: from[1], z: from[2] }, () => 0)
-knocked.knock(lungeKnock(-1, 0))
 const world = { graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles, base: { x: from[0], y: from[1], z: from[2] } }
 const knockPackets: Packet[] = []
 let prevK: Packet | null = null
-for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
-  knocked.tick(0.1, world)
+const pushK = (sim: number) => {
   const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
-  const pkt: Packet = { t: sim, x: knocked.pos.x, y: knocked.pos.y, z: knocked.pos.z, st, vx: 0, vy: 0, vz: 0 }
+  const pkt: Packet = { t: sim, x: knocked.pos.x, y: knocked.pos.y, z: knocked.pos.z, st, vx: 0, vy: 0, vz: 0, an: knocked.animCode() }
   if (prevK) {
     pkt.vx = (pkt.x - prevK.x) / 0.1
     pkt.vy = (pkt.y - prevK.y) / 0.1
@@ -289,7 +292,17 @@ for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
   }
   knockPackets.push(pkt)
   prevK = pkt
-  if (knocked.mode === 'walk' && sim > 0.4) break
+}
+for (let i = 0; i < 5; i++) pushK(i * 0.1)
+knocked.knock(lungeKnock(-1, 0))
+let landedAt = -1
+for (let i = 5, sim = 0.5; i < 90 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
+  knocked.tick(0.1, world)
+  pushK(sim)
+  if (knocked.mode === 'walk' && sim > 1) {
+    if (landedAt < 0) landedAt = sim
+    if (sim - landedAt >= 0.5) break
+  }
 }
 const knockReport = replay('knock+glide', knockPackets)
 
@@ -307,3 +320,121 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   process.exit(1)
 }
 console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
+
+// ── Stand-in: one body, tracks the draw, avatar component stays put ──
+const glb = readFileSync(new URL('../' + STANDIN_MODEL, import.meta.url))
+const jsonLen = glb.readUInt32LE(12)
+const gltf = JSON.parse(glb.subarray(20, 20 + jsonLen).toString('utf8')) as {
+  nodes: { name: string }[]
+  animations: { name: string }[]
+  skins: { joints: number[] }[]
+}
+const nodeNames = gltf.nodes.map(n => n.name)
+const clipNames = gltf.animations.map(a => a.name)
+if (nodeNames.includes('Armature_Prop') || glb.includes(Buffer.from('Armature_Prop'))) {
+  console.error('✗ stand-in glb has a node named Armature_Prop')
+  process.exit(1)
+}
+if (STANDIN_CLIPS.some(c => !clipNames.includes(c)) || gltf.skins[0].joints.length < 8) {
+  console.error(`✗ stand-in clips ${clipNames.join(',')} joints ${gltf.skins[0].joints.length}`)
+  process.exit(1)
+}
+const stretch = gesturePose('stretch', 0.14).stretch
+const flip = gesturePose('flip', 0.42).pitch
+const spin = gesturePose('spin', 0.55).roll
+const glidePitch = gesturePose('pitch', 2).pitch
+if (stretch < 1.2 || Math.abs(flip - 360) > 0.01 || Math.abs(spin - 360) > 0.01 || glidePitch !== GLIDE_PITCH_DEG) {
+  console.error('✗ code motion did not stretch, flip, spin, and pitch')
+  process.exit(1)
+}
+if (!puffOnClip('jump') || !puffOnClip('double') || puffOnClip('fall') || puffOnClip('glide') || puffOnClip('tumble')) {
+  console.error('✗ puff should fire on jump and double jump only')
+  process.exit(1)
+}
+if (motionFor('jump') !== 'stretch' || motionFor('double') !== 'flip' || motionFor('tumble') !== 'spin' || motionFor('glide') !== 'pitch') {
+  console.error('✗ clip motion mapping')
+  process.exit(1)
+}
+if (clipFor(1, 2) !== 'jump' || clipFor(1, 3) !== 'double' || clipFor(4, 4) !== 'glide' || clipFor(1, 5) !== 'fall' || clipFor(1, 1) !== 'tumble' || clipFor(2, 0) !== 'fall') {
+  console.error('✗ clipFor phase mapping')
+  process.exit(1)
+}
+if (standInFor(0) || standInFor(3) || !standInFor(1) || !standInFor(2) || !standInFor(4)) {
+  console.error('✗ stand-in should cover knock, rescue, and glide, not the wind-up')
+  process.exit(1)
+}
+
+function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: number; both: number; none: number; offDraw: number; clips: string } {
+  const c = new Client()
+  let showing = false
+  let held = 0
+  let shows = 0
+  let hides = 0
+  let both = 0
+  let none = 0
+  let offDraw = 0
+  const seen = new Set<string>()
+  for (let i = 0; i < packets.length; i++) {
+    const p = packets[i]
+    c.packet(p)
+    for (let f = 0; f < 3; f++) {
+      c.frame(0.033)
+      let st = p.st
+      if (flap && st === 4 && i % 7 === 0) st = 0
+      const step = stepStandIn(showing, held, st, 0.033)
+      if (step.changed) {
+        if (step.showing) shows++
+        else hides++
+      }
+      showing = step.showing
+      held = step.groundHeld
+      const avatarOn = !showing
+      const standOn = showing
+      if (avatarOn && standOn) both++
+      if (!avatarOn && !standOn) none++
+      // syncAirStandIn copies renderPos onto the mannequin, so this is its server error.
+      if (standOn) offDraw = Math.max(offDraw, sub(c.render, { x: p.x, y: p.y, z: p.z }))
+      if (showing && standInFor(st)) seen.add(clipFor(st, p.an ?? 0))
+    }
+  }
+  return { shows, hides, both, none, offDraw, clips: [...seen].join(',') }
+}
+
+const bodies = countBodies(knockPackets, false)
+const flappy = countBodies(knockPackets, true)
+console.log(`stand-in: show ${bodies.shows} hide ${bodies.hides} serverLag ${bodies.offDraw.toFixed(2)} m clips ${bodies.clips}; flap show ${flappy.shows} hide ${flappy.hides}`)
+if (bodies.shows !== 1 || bodies.hides !== 1 || bodies.both !== 0 || bodies.none !== 0 || !(bodies.offDraw < 15)) {
+  console.error(`✗ want one show and one hide per knock and one body (server lag ${bodies.offDraw.toFixed(2)} m)`)
+  process.exit(1)
+}
+if (!bodies.clips.includes('glide')) {
+  console.error('✗ the knock never played the glide clip')
+  process.exit(1)
+}
+if (flappy.shows !== 1 || flappy.hides !== 1) {
+  console.error('✗ a one-packet st=0 during the glide flapped the body')
+  process.exit(1)
+}
+
+const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+const sync = visualSrc.slice(visualSrc.indexOf('function syncAirStandIn'), visualSrc.indexOf('export function initBotVisual'))
+const shapeWrites = (sync.match(/AvatarShape|paintAvatar/g) ?? []).length
+const parentWrites = (sync.match(/parent:/g) ?? []).length
+if (shapeWrites !== 0 || parentWrites !== 0 || !sync.includes('standTf.position = rec.renderPos')) {
+  console.error('✗ the airborne sync rewrites AvatarShape or reparents, or the stand-in left the draw')
+  process.exit(1)
+}
+if ((visualSrc.match(/AvatarShape\.createOrReplace/g) ?? []).length !== 1) {
+  console.error('✗ AvatarShape should be written in paintAvatar only')
+  process.exit(1)
+}
+if (!visualSrc.includes('engine.removeEntity(rec.stand)') || !visualSrc.includes('for (const puff of rec.puffs) engine.removeEntity(puff.e)')) {
+  console.error('✗ bot removal does not reap the stand-in and its puffs')
+  process.exit(1)
+}
+const setShown = visualSrc.slice(visualSrc.indexOf('function setShown'), visualSrc.indexOf('function createBotVisual'))
+if (!setShown.includes('if (show === was) return was') || !setShown.includes('VisibilityComponent.getMutable')) {
+  console.error('✗ visibility is not write-on-change')
+  process.exit(1)
+}
+console.log('✓ one body per bot; stand-in tracks the draw; avatar visibility changes twice and AvatarShape is not rewritten')
