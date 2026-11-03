@@ -10,6 +10,13 @@
  * whatever position you write) does not drag the body off that target.
  * Locomotion from that setup is untested until a preview pass.
  *
+ * While the server says the body is off the ground (st != 0), the world
+ * transform is written on a plain parent. The AvatarShape stays parented at
+ * local origin and its own transform is not written, so a client that
+ * classifies run/idle from that entity's transform delta sees idle. On the
+ * ground the avatar is unparented and moved directly, which is what makes
+ * the run cycle play. The lerp and the snapshot buffer are unchanged.
+ *
  * ── Why per-frame lerp ──────────────────────────────────────────────
  *
  * Tween durations are fixed at issue time, so any drift between the
@@ -27,7 +34,7 @@
  */
 
 import {
-  engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
+  engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, GltfContainer, EasingFunction,
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
@@ -92,7 +99,15 @@ type Snap = { t: number; pos: Vector3 }
 let clockOffset: number | null = null
 
 interface BotVisual {
+  /** AvatarShape entity. Unparented on the ground; child of `mover` in the air. */
   root: Entity
+  /** Plain parent that carries the world transform while `carried` is set. */
+  mover: Entity
+  /** Avatar is parented to `mover` and its local transform is left at the origin. */
+  carried: boolean
+  /** Last wire state. 0 is on the ground. */
+  st: number
+  wing: Entity | null
   id: number
   team: number
   lastServerPos: Vector3
@@ -103,6 +118,8 @@ interface BotVisual {
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
 }
+
+const GLIDER = 'assets/models/bot_glider.glb'
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
 function interpDelay(snaps: Snap[]): number {
@@ -170,6 +187,8 @@ function holdWalker(entity: Entity, pos: Vector3): void {
 }
 
 function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
+  const mover = engine.addEntity()
+  Transform.create(mover, { position: pos, rotation: Quaternion.Identity() })
   const root = engine.addEntity()
   Transform.create(root, {
     position: pos,
@@ -180,6 +199,10 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
 
   return {
     root,
+    mover,
+    carried: false,
+    st: 0,
+    wing: null,
     id,
     team,
     lastServerPos: Vector3.clone(pos),
@@ -190,6 +213,59 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     snaps: [],
     riding: false,
   }
+}
+
+function yawOf(deg: number) {
+  return Quaternion.fromEulerDegrees(0, deg, 0)
+}
+
+/** World pose. In the air the parent moves and the avatar stays at local origin. */
+function placeAvatar(rec: BotVisual): void {
+  const yaw = yawOf(rec.lastYawDeg)
+  if (rec.st !== 0) {
+    const mover = Transform.getMutable(rec.mover)
+    mover.position = rec.renderPos
+    mover.rotation = yaw
+    if (!rec.carried) {
+      if (Tween.has(rec.root)) Tween.deleteFrom(rec.root)
+      Transform.createOrReplace(rec.root, {
+        parent: rec.mover,
+        position: Vector3.Zero(),
+        rotation: Quaternion.Identity(),
+      })
+      rec.carried = true
+    }
+    return
+  }
+  if (rec.carried) {
+    Transform.createOrReplace(rec.root, { position: rec.renderPos, rotation: yaw })
+    rec.carried = false
+  } else {
+    const tf = Transform.getMutable(rec.root)
+    tf.position = rec.renderPos
+    tf.rotation = yaw
+  }
+  holdWalker(rec.root, rec.renderPos)
+}
+
+function syncWing(rec: BotVisual): void {
+  if (rec.st !== 4) {
+    if (rec.wing) { engine.removeEntity(rec.wing); rec.wing = null }
+    return
+  }
+  if (rec.wing) return
+  const wing = engine.addEntity()
+  Transform.create(wing, {
+    parent: rec.mover,
+    position: Vector3.Zero(),
+    rotation: Quaternion.Identity(),
+  })
+  GltfContainer.create(wing, {
+    src: GLIDER,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  rec.wing = wing
 }
 
 export function initBotVisual(): void {
@@ -229,6 +305,8 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
+        rec.st = b.st ?? 0
+        rec.riding = rec.st === 2
         bots.set(b.id, rec)
         continue
       }
@@ -249,7 +327,8 @@ export function initBotVisual(): void {
         if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
       }
       const wasFast = now < rec.fastUntil
-      rec.riding = b.st === 2
+      rec.st = b.st ?? 0
+      rec.riding = rec.st === 2
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -277,10 +356,12 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. Halo is parented → root removal reaps both.
+    // Reap dropped bots. Avatar and mover are separate entities; a wing is too.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
+        if (rec.wing) engine.removeEntity(rec.wing)
         engine.removeEntity(rec.root)
+        engine.removeEntity(rec.mover)
         bots.delete(id)
       }
     }
@@ -316,10 +397,6 @@ export function initBotVisual(): void {
         )
       }
 
-      const tf = Transform.getMutable(rec.root)
-      tf.position = rec.renderPos
-      holdWalker(rec.root, rec.renderPos)
-
       // Yaw from smoothed VELOCITY, not from renderPos -> lastServerPos.
       // The old approach flipped 180° the instant renderPos overshot its
       // target (the delta reversed sign each frame), which produced the
@@ -334,7 +411,8 @@ export function initBotVisual(): void {
       if (speedSq > 0.25) {
         rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
       }
-      tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+      placeAvatar(rec)
+      syncWing(rec)
     }
   })
 }

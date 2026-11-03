@@ -134,7 +134,39 @@ class Client {
   }
 }
 
-type Report = { name: string; max: number; stuck: number; nans: number; sts: string; samples: number }
+type Report = { name: string; max: number; stuck: number; nans: number; sts: string; samples: number; draws: V[] }
+
+/**
+ * Parent-mover contract. The drawn world position is always the interpolated
+ * feet. While st != 0 the avatar entity's own transform stays at local origin
+ * (the parent carries the world pose). A mode switch must not add a jump on
+ * top of the draw's own step.
+ */
+function parentContract(name: string, packets: Packet[], draws: V[]): { switches: number; extra: number } {
+  let air = false
+  let switches = 0
+  let extra = 0
+  for (let i = 0; i < packets.length; i++) {
+    const next = packets[i].st !== 0
+    const world = draws[i]
+    const local = next ? { x: 0, y: 0, z: 0 } : world
+    const shown = next
+      ? { x: world.x + local.x, y: world.y + local.y, z: world.z + local.z }
+      : local
+    extra = Math.max(extra, sub(shown, world))
+    if (i > 0 && next !== air) {
+      switches++
+      const drawStep = sub(draws[i], draws[i - 1])
+      const shownStep = sub(shown, next
+        ? { x: draws[i - 1].x, y: draws[i - 1].y, z: draws[i - 1].z }
+        : draws[i - 1])
+      extra = Math.max(extra, Math.abs(shownStep - drawStep))
+    }
+    air = next
+  }
+  console.log(`${name} parent: switches=${switches} hierarchyJump=${extra.toFixed(3)} m`)
+  return { switches, extra }
+}
 
 function replay(name: string, packets: Packet[]): Report {
   const c = new Client()
@@ -144,6 +176,7 @@ function replay(name: string, packets: Packet[]): Report {
   const sts = new Map<number, number>()
   let prevRender: V | null = null
   let prevServer: V | null = null
+  const draws: V[] = []
   for (const p of packets) {
     if (![p.x, p.y, p.z, p.vx, p.vy, p.vz, p.t].every(Number.isFinite)) nans++
     sts.set(p.st, (sts.get(p.st) ?? 0) + 1)
@@ -156,10 +189,11 @@ function replay(name: string, packets: Packet[]): Report {
     if (prevRender && prevServer && sub(prevRender, c.render) < 0.05 && sub(prevServer, server) > 1.5) stuck++
     prevRender = { ...c.render }
     prevServer = server
+    draws.push({ ...c.render })
   }
   const stText = [...sts.entries()].map(([k, n]) => `${k}:${n}`).join(' ')
   console.log(`${name}: packets=${packets.length} maxDrawError=${max.toFixed(2)} m  frozenWhileServerMoved=${stuck}  nans=${nans}  st[${stText}]`)
-  return { name, max, stuck, nans, sts: stText, samples: packets.length }
+  return { name, max, stuck, nans, sts: stText, samples: packets.length, draws }
 }
 
 function finite(p: Packet[]): boolean {
@@ -304,6 +338,11 @@ if (walkBad.length || knockReport.nans > 0 || knockReport.stuck > 2 || knockRepo
 }
 if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   console.error('✗ non-finite position in a stream')
+  process.exit(1)
+}
+const carry = parentContract('knock+glide', knockPackets, knockReport.draws)
+if (carry.extra > 1) {
+  console.error(`✗ parent switch added ${carry.extra.toFixed(2)} m beyond the server step`)
   process.exit(1)
 }
 console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
