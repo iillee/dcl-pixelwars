@@ -105,19 +105,20 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format }) => {
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
     if (idx !== getRoundIndex() || active !== isRoundActive() || Math.abs(end - getRoundEndMs()) > 500) setRoundState(idx, end, active)
+    events.emit('round:clock', { idx, active, format: format === 'pvb' ? 'pvb' : 'pvp' })
   })
 
   room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal }) => {
     events.emit('round:ended', { finalRed, finalBlue, finalTotal })
   })
 
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal }) => {
-    events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal })
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format }) => {
+    events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal, format: format === 'pvb' ? 'pvb' : 'pvp' })
   })
 
 

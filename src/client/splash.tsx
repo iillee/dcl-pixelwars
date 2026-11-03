@@ -31,6 +31,11 @@ engine.addSystem((dt: number) => {
 // inset (safe area) / scaled to the 1920x1080 virtual canvas, so '100%' of it left uncovered strips.
 const SPLASH_BLEED = 4000 // px (virtual) the cover extends past every edge of the HUD root
 
+/** True while the white load cover is still up. The format banner waits this out so it isn't hidden. */
+export function loadSplashCovering(): boolean {
+  return alpha > 0.05
+}
+
 export function SplashScreen() {
   if (alpha <= 0) return null
   return (

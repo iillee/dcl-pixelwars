@@ -130,5 +130,35 @@ console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and w
   else console.log(`✓ jump then dive: peak +${(peak - base.y).toFixed(2)} m, then down`)
 }
 
+// Open floor: player-scale knock, and every step stays a normal physics step (no teleport).
+{
+  const Y = 90
+  const nodes = new Map<string, [number, number, number]>()
+  for (let x = -4; x <= 120; x += 2) nodes.set('flat' + x, [x, Y, 0])
+  const flat = { graph: { worldPos: nodes } as typeof graph, rampTiles: [] as typeof rampTiles, base }
+  const slide = (spec: KnockSpec) => {
+    const body = new BotBody({ x: 0, y: Y - 0.05, z: 0 })
+    body.rng = () => 1
+    body.knock(spec)
+    let peak = body.pos.y
+    let prev = { ...body.pos }
+    let maxStep = 0
+    for (let t = 0; t < 8 && body.mode === 'knock'; t += 0.05) {
+      body.tick(0.05, flat)
+      maxStep = Math.max(maxStep, Math.hypot(body.pos.x - prev.x, body.pos.y - prev.y, body.pos.z - prev.z))
+      prev = { ...body.pos }
+      if (body.pos.y > peak) peak = body.pos.y
+    }
+    return { d: body.pos.x, hop: peak - (Y - 0.05), maxStep, mode: body.mode }
+  }
+  const lunge = slide(lungeKnock(1, 0))
+  const burst = slide(burstKnock(1, 0))
+  console.log(`open floor: lunge ${lunge.d.toFixed(1)} m (hop ${lunge.hop.toFixed(2)}, step ${lunge.maxStep.toFixed(2)}), burst ${burst.d.toFixed(1)} m (hop ${burst.hop.toFixed(2)}, step ${burst.maxStep.toFixed(2)})`)
+  if (lunge.d < 30 || lunge.d > 60) fail(`lunge on open floor ${lunge.d.toFixed(1)} m; player-scale band is 30–60 m`)
+  if (burst.d < 14 || burst.d > 30) fail(`burst on open floor ${burst.d.toFixed(1)} m; player-scale band is 14–30 m`)
+  if (lunge.maxStep > 4 || burst.maxStep > 4) fail(`knock stepped ${Math.max(lunge.maxStep, burst.maxStep).toFixed(2)} m in one tick`)
+  if (lunge.mode !== 'walk' || burst.mode !== 'walk') fail(`open-floor knock did not settle (lunge ${lunge.mode}, burst ${burst.mode})`)
+}
+
 if (failed) process.exit(1)
 console.log('✓ bot body checks passed')

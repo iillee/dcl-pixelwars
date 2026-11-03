@@ -7,7 +7,7 @@
  * uses the same radius, direction, and hit ledger as a ground Burst. Feel,
  * LOS raycast and networking need an Explorer playtest.
  */
-import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre, shockwaveHits } from '../src/shared/burst'
+import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre, shockwaveHits, shockwaveHitsBot, burstBotInRange } from '../src/shared/burst'
 import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, SERVER_BURST_LAND_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
 import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
@@ -267,7 +267,21 @@ check('unknown centre paints nothing', burstFootprint(g, 'nope', 'square', 1).le
   late.start('a', 2, 0, 1)
   check('landing knock outside the land window is rejected', !late.openLanding('a', 2, SERVER_BURST_LAND_WINDOW_S * 1000 + 1, SERVER_BURST_LAND_WINDOW_S) && late.impactAir('a', 2) === 1)
   check('a connect that never lands stays a downward spike', late.hit('a', 2, 'victim', 100) === 'ok' && late.impactAir('a', 2) === 1)
+  const placed = new BurstLedger()
+  placed.start('a', 3, 0, 0)
+  check('shockwave origin is empty until the press is placed', placed.origin('a', 3) === null)
+  placed.place('a', 3, P(1, 2, 3))
+  const origin = placed.origin('a', 3)
+  check('placed origin is the shockwave feet', !!origin && origin.x === 1 && origin.y === 3 && origin.z === 2)
 }
+check('bot feet inside the ground radius are a hit', shockwaveHitsBot(P(0, 0), P(4, 0), false))
+check('bot on the next level is not a ground hit', !shockwaveHitsBot(P(0, 0), P(1, 0, 10.8), false))
+check('ramp feet just past the height limit still hit when they stand on the footprint', shockwaveHitsBot(P(0, 0), P(6, 0, 4.2), true))
+check('those same ramp feet are not a hit off the footprint', !shockwaveHitsBot(P(0, 0), P(6, 0, 4.2), false))
+check('a stale footprint cell outside the radius is not a hit', !shockwaveHitsBot(P(0, 0), P(BURST_RADIUS + 3, 0, 1), true))
+check('render lag a couple of metres outside the radius still validates', burstBotInRange(P(0, 0), P(BURST_RADIUS + 2, 0), false))
+check('an air report beside the attacker is not a spike', !burstBotInRange(P(0, 0, 6), P(1.2, 0, 6), true))
+check('an air report just outside the cylinder, clearly below, still validates', burstBotInRange(P(0, 0, 6), P(AIR_SPIKE_RADIUS + 1.5, 0, 4), true))
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }
 console.log('✓ all burst checks passed')

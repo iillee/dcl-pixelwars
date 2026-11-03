@@ -12,6 +12,38 @@
  * knockback reuses flagtag's tuned bomb values. Tune in a two-player playtest.
  */
 
+// ═══ Playtest round format (temporary) ══════════════════════════════
+// One switch. FORMAT_ALTERNATE false → every round is PvP (normal Pixelwars).
+// true → startNextRound flips pvp/pvb after each round that continues from
+// the summary. A cold start or an idle start is always PvP.
+// PvB: every human on one colour (Red, then Blue, … across PvB rounds);
+// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)),
+// taken at round start. Mid-round the count may grow as humans join; it does
+// not shrink until the next round, unless no humans are left.
+export const FORMAT_ALTERNATE = true
+/** Bots per active human in a PvB round. 1 = one bot each. */
+export const PVB_RATIO = 1.0
+/** Hard cap on PvB bots (playtest: up to 15). */
+export const PVB_BOT_MAX = 15
+
+export type RoundFormat = 'pvp' | 'pvb'
+
+export function pvbBotCount(activeHumans: number): number {
+  if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
+  return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
+}
+
+/** Next round's format. `continuing` is false for a cold start and an idle start. */
+export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
+  return current === 'pvb' ? 'pvp' : 'pvb'
+}
+
+/** Human colour for PvB round `index` (0-based, PvB rounds only). Red, then Blue, then Red… */
+export function pvbHumanTeam(index: number): 1 | 2 {
+  return index % 2 === 0 ? 1 : 2
+}
+
 /**
  * 'on'        — every round.
  * 'off'       — disabled everywhere (no slot, server drops requests).
@@ -184,6 +216,10 @@ export const AIR_SPIKE_FORCE_S = 0.28
 export const AIR_SPIKE_GROUND_OUT = 85
 export const AIR_SPIKE_GROUND_LIFT = 16
 export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
+/** Attacker aerial Burst: same glider shut as a spiked victim, held for the dive.
+ *  Long enough to fall from the top of the sky maze if the landing clear is missed.
+ *  The client clears it when the feet land. Ground Burst does not use this. */
+export const AIR_SPIKE_DIVE_GLIDE_LOCK_S = 4
 /**
  * Attacker recovery after a connect. One block so a playtest can tune the risk.
  * A miss does not use these: the full dive (impulse + downward force) keeps going,
@@ -440,8 +476,11 @@ export const VICTIM_SPECULATIVE_KNOCK = true
 // ─── Ghost bot body (shared/botBody.ts, run by the server) ──────────
 /** Bots take the same knocks as players (shared/knocks.ts) through a server body sim. These convert
  *  Physics-API units to the body's m/s and set its gravity and ground friction. Tune them until the
- *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit. */
-export const BOT_KNOCK_UNIT = 0.15 // m/s per impulse unit (guess: lunge ≈ 12 m on flat floor; the anvil's 0.25 gave ≈ 49 m)
+ *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit.
+ *  0.15 guessed a 12 m lunge. A human gets the raw impulse; the anvil stand-in for that impulse
+ *  (LUNGE_DUMMY_UNIT) is 0.25 and slides about 40 m. Same number here. Motion stays the body's
+ *  normal steps — no extra snap. */
+export const BOT_KNOCK_UNIT = 0.25 // m/s per impulse unit; matches LUNGE_DUMMY_UNIT
 export const BOT_GRAVITY = 20 // m/s²
 export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
 /** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */

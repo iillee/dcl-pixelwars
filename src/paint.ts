@@ -682,15 +682,17 @@ let stanceStep = 8
 let stanceLookup: ((tx: number, tz: number, py: number) => { type: string; r: number; y: number } | null) | null = null
 
 /** Feet right now, and whether they are close enough to a walkable cell to be a ground Burst.
- *  Independent of `isPlayerGrounded` (movement paint, one frame behind, 0.4 m). */
-export function sampleBurstStance(): { x: number; y: number; z: number; cell: string; grounded: boolean } | null {
+ *  `lift` is metres above that surface (Infinity over the void). Independent of
+ *  `isPlayerGrounded` (movement paint, one frame behind, 0.4 m). */
+export function sampleBurstStance(): { x: number; y: number; z: number; cell: string; grounded: boolean; lift: number } | null {
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return null
   const { x, y, z } = t.position
-  if (!stanceLookup) return { x, y, z, cell: lastCenterId ?? '', grounded: playerGrounded }
+  if (!stanceLookup) return { x, y, z, cell: lastCenterId ?? '', grounded: playerGrounded, lift: playerGrounded ? 0 : Infinity }
   const hit = worldToCellId(x, y, z, stanceCell, stanceStep, stanceLookup)
-  if (!hit) return { x, y, z, cell: '', grounded: false }
-  return { x, y, z, cell: hit.id, grounded: y - hit.groundY <= BURST_STANCE_SLACK }
+  if (!hit) return { x, y, z, cell: '', grounded: false, lift: Infinity }
+  const lift = y - hit.groundY
+  return { x, y, z, cell: hit.id, grounded: lift <= BURST_STANCE_SLACK, lift }
 }
 
 // ─── Painting system (per-frame, single-player for now) ──────────────

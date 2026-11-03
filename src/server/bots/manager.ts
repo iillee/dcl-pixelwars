@@ -2,22 +2,28 @@
  * manager.ts — bot population control + tick loop.
  *
  * Owns the pool of active Bot instances. On each server tick:
- *   1. Adjust population to hit `targetActive` humans + bots
- *   2. Tick every bot; apply resulting paint via the injected callback
+ *   1. Population. PvP (default): fill the short team — bot count = how
+ *      many fewer ACTIVE humans that team has. All bots sit on that team
+ *      only (bots never fight bots). 1 red human → 1 blue bot; 3 red vs
+ *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
+ *      Wrong-side and excess bots retire immediately.
+ *      PvB (setPopulation): every bot on the colour opposite the human
+ *      team. Count = pvbBotCount(active humans). At a round boundary the
+ *      pool is trimmed to that count. Mid-round it may grow when humans
+ *      join, and it retires only when no humans are left.
+ *   2. Tick every bot; apply resulting paint via the injected callback.
  *
- * Spawning: the ghost always starts on its OWN base tile centre (the base
- * opposite the solo human). On a round boundary the graph is rebuilt and
- * the ghost is sent back to its base; if the solo human changes team the
- * ghost is respawned for the other side on the other base.
+ * Spawning: each bot starts on its own team's base, spread across the
+ * base cells so a crowd does not stack on one cell. A round rebuild
+ * reseats survivors the same way. If the short team flips (PvP), bots on
+ * the old side retire immediately and new ones spawn on the new base.
  *
- * Bots do NOT flow through the paintTick / leaderboard code paths — they
- * call applyPaint directly. That's intentional:
- *   - No wire message (they're already server-side)
- *   - No leaderboard credit (bot names must never appear in top-painters)
+ * Paint is applied here (no paintTick wire message) and attributed to
+ * `bot:<id>`. The server credits that id on the live / round scoreboard
+ * only — never the persisted top-painters board.
  *
- * Team assignment: whichever team currently has fewer bots. Ties go to
- * Red. Keeps team distribution balanced without needing to poll the
- * human roster split.
+ * Active humans come from the roster (60s window). Bots are not part of
+ * that count; they fill the gap after humans are assigned.
  */
 
 import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, Placed } from '../../maze/generator'
@@ -30,7 +36,7 @@ import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
-  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE,
+  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount,
 } from '../../shared/pvp'
 import { Bot, makeValueTarget, PaintReader } from './bot'
 
@@ -55,20 +61,13 @@ const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null,
 })
 
-// Solo-mode: exactly one bot appears when there is exactly one human,
-// always on the OPPOSITE team so the solo player has an opponent. Two+
-// humans = no bots; zero humans = no bots.
-const SOLO_HUMAN_COUNT = 1
-
 export interface ManagerDeps {
   /** Attribute paint to a team. Returns true if the cell actually flipped. */
   applyPaint: (cellId: string, team: number, painter: string) => boolean
   /** Read paint state to power smart-target heuristics. */
   paint: PaintReader
-  /** Currently-connected (or ever-connected) human count. */
-  humanCount: () => number
-  /** Team (1 or 2) of the sole human when humanCount===1, else null. */
-  soloHumanTeam: () => number | null
+  /** Active humans per team (roster idle rule). Humans only — never bots. */
+  activeHumans: () => { red: number; blue: number }
   /** Bot crossed the fall line at `at`; the cloud carries it to `base` (broadcast rescueStart, count the death). */
   onFell?: (id: number, at: V3, base: V3) => void
   /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
@@ -85,17 +84,38 @@ export interface ManagerDeps {
   onBurstLand?: (id: number, burstId: number, team: number, at: V3, fx: number, fz: number) => void
   /** Bot's lunge reached `human` by reported positions (round stats only; the victim's client knocks itself). */
   onBotHit?: (id: number, human: string) => void
+  /** A bot just entered the round (live scoreboard row). */
+  onSpawn?: (id: number, team: number) => void
 }
 
 let deps: ManagerDeps | null = null
 let graph: WalkableGraph | null = null
 let rampTiles: Placed[] = []
+let placedTiles: Placed[] = []
 let bots: LiveBot[] = []
 let botIdCounter = 0
 
+/** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
+export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
+let population: BotPopulation = { kind: 'pvp' }
+let populationGen = 0
+let appliedGen = -1
+/** Base cells per team, deep cells first, refreshed with the graph. */
+const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+
 export function initBots(d: ManagerDeps): void {
   deps = d
-  console.log('[Bots] initialised (solo-mode: 1 bot when 1 human, opposite team)')
+  population = { kind: 'pvp' }
+  populationGen++
+  console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
+}
+
+/** Called from startNextRound. The next tick fits the pool (PvP immediately, PvB at the boundary). */
+export function setPopulation(mode: BotPopulation): void {
+  population = mode.kind === 'pvb' && (mode.humanTeam === 1 || mode.humanTeam === 2)
+    ? { kind: 'pvb', humanTeam: mode.humanTeam }
+    : { kind: 'pvp' }
+  populationGen++
 }
 
 /**
@@ -108,26 +128,81 @@ export function rebuildBotGraph(seed: number): void {
   if (winning === null) {
     console.log('[Bots] graph rebuild failed: no valid maze from seed ' + seed)
     graph = null
+    rampTiles = []
+    placedTiles = []
+    baseCellCache[1] = []
+    baseCellCache[2] = []
     return
   }
   const t0 = Date.now()
   const tiles = getPlacedTilesInOrder()
   graph = buildWalkableGraph(tiles)
   rampTiles = tiles.filter(t => TILES[t.type].isRamp)
+  placedTiles = tiles
+  cacheBaseCells()
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
 
-  // New round: send any surviving ghost back to its own base (the old
+  // New round: spread any surviving ghost across its own base (the old
   // cellIds are stale). tickBots() then re-checks its team next tick.
   for (const b of bots) placeAtBase(b)
+}
+
+function cacheBaseCells(): void {
+  baseCellCache[1] = []
+  baseCellCache[2] = []
+  if (!graph) return
+  const buckets: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+  for (const id of graph.nodes) {
+    const t = baseTeamOfCellId(id)
+    if (t === 1 || t === 2) buckets[t].push(id)
+  }
+  for (const team of [1, 2] as const) {
+    buckets[team].sort((a, b) => {
+      const da = graph!.deepNodes.has(a) ? 0 : 1
+      const db = graph!.deepNodes.has(b) ? 0 : 1
+      if (da !== db) return da - db
+      const pa = graph!.worldPos.get(a)
+      const pb = graph!.worldPos.get(b)
+      if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
+      if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
+      return a < b ? -1 : a > b ? 1 : 0
+    })
+    baseCellCache[team] = buckets[team]
+  }
 }
 
 /** Stand a bot on its base: legs and body both, ending any cloud trip. */
 function placeAtBase(b: LiveBot): void {
   if (b.body.inRescue()) deps?.onRescueEnd?.(b.botId)
-  b.currentCell = baseStartCell(b.team)
+  const spot = pickSpawn(b.team, b)
+  b.currentCell = spot.cell
   b.clearPath()
-  b.body.reset(cellPos(b.currentCell) ?? baseSpawn(b.team).pos)
+  b.body.reset(spot.pos)
+}
+
+/**
+ * A free cell on this team's base. The first bot takes the same cell humans
+ * spawn on; the rest walk the base so they don't stack. `self` is excluded
+ * so a reseat can keep its own cell when nobody else is on it.
+ */
+function pickSpawn(team: number, self?: LiveBot): { cell: string; pos: V3 } {
+  const cells = team === 1 || team === 2 ? baseCellCache[team] : []
+  const taken = new Set<string>()
+  for (const o of bots) if (o !== self && o.team === team) taken.add(o.currentCell)
+  const primary = baseStartCell(team)
+  const ordered = primary && !cells.includes(primary) ? [primary, ...cells] : [primary, ...cells.filter(id => id !== primary)]
+  for (const id of ordered) {
+    if (!id || taken.has(id)) continue
+    const p = cellPos(id)
+    if (p) return { cell: id, pos: p }
+  }
+  const cell = cells[0] ?? primary
+  const base = cellPos(cell) ?? baseSpawn(team).pos
+  const n = bots.filter(o => o !== self && o.team === team).length
+  const ang = n * 2.399963229728653
+  const rad = 0.45 * (1 + (n % 5))
+  return { cell, pos: { x: base.x + Math.cos(ang) * rad, y: base.y, z: base.z + Math.sin(ang) * rad } }
 }
 
 function cellPos(id: string): V3 | null {
@@ -174,40 +249,126 @@ function baseStartCell(team: number): string {
   return [...g.nodes][0]
 }
 
-/** Solo-mode: bot team is opposite of the sole human. Defaults to Blue
- *  if soloHumanTeam is somehow unavailable at spawn time. */
-function pickTeamForNewBot(): number {
-  const humanTeam = deps?.soloHumanTeam() ?? 1
-  return humanTeam === 1 ? 2 : 1
+function teamName(team: number): string {
+  return team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'NONE'
 }
 
-function spawnBot(): void {
+function countLabel(c: { red: number; blue: number }): string {
+  return `red=${c.red} blue=${c.blue} bots=${bots.length}`
+}
+
+/** Short team and how many bots it needs. Even or empty lobbies need none. */
+function desiredFill(c: { red: number; blue: number }): { team: number; count: number } {
+  if (c.red + c.blue === 0 || c.red === c.blue) return { team: 0, count: 0 }
+  if (c.red < c.blue) return { team: 1, count: c.blue - c.red }
+  return { team: 2, count: c.red - c.blue }
+}
+
+/** Bot whose nearest human is farthest. No reported positions → newest id. */
+function pickFarthest(pool: LiveBot[]): LiveBot {
+  const humans = deps?.humans?.() ?? []
+  let best = pool[0]
+  let bestD = -1
+  for (const b of pool) {
+    const p = b.body.pos
+    let d = 0
+    if (humans.length > 0) {
+      d = Infinity
+      for (const h of humans) {
+        const dd = Math.hypot(p.x - h.x, p.y - h.y, p.z - h.z)
+        if (dd < d) d = dd
+      }
+    }
+    if (d > bestD + 1e-3 || (Math.abs(d - bestD) <= 1e-3 && b.botId > best.botId)) {
+      best = b
+      bestD = d
+    }
+  }
+  return best
+}
+
+function spawnBot(team: number, reason: string, counts: { red: number; blue: number }): void {
   if (!graph || !deps) return
-  // Spawn on the deep (eroded) subgraph so the bot's very first path
-  // stays off walls. Fall back to full nodes only in the pathological
-  // case where the deep set is empty (shouldn't happen with ARM=10).
-  // Spawn on the ghost's OWN base — the opposite base from the solo human.
-  const team = pickTeamForNewBot()
-  const startCell = baseStartCell(team)
+  // Own base, spread across the base cells. Each bot is its own instance:
+  // path, combat cooldowns, and `bot:<id>` paint / hit credit.
+  const spot = pickSpawn(team)
   const bot = new Bot({
     team,
-    startCell,
+    startCell: spot.cell,
     pickTarget: makeValueTarget(deps.paint, team),
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
   }) as LiveBot
   botIdCounter++
   bot.botId = botIdCounter
-  bot.body = new BotBody(cellPos(startCell) ?? baseSpawn(team).pos)
+  bot.body = new BotBody(spot.pos)
   bot.combat = newCombat()
   bots.push(bot)
-  console.log(`[Bots] spawn #${botIdCounter}: team ${team === 1 ? 'RED' : 'BLUE'} at ${startCell} (pop ${bots.length})`)
+  deps.onSpawn?.(bot.botId, team)
+  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)})`)
 }
 
-function retireBot(): void {
-  const removed = bots.pop()
-  if (!removed) return
-  if (removed.body.inRescue()) deps?.onRescueEnd?.(removed.botId)
-  console.log(`[Bots] retire: team ${removed.team === 1 ? 'RED' : 'BLUE'} (pop ${bots.length})`)
+function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
+  const i = bots.indexOf(b)
+  if (i < 0) return
+  bots.splice(i, 1)
+  if (b.body.inRescue()) deps?.onRescueEnd?.(b.botId)
+  console.log(`[Bots] retire #${b.botId} team ${teamName(b.team)} (${reason}, ${countLabel(counts)})`)
+}
+
+/** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
+function balanceBots(): void {
+  if (!graph || !deps) return
+  const fresh = appliedGen !== populationGen
+  appliedGen = populationGen
+  if (population.kind === 'pvb') {
+    balancePvb(fresh)
+    return
+  }
+  const counts = deps.activeHumans()
+  const want = desiredFill(counts)
+  if (want.count === 0) {
+    const why = counts.red + counts.blue === 0 ? 'zero humans' : 'teams even'
+    while (bots.length > 0) retireBot(pickFarthest(bots), why, counts)
+    return
+  }
+  for (const b of bots.filter(x => x.team !== want.team)) {
+    retireBot(b, `wrong team, short side is ${teamName(want.team)}`, counts)
+  }
+  while (bots.length > want.count) retireBot(pickFarthest(bots), 'excess, farthest from a human', counts)
+  while (bots.length < want.count) {
+    const before = bots.length
+    spawnBot(want.team, 'fill short team', counts)
+    if (bots.length === before) break
+  }
+}
+
+/**
+ * PvB pool. Wrong-team leftovers (the previous format) retire. On the tick
+ * that applies a new population, trim down to the round-start count. After
+ * that, only add bots — a human leaving does not retire anyone, unless the
+ * human count hits zero.
+ */
+function balancePvb(fresh: boolean): void {
+  if (!deps) return
+  const counts = deps.activeHumans()
+  const humans = counts.red + counts.blue
+  const wantN = pvbBotCount(humans)
+  const team = population.kind === 'pvb' && population.humanTeam === 1 ? 2 : 1
+  for (const b of bots.filter(x => x.team !== team)) {
+    retireBot(b, `wrong team, PvB bots are ${teamName(team)}`, counts)
+  }
+  if (wantN === 0) {
+    while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
+    return
+  }
+  if (fresh) {
+    while (bots.length > wantN) retireBot(pickFarthest(bots), 'round start, fit PvB count', counts)
+  }
+  while (bots.length < wantN) {
+    const before = bots.length
+    spawnBot(team, 'PvB fill', counts)
+    if (bots.length === before) break
+  }
 }
 
 /**
@@ -225,20 +386,10 @@ export function tickBots(dtSec: number): void {
   if (!graph || !deps) return
 
   // ── 1. Population control ──────────────────────────────────────────
-  const humans = deps.humanCount()
-  const desired = humans === SOLO_HUMAN_COUNT ? 1 : 0
-  while (bots.length < desired) spawnBot()
-  while (bots.length > desired) retireBot()
-
-  // Solo human switched team (or was re-assigned at a new round): the ghost
-  // must play the other side, so retire it and respawn on the opposite base.
-  // Bot.team is fixed per instance (its smart target is bound to it).
-  const solo = deps.soloHumanTeam()
-  if (solo !== null && bots.length === 1 && bots[0].team === solo) {
-    console.log(`[Bots] solo human is now ${solo === 1 ? 'RED' : 'BLUE'} - respawning ghost on the opposite base`)
-    retireBot()
-    spawnBot()
-  }
+  // Immediate: a human joining or waking drops the excess this tick, not at
+  // the round boundary. Bot.team is fixed per instance (target is bound to it),
+  // so a side flip retires the old bots and spawns on the new base.
+  balanceBots()
 
   // Walking ghost whose cell no longer exists (e.g. the tile under it went
   // away): back to its own base.
@@ -256,7 +407,7 @@ export function tickBots(dtSec: number): void {
   // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
   for (const b of bots) {
-    const world = { graph, rampTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
+    const world = { graph, rampTiles, tiles: placedTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'settled') {
@@ -447,6 +598,13 @@ function wireOf(b: LiveBot): BotWireState {
   if (b.body.isGliding()) return 4
   if (b.body.mode === 'walk') return 0
   return b.body.mode === 'knock' ? 1 : 2
+}
+
+/** Feet plus the graph cell the bot last stood on. Hit tests use the feet; the cell is only
+ *  a footprint fallback for a ground Burst (a bot standing on a painted cell). */
+export function getBotHitPoints(): Array<{ id: number; team: number; x: number; y: number; z: number; cell: string }> {
+  if (!graph) return []
+  return bots.map(b => ({ id: b.botId, team: b.team, x: b.body.pos.x, y: b.body.pos.y, z: b.body.pos.z, cell: b.currentCell }))
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {

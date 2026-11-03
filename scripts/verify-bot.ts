@@ -8,7 +8,7 @@
  *   - Every consecutive pair is graph-adjacent (no teleports)
  */
 
-import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, CELL, MAZE_ORIGIN } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, makeSmartTarget, makeValueTarget, PaintReader } from '../src/server/bots/bot'
 
@@ -106,31 +106,72 @@ const perStep = (val.g * 5) / Math.max(1, total)
 console.log(`✓ value bot: ${perStep.toFixed(2)} cells gained per step over ${total} steps (5 runs)`)
 if (perStep < 1.2) { console.error('✗ value bot mostly walks its own paint'); process.exit(1) }
 
-// ─── Ghost spawn: always on the base opposite the solo human ─────────
-import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
+// ─── Short-team fill: bots = active-human gap, one side only, own base ─
+import { initBots, rebuildBotGraph, tickBots, getBotPositions, getWalkableGraph, setPopulation } from '../src/server/bots/manager'
 import { baseSpawn } from '../src/maze/generator'
 {
-  let humanTeam = 1
-  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, humanCount: () => 1, soloHumanTeam: () => humanTeam })
+  let counts = { red: 1, blue: 0 }
+  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
   rebuildBotGraph(42)
-  const near = (team: number) => {
+  const onBase = (team: number, label: string) => {
     const p = getBotPositions()
-    if (p.length !== 1) { console.error(`✗ expected 1 ghost, got ${p.length}`); process.exit(1) }
+    const g = getWalkableGraph()
+    if (!g) { console.error(`✗ ${label}: no graph`); process.exit(1) }
     const s = baseSpawn(team).pos
-    const d = Math.hypot(p[0].x - s.x, p[0].z - s.z)
-    if (p[0].team !== team || d > 3 || Math.abs(p[0].y - (s.y - 1.5)) > 1.5) { console.error(`✗ ghost team ${p[0].team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)}), want team ${team} near (${s.x}, ${s.z})`); process.exit(1) }
-    return `team ${team} at (${p[0].x.toFixed(1)}, ${p[0].y.toFixed(1)}, ${p[0].z.toFixed(1)})`
+    for (const b of p) {
+      let best = Infinity
+      let bestY = 0
+      for (const [id, pos] of g.worldPos) {
+        if (baseTeamOfCellId(id) !== team) continue
+        const d = Math.hypot(b.x - pos[0], b.z - pos[2])
+        if (d < best) { best = d; bestY = pos[1] }
+      }
+      const nearSpawn = p.length === 1 ? Math.hypot(b.x - s.x, b.z - s.z) : 0
+      if (b.team !== team || best > 1.6 || Math.abs(b.y - bestY) > 1.5 || (p.length === 1 && (nearSpawn > 3 || Math.abs(b.y - (s.y - 1.5)) > 1.5))) {
+        console.error(`✗ ${label}: bot ${b.id} team ${b.team} at (${b.x.toFixed(1)}, ${b.y.toFixed(1)}, ${b.z.toFixed(1)}), nearest base cell ${best.toFixed(1)} m, spawn ${nearSpawn.toFixed(1)} m`)
+        process.exit(1)
+      }
+    }
+    if (p.length > 1) {
+      for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
+        const d = Math.hypot(p[i].x - p[j].x, p[i].z - p[j].z)
+        if (d < 1.5) { console.error(`✗ ${label}: bots ${p[i].id} and ${p[j].id} stacked (${d.toFixed(2)} m)`); process.exit(1) }
+      }
+    }
   }
-  tickBots(0); const a = near(2)
-  humanTeam = 2; tickBots(0); const b = near(1)
+  const expect = (n: number, team: number, label: string) => {
+    const p = getBotPositions()
+    if (p.length !== n) { console.error(`✗ ${label}: expected ${n} bots, got ${p.length}`); process.exit(1) }
+    if (n === 0) return label
+    onBase(team, label)
+    const ids = new Set(p.map(b => b.id))
+    if (ids.size !== n) { console.error(`✗ ${label}: duplicate bot ids`); process.exit(1) }
+    return `${label}: ${n}× team ${team}`
+  }
+  tickBots(0)
+  const a = expect(1, 2, '1 red human')
+  counts = { red: 0, blue: 1 }; tickBots(0)
+  const b = expect(1, 1, 'short side flipped')
+  counts = { red: 3, blue: 1 }; tickBots(0)
+  const c = expect(2, 2, '3v1')
+  counts = { red: 3, blue: 2 }; tickBots(0)
+  const d = expect(1, 2, 'excess retired')
+  counts = { red: 2, blue: 2 }; tickBots(0)
+  const e = expect(0, 0, '2v2')
+  counts = { red: 0, blue: 0 }; tickBots(0)
+  const f = expect(0, 0, 'zero humans')
+  counts = { red: 0, blue: 1 }; tickBots(0)
   for (let i = 0; i < 40; i++) tickBots(0.2)
-  rebuildBotGraph(43); const c = near(1)
-  console.log(`✓ ghost spawns opposite: human RED → ${a}; human BLUE → ${b}; new round → ${c}`)
+  rebuildBotGraph(43)
+  const g = expect(1, 1, 'new round, still short red')
+  console.log(`✓ short-team fill: ${a}; ${b}; ${c}; ${d}; ${e}; ${f}; ${g}`)
 }
 
 // ─── Level drops: the path uses one, and the body lands on that floor ──
 import { findPath } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
+import { AnvilWorld } from '../src/shared/anvilSim'
+import { lungeKnock } from '../src/shared/knocks'
 import { TILES } from '../src/maze/tiles'
 {
   let drops = 0, jumps = 0, sample: { from: string; to: string } | null = null
@@ -150,7 +191,7 @@ import { TILES } from '../src/maze/tiles'
   if (walk && air.length >= walk.length) console.log(`(drop path ${air.length} is not shorter than the walk ${walk.length}; cost may still prefer the ramp)`)
   const body = new BotBody({ x: from[0], y: from[1], z: from[2] })
   if (!body.leap({ x: to[0], y: to[1], z: to[2] })) { console.error('✗ leap refused'); process.exit(1) }
-  const world = { graph, rampTiles: getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp), base: { x: from[0], y: from[1], z: from[2] } }
+  const world = { graph, rampTiles: getPlacedTilesInOrder().filter(t => TILES[t.type].isRamp), tiles: getPlacedTilesInOrder(), base: { x: from[0], y: from[1], z: from[2] } }
   let settled = false
   for (let t = 0; t < 8 && !settled; t += 0.05) {
     for (const e of body.tick(0.05, world)) if (e.type === 'settled') settled = true
@@ -163,4 +204,221 @@ import { TILES } from '../src/maze/tiles'
     process.exit(1)
   }
   console.log(`✓ drop ${sample!.from} → ${sample!.to}: path step 1, landed ${d.toFixed(1)} m from the cell (down ${(from[1] - to[1]).toFixed(1)} m)`)
+}
+
+// ─── Round format + PvB population ──────────────────────────────────
+import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount, pvbHumanTeam, type RoundFormat } from '../src/shared/pvp'
+{
+  const seq: RoundFormat[] = []
+  let f: RoundFormat = 'pvp'
+  f = nextRoundFormat(f, false); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, false); seq.push(f)
+  const want = FORMAT_ALTERNATE ? 'pvp,pvb,pvp,pvb,pvp' : 'pvp,pvp,pvp,pvp,pvp'
+  if (seq.join(',') !== want) { console.error(`✗ format sequence ${seq.join(',')} want ${want}`); process.exit(1) }
+  if (pvbHumanTeam(0) !== 1 || pvbHumanTeam(1) !== 2 || pvbHumanTeam(2) !== 1) {
+    console.error('✗ PvB human colour should be Red, Blue, Red'); process.exit(1)
+  }
+  if (pvbBotCount(0) !== 0 || pvbBotCount(-3) !== 0) { console.error('✗ zero humans → 0 bots'); process.exit(1) }
+  if (pvbBotCount(1) < 1 || pvbBotCount(1000) !== PVB_BOT_MAX) { console.error('✗ PvB count out of range'); process.exit(1) }
+  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
+  if (PVB_RATIO === 1 && (pvbBotCount(10) !== 10 || pvbBotCount(15) !== 15 || pvbBotCount(16) !== 15)) {
+    console.error(`✗ ratio 1 counts: 10→${pvbBotCount(10)} 15→${pvbBotCount(15)} 16→${pvbBotCount(16)}`); process.exit(1)
+  }
+  console.log(`✓ format alternation (${seq.join(' → ')}) and PvB count cap ${PVB_BOT_MAX}`)
+}
+
+{
+  let counts = { red: 0, blue: 0 }
+  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
+  rebuildBotGraph(42)
+  setPopulation({ kind: 'pvp' })
+  tickBots(0) // drop whatever the short-team block left behind
+  if (getBotPositions().length !== 0) { console.error('✗ PvB setup: leftover bots'); process.exit(1) }
+
+  const assertSpread = (n: number, team: number, label: string) => {
+    const p = getBotPositions()
+    if (p.length !== n) { console.error(`✗ ${label}: expected ${n} bots, got ${p.length}`); process.exit(1) }
+    const g = getWalkableGraph()!
+    for (const b of p) {
+      if (b.team !== team) { console.error(`✗ ${label}: bot ${b.id} on team ${b.team}, want ${team}`); process.exit(1) }
+      let best = Infinity
+      for (const [id, pos] of g.worldPos) {
+        if (baseTeamOfCellId(id) !== team) continue
+        best = Math.min(best, Math.hypot(b.x - pos[0], b.z - pos[2]))
+      }
+      if (best > 1.6) { console.error(`✗ ${label}: bot ${b.id} ${best.toFixed(1)} m off the base`); process.exit(1) }
+    }
+    let minD = Infinity
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
+      minD = Math.min(minD, Math.hypot(p[i].x - p[j].x, p[i].z - p[j].z))
+    }
+    if (n > 1 && minD < 1.5) { console.error(`✗ ${label}: stacked, closest ${minD.toFixed(2)} m`); process.exit(1) }
+    return minD
+  }
+
+  counts = { red: 10, blue: 0 }
+  setPopulation({ kind: 'pvb', humanTeam: 1 })
+  tickBots(0)
+  const kept = new Set(getBotPositions().map(b => b.id))
+  const spread10 = assertSpread(10, 2, '10 humans → 10 blue bots')
+
+  counts = { red: 12, blue: 0 }
+  tickBots(0) // mid-round: add, keep the ones already in
+  assertSpread(12, 2, 'humans 10→12 adds bots')
+  for (const id of kept) {
+    if (!getBotPositions().some(b => b.id === id)) { console.error(`✗ added bots retired #${id}`); process.exit(1) }
+  }
+
+  counts = { red: 3, blue: 0 }
+  tickBots(0) // mid-round: do not retire while humans remain
+  if (getBotPositions().length !== 12) { console.error(`✗ mid-round retire: ${getBotPositions().length} bots, want 12`); process.exit(1) }
+
+  counts = { red: 20, blue: 0 }
+  tickBots(0)
+  const spread15 = assertSpread(PVB_BOT_MAX, 2, 'cap')
+
+  counts = { red: 0, blue: 0 }
+  tickBots(0)
+  if (getBotPositions().length !== 0) { console.error('✗ zero humans should retire PvB bots'); process.exit(1) }
+
+  counts = { red: 0, blue: 4 }
+  setPopulation({ kind: 'pvb', humanTeam: 2 }) // next PvB boundary: humans on blue
+  tickBots(0)
+  assertSpread(4, 1, 'human team flipped to blue')
+
+  counts = { red: 4, blue: 0 }
+  tickBots(0) // humans moved but population not reset: still the blue-human round, count may grow, no retire
+  if (getBotPositions().length !== 4) { console.error(`✗ team counts changed under the same PvB round: ${getBotPositions().length}`); process.exit(1) }
+
+  counts = { red: 3, blue: 1 }
+  setPopulation({ kind: 'pvp' })
+  tickBots(0)
+  const pvp = getBotPositions()
+  if (pvp.length !== 2 || pvp.some(b => b.team !== 2)) {
+    console.error(`✗ back to PvP gap: ${pvp.map(b => b.team).join(',') || 'none'}`); process.exit(1)
+  }
+
+  // 15 bots. The first ticks pathfind; the second window is the steady walk.
+  // Fail only if the steady average cannot fit in a 30 Hz server frame.
+  counts = { red: 15, blue: 0 }
+  setPopulation({ kind: 'pvb', humanTeam: 1 })
+  tickBots(0)
+  if (getBotPositions().length !== PVB_BOT_MAX) { console.error('✗ perf setup did not reach the cap'); process.exit(1) }
+  const bench = (n: number) => {
+    const t0 = Date.now()
+    let slow = 0
+    let worst = 0
+    for (let i = 0; i < n; i++) {
+      const a = Date.now()
+      tickBots(1 / 30)
+      const dt = Date.now() - a
+      if (dt > worst) worst = dt
+      if (dt > 30) slow++
+    }
+    return { ms: Date.now() - t0, slow, worst, n }
+  }
+  const warm = bench(30)
+  const steady = bench(60)
+  console.log(`✓ PvB population: spread10 ${spread10.toFixed(1)} m, spread15 ${spread15.toFixed(1)} m`)
+  console.log(`  15-bot tick warm-up ${warm.n}: ${(warm.ms / warm.n).toFixed(2)} ms/tick (worst ${warm.worst} ms)`)
+  console.log(`  15-bot tick steady ${steady.n}: ${(steady.ms / steady.n).toFixed(2)} ms/tick (worst ${steady.worst} ms, ${steady.slow} ticks > 30 ms)`)
+  if (steady.ms / steady.n > 30) { console.error('✗ 15-bot steady tick averages over a 30 Hz frame'); process.exit(1) }
+}
+
+// Interior wall (next cell is floor or a taller tile): a shove stays on the slab.
+// Perimeter lip (nothing at this height beyond): a knock flies off and falls.
+// A body left below a walkable cell is snapped back up, not left inside the mesh.
+{
+  const tiles = getPlacedTilesInOrder()
+  const world = {
+    graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles,
+    base: { x: 0, y: 0, z: 0 },
+  }
+  const cover = (x: number, z: number) => tiles.filter(t => {
+    const x0 = t.x * CELL + MAZE_ORIGIN, z0 = t.z * CELL + MAZE_ORIGIN
+    return x >= x0 && x < x0 + CELL && z >= z0 && z < z0 + CELL
+  })
+  // What sits past the walkable cell: continuing floor, a taller tile, a lower deck, or void.
+  const beyond = (p: [number, number, number], dx: number, dz: number): 'floor' | 'higher' | 'same' | 'lower' | 'void' => {
+    for (const dist of [3, 8, 14]) {
+      const x = p[0] + dx * dist, z = p[2] + dz * dist
+      const near = [...graph.worldPos.values()].some(q => Math.abs(q[1] - p[1]) < 1.5 && Math.hypot(q[0] - x, q[2] - z) < 1.5)
+      if (near) return 'floor'
+      const here = cover(x, z)
+      if (!here.length) return 'void'
+      const deck = p[1] - 0.5
+      if (here.some(t => t.y > deck + 2)) return 'higher'
+      if (here.some(t => Math.abs(t.y - deck) <= 2)) continue
+      if (here.every(t => t.y < deck - 2)) return 'lower'
+    }
+    return 'same'
+  }
+  const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+  let wall: { p: [number, number, number]; dx: number; dz: number } | null = null
+  let lip: { p: [number, number, number]; dx: number; dz: number } | null = null
+  for (const [id, p] of graph.worldPos) {
+    const [tx, tz, ty] = id.split(':')[0].split(',').map(Number)
+    const tile = tiles.find(t => t.x === tx && t.z === tz && Math.abs(t.y - ty) < 0.05)
+    if (!tile || TILES[tile.type].isRamp) continue
+    for (const [dx, dz] of dirs) {
+      const kind = beyond(p, dx, dz)
+      if (!wall && (kind === 'higher' || kind === 'same')) wall = { p, dx, dz }
+      if (!lip && kind === 'void') lip = { p, dx, dz }
+    }
+    if (wall && lip) break
+  }
+  if (!wall) { console.error('✗ no interior wall (adjacent floor or taller tile) to shove into'); process.exit(1) }
+  if (!lip) { console.error('✗ no perimeter lip to knock off'); process.exit(1) }
+
+  const body = new BotBody({ x: wall.p[0], y: wall.p[1], z: wall.p[2] })
+  body.rng = () => 1
+  body.knock({ kind: 'lunge', impulse: { x: wall.dx * 80, y: 0, z: wall.dz * 80 }, forceDir: { x: wall.dx, y: 0, z: wall.dz }, force: 40, forceS: 0.3, lockS: 0.2 })
+  for (let t = 0; t < 1.2; t += 0.05) body.tick(0.05, world)
+  const along = (wall.p[0] - body.pos.x) * -wall.dx + (wall.p[2] - body.pos.z) * -wall.dz
+  if (body.pos.y < wall.p[1] - 0.4 || along > 2.2) {
+    console.error(`✗ wall shove sank or crossed the margin: travel ${along.toFixed(2)} y ${body.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)}) mode=${body.mode}`)
+    process.exit(1)
+  }
+  console.log(`✓ wall shove stayed on the slab (${along.toFixed(2)} m toward the wall)`)
+
+  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
+  sunk.rng = () => 1
+  sunk.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
+  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
+  if (sunk.pos.y < wall.p[1] - 0.25) {
+    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ sunk body snapped up to ${sunk.pos.y.toFixed(2)}`)
+
+  const launch = (dx: number, dz: number) => {
+    const bot = new BotBody({ x: lip.p[0], y: lip.p[1], z: lip.p[2] })
+    bot.rng = () => 1
+    bot.knock(lungeKnock(dx, dz))
+    let fell = false
+    for (let t = 0; t < 6 && !fell; t += 0.05) {
+      for (const e of bot.tick(0.05, world)) if (e.type === 'fell') fell = true
+    }
+    const anvil = new AnvilWorld(1)
+    anvil.setMaze(graph, tiles, [], false)
+    const a = anvil.anvils[0]
+    a.alive = true
+    a.pos = { x: lip.p[0], y: lip.p[1], z: lip.p[2] }
+    anvil.hit(0, dx, dz, 1)
+    let anvilFell = false
+    for (let t = 0; t < 6 && !anvilFell; t += 0.05) {
+      anvil.tick(0.05)
+      if (!a.alive) anvilFell = true
+    }
+    return { fell, anvilFell, botY: bot.pos.y, anvilY: a.pos.y }
+  }
+  const off = launch(lip.dx, lip.dz)
+  if (!off.fell || !off.anvilFell) {
+    console.error(`✗ perimeter knock stuck on the lip: bot ${off.fell ? 'fell' : 'stayed'} y ${off.botY.toFixed(2)}, anvil ${off.anvilFell ? 'fell' : 'stayed'} y ${off.anvilY.toFixed(2)} (start ${lip.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ perimeter knock left the level (bot fell, anvil fell)`)
 }
