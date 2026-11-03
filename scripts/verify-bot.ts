@@ -107,24 +107,43 @@ console.log(`✓ value bot: ${perStep.toFixed(2)} cells gained per step over ${t
 if (perStep < 1.2) { console.error('✗ value bot mostly walks its own paint'); process.exit(1) }
 
 // ─── Short-team fill: bots = active-human gap, one side only, own base ─
-import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
+import { initBots, rebuildBotGraph, tickBots, getBotPositions, getWalkableGraph, setPopulation } from '../src/server/bots/manager'
 import { baseSpawn } from '../src/maze/generator'
 {
   let counts = { red: 1, blue: 0 }
   initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
   rebuildBotGraph(42)
+  const onBase = (team: number, label: string) => {
+    const p = getBotPositions()
+    const g = getWalkableGraph()
+    if (!g) { console.error(`✗ ${label}: no graph`); process.exit(1) }
+    const s = baseSpawn(team).pos
+    for (const b of p) {
+      let best = Infinity
+      let bestY = 0
+      for (const [id, pos] of g.worldPos) {
+        if (baseTeamOfCellId(id) !== team) continue
+        const d = Math.hypot(b.x - pos[0], b.z - pos[2])
+        if (d < best) { best = d; bestY = pos[1] }
+      }
+      const nearSpawn = p.length === 1 ? Math.hypot(b.x - s.x, b.z - s.z) : 0
+      if (b.team !== team || best > 1.6 || Math.abs(b.y - bestY) > 1.5 || (p.length === 1 && (nearSpawn > 3 || Math.abs(b.y - (s.y - 1.5)) > 1.5))) {
+        console.error(`✗ ${label}: bot ${b.id} team ${b.team} at (${b.x.toFixed(1)}, ${b.y.toFixed(1)}, ${b.z.toFixed(1)}), nearest base cell ${best.toFixed(1)} m, spawn ${nearSpawn.toFixed(1)} m`)
+        process.exit(1)
+      }
+    }
+    if (p.length > 1) {
+      for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
+        const d = Math.hypot(p[i].x - p[j].x, p[i].z - p[j].z)
+        if (d < 1.5) { console.error(`✗ ${label}: bots ${p[i].id} and ${p[j].id} stacked (${d.toFixed(2)} m)`); process.exit(1) }
+      }
+    }
+  }
   const expect = (n: number, team: number, label: string) => {
     const p = getBotPositions()
     if (p.length !== n) { console.error(`✗ ${label}: expected ${n} bots, got ${p.length}`); process.exit(1) }
     if (n === 0) return label
-    const s = baseSpawn(team).pos
-    for (const b of p) {
-      const d = Math.hypot(b.x - s.x, b.z - s.z)
-      if (b.team !== team || d > 3 || Math.abs(b.y - (s.y - 1.5)) > 1.5) {
-        console.error(`✗ ${label}: bot ${b.id} team ${b.team} at (${b.x.toFixed(1)}, ${b.y.toFixed(1)}, ${b.z.toFixed(1)}), want team ${team} near (${s.x}, ${s.z})`)
-        process.exit(1)
-      }
-    }
+    onBase(team, label)
     const ids = new Set(p.map(b => b.id))
     if (ids.size !== n) { console.error(`✗ ${label}: duplicate bot ids`); process.exit(1) }
     return `${label}: ${n}× team ${team}`
@@ -183,4 +202,126 @@ import { TILES } from '../src/maze/tiles'
     process.exit(1)
   }
   console.log(`✓ drop ${sample!.from} → ${sample!.to}: path step 1, landed ${d.toFixed(1)} m from the cell (down ${(from[1] - to[1]).toFixed(1)} m)`)
+}
+
+// ─── Round format + PvB population ──────────────────────────────────
+import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount, pvbHumanTeam, type RoundFormat } from '../src/shared/pvp'
+{
+  const seq: RoundFormat[] = []
+  let f: RoundFormat = 'pvp'
+  f = nextRoundFormat(f, false); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, true); seq.push(f)
+  f = nextRoundFormat(f, false); seq.push(f)
+  const want = FORMAT_ALTERNATE ? 'pvp,pvb,pvp,pvb,pvp' : 'pvp,pvp,pvp,pvp,pvp'
+  if (seq.join(',') !== want) { console.error(`✗ format sequence ${seq.join(',')} want ${want}`); process.exit(1) }
+  if (pvbHumanTeam(0) !== 1 || pvbHumanTeam(1) !== 2 || pvbHumanTeam(2) !== 1) {
+    console.error('✗ PvB human colour should be Red, Blue, Red'); process.exit(1)
+  }
+  if (pvbBotCount(0) !== 0 || pvbBotCount(-3) !== 0) { console.error('✗ zero humans → 0 bots'); process.exit(1) }
+  if (pvbBotCount(1) < 1 || pvbBotCount(1000) !== PVB_BOT_MAX) { console.error('✗ PvB count out of range'); process.exit(1) }
+  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
+  if (PVB_RATIO === 1 && (pvbBotCount(10) !== 10 || pvbBotCount(15) !== 15 || pvbBotCount(16) !== 15)) {
+    console.error(`✗ ratio 1 counts: 10→${pvbBotCount(10)} 15→${pvbBotCount(15)} 16→${pvbBotCount(16)}`); process.exit(1)
+  }
+  console.log(`✓ format alternation (${seq.join(' → ')}) and PvB count cap ${PVB_BOT_MAX}`)
+}
+
+{
+  let counts = { red: 0, blue: 0 }
+  initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
+  rebuildBotGraph(42)
+  setPopulation({ kind: 'pvp' })
+  tickBots(0) // drop whatever the short-team block left behind
+  if (getBotPositions().length !== 0) { console.error('✗ PvB setup: leftover bots'); process.exit(1) }
+
+  const assertSpread = (n: number, team: number, label: string) => {
+    const p = getBotPositions()
+    if (p.length !== n) { console.error(`✗ ${label}: expected ${n} bots, got ${p.length}`); process.exit(1) }
+    const g = getWalkableGraph()!
+    for (const b of p) {
+      if (b.team !== team) { console.error(`✗ ${label}: bot ${b.id} on team ${b.team}, want ${team}`); process.exit(1) }
+      let best = Infinity
+      for (const [id, pos] of g.worldPos) {
+        if (baseTeamOfCellId(id) !== team) continue
+        best = Math.min(best, Math.hypot(b.x - pos[0], b.z - pos[2]))
+      }
+      if (best > 1.6) { console.error(`✗ ${label}: bot ${b.id} ${best.toFixed(1)} m off the base`); process.exit(1) }
+    }
+    let minD = Infinity
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
+      minD = Math.min(minD, Math.hypot(p[i].x - p[j].x, p[i].z - p[j].z))
+    }
+    if (n > 1 && minD < 1.5) { console.error(`✗ ${label}: stacked, closest ${minD.toFixed(2)} m`); process.exit(1) }
+    return minD
+  }
+
+  counts = { red: 10, blue: 0 }
+  setPopulation({ kind: 'pvb', humanTeam: 1 })
+  tickBots(0)
+  const kept = new Set(getBotPositions().map(b => b.id))
+  const spread10 = assertSpread(10, 2, '10 humans → 10 blue bots')
+
+  counts = { red: 12, blue: 0 }
+  tickBots(0) // mid-round: add, keep the ones already in
+  assertSpread(12, 2, 'humans 10→12 adds bots')
+  for (const id of kept) {
+    if (!getBotPositions().some(b => b.id === id)) { console.error(`✗ added bots retired #${id}`); process.exit(1) }
+  }
+
+  counts = { red: 3, blue: 0 }
+  tickBots(0) // mid-round: do not retire while humans remain
+  if (getBotPositions().length !== 12) { console.error(`✗ mid-round retire: ${getBotPositions().length} bots, want 12`); process.exit(1) }
+
+  counts = { red: 20, blue: 0 }
+  tickBots(0)
+  const spread15 = assertSpread(PVB_BOT_MAX, 2, 'cap')
+
+  counts = { red: 0, blue: 0 }
+  tickBots(0)
+  if (getBotPositions().length !== 0) { console.error('✗ zero humans should retire PvB bots'); process.exit(1) }
+
+  counts = { red: 0, blue: 4 }
+  setPopulation({ kind: 'pvb', humanTeam: 2 }) // next PvB boundary: humans on blue
+  tickBots(0)
+  assertSpread(4, 1, 'human team flipped to blue')
+
+  counts = { red: 4, blue: 0 }
+  tickBots(0) // humans moved but population not reset: still the blue-human round, count may grow, no retire
+  if (getBotPositions().length !== 4) { console.error(`✗ team counts changed under the same PvB round: ${getBotPositions().length}`); process.exit(1) }
+
+  counts = { red: 3, blue: 1 }
+  setPopulation({ kind: 'pvp' })
+  tickBots(0)
+  const pvp = getBotPositions()
+  if (pvp.length !== 2 || pvp.some(b => b.team !== 2)) {
+    console.error(`✗ back to PvP gap: ${pvp.map(b => b.team).join(',') || 'none'}`); process.exit(1)
+  }
+
+  // 15 bots. The first ticks pathfind; the second window is the steady walk.
+  // Fail only if the steady average cannot fit in a 30 Hz server frame.
+  counts = { red: 15, blue: 0 }
+  setPopulation({ kind: 'pvb', humanTeam: 1 })
+  tickBots(0)
+  if (getBotPositions().length !== PVB_BOT_MAX) { console.error('✗ perf setup did not reach the cap'); process.exit(1) }
+  const bench = (n: number) => {
+    const t0 = Date.now()
+    let slow = 0
+    let worst = 0
+    for (let i = 0; i < n; i++) {
+      const a = Date.now()
+      tickBots(1 / 30)
+      const dt = Date.now() - a
+      if (dt > worst) worst = dt
+      if (dt > 30) slow++
+    }
+    return { ms: Date.now() - t0, slow, worst, n }
+  }
+  const warm = bench(30)
+  const steady = bench(60)
+  console.log(`✓ PvB population: spread10 ${spread10.toFixed(1)} m, spread15 ${spread15.toFixed(1)} m`)
+  console.log(`  15-bot tick warm-up ${warm.n}: ${(warm.ms / warm.n).toFixed(2)} ms/tick (worst ${warm.worst} ms)`)
+  console.log(`  15-bot tick steady ${steady.n}: ${(steady.ms / steady.n).toFixed(2)} ms/tick (worst ${steady.worst} ms, ${steady.slow} ticks > 30 ms)`)
+  if (steady.ms / steady.n > 30) { console.error('✗ 15-bot steady tick averages over a 30 Hz frame'); process.exit(1) }
 }

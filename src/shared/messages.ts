@@ -84,7 +84,8 @@ export const Messages = {
   // banner denominator from its own walkable-cell count (same math as HUD).
   // Server → Client: the server-owned round (round-on-join). Broadcast on start / boundary / idle, and sent to
   // each joiner (joinRoster, requestSnapshot). remainingMs is relative so client clock skew doesn't matter.
-  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean }),
+  // format: 'pvp' | 'pvb' (playtest alternation, shared/pvp.ts FORMAT_ALTERNATE). Late joiners read it here.
+  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean, format: Schemas.String }),
 
   // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.
   roundEnded: Schemas.Map({
@@ -93,11 +94,13 @@ export const Messages = {
     finalTotal: Schemas.Int,
   }),
 
+  // format: 'pvp' | 'pvb' for the round that is starting (the splash banner).
   roundReset: Schemas.Map({
     seed: Schemas.Int,
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
     finalTotal: Schemas.Int,
+    format: Schemas.String,
   }),
 
   // Client → Server: send this player's display name once on join so

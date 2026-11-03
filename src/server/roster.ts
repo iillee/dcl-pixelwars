@@ -15,6 +15,14 @@
 
 const teamOf = new Map<string, number>() // userId → 1 (Red) | 2 (Blue)
 
+/** PvB only: new (and wrong-team) joiners take this colour. null = PvP balance. */
+let forcedTeam: number | null = null
+
+/** Set for a PvB round (the human colour), or null to restore PvP assignment. */
+export function setForcedTeam(team: number | null): void {
+  forcedTeam = team === 1 || team === 2 ? team : null
+}
+
 // Last-activity timestamps per userId. Populated by markActive() from
 // paintTick + joinRoster handlers. Used to filter out invisible scraper
 // bots that connect but never paint, and as the balance headcount.
@@ -46,10 +54,24 @@ export function activeTeamCounts(exclude?: string): { red: number; blue: number 
 }
 
 /** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue).
- *  New joiners take the side with fewer active humans (this map, not bots). */
+ *  PvP: new joiners take the side with fewer active humans (this map, not bots).
+ *  PvB: setForcedTeam sends every joiner to the human colour. */
 export function assignTeam(userId: string): number {
   const existing = teamOf.get(userId)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // PvB: a rejoiner who still holds the bot colour moves onto the human team.
+    if (forcedTeam !== null && existing !== forcedTeam) {
+      teamOf.set(userId, forcedTeam)
+      console.log(`[Roster] ${userId} → ${forcedTeam === 1 ? 'RED' : 'BLUE'} (PvB human team, was ${existing === 1 ? 'RED' : 'BLUE'})`)
+      return forcedTeam
+    }
+    return existing
+  }
+  if (forcedTeam !== null) {
+    teamOf.set(userId, forcedTeam)
+    console.log(`[Roster] new ${userId} → ${forcedTeam === 1 ? 'RED' : 'BLUE'} (PvB human team)`)
+    return forcedTeam
+  }
   const { red, blue } = activeTeamCounts(userId)
   const team = red < blue ? 1 : blue < red ? 2 : (Math.random() < 0.5 ? 1 : 2)
   teamOf.set(userId, team)
@@ -100,6 +122,17 @@ export function shuffleTeams(): Array<{ userId: string; team: number }> {
 /** Force a player's team (1v1 join fix). */
 export function setTeam(userId: string, team: number): void {
   teamOf.set(userId, team)
+}
+
+/** PvB round start: every connected human onto the human colour. Same shape as shuffleTeams. */
+export function assignAllConnected(team: number): Array<{ userId: string; team: number }> {
+  const out: Array<{ userId: string; team: number }> = []
+  for (const uid of teamOf.keys()) {
+    if (!connected.has(uid)) continue
+    teamOf.set(uid, team)
+    out.push({ userId: uid, team })
+  }
+  return out
 }
 
 /** For diagnostics. */

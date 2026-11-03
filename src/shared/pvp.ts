@@ -12,6 +12,38 @@
  * knockback reuses flagtag's tuned bomb values. Tune in a two-player playtest.
  */
 
+// ═══ Playtest round format (temporary) ══════════════════════════════
+// One switch. FORMAT_ALTERNATE false → every round is PvP (normal Pixelwars).
+// true → startNextRound flips pvp/pvb after each round that continues from
+// the summary. A cold start or an idle start is always PvP.
+// PvB: every human on one colour (Red, then Blue, … across PvB rounds);
+// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)),
+// taken at round start. Mid-round the count may grow as humans join; it does
+// not shrink until the next round, unless no humans are left.
+export const FORMAT_ALTERNATE = true
+/** Bots per active human in a PvB round. 1 = one bot each. */
+export const PVB_RATIO = 1.0
+/** Hard cap on PvB bots (playtest: up to 15). */
+export const PVB_BOT_MAX = 15
+
+export type RoundFormat = 'pvp' | 'pvb'
+
+export function pvbBotCount(activeHumans: number): number {
+  if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
+  return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
+}
+
+/** Next round's format. `continuing` is false for a cold start and an idle start. */
+export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
+  return current === 'pvb' ? 'pvp' : 'pvb'
+}
+
+/** Human colour for PvB round `index` (0-based, PvB rounds only). Red, then Blue, then Red… */
+export function pvbHumanTeam(index: number): 1 | 2 {
+  return index % 2 === 0 ? 1 : 2
+}
+
 /**
  * 'on'        — every round.
  * 'off'       — disabled everywhere (no slot, server drops requests).

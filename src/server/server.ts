@@ -14,10 +14,10 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, botSimTime, hitBot, getWalkableGraph } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -40,6 +40,7 @@ import {
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
+  nextRoundFormat, pvbBotCount, pvbHumanTeam,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHits } from '../shared/burst'
@@ -216,12 +217,19 @@ export async function setupServer(): Promise<void> {
   // second player leaves (instead of waiting up to 60s for the activity
   // window to expire). markInactive() keeps the roster slot for rejoin
   // stability — only the activity timestamp is cleared.
-  /** Round-on-join state → one client (to) or everyone. */
+  // Playtest format. Cold start / idle start stays 'pvp'. A round that continues
+  // from the summary flips when FORMAT_ALTERNATE (nextRoundFormat). pvbRoundIndex
+  // counts PvB rounds only, so the human colour goes Red, Blue, Red…
+  let roundFormat: 'pvp' | 'pvb' = 'pvp'
+  let pvbRoundIndex = 0
+
+  /** Round-on-join state → one client (to) or everyone. `format` lets a late joiner show the splash. */
   function sendRoundClock(to?: string): void {
     const msg = {
       idx: currentRoundIndex(),
       remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())),
       active: isRoundActive(),
+      format: roundFormat,
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }
@@ -246,16 +254,36 @@ export async function setupServer(): Promise<void> {
   let pendingFinal = { red: 0, blue: 0, total: 0 }
   let pendingNextIdx = 0
 
-  /** Reshuffle teams, roundReset (maze), start clock. Between-rounds and cold-start. */
+  /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. Between-rounds and cold-start. */
   function startNextRound(): void {
+    const continuing = intermission === 'summaryWait'
+    roundFormat = nextRoundFormat(roundFormat, continuing)
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
     const c = pendingFinal
     const pruned = pruneForNewRound()
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round start`)
-    const shuffled = shuffleTeams()
-    for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
-    console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
-    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    let humanTeamLabel = '-'
+    let plannedBots = 0
+    if (roundFormat === 'pvb') {
+      const humanTeam = pvbHumanTeam(pvbRoundIndex)
+      pvbRoundIndex++
+      setForcedTeam(humanTeam)
+      const assigned = assignAllConnected(humanTeam)
+      for (const { userId, team } of assigned) room.send('teamAssigned', { team }, { to: [userId] })
+      humanTeamLabel = humanTeam === 1 ? 'RED' : 'BLUE'
+      plannedBots = pvbBotCount(activeHumanCount())
+      setPopulation({ kind: 'pvb', humanTeam })
+      console.log(`[Server] PvB humans → ${humanTeamLabel}: ${assigned.map(s => s.userId.slice(0, 8)).join(' ') || '(none)'}`)
+    } else {
+      setForcedTeam(null)
+      setPopulation({ kind: 'pvp' })
+      const shuffled = shuffleTeams()
+      for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
+      const counts = activeTeamCounts()
+      plannedBots = counts.red + counts.blue === 0 || counts.red === counts.blue ? 0 : Math.abs(counts.red - counts.blue)
+      console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+    }
+    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat })
     clearPaintState()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
@@ -266,7 +294,7 @@ export async function setupServer(): Promise<void> {
     pendingNextIdx = 0
     pendingFinal = { red: 0, blue: 0, total: 0 }
     intermission = 'idle'
-    console.log(`[Server] round ${seed} started (Pixelwars)`)
+    console.log(`[Server] round ${seed} started format=${roundFormat} humanTeam=${humanTeamLabel} bots=${plannedBots} (activeHumans=${activeHumanCount()})`)
     sendRoundClock()
   }
 
@@ -331,11 +359,14 @@ export async function setupServer(): Promise<void> {
     }
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     let team = assignTeam(from)
-    // Rejoiner kept the same colour as the only other active human: flip them so
-    // the sides even out and the fill bots retire on the next tick. New joiners
-    // already take the side with fewer active humans (humans only, not bots).
-    const other = activeSoloHumanTeam(from)
-    if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
+    // PvP only. Rejoiner kept the same colour as the only other active human: flip
+    // them so the sides even out and the fill bots retire on the next tick. New
+    // joiners already take the side with fewer active humans (humans only, not bots).
+    // PvB skips this — assignTeam already put them on the human colour.
+    if (roundFormat === 'pvp') {
+      const other = activeSoloHumanTeam(from)
+      if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
+    }
     markActive(from) // count them as present immediately; paint activity will refresh it
     // Round-on-join: live round → join as-is. Idle → start immediately. Mid-summary → wait for next reset.
     lastPingAt.set(from, Date.now())
@@ -447,9 +478,9 @@ export async function setupServer(): Promise<void> {
     }
   })
 
-  // Bot position broadcast (10 Hz). Payload trivial — 3 bots × ≈20 bytes
-  // = ~600 bytes/sec. Clients Tween between updates (100ms per segment)
-  // for continuous walking motion.
+  // Bot position broadcast (10 Hz). One batched `botPositions` message for the
+  // whole pool (not one message per bot). 15 bots × ~9 numbers is still a
+  // small frame; clients lerp between updates.
   //
   // Rate history: 2Hz teleport-hop -> 4Hz Tweened (visible aliasing between
   // bot step cadence and broadcast cadence, uneven segment lengths) -> 10Hz

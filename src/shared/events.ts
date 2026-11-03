@@ -67,12 +67,16 @@ export type Events = {
     finalTotal: number
   }
 
+  // Round clock (join + periodic resync). format is the live round; inactive clocks do not open the splash.
+  'round:clock': { idx: number; active: boolean; format: 'pvp' | 'pvb' }
+
   // After summary wait: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
   'round:reset': {
     seed: number
     finalRed: number
     finalBlue: number
     finalTotal: number
+    format: 'pvp' | 'pvb'
   }
 
 

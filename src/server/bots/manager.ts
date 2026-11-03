@@ -2,15 +2,21 @@
  * manager.ts — bot population control + tick loop.
  *
  * Owns the pool of active Bot instances. On each server tick:
- *   1. Fill the short team: bot count = how many fewer ACTIVE humans that
- *      team has. All bots sit on that team only (bots never fight bots).
- *      1 red human → 1 blue bot; 3 red vs 1 blue → 2 blue bots; even or
- *      zero humans → no bots. No cap.
+ *   1. Population. PvP (default): fill the short team — bot count = how
+ *      many fewer ACTIVE humans that team has. All bots sit on that team
+ *      only (bots never fight bots). 1 red human → 1 blue bot; 3 red vs
+ *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
+ *      Wrong-side and excess bots retire immediately.
+ *      PvB (setPopulation): every bot on the colour opposite the human
+ *      team. Count = pvbBotCount(active humans). At a round boundary the
+ *      pool is trimmed to that count. Mid-round it may grow when humans
+ *      join, and it retires only when no humans are left.
  *   2. Tick every bot; apply resulting paint via the injected callback.
  *
- * Spawning: each bot starts on its OWN base tile centre. A round rebuild
- * sends survivors back to that base. If the short team flips, bots on the
- * old side retire immediately and new ones spawn on the new base.
+ * Spawning: each bot starts on its own team's base, spread across the
+ * base cells so a crowd does not stack on one cell. A round rebuild
+ * reseats survivors the same way. If the short team flips (PvP), bots on
+ * the old side retire immediately and new ones spawn on the new base.
  *
  * Paint is applied here (no paintTick wire message) and attributed to
  * `bot:<id>`. The server credits that id on the live / round scoreboard
@@ -30,7 +36,7 @@ import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
-  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE,
+  BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount,
 } from '../../shared/pvp'
 import { Bot, makeValueTarget, PaintReader } from './bot'
 
@@ -88,9 +94,27 @@ let rampTiles: Placed[] = []
 let bots: LiveBot[] = []
 let botIdCounter = 0
 
+/** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
+export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
+let population: BotPopulation = { kind: 'pvp' }
+let populationGen = 0
+let appliedGen = -1
+/** Base cells per team, deep cells first, refreshed with the graph. */
+const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+
 export function initBots(d: ManagerDeps): void {
   deps = d
-  console.log('[Bots] initialised (short-team fill: bots = active-human gap, one side only)')
+  population = { kind: 'pvp' }
+  populationGen++
+  console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
+}
+
+/** Called from startNextRound. The next tick fits the pool (PvP immediately, PvB at the boundary). */
+export function setPopulation(mode: BotPopulation): void {
+  population = mode.kind === 'pvb' && (mode.humanTeam === 1 || mode.humanTeam === 2)
+    ? { kind: 'pvb', humanTeam: mode.humanTeam }
+    : { kind: 'pvp' }
+  populationGen++
 }
 
 /**
@@ -103,26 +127,78 @@ export function rebuildBotGraph(seed: number): void {
   if (winning === null) {
     console.log('[Bots] graph rebuild failed: no valid maze from seed ' + seed)
     graph = null
+    baseCellCache[1] = []
+    baseCellCache[2] = []
     return
   }
   const t0 = Date.now()
   const tiles = getPlacedTilesInOrder()
   graph = buildWalkableGraph(tiles)
   rampTiles = tiles.filter(t => TILES[t.type].isRamp)
+  cacheBaseCells()
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
 
-  // New round: send any surviving ghost back to its own base (the old
+  // New round: spread any surviving ghost across its own base (the old
   // cellIds are stale). tickBots() then re-checks its team next tick.
   for (const b of bots) placeAtBase(b)
+}
+
+function cacheBaseCells(): void {
+  baseCellCache[1] = []
+  baseCellCache[2] = []
+  if (!graph) return
+  const buckets: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+  for (const id of graph.nodes) {
+    const t = baseTeamOfCellId(id)
+    if (t === 1 || t === 2) buckets[t].push(id)
+  }
+  for (const team of [1, 2] as const) {
+    buckets[team].sort((a, b) => {
+      const da = graph!.deepNodes.has(a) ? 0 : 1
+      const db = graph!.deepNodes.has(b) ? 0 : 1
+      if (da !== db) return da - db
+      const pa = graph!.worldPos.get(a)
+      const pb = graph!.worldPos.get(b)
+      if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
+      if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
+      return a < b ? -1 : a > b ? 1 : 0
+    })
+    baseCellCache[team] = buckets[team]
+  }
 }
 
 /** Stand a bot on its base: legs and body both, ending any cloud trip. */
 function placeAtBase(b: LiveBot): void {
   if (b.body.inRescue()) deps?.onRescueEnd?.(b.botId)
-  b.currentCell = baseStartCell(b.team)
+  const spot = pickSpawn(b.team, b)
+  b.currentCell = spot.cell
   b.clearPath()
-  b.body.reset(cellPos(b.currentCell) ?? baseSpawn(b.team).pos)
+  b.body.reset(spot.pos)
+}
+
+/**
+ * A free cell on this team's base. The first bot takes the same cell humans
+ * spawn on; the rest walk the base so they don't stack. `self` is excluded
+ * so a reseat can keep its own cell when nobody else is on it.
+ */
+function pickSpawn(team: number, self?: LiveBot): { cell: string; pos: V3 } {
+  const cells = team === 1 || team === 2 ? baseCellCache[team] : []
+  const taken = new Set<string>()
+  for (const o of bots) if (o !== self && o.team === team) taken.add(o.currentCell)
+  const primary = baseStartCell(team)
+  const ordered = primary && !cells.includes(primary) ? [primary, ...cells] : [primary, ...cells.filter(id => id !== primary)]
+  for (const id of ordered) {
+    if (!id || taken.has(id)) continue
+    const p = cellPos(id)
+    if (p) return { cell: id, pos: p }
+  }
+  const cell = cells[0] ?? primary
+  const base = cellPos(cell) ?? baseSpawn(team).pos
+  const n = bots.filter(o => o !== self && o.team === team).length
+  const ang = n * 2.399963229728653
+  const rad = 0.45 * (1 + (n % 5))
+  return { cell, pos: { x: base.x + Math.cos(ang) * rad, y: base.y, z: base.z + Math.sin(ang) * rad } }
 }
 
 function cellPos(id: string): V3 | null {
@@ -209,22 +285,22 @@ function pickFarthest(pool: LiveBot[]): LiveBot {
 
 function spawnBot(team: number, reason: string, counts: { red: number; blue: number }): void {
   if (!graph || !deps) return
-  // Own base, deep cells first (baseStartCell). Each bot is its own instance:
+  // Own base, spread across the base cells. Each bot is its own instance:
   // path, combat cooldowns, and `bot:<id>` paint / hit credit.
-  const startCell = baseStartCell(team)
+  const spot = pickSpawn(team)
   const bot = new Bot({
     team,
-    startCell,
+    startCell: spot.cell,
     pickTarget: makeValueTarget(deps.paint, team),
     paint: deps.paint,   // enables own-paint-avoidance in pathfinding
   }) as LiveBot
   botIdCounter++
   bot.botId = botIdCounter
-  bot.body = new BotBody(cellPos(startCell) ?? baseSpawn(team).pos)
+  bot.body = new BotBody(spot.pos)
   bot.combat = newCombat()
   bots.push(bot)
   deps.onSpawn?.(bot.botId, team)
-  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${startCell} (${reason}, ${countLabel(counts)})`)
+  console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)})`)
 }
 
 function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
@@ -238,6 +314,12 @@ function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: numb
 /** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
 function balanceBots(): void {
   if (!graph || !deps) return
+  const fresh = appliedGen !== populationGen
+  appliedGen = populationGen
+  if (population.kind === 'pvb') {
+    balancePvb(fresh)
+    return
+  }
   const counts = deps.activeHumans()
   const want = desiredFill(counts)
   if (want.count === 0) {
@@ -252,6 +334,35 @@ function balanceBots(): void {
   while (bots.length < want.count) {
     const before = bots.length
     spawnBot(want.team, 'fill short team', counts)
+    if (bots.length === before) break
+  }
+}
+
+/**
+ * PvB pool. Wrong-team leftovers (the previous format) retire. On the tick
+ * that applies a new population, trim down to the round-start count. After
+ * that, only add bots — a human leaving does not retire anyone, unless the
+ * human count hits zero.
+ */
+function balancePvb(fresh: boolean): void {
+  if (!deps) return
+  const counts = deps.activeHumans()
+  const humans = counts.red + counts.blue
+  const wantN = pvbBotCount(humans)
+  const team = population.kind === 'pvb' && population.humanTeam === 1 ? 2 : 1
+  for (const b of bots.filter(x => x.team !== team)) {
+    retireBot(b, `wrong team, PvB bots are ${teamName(team)}`, counts)
+  }
+  if (wantN === 0) {
+    while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
+    return
+  }
+  if (fresh) {
+    while (bots.length > wantN) retireBot(pickFarthest(bots), 'round start, fit PvB count', counts)
+  }
+  while (bots.length < wantN) {
+    const before = bots.length
+    spawnBot(team, 'PvB fill', counts)
     if (bots.length === before) break
   }
 }

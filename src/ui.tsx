@@ -4,7 +4,7 @@ import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
 import { isRoundActive } from "./shared/roundTiming"
-import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES } from "./round"
+import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
@@ -101,7 +101,7 @@ const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
 const SUMMARY_TITLE_FONT = 72 // older build's title size
-const SUMMARY_HEAD_H = 150 // title pill + margins above the territory bar
+const SUMMARY_HEAD_H = 184 // title + subtitle + "Next round" line above the territory bar
 const SUMMARY_GAP = 32 // territory bar → tables
 const SUMMARY_SUB_FONT = 18
 const SUMMARY_PILL_FONT = 30
@@ -354,6 +354,7 @@ function RoundSummary(p: number) {
               <Label value={teamWord !== '' ? 'WINS!' : "IT'S A TIE"} fontSize={titleF} color={withA(Color4.White(), a)} textAlign={teamWord !== '' ? 'middle-left' : 'middle-center'} textWrap="nowrap" uiTransform={{ width: textWSafe(teamWord !== '' ? 'WINS!' : "IT'S A TIE", titleF), height: titleF * 1.2, flexShrink: 0 }} />
             </UiEntity>
             <Label value={SUB} fontSize={subF} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
+            <Label value={nextRoundBlurb()} fontSize={Math.max(SUMMARY_FONT_MIN, subF * 0.9)} color={withA(Color4.White(), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(nextRoundBlurb(), Math.max(SUMMARY_FONT_MIN, subF * 0.9)), height: subF * 1.4, flexShrink: 0, margin: { top: 4 * k } }} />
           </UiEntity>
         )}
       </UiEntity>
@@ -396,6 +397,36 @@ function bannerColor(): Color4 {
   if (b.winner === 'RED')  return RED_COLOR
   if (b.winner === 'BLUE') return BLUE_COLOR
   return Color4.White()
+}
+
+/** Playtest format banner. Centered, ~2.5s, no input lock (pointerFilter none). Scales down on a narrow phone. */
+function FormatSplash() {
+  const s = getFormatSplash()
+  if (!s) return null
+  const cv = canvasSize()
+  const avail = Math.max(240, cv.w * 0.88)
+  const cap = isMobile() ? 46 : 64
+  const titleF = Math.max(20, Math.min(cap, avail / (s.title.length * 0.8)))
+  const subF = Math.max(16, Math.min(isMobile() ? 26 : 32, titleF * 0.55))
+  const titleW = textWSafe(s.title, titleF)
+  const subW = textWSafe(s.sub, subF)
+  const pad = isMobile() ? 16 : 26
+  return (
+    <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
+      <UiEntity
+        uiTransform={{
+          width: Math.min(avail, Math.max(titleW, subW) + pad * 2),
+          height: titleF * 1.35 + subF * 1.6 + pad * 2,
+          flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 18, padding: pad, pointerFilter: 'none',
+        }}
+        uiBackground={{ color: Color4.create(0.08, 0.08, 0.1, 0.88) }}
+      >
+        <Label value={s.title} fontSize={titleF} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: titleW, height: titleF * 1.3 }} />
+        <Label value={s.sub} fontSize={subF} color={Color4.create(0.9, 0.91, 0.94, 1)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: subW, height: subF * 1.45 }} />
+      </UiEntity>
+    </UiEntity>
+  )
 }
 
 function bannerHeadline(): string {
@@ -683,6 +714,7 @@ export const uiMenu = () => (
 
     {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
     {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
+    <FormatSplash />
     {/* Load splash: last child = top-most layer. */}
     <SplashScreen />
   </UiEntity>
