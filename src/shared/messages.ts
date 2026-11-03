@@ -155,6 +155,7 @@ export const Messages = {
       vx: Schemas.Number,    // m/s over the real time since the previous broadcast
       vy: Schemas.Number,
       vz: Schemas.Number,
+      an: Schemas.Int,       // pose: 0 locomotion, 1 slide, 2 jump, 3 double jump, 4 glide, 5 fall (shared/botAnim.ts)
     })),
     t: Schemas.Number,       // server bot-simulation clock (s) when these positions were taken
   }),

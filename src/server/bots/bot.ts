@@ -20,6 +20,9 @@
 
 import { WalkableGraph, findPath, DEEP_MARGIN, AirKind } from '../../shared/mazeGraph'
 import { GRID_W, GRID_H } from '../../maze/generator'
+import {
+  BOT_SPEED_SPREAD, BOT_RETARGET_S, BOT_RETARGET_SPREAD, BOT_ENGAGE_MIN_M, BOT_ENGAGE_MAX_M,
+} from '../../shared/pvp'
 
 /**
  * Steps per second when a caller fixes the pace (scripts); live bots use the
@@ -32,6 +35,16 @@ import { GRID_W, GRID_H } from '../../maze/generator'
  * Actual per-step time is jittered ±JITTER_FRAC to break the metronome.
  */
 export const DEFAULT_STEPS_PER_SEC = 4.8
+
+/** A walk step is one ~2 m cell. Anything farther, or a rise a ramp cell doesn't make, is a jump. */
+export function mustLeap(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+): boolean {
+  const dy = Math.abs(to[1] - from[1])
+  const dist = Math.hypot(to[0] - from[0], to[2] - from[2])
+  return dy > 1.2 || dist > 3.2
+}
 
 /** Player pace on 2 m cells: jog 8 m/s, run 10 m/s (client defaults, client/speed.ts).
  *  Without a fixed stepsPerSec the bot picks one per route: long routes run, short
@@ -52,6 +65,59 @@ const PAUSE_MIN_MS = 800
 const PAUSE_MAX_MS = 1800
 
 export type PickTarget = (self: Bot, graph: WalkableGraph) => string | null
+
+export type BotFocus = 'paint' | 'enemy' | 'chase' | 'roam'
+export interface BotWeights { paint: number; enemy: number; chase: number; roam: number }
+/** Rolled once at spawn. Same seed → same bot. */
+export interface BotPersonality {
+  seed: number
+  /** Step rate multiplier, about 1 ± BOT_SPEED_SPREAD. */
+  speedMul: number
+  weights: BotWeights
+  /** Seconds between dropping the current path and picking again. */
+  retargetS: number
+  /** How close a human has to be before this bot bothers chasing (m). */
+  engageM: number
+}
+export interface BotSense {
+  humans: Array<{ id: string; team: number; x: number; y: number; z: number }>
+  avoidCells: Set<string>
+  avoidHumans: Set<string>
+}
+
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a |= 0
+    a = a + 0x6D2B79F5 | 0
+    let t = Math.imul(a ^ a >>> 15, 1 | a)
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
+    return ((t ^ t >>> 14) >>> 0) / 4294967296
+  }
+}
+
+function dirichlet(rng: () => number): BotWeights {
+  const raw = [0, 1, 2, 3].map(() => -Math.log(Math.max(1e-9, rng())))
+  const sum = raw[0] + raw[1] + raw[2] + raw[3]
+  return { paint: raw[0] / sum, enemy: raw[1] / sum, chase: raw[2] / sum, roam: raw[3] / sum }
+}
+
+export function rollPersonality(rng: () => number, seed: number): BotPersonality {
+  const weights = dirichlet(rng)
+  const speedMul = 1 + (rng() * 2 - 1) * BOT_SPEED_SPREAD
+  const retargetS = BOT_RETARGET_S * (1 + (rng() * 2 - 1) * BOT_RETARGET_SPREAD)
+  const engageM = BOT_ENGAGE_MIN_M + rng() * (BOT_ENGAGE_MAX_M - BOT_ENGAGE_MIN_M)
+  return { seed, speedMul, weights, retargetS, engageM }
+}
+
+function focusOf(w: BotWeights, u: number): BotFocus {
+  const sum = w.paint + w.enemy + w.chase + w.roam || 1
+  let x = u * sum
+  if ((x -= w.paint) <= 0) return 'paint'
+  if ((x -= w.enemy) <= 0) return 'enemy'
+  if ((x -= w.chase) <= 0) return 'chase'
+  return 'roam'
+}
 
 /** Fallback strategy: uniformly random walkable cell (not self). */
 export const randomTarget: PickTarget = (self, graph) => {
@@ -206,7 +272,7 @@ const VALUE_RADIUS = 1
 /** A level change costs this many metres extra (ramps are detours). */
 const VALUE_LEVEL_PENALTY_M = 12
 
-function stampValue(cellId: string, graph: WalkableGraph, paint: PaintReader, myTeam: number): number {
+function stampValue(cellId: string, graph: WalkableGraph, paint: PaintReader, myTeam: number, neutral = 1, enemy = 2): number {
   const colon = cellId.indexOf(':')
   if (colon < 0) return 0
   const prefix = cellId.slice(0, colon + 1)
@@ -218,7 +284,7 @@ function stampValue(cellId: string, graph: WalkableGraph, paint: PaintReader, my
       const id = `${prefix}${col + dc},${row + dr}`
       if (!graph.nodes.has(id)) continue
       const t = paint.teamOf(id)
-      v += t === 0 ? 1 : t === myTeam ? 0 : 2
+      v += t === 0 ? neutral : t === myTeam ? 0 : enemy
     }
   }
   return v
@@ -248,6 +314,88 @@ export function makeValueTarget(paint: PaintReader, myTeam: number): PickTarget 
   }
 }
 
+function unusedDeep(self: Bot, graph: WalkableGraph): string | null {
+  const src = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
+  const arr = [...src]
+  for (let i = 0; i < 8; i++) {
+    const pick = arr[Math.floor(self.nextRand() * arr.length)]
+    if (pick && pick !== self.currentCell && !self.sense.avoidCells.has(pick)) return pick
+  }
+  return arr.find(id => id !== self.currentCell) ?? null
+}
+
+/** Cell under an enemy human this bot is allowed to chase. Skips humans a teammate already has. */
+function humanCell(self: Bot, graph: WalkableGraph): string | null {
+  const foes = self.sense.humans.filter(h => h.team !== self.team)
+  const open = foes.filter(h => !self.sense.avoidHumans.has(h.id))
+  const pool = open.length > 0 ? open : foes
+  if (pool.length === 0) return null
+  const here = graph.worldPos.get(self.currentCell)
+  let best = pool[0], bestD = Infinity
+  for (const h of pool) {
+    const d = here ? Math.hypot(h.x - here[0], h.z - here[2]) + Math.abs(h.y - here[1]) : 0
+    if (d < bestD) { bestD = d; best = h }
+  }
+  const src = graph.deepNodes.size > 0 ? graph.deepNodes : graph.nodes
+  let cell: string | null = null, cellD = Infinity
+  for (const id of src) {
+    const q = graph.worldPos.get(id)
+    if (!q || Math.abs(q[1] - best.y) > 2.5) continue
+    const d = Math.hypot(q[0] - best.x, q[2] - best.z)
+    if (d < cellD) { cellD = d; cell = id }
+  }
+  return cell
+}
+
+function scoredFocus(self: Bot, graph: WalkableGraph, paint: PaintReader, myTeam: number, focus: 'paint' | 'enemy'): string | null {
+  const here = graph.worldPos.get(self.currentCell)
+  const neutral = focus === 'paint' ? 2 : 0.4
+  const enemy = focus === 'enemy' ? 2 : 0.4
+  const cands = sampleNodes(graph, VALUE_SAMPLE_K)
+  if (paint.sampleEnemy && focus === 'enemy') cands.push(...paint.sampleEnemy(myTeam, VALUE_ENEMY_K))
+  const score = (skipTaken: boolean) => {
+    const scored: Array<{ id: string; s: number }> = []
+    const seen = new Set<string>()
+    for (const c of cands) {
+      if (c === self.currentCell || seen.has(c) || !isDeepCentre(c, graph)) continue
+      if (skipTaken && self.sense.avoidCells.has(c)) continue
+      seen.add(c)
+      const v = stampValue(c, graph, paint, myTeam, neutral, enemy)
+      if (v <= 0) continue
+      const p = graph.worldPos.get(c)
+      const d = here && p
+        ? Math.hypot(p[0] - here[0], p[2] - here[2]) + (Math.abs(p[1] - here[1]) > 1.5 ? VALUE_LEVEL_PENALTY_M : 0)
+        : 30
+      scored.push({ id: c, s: v / (d + VALUE_DIST_BIAS_M) })
+    }
+    scored.sort((a, b) => b.s - a.s)
+    return scored
+  }
+  const top = score(true)
+  const use = top.length > 0 ? top : score(false)
+  if (use.length === 0) return null
+  return use[Math.floor(self.nextRand() * Math.min(VALUE_TOP_N, use.length))].id
+}
+
+/**
+ * Spawn personality: roll paint / enemy / chase / roam, and don't take a tile or a human
+ * a teammate already chose when another one is available.
+ */
+export function makeWeightedTarget(paint: PaintReader, myTeam: number): PickTarget {
+  return (self, graph) => {
+    const who = self.personality
+    if (!who) return makeValueTarget(paint, myTeam)(self, graph)
+    const focus = focusOf(who.weights, self.nextRand())
+    if (focus === 'roam') return unusedDeep(self, graph)
+    if (focus === 'chase') {
+      const cell = humanCell(self, graph)
+      if (cell && !self.sense.avoidCells.has(cell)) return cell
+      return unusedDeep(self, graph) ?? cell
+    }
+    return scoredFocus(self, graph, paint, myTeam, focus) ?? unusedDeep(self, graph)
+  }
+}
+
 export interface BotOpts {
   team: number                  // 1 = Red, 2 = Blue (matches Team enum)
   startCell: string
@@ -260,6 +408,10 @@ export interface BotOpts {
   paint?: PaintReader
   /** Level drops and jumps. The walk-only verify turns this off. */
   useAir?: boolean
+  /** Seeded pace, focus, and engagement. Omit for the walk-only verifies. */
+  personality?: BotPersonality
+  /** Target rolls. Defaults to Math.random. */
+  rng?: () => number
 }
 
 export class Bot {
@@ -274,6 +426,14 @@ export class Bot {
   private pick: PickTarget
   private paint?: PaintReader
   private readonly useAir: boolean
+  readonly personality: BotPersonality | null
+  private rng: () => number
+  sense: BotSense = { humans: [], avoidCells: new Set(), avoidHumans: new Set() }
+  private goal: string | null = null
+  private readonly speedMul: number
+  /** 0 = keep a path until it ends (the verifies). */
+  private readonly retargetEveryMs: number
+  private retargetLeftMs: number
   /** Next path step leaves the floor. The manager hands it to the body; the legs do not step it. */
   private pendingLeap: { to: string; kind: AirKind } | null = null
 
@@ -286,12 +446,23 @@ export class Bot {
     this.team = opts.team
     this.currentCell = opts.startCell
     this.fixedPace = opts.stepsPerSec !== undefined
-    this.baseStepIntervalMs = 1000 / (opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC)
+    this.personality = opts.personality ?? null
+    this.rng = opts.rng ?? Math.random
+    this.speedMul = this.personality?.speedMul ?? 1
+    this.retargetEveryMs = this.personality && this.personality.retargetS > 0 ? this.personality.retargetS * 1000 : 0
+    this.retargetLeftMs = this.retargetEveryMs
+    this.baseStepIntervalMs = 1000 / ((opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC) * this.speedMul)
     this.stepIntervalMs = this.jitteredInterval()
     this.pick = opts.pickTarget ?? randomTarget
     this.paint = opts.paint
     this.useAir = opts.useAir !== false
   }
+
+  nextRand(): number { return this.rng() }
+  /** Current step rate, after the route picked jog or run. */
+  stepsPerSec(): number { return 1000 / this.baseStepIntervalMs }
+  /** Cell this bot is walking toward, if it has one. */
+  goalOf(): string | null { return this.goal }
 
   /** A drop or jump the last tick pulled off the path, once. */
   takeLeap(): { to: string; kind: AirKind } | null {
@@ -330,6 +501,15 @@ export class Bot {
       this.pauseRemainingMs = 0
     }
 
+    if (this.retargetEveryMs > 0 && this.path.length > 0 && this.chaseCell === null) {
+      this.retargetLeftMs -= dtMs
+      if (this.retargetLeftMs <= 0) {
+        this.path = []
+        this.goal = null
+        this.retargetLeftMs = this.retargetEveryMs
+      }
+    }
+
     this.stepAccumMs += dtMs
     const stepped: string[] = []
 
@@ -350,6 +530,8 @@ export class Bot {
         }
         const target = this.chaseCell ?? this.pick(this, graph)
         this.chaseCell = null
+        this.goal = target
+        if (this.retargetEveryMs > 0) this.retargetLeftMs = this.retargetEveryMs
         if (target === null || target === this.currentCell) break
         // useDeepOnly=true: the pathfinder cannot traverse wall cells
         // even to reach a deep target. If currentCell has drifted off the
@@ -374,7 +556,7 @@ export class Bot {
         this.path = p.slice(1) // drop index 0 (currentCell)
         if (!this.fixedPace) {
           const run = this.path.length >= RUN_ROUTE_CELLS || Math.random() < SHORT_ROUTE_RUN_CHANCE
-          this.baseStepIntervalMs = 1000 / (run ? RUN_STEPS_PER_SEC : JOG_STEPS_PER_SEC)
+          this.baseStepIntervalMs = 1000 / ((run ? RUN_STEPS_PER_SEC : JOG_STEPS_PER_SEC) * this.speedMul)
         }
       }
 
@@ -383,10 +565,13 @@ export class Bot {
       const onDeep = graph.deepNodes.has(this.currentCell)
       const edge = (onDeep ? graph.deepAir : graph.air).get(this.currentCell)?.find(e => e.to === next)
       const walk = (onDeep ? graph.deepAdj : graph.adj).get(this.currentCell) ?? []
-      if (edge && !walk.includes(next)) {
-        // The body flies this one. Don't paint it and don't snap currentCell across the gap.
-        this.pendingLeap = { to: next, kind: edge.kind }
-        this.path.shift()
+      const fromP = graph.worldPos.get(this.currentCell)
+      const toP = graph.worldPos.get(next)
+      const gap = !walk.includes(next) || (fromP && toP && mustLeap(fromP, toP))
+      if (this.useAir && (edge || gap)) {
+        // Leave the cell on the path until the body actually jumps, so a failed
+        // launch can walk back to the lip and try again instead of deleting the route.
+        this.pendingLeap = { to: next, kind: edge?.kind ?? ((toP && fromP && toP[1] > fromP[1] + 0.7) ? 'jump' : 'drop') }
         this.stepAccumMs = 0
         break
       }
@@ -414,6 +599,7 @@ export class Bot {
   /** Head for `cell` now (re-paths on the next step, skips the look-around pause). */
   chase(cell: string): void {
     this.chaseCell = cell
+    this.goal = cell
     this.path = []
     this.pauseRemainingMs = 0
   }
@@ -421,6 +607,7 @@ export class Bot {
   /** Manager can call this to force target re-selection (e.g. round reset). */
   clearPath(): void {
     this.path = []
+    this.goal = null
   }
 
   /**
@@ -437,6 +624,11 @@ export class Bot {
    * broadcast into continuous motion so the Tween only has to smooth
    * out network jitter.
    */
+  /** Drop the leap/gap cell once the body has actually left the floor toward it. */
+  commitLeap(): void {
+    if (this.path.length > 0) this.path.shift()
+  }
+
   visualPosition(graph: WalkableGraph): [number, number, number] | null {
     const cur = graph.worldPos.get(this.currentCell)
     if (!cur) return null
@@ -444,6 +636,9 @@ export class Bot {
     if (!nextId) return [cur[0], cur[1], cur[2]]
     const next = graph.worldPos.get(nextId)
     if (!next) return [cur[0], cur[1], cur[2]]
+    // A gap or a level change is a jump, not a slide. Lerping there is the
+    // teleport between platforms: the client snaps anything over 8 m.
+    if (mustLeap(cur, next)) return [cur[0], cur[1], cur[2]]
     // Fraction of the way to next cell. Clamped [0,1] — accum can briefly
     // exceed intervalMs when the server tick is late.
     const f = Math.max(0, Math.min(1, this.stepAccumMs / this.stepIntervalMs))
