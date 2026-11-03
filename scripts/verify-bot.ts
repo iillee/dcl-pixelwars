@@ -8,7 +8,7 @@
  *   - Every consecutive pair is graph-adjacent (no teleports)
  */
 
-import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, CELL, MAZE_ORIGIN } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, makeSmartTarget, makeValueTarget, PaintReader } from '../src/server/bots/bot'
 
@@ -170,6 +170,8 @@ import { baseSpawn } from '../src/maze/generator'
 // ─── Level drops: the path uses one, and the body lands on that floor ──
 import { findPath } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
+import { AnvilWorld } from '../src/shared/anvilSim'
+import { lungeKnock } from '../src/shared/knocks'
 import { TILES } from '../src/maze/tiles'
 {
   let drops = 0, jumps = 0, sample: { from: string; to: string } | null = null
@@ -326,43 +328,97 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   if (steady.ms / steady.n > 30) { console.error('✗ 15-bot steady tick averages over a 30 Hz frame'); process.exit(1) }
 }
 
-// A knock into the corridor wall stays on the slab. A body left below that
-// slab is snapped back up, not left to walk inside the mesh.
+// Interior wall (next cell is floor or a taller tile): a shove stays on the slab.
+// Perimeter lip (nothing at this height beyond): a knock flies off and falls.
+// A body left below a walkable cell is snapped back up, not left inside the mesh.
 {
   const tiles = getPlacedTilesInOrder()
   const world = {
     graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles,
     base: { x: 0, y: 0, z: 0 },
   }
-  let spot: { p: [number, number, number] } | null = null
+  const cover = (x: number, z: number) => tiles.filter(t => {
+    const x0 = t.x * CELL + MAZE_ORIGIN, z0 = t.z * CELL + MAZE_ORIGIN
+    return x >= x0 && x < x0 + CELL && z >= z0 && z < z0 + CELL
+  })
+  // What sits past the walkable cell: continuing floor, a taller tile, a lower deck, or void.
+  const beyond = (p: [number, number, number], dx: number, dz: number): 'floor' | 'higher' | 'same' | 'lower' | 'void' => {
+    for (const dist of [3, 8, 14]) {
+      const x = p[0] + dx * dist, z = p[2] + dz * dist
+      const near = [...graph.worldPos.values()].some(q => Math.abs(q[1] - p[1]) < 1.5 && Math.hypot(q[0] - x, q[2] - z) < 1.5)
+      if (near) return 'floor'
+      const here = cover(x, z)
+      if (!here.length) return 'void'
+      const deck = p[1] - 0.5
+      if (here.some(t => t.y > deck + 2)) return 'higher'
+      if (here.some(t => Math.abs(t.y - deck) <= 2)) continue
+      if (here.every(t => t.y < deck - 2)) return 'lower'
+    }
+    return 'same'
+  }
+  const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+  let wall: { p: [number, number, number]; dx: number; dz: number } | null = null
+  let lip: { p: [number, number, number]; dx: number; dz: number } | null = null
   for (const [id, p] of graph.worldPos) {
-    const [head, tail] = id.split(':')
-    const [tx, tz, ty] = head.split(',').map(Number)
-    const col = parseInt(tail.split(',')[0], 10)
-    if (col !== 3) continue
+    const [tx, tz, ty] = id.split(':')[0].split(',').map(Number)
     const tile = tiles.find(t => t.x === tx && t.z === tz && Math.abs(t.y - ty) < 0.05)
     if (!tile || TILES[tile.type].isRamp) continue
-    spot = { p }
-    break
+    for (const [dx, dz] of dirs) {
+      const kind = beyond(p, dx, dz)
+      if (!wall && (kind === 'higher' || kind === 'same')) wall = { p, dx, dz }
+      if (!lip && kind === 'void') lip = { p, dx, dz }
+    }
+    if (wall && lip) break
   }
-  if (!spot) { console.error('✗ no flat corridor-edge cell to shove into a wall'); process.exit(1) }
-  const body = new BotBody({ x: spot.p[0], y: spot.p[1], z: spot.p[2] })
+  if (!wall) { console.error('✗ no interior wall (adjacent floor or taller tile) to shove into'); process.exit(1) }
+  if (!lip) { console.error('✗ no perimeter lip to knock off'); process.exit(1) }
+
+  const body = new BotBody({ x: wall.p[0], y: wall.p[1], z: wall.p[2] })
   body.rng = () => 1
-  body.knock({ kind: 'lunge', impulse: { x: -80, y: 0, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 40, forceS: 0.3, lockS: 0.2 })
+  body.knock({ kind: 'lunge', impulse: { x: wall.dx * 80, y: 0, z: wall.dz * 80 }, forceDir: { x: wall.dx, y: 0, z: wall.dz }, force: 40, forceS: 0.3, lockS: 0.2 })
   for (let t = 0; t < 1.2; t += 0.05) body.tick(0.05, world)
-  const intoWall = spot.p[0] - body.pos.x
-  if (body.pos.y < spot.p[1] - 0.4 || intoWall > 2.2) {
-    console.error(`✗ wall shove sank or crossed the margin: Δx ${intoWall.toFixed(2)} y ${body.pos.y.toFixed(2)} (node ${spot.p[1].toFixed(2)}) mode=${body.mode}`)
+  const along = (wall.p[0] - body.pos.x) * -wall.dx + (wall.p[2] - body.pos.z) * -wall.dz
+  if (body.pos.y < wall.p[1] - 0.4 || along > 2.2) {
+    console.error(`✗ wall shove sank or crossed the margin: travel ${along.toFixed(2)} y ${body.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)}) mode=${body.mode}`)
     process.exit(1)
   }
-  console.log(`✓ wall shove stayed on the slab (${intoWall.toFixed(2)} m toward the wall)`)
-  const sunk = new BotBody({ x: spot.p[0], y: spot.p[1] - 1.2, z: spot.p[2] })
+  console.log(`✓ wall shove stayed on the slab (${along.toFixed(2)} m toward the wall)`)
+
+  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
   sunk.rng = () => 1
   sunk.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
-  for (let t = 0; t < 0.5 && sunk.pos.y < spot.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
-  if (sunk.pos.y < spot.p[1] - 0.25) {
-    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${spot.p[1].toFixed(2)})`)
+  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
+  if (sunk.pos.y < wall.p[1] - 0.25) {
+    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
     process.exit(1)
   }
   console.log(`✓ sunk body snapped up to ${sunk.pos.y.toFixed(2)}`)
+
+  const launch = (dx: number, dz: number) => {
+    const bot = new BotBody({ x: lip.p[0], y: lip.p[1], z: lip.p[2] })
+    bot.rng = () => 1
+    bot.knock(lungeKnock(dx, dz))
+    let fell = false
+    for (let t = 0; t < 6 && !fell; t += 0.05) {
+      for (const e of bot.tick(0.05, world)) if (e.type === 'fell') fell = true
+    }
+    const anvil = new AnvilWorld(1)
+    anvil.setMaze(graph, tiles, [], false)
+    const a = anvil.anvils[0]
+    a.alive = true
+    a.pos = { x: lip.p[0], y: lip.p[1], z: lip.p[2] }
+    anvil.hit(0, dx, dz, 1)
+    let anvilFell = false
+    for (let t = 0; t < 6 && !anvilFell; t += 0.05) {
+      anvil.tick(0.05)
+      if (!a.alive) anvilFell = true
+    }
+    return { fell, anvilFell, botY: bot.pos.y, anvilY: a.pos.y }
+  }
+  const off = launch(lip.dx, lip.dz)
+  if (!off.fell || !off.anvilFell) {
+    console.error(`✗ perimeter knock stuck on the lip: bot ${off.fell ? 'fell' : 'stayed'} y ${off.botY.toFixed(2)}, anvil ${off.anvilFell ? 'fell' : 'stayed'} y ${off.anvilY.toFixed(2)} (start ${lip.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ perimeter knock left the level (bot fell, anvil fell)`)
 }

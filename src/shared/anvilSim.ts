@@ -11,8 +11,10 @@
  * Knockback: v += impulse × LUNGE_DUMMY_UNIT, held force for LUNGE_KNOCK_FORCE_S, gravity, ground
  * friction; floor = highest walkable cell within ~1 cell under it (ramps: continuous slope height
  * via rampSurfaceY), grounded anvils snap down ≤ SNAP_DOWN (down-ramps). The tile's non-walkable
- * margin is a wall: a step into it is stopped. A body that has sunk through the slab (less than a
- * level) is snapped back up. None of that under it, or already below the fall line → it falls.
+ * margin is a wall only where the next tile is floor or a taller side: a step into that is stopped,
+ * and a body that has sunk through the slab (less than a level) is snapped back up. The outer lip,
+ * where nothing at this height continues, is a drop — knocked bodies fly off and fall. Already
+ * below the fall line → it falls.
  */
 import {
   LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
@@ -91,7 +93,66 @@ function tileContaining(tiles: Placed[], x: number, z: number, y: number): Place
   return best
 }
 
-/** Wall margin: inside a tile, at or below its top, and not on a walkable cell.
+/** Closest walkable node within `r` whose feet are near `y`. Null out in the void. */
+function nearestFloorNode(graph: WalkableGraph, x: number, z: number, y: number, r: number): { x: number; z: number; y: number } | null {
+  let best: { x: number; z: number; y: number } | null = null
+  let bestD = r * r
+  for (const p of graph.worldPos.values()) {
+    const d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z)
+    if (d > bestD) continue
+    const fy = p[1] + FLOOR_FROM_NODE
+    if (fy > y + RECOVER_UP || fy < y - 1.5) continue
+    bestD = d
+    best = { x: p[0], z: p[2], y: fy }
+  }
+  return best
+}
+
+/** Tile whose walkable surface is the floor under (x, z) at `y`. */
+function tileAtFeet(tiles: Placed[], x: number, z: number, y: number): Placed | null {
+  let best: Placed | null = null
+  for (const t of tiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    if (Math.abs(tileSurfaceY(t, x, z) - y) > 2.5) continue
+    if (!best || t.y > best.y) best = t
+  }
+  return best
+}
+
+/** Neighbour grid cell has a floor at or above `floorY` (same deck, or a taller tile's side). */
+function neighborSolid(tiles: Placed[], gx: number, gz: number, floorY: number): boolean {
+  const sx = gx * CELL + MAZE_ORIGIN + CELL / 2
+  const sz = gz * CELL + MAZE_ORIGIN + CELL / 2
+  for (const t of tiles) {
+    if (t.x !== gx || t.z !== gz) continue
+    if (tileSurfaceY(t, sx, sz) >= floorY - 1) return true
+  }
+  return false
+}
+
+/**
+ * Past the walkable cell, and the next tile outward is void or a lower level.
+ * That lip is a drop-off: don't stop on it and don't snap back onto it.
+ * An interior margin (floor or a taller tile in the next cell) is not a drop.
+ */
+function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): boolean {
+  if (!tiles.length) return false
+  if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return false
+  const node = nearestFloorNode(graph, x, z, y, 12)
+  if (!node) return true
+  const home = tileAtFeet(tiles, node.x, node.z, node.y)
+  if (!home) return true
+  const dx = x - node.x, dz = z - node.z
+  let backed = false
+  if (Math.abs(dx) > 0.4) backed = neighborSolid(tiles, home.x + Math.sign(dx), home.z, node.y)
+  if (!backed && Math.abs(dz) > 0.4) backed = neighborSolid(tiles, home.x, home.z + Math.sign(dz), node.y)
+  return !backed
+}
+
+/** Wall margin: inside a tile, at or below its top, not on a walkable cell, and backed by
+ *  floor or a taller tile. A perimeter lip (nothing at this height beyond) is not a wall.
  *  Returns the lip height, or null when the body may occupy this point. */
 function wallTopAt(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): number | null {
   if (!tiles.length) return null
@@ -99,6 +160,7 @@ function wallTopAt(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x
   if (!tile) return null
   // Still on a walkable cell (the node covers the whole 2 m cell). Not a wall.
   if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return null
+  if (dropLip(graph, rampTiles, tiles, x, z, y)) return null
   return tileSurfaceY(tile, x, z)
 }
 
@@ -115,9 +177,11 @@ function clampWall(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
 
 /**
  * One integration step for a server body (bot or anvil), after velocity was updated.
- * Lands on the walkable surface, refuses the wall margin, and snaps a body that has
- * sunk through a slab (less than a level) back onto it. A floor a full level up is
- * out of RECOVER_UP, so an open gap under a bridge is still a fall.
+ * Lands on the walkable surface, refuses an interior wall (the next tile is floor or
+ * a taller side), and snaps a body that has sunk through a slab (less than a level)
+ * back onto it. A perimeter lip is not a wall and is not snapped back onto, so a knock
+ * flies off and falls. A floor a full level up is out of RECOVER_UP, so an open gap
+ * under a bridge is still a fall.
  */
 export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
   prev: { x: number; y: number; z: number }, nx: number, ny: number, nz: number, velY: number, wasGrounded: boolean,
@@ -126,7 +190,10 @@ export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles:
   let y = ny
   let vy = velY
   let grounded = false
-  const floor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y)
+  // A floor found just past a drop lip is the deck we are leaving, not support.
+  const lip = (at: number) => dropLip(graph, rampTiles, tiles, stopped.x, stopped.z, at)
+  let floor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y)
+  if (floor !== null && lip(floor)) floor = null
   if (floor !== null && (y <= floor || (wasGrounded && y - floor <= SNAP_DOWN))) {
     y = floor
     if (vy < 0) vy = 0
@@ -134,7 +201,10 @@ export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles:
   } else {
     // Below a surface we should be standing on. The 0.6 m step limit hides it once
     // a step has already dropped through; a level gap is still too far to grab.
-    const overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, RECOVER_UP)
+    // Not past a drop lip — that nearby floor is behind us, and pulling back up
+    // would pin a knock to the outer edge.
+    let overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, RECOVER_UP)
+    if (overhead !== null && lip(overhead)) overhead = null
     if (overhead !== null && overhead > y && vy <= 0) {
       y = overhead
       vy = 0
