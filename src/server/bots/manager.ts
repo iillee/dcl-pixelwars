@@ -410,6 +410,7 @@ export function tickBots(dtSec: number): void {
     const world = { graph, rampTiles, tiles: placedTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
+      else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)
       else if (ev.type === 'settled') {
         const dive = b.combat.dive
         b.combat.dive = null
