@@ -33,7 +33,6 @@ import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
 import { initAudio } from './audio'
 import { initBotVisual } from './botVisual'
-import { initBotPose } from './botPose'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
 import { initSpeedBonus } from './speed'
@@ -129,7 +128,6 @@ export async function setupClient(): Promise<void> {
   initNametags()
   initSpeedBonus()
   initBotVisual()
-  initBotPose()
   initLunge()
   initLungeDummy()
   initPaintBurst()

@@ -102,7 +102,6 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
-  pose: number          // shared/botAnim.ts, from the broadcast `an` field
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -190,7 +189,6 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
-    pose: 0,
   }
 }
 
@@ -231,7 +229,6 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
-        rec.pose = b.an ?? 0
         bots.set(b.id, rec)
         continue
       }
@@ -253,7 +250,6 @@ export function initBotVisual(): void {
       }
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
-      rec.pose = b.an ?? 0
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
@@ -281,8 +277,7 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. The glider child is removed by the pose system when
-    // this id leaves the draw set; removeEntity does not reap children.
+    // Reap dropped bots. Halo is parented → root removal reaps both.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
         engine.removeEntity(rec.root)
@@ -342,32 +337,6 @@ export function initBotVisual(): void {
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
     }
   })
-}
-
-/**
- * Round reset: keep the same entity and put a fresh AvatarShape on it.
- * Replacing the entity left the previous one in the explorer (AvatarShape
- * nodes are not torn down with the scene entity) and the new one shared
- * that avatar id, so one body kept moving and a second had no mesh.
- * createOrReplace clears any expression on this entity. Dropping the
- * airborne snapshots makes the reseat use the walk snap. The lerp and the
- * entity hierarchy stay as they are.
- */
-export function refreshBotAvatars(): void {
-  for (const rec of bots.values()) {
-    paintAvatar(rec.root, rec.team, rec.id)
-    holdWalker(rec.root, rec.renderPos)
-    rec.pose = 0
-    rec.snaps = []
-    rec.fastUntil = 0
-  }
-}
-
-/** Smoothed feet, facing, and the pose code. The pose renderer reads this; it does not move the avatar. */
-export function getBotDrawState(): Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> {
-  const out: Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> = []
-  for (const [id, rec] of bots) out.push({ id, root: rec.root, pos: rec.renderPos, yawDeg: rec.lastYawDeg, pose: rec.pose })
-  return out
 }
 
 /** Where each bot is drawn right now (id → smoothed feet position). */
