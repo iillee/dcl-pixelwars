@@ -12,7 +12,7 @@
  *           respawn immunity, like a human arriving home.
  */
 import { WalkableGraph, leapPlan } from './mazeGraph'
-import { graphFloorAt, resolveSupport } from './anvilSim'
+import { graphFloorAt } from './anvilSim'
 import { MIN_Y, Placed } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import {
@@ -30,9 +30,10 @@ export type BotBodyEvent =
   | { type: 'fell'; catch: V3 }      // crossed the fall line: the cloud trip starts here
   | { type: 'landed' }               // home on the base after the cloud
   | { type: 'trace'; line: string }  // KNOCK_TRACE result
-export type BotWorld = { graph: WalkableGraph; rampTiles: Placed[]; tiles?: Placed[]; base: V3 }
+export type BotWorld = { graph: WalkableGraph; rampTiles: Placed[]; base: V3 }
 
 const SUBSTEP_S = 0.05
+const SNAP_DOWN = 0.6
 
 export class BotBody {
   mode: BotBodyMode = 'walk'
@@ -291,7 +292,7 @@ export class BotBody {
     return best
   }
 
-  /** Anvil-style integration: held force, gravity, floor snap, wall stop, floor friction. */
+  /** Anvil-style integration: held force, gravity, floor snap, floor friction. */
   private physics(dt: number, world: BotWorld): void {
     if (this.forceLeft > 0) {
       this.vel.x += this.force.x * dt
@@ -303,11 +304,15 @@ export class BotBody {
     this.vel.y -= BOT_GRAVITY * dt
     const nx = this.pos.x + this.vel.x * dt
     const nz = this.pos.z + this.vel.z * dt
-    const ny = this.pos.y + this.vel.y * dt
-    const hit = resolveSupport(world.graph, world.rampTiles, world.tiles ?? [], this.pos, nx, ny, nz, this.vel.y, wasGrounded)
-    this.pos = { x: hit.x, y: hit.y, z: hit.z }
-    this.vel.y = hit.velY
-    this.grounded = hit.grounded
+    let ny = this.pos.y + this.vel.y * dt
+    const floor = graphFloorAt(world.graph, world.rampTiles, nx, nz, this.pos.y)
+    this.grounded = false
+    if (floor !== null && (ny <= floor || (wasGrounded && ny - floor <= SNAP_DOWN))) {
+      ny = floor
+      if (this.vel.y < 0) this.vel.y = 0
+      this.grounded = true
+    }
+    this.pos = { x: nx, y: ny, z: nz }
     if (this.grounded) {
       const h = Math.hypot(this.vel.x, this.vel.z)
       const nh = Math.max(0, h - BOT_FRICTION * dt)
