@@ -343,6 +343,33 @@ export function initBotVisual(): void {
   })
 }
 
+/**
+ * Round reset: throw the bot entity away and stand a new AvatarShape at the
+ * same smoothed feet. AvatarEmoteCommand is grow-only, so the scene cannot
+ * delete a value it appended; the explorer keeps the emote mesh it spawned
+ * for that entity. Removing the entity drops that mesh. The new shape has
+ * no emote, so it follows the transform the lerp writes. The lerp itself
+ * is unchanged. Snaps from the previous round are dropped so a reseat uses
+ * the walk snap instead of blending through the old airborne trail.
+ */
+export function refreshBotAvatars(): void {
+  for (const rec of bots.values()) {
+    const pos = Vector3.clone(rec.renderPos)
+    engine.removeEntity(rec.root)
+    const root = engine.addEntity()
+    Transform.create(root, {
+      position: pos,
+      rotation: Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0),
+    })
+    paintAvatar(root, rec.team, rec.id)
+    holdWalker(root, pos)
+    rec.root = root
+    rec.pose = 0
+    rec.snaps = []
+    rec.fastUntil = 0
+  }
+}
+
 /** Smoothed feet, facing, and the pose code. The pose renderer reads this; it does not move the avatar. */
 export function getBotDrawState(): Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> {
   const out: Array<{ id: number; root: Entity; pos: Vector3; yawDeg: number; pose: number }> = []
