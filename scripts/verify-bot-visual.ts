@@ -136,38 +136,6 @@ class Client {
 
 type Report = { name: string; max: number; stuck: number; nans: number; sts: string; samples: number; draws: V[] }
 
-/**
- * Parent-mover contract. The drawn world position is always the interpolated
- * feet. While st != 0 the avatar entity's own transform stays at local origin
- * (the parent carries the world pose). A mode switch must not add a jump on
- * top of the draw's own step.
- */
-function parentContract(name: string, packets: Packet[], draws: V[]): { switches: number; extra: number } {
-  let air = false
-  let switches = 0
-  let extra = 0
-  for (let i = 0; i < packets.length; i++) {
-    const next = packets[i].st !== 0
-    const world = draws[i]
-    const local = next ? { x: 0, y: 0, z: 0 } : world
-    const shown = next
-      ? { x: world.x + local.x, y: world.y + local.y, z: world.z + local.z }
-      : local
-    extra = Math.max(extra, sub(shown, world))
-    if (i > 0 && next !== air) {
-      switches++
-      const drawStep = sub(draws[i], draws[i - 1])
-      const shownStep = sub(shown, next
-        ? { x: draws[i - 1].x, y: draws[i - 1].y, z: draws[i - 1].z }
-        : draws[i - 1])
-      extra = Math.max(extra, Math.abs(shownStep - drawStep))
-    }
-    air = next
-  }
-  console.log(`${name} parent: switches=${switches} hierarchyJump=${extra.toFixed(3)} m`)
-  return { switches, extra }
-}
-
 function replay(name: string, packets: Packet[]): Report {
   const c = new Client()
   let max = 0
@@ -305,16 +273,14 @@ if (chain) {
 }
 const rampReport = rampPackets.length ? replay('ramp walk/leap', rampPackets) : null
 
-// ── Knock off a lip, the recovery glide the wire marks st=4 ─────────
+// ── Dash knock, glide, then the cloud if it falls. Ground frames first so
+//    the pre-parent world position is not the origin. ──────────────────
 const from = chain ? graph.worldPos.get(chain[0])! : [...graph.worldPos.values()][0]
 const knocked = new BotBody({ x: from[0], y: from[1], z: from[2] }, () => 0)
-knocked.knock(lungeKnock(-1, 0))
 const world = { graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles, base: { x: from[0], y: from[1], z: from[2] } }
 const knockPackets: Packet[] = []
 let prevK: Packet | null = null
-for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
-  knocked.tick(0.1, world)
-  const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
+const pushK = (sim: number, st: number) => {
   const pkt: Packet = { t: sim, x: knocked.pos.x, y: knocked.pos.y, z: knocked.pos.z, st, vx: 0, vy: 0, vz: 0 }
   if (prevK) {
     pkt.vx = (pkt.x - prevK.x) / 0.1
@@ -323,9 +289,62 @@ for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
   }
   knockPackets.push(pkt)
   prevK = pkt
-  if (knocked.mode === 'walk' && sim > 0.4) break
 }
-const knockReport = replay('knock+glide', knockPackets)
+for (let i = 0; i < 5; i++) pushK(i * 0.1, 0)
+knocked.knock(lungeKnock(-1, 0))
+for (let i = 5, sim = 0.5; i < 90 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
+  knocked.tick(0.1, world)
+  const st = knocked.isGliding() ? 4 : knocked.mode === 'walk' ? 0 : knocked.mode === 'knock' ? 1 : 2
+  pushK(sim, st)
+  if (knocked.mode === 'walk' && sim > 1) break
+}
+if (knocked.mode === 'rescue') {
+  for (let i = 0; i < 8; i++) {
+    knocked.pos.x += 2
+    knocked.pos.y += 3
+    pushK(20 + i * 0.1, 2)
+  }
+}
+const knockReport = replay('dash knock → air → land/rescue', knockPackets)
+
+/**
+ * Avatar world position is parent * local. The bug: the ground tween's world
+ * end is written once into the child after reparent and left there, so the
+ * avatar sits at parent+that point and flies away. The fix zeros local every
+ * airborne frame, so world stays on the parent.
+ */
+function hierarchyWorld(draws: V[], packets: Packet[], zeroEveryAirFrame: boolean): { maxOffDraw: number; maxExtraJump: number } {
+  let carried = false
+  let local: V = { x: 0, y: 0, z: 0 }
+  let prevWorld: V | null = null
+  let prevServer: V | null = null
+  let maxOffDraw = 0
+  let maxExtraJump = 0
+  for (let i = 0; i < packets.length; i++) {
+    const air = packets[i].st !== 0
+    const parent = draws[i]
+    if (air) {
+      if (!carried && !zeroEveryAirFrame) local = i > 0 ? draws[i - 1] : parent
+      else local = { x: 0, y: 0, z: 0 }
+      carried = true
+    } else {
+      local = parent
+      carried = false
+    }
+    const world = carried
+      ? { x: parent.x + local.x, y: parent.y + local.y, z: parent.z + local.z }
+      : local
+    maxOffDraw = Math.max(maxOffDraw, sub(world, draws[i]))
+    const server = { x: packets[i].x, y: packets[i].y, z: packets[i].z }
+    if (prevWorld && prevServer) {
+      const extra = sub(world, prevWorld) - sub(server, prevServer)
+      if (extra > maxExtraJump) maxExtraJump = extra
+    }
+    prevWorld = world
+    prevServer = server
+  }
+  return { maxOffDraw, maxExtraJump }
+}
 
 const walkBad = [liveReport, rampReport].filter((r): r is Report => !!r && (r.max > 3 || r.stuck > 0 || r.nans > 0))
 if (live.some(p => p.st !== 0)) {
@@ -340,9 +359,15 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   console.error('✗ non-finite position in a stream')
   process.exit(1)
 }
-const carry = parentContract('knock+glide', knockPackets, knockReport.draws)
-if (carry.extra > 1) {
-  console.error(`✗ parent switch added ${carry.extra.toFixed(2)} m beyond the server step`)
+const fixed = hierarchyWorld(knockReport.draws, knockPackets, true)
+const stale = hierarchyWorld(knockReport.draws, knockPackets, false)
+console.log(`dash parent*local: fixed offDraw=${fixed.maxOffDraw.toFixed(2)} m extraJump=${fixed.maxExtraJump.toFixed(2)} m; stale-local offDraw=${stale.maxOffDraw.toFixed(2)} m`)
+if (fixed.maxOffDraw > 0.01) {
+  console.error('✗ avatar world position left the draw during knock/air/rescue')
   process.exit(1)
 }
-console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
+if (stale.maxOffDraw < 1) {
+  console.error('✗ the stale-local bug would not have shown up on this trace')
+  process.exit(1)
+}
+console.log('✓ walking draw stays within 3 m; airborne parent*local stays on the draw, no jump > 1 m')

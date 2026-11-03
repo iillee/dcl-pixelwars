@@ -219,7 +219,15 @@ function yawOf(deg: number) {
   return Quaternion.fromEulerDegrees(0, deg, 0)
 }
 
-/** World pose. In the air the parent moves and the avatar stays at local origin. */
+/**
+ * World pose. In the air the parent moves and the avatar stays at local origin.
+ *
+ * The ground tween's end point is a world position. Parenting turns the next
+ * tween write into a local offset, so the avatar jumps to parent+world and
+ * then rides that offset. Zero the local pose and retarget the finished tween
+ * to the origin every airborne frame. On the ground the avatar is unparented
+ * and the tween sits on the world position, which is what plays the run cycle.
+ */
 function placeAvatar(rec: BotVisual): void {
   const yaw = yawOf(rec.lastYawDeg)
   if (rec.st !== 0) {
@@ -227,18 +235,25 @@ function placeAvatar(rec: BotVisual): void {
     mover.position = rec.renderPos
     mover.rotation = yaw
     if (!rec.carried) {
-      if (Tween.has(rec.root)) Tween.deleteFrom(rec.root)
       Transform.createOrReplace(rec.root, {
         parent: rec.mover,
         position: Vector3.Zero(),
         rotation: Quaternion.Identity(),
       })
       rec.carried = true
+    } else {
+      const child = Transform.getMutable(rec.root)
+      child.position = Vector3.Zero()
+      child.rotation = Quaternion.Identity()
     }
+    holdWalker(rec.root, Vector3.Zero())
     return
   }
   if (rec.carried) {
-    Transform.createOrReplace(rec.root, { position: rec.renderPos, rotation: yaw })
+    Transform.createOrReplace(rec.root, {
+      position: rec.renderPos,
+      rotation: yaw,
+    })
     rec.carried = false
   } else {
     const tf = Transform.getMutable(rec.root)
