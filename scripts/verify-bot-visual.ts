@@ -17,8 +17,8 @@ import { lungeKnock } from '../src/shared/knocks'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 import { readFileSync } from 'node:fs'
 import {
-  STANDIN_GHOST, GLIDER_MODEL, GHOST_CROWN_M, STANDIN_SCALE, GLIDE_PITCH_DEG,
-  standInModel, stepStandIn, standInFor, phaseFor, ghostPose,
+  STANDIN_MODEL, STANDIN_CLIPS, GLIDER_MODEL, GLIDE_PITCH_DEG,
+  stepStandIn, standInFor, phaseFor, standPose,
 } from '../src/client/botStandin'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -328,35 +328,29 @@ function gltfJson(path: string): { nodes: { name: string }[] } {
   const jsonLen = glb.readUInt32LE(12)
   return JSON.parse(glb.subarray(20, 20 + jsonLen).toString('utf8'))
 }
-for (const path of [STANDIN_GHOST.red, STANDIN_GHOST.blue]) {
-  const names = gltfJson(path).nodes.map(n => n.name)
-  if (!names.includes('Ghost')) {
-    console.error('✗ ghost model missing Ghost node: ' + path)
-    process.exit(1)
-  }
+const figure = gltfJson(STANDIN_MODEL)
+const figureNames = figure.nodes.map(n => n.name)
+const figureClips = (figure as { animations?: { name: string }[]; skins?: unknown[] }).animations?.map(a => a.name) ?? []
+const figureSkins = (figure as { skins?: unknown[] }).skins ?? []
+if (figureNames.includes('Armature_Prop') || figureSkins.length < 1 || STANDIN_CLIPS.some(c => !figureClips.includes(c))) {
+  console.error(`✗ mannequin clips ${figureClips.join(',')} skins ${figureSkins.length}`)
+  process.exit(1)
 }
 const wingNames = gltfJson(GLIDER_MODEL).nodes.map(n => n.name)
 if (!wingNames.includes('BotGliderRoot') || wingNames.includes('Armature_Prop')) {
   console.error('✗ glider must be the renamed model, not Armature_Prop')
   process.exit(1)
 }
-const spin = ghostPose('tumble', 0.6, 0)
-const tilt = ghostPose('tumble', 0.3, 0)
-const lean = ghostPose('glide', 1, 1)
-const bob = ghostPose('fall', 0, Math.PI / 2 / 3.2)
-if (Math.abs(spin.roll - 360) > 0.01 || Math.abs(tilt.pitch) < 10 || lean.pitch !== GLIDE_PITCH_DEG || Math.abs(bob.bob) < 0.05) {
-  console.error('✗ ghost motion should spin and tilt on a hit, bob in the air, and lean on the glide')
+const spin = standPose('tumble', 0.6, 0)
+const tilt = standPose('tumble', 0.3, 0)
+const stretch = standPose('jump', 0.14, 0)
+const flip = standPose('double', 0.42, 0)
+const lean = standPose('glide', 1, 1)
+if (Math.abs(spin.roll - 360) > 0.01 || Math.abs(tilt.pitch) < 10 || stretch.stretch < 1.2 || Math.abs(flip.pitch - 360) > 0.01 || lean.pitch !== GLIDE_PITCH_DEG) {
+  console.error('✗ code motion should spin on a hit, stretch a jump, flip a double, and lean on the glide')
   process.exit(1)
 }
-if (Math.abs(STANDIN_SCALE * GHOST_CROWN_M - 1.8) > 0.001) {
-  console.error('✗ ghost scale should put the crown at avatar height')
-  process.exit(1)
-}
-if (!standInModel(1).includes('ghost-red') || !standInModel(2).includes('ghost-blue')) {
-  console.error('✗ stand-in should use the team ghost models')
-  process.exit(1)
-}
-if (phaseFor(1, 2) !== 'jump' || phaseFor(4, 4) !== 'glide' || phaseFor(1, 5) !== 'fall' || phaseFor(1, 1) !== 'tumble' || phaseFor(2, 0) !== 'fall') {
+if (phaseFor(1, 2) !== 'jump' || phaseFor(1, 3) !== 'double' || phaseFor(4, 4) !== 'glide' || phaseFor(1, 5) !== 'fall' || phaseFor(1, 1) !== 'tumble' || phaseFor(2, 0) !== 'fall') {
   console.error('✗ phaseFor mapping')
   process.exit(1)
 }
@@ -441,8 +435,16 @@ if ((visualSrc.match(/AvatarShape\.createOrReplace/g) ?? []).length !== 1) {
   console.error('✗ AvatarShape should be written in paintAvatar only')
   process.exit(1)
 }
-if ((visualSrc.match(/GltfContainer\.createOrReplace/g) ?? []).length !== 1) {
-  console.error('✗ the ghost model should be rewritten only on a team change')
+if ((visualSrc.match(/GltfContainer\.createOrReplace/g) ?? []).length !== 0) {
+  console.error('✗ the mannequin model should be created once, not replaced')
+  process.exit(1)
+}
+if (!visualSrc.includes('STANDIN_MODEL') || !visualSrc.includes('Animator.create')) {
+  console.error('✗ the stand-in should load STANDIN_MODEL and play it with Animator')
+  process.exit(1)
+}
+if (visualSrc.includes('ghost-red') || visualSrc.includes('ghostFace') || visualSrc.includes('poseGhostFace')) {
+  console.error('✗ the stand-in is still the ghost')
   process.exit(1)
 }
 if (!visualSrc.includes('engine.removeEntityWithChildren(rec.stand)')) {

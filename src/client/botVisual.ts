@@ -11,8 +11,8 @@
  * Locomotion from that setup is untested until a preview pass.
  *
  * Off the ground the avatar stays on this entity. VisibilityComponent hides
- * it, and the team ghost (botStandin.ts) draws the recovery with a tilt,
- * a spin, and a lean. The glider is a child of that ghost while gliding.
+ * it, and a rigged mannequin (botStandin.ts) plays the recovery clip. The
+ * glider is a child of that mannequin while the glide clip plays.
  * The avatar is not reparented and AvatarShape is not rewritten to swap.
  *
  * ── Why per-frame lerp ──────────────────────────────────────────────
@@ -33,15 +33,14 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
-  VisibilityComponent, GltfContainer,
+  VisibilityComponent, GltfContainer, Animator, GltfNodeModifiers,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import {
-  GLIDER_MODEL, GLIDER_DROP_M, STANDIN_SCALE, AirPhase,
-  standInModel, stepStandIn, standInFor, phaseFor, ghostPose,
+  GLIDER_MODEL, GLIDER_OFFSET, STANDIN_MODEL, STANDIN_CLIPS, STANDIN_BLEND_S, AirPhase,
+  stepStandIn, standInFor, phaseFor, standPose,
 } from './botStandin'
-import { GhostFace, createGhostFace, poseGhostFace, recolorGhostFace } from './ghostFace'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
@@ -115,11 +114,10 @@ interface BotVisual {
   riding: boolean       // last packet said rescue (st 2)
   st: number
   an: number
-  /** Ghost root. Not a child of the avatar. Body, eyes, and wing hang off it. */
+  /** Mannequin root. Not a child of the avatar. Body and wing hang off it. */
   stand: Entity
   body: Entity
   wing: Entity
-  face: GhostFace
   showing: boolean
   groundHeld: number
   avatarShown: boolean
@@ -128,6 +126,9 @@ interface BotVisual {
   phase: AirPhase | ''
   phaseAge: number
   airTime: number
+  clip: string
+  prevClip: string
+  blend: number
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
@@ -209,6 +210,26 @@ function setShown(entity: Entity, show: boolean, was: boolean): boolean {
   return show
 }
 
+/** One neutral mannequin, tinted per team. Written at spawn and on a team change. */
+function tintBody(entity: Entity, team: number): void {
+  const c = TEAM_RGB[team] ?? TEAM_RGB[Team.Red]
+  GltfNodeModifiers.createOrReplace(entity, {
+    modifiers: [{
+      path: '',
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: {
+            albedoColor: Color4.create(c.r, c.g, c.b, 1),
+            metallic: 0.04,
+            roughness: 0.72,
+          },
+        },
+      },
+    }],
+  })
+}
+
 function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
   const root = engine.addEntity()
   Transform.create(root, {
@@ -221,21 +242,23 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
 
   const stand = engine.addEntity()
   Transform.create(stand, { position: pos, rotation: Quaternion.Identity() })
-  // propagateToChildren hides the eyes with the body. The wing has its own flag.
+  // The wing has its own flag so a tumble does not show it. The body inherits this one.
   VisibilityComponent.create(stand, { visible: false, propagateToChildren: true })
   const body = engine.addEntity()
-  const s = STANDIN_SCALE
-  Transform.create(body, { parent: stand, scale: Vector3.create(s, s, s) })
+  Transform.create(body, { parent: stand })
   GltfContainer.create(body, {
-    src: standInModel(team),
+    src: STANDIN_MODEL,
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  const face = createGhostFace(body, team)
+  Animator.create(body, {
+    states: STANDIN_CLIPS.map(clip => ({ clip, playing: false, loop: true, weight: 0, speed: 1 })),
+  })
+  tintBody(body, team)
   const wing = engine.addEntity()
   Transform.create(wing, {
     parent: stand,
-    position: Vector3.create(0, -GLIDER_DROP_M, 0),
+    position: Vector3.create(GLIDER_OFFSET.x, GLIDER_OFFSET.y, GLIDER_OFFSET.z),
     rotation: Quaternion.Identity(),
   })
   GltfContainer.create(wing, {
@@ -261,7 +284,6 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     stand,
     body,
     wing,
-    face,
     showing: false,
     groundHeld: 0,
     avatarShown: true,
@@ -270,10 +292,32 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     phase: '',
     phaseAge: 0,
     airTime: 0,
+    clip: '',
+    prevClip: '',
+    blend: 1,
   }
 }
 
-/** One visible body. The ghost tracks the interpolated feet and yaw. */
+function blendClip(rec: BotVisual, clip: AirPhase, dt: number): void {
+  if (rec.clip !== clip) {
+    rec.prevClip = rec.clip
+    rec.clip = clip
+    rec.blend = 0
+  }
+  if (rec.blend >= 1) return
+  rec.blend = Math.min(1, rec.blend + dt / STANDIN_BLEND_S)
+  const anim = Animator.getMutable(rec.body)
+  for (const state of anim.states) {
+    const on = state.clip === rec.clip
+    const prev = state.clip === rec.prevClip
+    state.weight = on ? rec.blend : prev ? 1 - rec.blend : 0
+    state.playing = (state.weight ?? 0) > 0.02
+    state.loop = true
+    state.shouldReset = on && rec.blend <= dt / STANDIN_BLEND_S + 1e-4
+  }
+}
+
+/** One visible body. The mannequin tracks the interpolated feet and yaw. */
 function syncAirStandIn(rec: BotVisual, dt: number): void {
   const step = stepStandIn(rec.showing, rec.groundHeld, rec.st, dt)
   rec.groundHeld = step.groundHeld
@@ -286,20 +330,22 @@ function syncAirStandIn(rec: BotVisual, dt: number): void {
   if (rec.showing && standInFor(rec.st)) {
     const phase = phaseFor(rec.st, rec.an)
     if (phase !== rec.phase) { rec.phase = phase; rec.phaseAge = 0 }
+    blendClip(rec, phase, dt)
   } else if (!rec.showing) {
     rec.phase = ''
     rec.phaseAge = 0
+    rec.clip = ''
   }
   if (rec.showing) {
     rec.phaseAge += dt
     rec.airTime += dt
-    poseGhostFace(rec.face, rec.phase === 'glide' ? 'glide' : rec.phase === 'jump' ? 'focus' : rec.phase === 'fall' ? 'down' : 'hurt', dt, rec.airTime)
   }
 
-  const pose = ghostPose(rec.phase || 'fall', rec.phaseAge, rec.airTime)
+  const pose = standPose(rec.phase || 'fall', rec.phaseAge, rec.airTime)
   const standTf = Transform.getMutable(rec.stand)
   standTf.position = Vector3.create(rec.renderPos.x, rec.renderPos.y + (rec.showing ? pose.bob : 0), rec.renderPos.z)
   standTf.rotation = Quaternion.fromEulerDegrees(rec.showing ? pose.pitch : 0, rec.lastYawDeg + (rec.showing ? pose.yawExtra : 0), rec.showing ? pose.roll : 0)
+  Transform.getMutable(rec.body).scale = Vector3.create(1, rec.showing ? pose.stretch : 1, 1)
   rec.wingShown = setShown(rec.wing, rec.showing && rec.phase === 'glide', rec.wingShown)
 }
 
@@ -349,12 +395,7 @@ export function initBotVisual(): void {
 
       if (rec.team !== b.team) {
         paintAvatar(rec.root, b.team, rec.id)
-        GltfContainer.createOrReplace(rec.body, {
-          src: standInModel(b.team),
-          visibleMeshesCollisionMask: 0,
-          invisibleMeshesCollisionMask: 0,
-        })
-        recolorGhostFace(rec.face, b.team)
+        tintBody(rec.body, b.team)
         rec.team = b.team
       }
       rec.st = b.st ?? 0
@@ -399,7 +440,7 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. Eyes and the wing are children of the ghost root.
+    // Reap dropped bots. The mannequin mesh and the wing are children of the stand root.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
         engine.removeEntityWithChildren(rec.stand)
