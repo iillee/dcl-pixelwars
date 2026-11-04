@@ -11,7 +11,8 @@
  * Locomotion from that setup is untested until a preview pass.
  *
  * Off the ground the avatar stays on this entity. VisibilityComponent hides
- * it, and a separate rigged mannequin (botStandin.ts) draws the recovery.
+ * it, and the team ghost (botStandin.ts) draws the recovery with a tilt,
+ * a spin, and a lean. The glider is a child of that ghost while gliding.
  * The avatar is not reparented and AvatarShape is not rewritten to swap.
  *
  * ── Why per-frame lerp ──────────────────────────────────────────────
@@ -32,14 +33,15 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
-  VisibilityComponent, Animator, GltfContainer, GltfNodeModifiers, MeshRenderer, Material,
+  VisibilityComponent, GltfContainer,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import {
-  STANDIN_MODEL, STANDIN_CLIPS, STANDIN_BLEND_S, StandClip, MotionKind,
-  stepStandIn, standInFor, clipFor, motionFor, puffOnClip, gesturePose,
+  GLIDER_MODEL, GLIDER_DROP_M, STANDIN_SCALE, AirPhase,
+  standInModel, stepStandIn, standInFor, phaseFor, ghostPose,
 } from './botStandin'
+import { GhostFace, createGhostFace, poseGhostFace, recolorGhostFace } from './ghostFace'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
@@ -113,21 +115,20 @@ interface BotVisual {
   riding: boolean       // last packet said rescue (st 2)
   st: number
   an: number
-  /** Mannequin entity. Not a child of the avatar. */
+  /** Ghost root. Not a child of the avatar. Body, eyes, and wing hang off it. */
   stand: Entity
+  body: Entity
+  wing: Entity
+  face: GhostFace
   showing: boolean
   groundHeld: number
   avatarShown: boolean
   standShown: boolean
-  clip: string
-  prevClip: string
-  blend: number
-  gesture: MotionKind
-  gestureAge: number
-  puffs: Puff[]
+  wingShown: boolean
+  phase: AirPhase | ''
+  phaseAge: number
+  airTime: number
 }
-
-type Puff = { e: Entity; age: number; ox: number; oz: number }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
 function interpDelay(snaps: Snap[]): number {
@@ -194,25 +195,6 @@ function holdWalker(entity: Entity, pos: Vector3): void {
   })
 }
 
-function tintStand(entity: Entity, team: number): void {
-  const c = TEAM_RGB[team] ?? TEAM_RGB[Team.Red]
-  GltfNodeModifiers.createOrReplace(entity, {
-    modifiers: [{
-      path: '',
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: {
-            albedoColor: Color4.create(c.r, c.g, c.b, 1),
-            metallic: 0.04,
-            roughness: 0.72,
-          },
-        },
-      },
-    }],
-  })
-}
-
 /**
  * Hide or show one entity. VisibilityComponent is written only when the flag
  * changes. On the Godot explorer that sets `visible` on the AvatarShape node
@@ -238,17 +220,30 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
   holdWalker(root, pos)
 
   const stand = engine.addEntity()
-  Transform.create(stand, { position: pos, rotation: Quaternion.Identity(), scale: Vector3.One() })
-  GltfContainer.create(stand, {
-    src: STANDIN_MODEL,
+  Transform.create(stand, { position: pos, rotation: Quaternion.Identity() })
+  // propagateToChildren hides the eyes with the body. The wing has its own flag.
+  VisibilityComponent.create(stand, { visible: false, propagateToChildren: true })
+  const body = engine.addEntity()
+  const s = STANDIN_SCALE
+  Transform.create(body, { parent: stand, scale: Vector3.create(s, s, s) })
+  GltfContainer.create(body, {
+    src: standInModel(team),
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  Animator.create(stand, {
-    states: STANDIN_CLIPS.map(clip => ({ clip, playing: false, loop: true, weight: 0, speed: 1 })),
+  const face = createGhostFace(body, team)
+  const wing = engine.addEntity()
+  Transform.create(wing, {
+    parent: stand,
+    position: Vector3.create(0, -GLIDER_DROP_M, 0),
+    rotation: Quaternion.Identity(),
   })
-  VisibilityComponent.create(stand, { visible: false })
-  tintStand(stand, team)
+  GltfContainer.create(wing, {
+    src: GLIDER_MODEL,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  VisibilityComponent.create(wing, { visible: false })
 
   return {
     root,
@@ -264,108 +259,48 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     st: 0,
     an: 0,
     stand,
+    body,
+    wing,
+    face,
     showing: false,
     groundHeld: 0,
     avatarShown: true,
     standShown: false,
-    clip: '',
-    prevClip: '',
-    blend: 1,
-    gesture: 'none',
-    gestureAge: 0,
-    puffs: [],
+    wingShown: false,
+    phase: '',
+    phaseAge: 0,
+    airTime: 0,
   }
 }
 
-const PUFF_LIFE = 0.35
-const PUFF_MAX = 12
-
-function spawnPuff(rec: BotVisual): void {
-  while (rec.puffs.length + 6 > PUFF_MAX) {
-    const old = rec.puffs.shift()
-    if (old) engine.removeEntity(old.e)
-  }
-  for (let i = 0; i < 6; i++) {
-    const e = engine.addEntity()
-    const ang = (i / 6) * Math.PI * 2
-    Transform.create(e, {
-      position: Vector3.create(rec.renderPos.x, rec.renderPos.y + 0.12, rec.renderPos.z),
-      scale: Vector3.create(0.08, 0.08, 0.08),
-    })
-    MeshRenderer.setSphere(e)
-    Material.setPbrMaterial(e, {
-      albedoColor: Color4.create(0.92, 0.93, 0.95, 0.9),
-      roughness: 1,
-      metallic: 0,
-      castShadows: false,
-    })
-    rec.puffs.push({ e, age: 0, ox: Math.cos(ang), oz: Math.sin(ang) })
-  }
-}
-
-function stepPuffs(rec: BotVisual, dt: number): void {
-  const keep: Puff[] = []
-  for (const p of rec.puffs) {
-    p.age += dt
-    if (p.age >= PUFF_LIFE) { engine.removeEntity(p.e); continue }
-    const u = p.age / PUFF_LIFE
-    const spread = 0.15 + u * 0.85
-    const tf = Transform.getMutable(p.e)
-    tf.position = Vector3.create(
-      rec.renderPos.x + p.ox * spread,
-      rec.renderPos.y + 0.1 + u * 0.7,
-      rec.renderPos.z + p.oz * spread,
-    )
-    const s = 0.1 + u * 0.28
-    tf.scale = Vector3.create(s, s * 0.6, s)
-    keep.push(p)
-  }
-  rec.puffs = keep
-}
-
-function blendClip(rec: BotVisual, clip: StandClip, dt: number): void {
-  if (rec.clip !== clip) {
-    rec.prevClip = rec.clip
-    rec.clip = clip
-    rec.blend = 0
-    rec.gesture = motionFor(clip)
-    rec.gestureAge = 0
-    if (puffOnClip(clip)) spawnPuff(rec)
-  }
-  if (rec.blend < 1) {
-    rec.blend = Math.min(1, rec.blend + dt / STANDIN_BLEND_S)
-    const anim = Animator.getMutable(rec.stand)
-    for (const state of anim.states) {
-      const on = state.clip === rec.clip
-      const prev = state.clip === rec.prevClip
-      state.weight = on ? rec.blend : prev ? 1 - rec.blend : 0
-      state.playing = (state.weight ?? 0) > 0.02
-      state.loop = true
-      state.shouldReset = on && rec.blend < dt / STANDIN_BLEND_S + 1e-4
-    }
-  }
-  rec.gestureAge += dt
-}
-
-/** One visible body. The mannequin tracks the interpolated feet and yaw. */
+/** One visible body. The ghost tracks the interpolated feet and yaw. */
 function syncAirStandIn(rec: BotVisual, dt: number): void {
   const step = stepStandIn(rec.showing, rec.groundHeld, rec.st, dt)
   rec.groundHeld = step.groundHeld
   if (step.changed) {
     rec.avatarShown = setShown(rec.root, !step.showing, rec.avatarShown)
     rec.standShown = setShown(rec.stand, step.showing, rec.standShown)
+    if (!step.showing) rec.wingShown = setShown(rec.wing, false, rec.wingShown)
   }
   rec.showing = step.showing
-  if (rec.showing && standInFor(rec.st)) blendClip(rec, clipFor(rec.st, rec.an), dt)
-  else if (rec.showing) rec.gestureAge += dt
-  else rec.clip = ''
+  if (rec.showing && standInFor(rec.st)) {
+    const phase = phaseFor(rec.st, rec.an)
+    if (phase !== rec.phase) { rec.phase = phase; rec.phaseAge = 0 }
+  } else if (!rec.showing) {
+    rec.phase = ''
+    rec.phaseAge = 0
+  }
+  if (rec.showing) {
+    rec.phaseAge += dt
+    rec.airTime += dt
+    poseGhostFace(rec.face, rec.phase === 'glide' ? 'glide' : rec.phase === 'jump' ? 'focus' : rec.phase === 'fall' ? 'down' : 'hurt', dt, rec.airTime)
+  }
 
-  const pose = rec.showing ? gesturePose(rec.gesture, rec.gestureAge) : { pitch: 0, roll: 0, stretch: 1 }
+  const pose = ghostPose(rec.phase || 'fall', rec.phaseAge, rec.airTime)
   const standTf = Transform.getMutable(rec.stand)
-  standTf.position = rec.renderPos
-  standTf.rotation = Quaternion.fromEulerDegrees(pose.pitch, rec.lastYawDeg, pose.roll)
-  standTf.scale = Vector3.create(1, pose.stretch, 1)
-  stepPuffs(rec, dt)
+  standTf.position = Vector3.create(rec.renderPos.x, rec.renderPos.y + (rec.showing ? pose.bob : 0), rec.renderPos.z)
+  standTf.rotation = Quaternion.fromEulerDegrees(rec.showing ? pose.pitch : 0, rec.lastYawDeg + (rec.showing ? pose.yawExtra : 0), rec.showing ? pose.roll : 0)
+  rec.wingShown = setShown(rec.wing, rec.showing && rec.phase === 'glide', rec.wingShown)
 }
 
 export function initBotVisual(): void {
@@ -414,7 +349,12 @@ export function initBotVisual(): void {
 
       if (rec.team !== b.team) {
         paintAvatar(rec.root, b.team, rec.id)
-        tintStand(rec.stand, b.team)
+        GltfContainer.createOrReplace(rec.body, {
+          src: standInModel(b.team),
+          visibleMeshesCollisionMask: 0,
+          invisibleMeshesCollisionMask: 0,
+        })
+        recolorGhostFace(rec.face, b.team)
         rec.team = b.team
       }
       rec.st = b.st ?? 0
@@ -459,11 +399,10 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. The mannequin and puffs are not children of the avatar.
+    // Reap dropped bots. Eyes and the wing are children of the ghost root.
     for (const [id, rec] of bots) {
       if (!seen.has(id)) {
-        for (const puff of rec.puffs) engine.removeEntity(puff.e)
-        engine.removeEntity(rec.stand)
+        engine.removeEntityWithChildren(rec.stand)
         engine.removeEntity(rec.root)
         bots.delete(id)
       }

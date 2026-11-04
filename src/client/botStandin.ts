@@ -2,7 +2,7 @@
  * Airborne stand-in. The avatar entity is never reparented and its
  * AvatarShape is not rewritten to swap bodies. While the server says the
  * bot is off the ground, the renderer hides that avatar with
- * VisibilityComponent and draws STANDIN_MODEL instead.
+ * VisibilityComponent and draws the existing ghost instead.
  *
  * VisibilityComponent is the hide. The Godot explorer tags the AvatarShape
  * node as the entity's own visual and only sets that node's `visible` flag
@@ -11,26 +11,41 @@
  * to a speck, and a transform rewrite is what faded the mesh on the parent
  * experiment. Write the visibility flag only when it changes.
  *
- * Swap STANDIN_MODEL for another rig later. Clips must keep these names.
+ * The ghost is the Pac-Man body in assets/models/bots/ghost-red.glb and
+ * ghost-blue.glb (crown 1.56 m, +Z forward). Motion is on the entity:
+ * a spin and tilt on a hit, a bob and sway in the air, a forward lean
+ * while gliding. The glider is a separate model with no Armature_Prop node.
  * Wind-up (st 3) stays the avatar: that pose is standing on the floor.
  */
-export const STANDIN_MODEL = 'assets/models/bots/air-standin.glb'
+export const STANDIN_GHOST = {
+  red: 'assets/models/bots/ghost-red.glb',
+  blue: 'assets/models/bots/ghost-blue.glb',
+} as const
 
-export const STANDIN_CLIPS = ['tumble', 'jump', 'double', 'fall', 'glide'] as const
-export type StandClip = typeof STANDIN_CLIPS[number]
+/** Renamed copy of the glider. The source file's armature node is Armature_Prop, which the explorer binds as an emote prop. */
+export const GLIDER_MODEL = 'assets/models/bot_glider.glb'
+
+/** Crown height of ghost-red.glb / ghost-blue.glb (scripts/build-ghost-glbs.mjs). */
+export const GHOST_CROWN_M = 0.2 + 0.88 + 0.48
+/** Scale the ghost so the crown matches a player. */
+export const STANDIN_SCALE = 1.8 / GHOST_CROWN_M
+/**
+ * Glider mesh sits about 2.1 m up in its own file. This drop puts the wing
+ * just over the scaled crown. No extra yaw: the ghost and the wing both face +Z.
+ */
+export const GLIDER_DROP_M = 0.34
+
+/** Nose-down lean, degrees, held for the whole glide. */
+export const GLIDE_PITCH_DEG = 18
 
 /** Grounded this long before the avatar comes back, so a one-frame st=0 does not flap. */
 export const STANDIN_GROUND_HOLD_S = 0.3
-/** Crossfade between clips. */
-export const STANDIN_BLEND_S = 0.12
 
-const STRETCH_S = 0.28
-const FLIP_S = 0.42
-const SPIN_S = 0.55
-/** Nose-down pitch, degrees, held for the whole glide. */
-export const GLIDE_PITCH_DEG = 22
+export type AirPhase = 'tumble' | 'jump' | 'fall' | 'glide'
 
-export type MotionKind = 'none' | 'stretch' | 'flip' | 'spin' | 'pitch'
+export function standInModel(team: number): string {
+  return team === 2 ? STANDIN_GHOST.blue : STANDIN_GHOST.red
+}
 
 /** Knocked / rescued / gliding. Not the lunge wind-up. */
 export function standInFor(st: number): boolean {
@@ -53,42 +68,29 @@ export function stepStandIn(
   return { showing: false, groundHeld: 0, changed: true }
 }
 
-/** `an` is shared/botAnim.ts. Rescue (st 2) hangs in the fall pose. */
-export function clipFor(st: number, an: number): StandClip {
-  if (an === 3) return 'double'
-  if (an === 2) return 'jump'
+/** `an` is shared/botAnim.ts. Rescue (st 2) uses the fall motion. */
+export function phaseFor(st: number, an: number): AirPhase {
   if (an === 4 || st === 4) return 'glide'
+  if (an === 2 || an === 3) return 'jump'
   if (an === 5 || st === 2) return 'fall'
   return 'tumble'
 }
 
-export function motionFor(clip: StandClip): MotionKind {
-  if (clip === 'jump') return 'stretch'
-  if (clip === 'double') return 'flip'
-  if (clip === 'tumble') return 'spin'
-  if (clip === 'glide') return 'pitch'
-  return 'none'
-}
+export type GhostPose = { pitch: number; roll: number; yawExtra: number; bob: number }
 
-export function puffOnClip(clip: StandClip): boolean {
-  return clip === 'jump' || clip === 'double'
-}
-
-/** Extra root motion on top of the clip. Pitch and roll are degrees. Stretch is a Y scale. */
-export function gesturePose(kind: MotionKind, age: number): { pitch: number; roll: number; stretch: number } {
-  const t = Math.max(0, age)
-  if (kind === 'stretch') {
-    const u = Math.min(1, t / STRETCH_S)
-    return { pitch: 0, roll: 0, stretch: u >= 1 ? 1 : 1 + 0.32 * Math.sin(Math.PI * u) }
+/** Code motion. Pitch, roll, and yawExtra are degrees. Bob is metres. */
+export function ghostPose(phase: AirPhase, age: number, time: number): GhostPose {
+  const t = Math.max(0, time)
+  const bob = Math.sin(t * 3.2) * 0.07
+  const sway = Math.sin(t * 2.1) * 7
+  if (phase === 'glide') {
+    return { pitch: GLIDE_PITCH_DEG, roll: sway * 0.35, yawExtra: 0, bob: Math.sin(t * 2.2) * 0.05 }
   }
-  if (kind === 'flip') {
-    const u = Math.min(1, t / FLIP_S)
-    return { pitch: 360 * u, roll: 0, stretch: 1 }
+  if (phase === 'jump') {
+    const u = Math.min(1, Math.max(0, age) / 0.35)
+    return { pitch: -14 * Math.sin(Math.PI * u), roll: sway * 0.4, yawExtra: 0, bob: bob + 0.14 * Math.sin(Math.PI * u) }
   }
-  if (kind === 'spin') {
-    const u = Math.min(1, t / SPIN_S)
-    return { pitch: 0, roll: 360 * u, stretch: 1 }
-  }
-  if (kind === 'pitch') return { pitch: GLIDE_PITCH_DEG, roll: 0, stretch: 1 }
-  return { pitch: 0, roll: 0, stretch: 1 }
+  if (phase === 'fall') return { pitch: 10, roll: sway, yawExtra: 0, bob }
+  const u = Math.min(1, Math.max(0, age) / 0.6)
+  return { pitch: 20 * Math.sin(Math.PI * u), roll: 360 * u, yawExtra: 40 * Math.sin(Math.PI * u), bob }
 }

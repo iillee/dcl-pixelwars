@@ -17,8 +17,8 @@ import { lungeKnock } from '../src/shared/knocks'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 import { readFileSync } from 'node:fs'
 import {
-  STANDIN_CLIPS, STANDIN_MODEL, GLIDE_PITCH_DEG,
-  stepStandIn, standInFor, clipFor, gesturePose, motionFor, puffOnClip,
+  STANDIN_GHOST, GLIDER_MODEL, GHOST_CROWN_M, STANDIN_SCALE, GLIDE_PITCH_DEG,
+  standInModel, stepStandIn, standInFor, phaseFor, ghostPose,
 } from '../src/client/botStandin'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -322,41 +322,42 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
 console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
 
 // ── Stand-in: one body, tracks the draw, avatar component stays put ──
-const glb = readFileSync(new URL('../' + STANDIN_MODEL, import.meta.url))
-const jsonLen = glb.readUInt32LE(12)
-const gltf = JSON.parse(glb.subarray(20, 20 + jsonLen).toString('utf8')) as {
-  nodes: { name: string }[]
-  animations: { name: string }[]
-  skins: { joints: number[] }[]
+function gltfJson(path: string): { nodes: { name: string }[] } {
+  const glb = readFileSync(new URL('../' + path, import.meta.url))
+  if (glb.includes(Buffer.from('Armature_Prop'))) throw new Error(path + ' has Armature_Prop')
+  const jsonLen = glb.readUInt32LE(12)
+  return JSON.parse(glb.subarray(20, 20 + jsonLen).toString('utf8'))
 }
-const nodeNames = gltf.nodes.map(n => n.name)
-const clipNames = gltf.animations.map(a => a.name)
-if (nodeNames.includes('Armature_Prop') || glb.includes(Buffer.from('Armature_Prop'))) {
-  console.error('✗ stand-in glb has a node named Armature_Prop')
+for (const path of [STANDIN_GHOST.red, STANDIN_GHOST.blue]) {
+  const names = gltfJson(path).nodes.map(n => n.name)
+  if (!names.includes('Ghost')) {
+    console.error('✗ ghost model missing Ghost node: ' + path)
+    process.exit(1)
+  }
+}
+const wingNames = gltfJson(GLIDER_MODEL).nodes.map(n => n.name)
+if (!wingNames.includes('BotGliderRoot') || wingNames.includes('Armature_Prop')) {
+  console.error('✗ glider must be the renamed model, not Armature_Prop')
   process.exit(1)
 }
-if (STANDIN_CLIPS.some(c => !clipNames.includes(c)) || gltf.skins[0].joints.length < 8) {
-  console.error(`✗ stand-in clips ${clipNames.join(',')} joints ${gltf.skins[0].joints.length}`)
+const spin = ghostPose('tumble', 0.6, 0)
+const tilt = ghostPose('tumble', 0.3, 0)
+const lean = ghostPose('glide', 1, 1)
+const bob = ghostPose('fall', 0, Math.PI / 2 / 3.2)
+if (Math.abs(spin.roll - 360) > 0.01 || Math.abs(tilt.pitch) < 10 || lean.pitch !== GLIDE_PITCH_DEG || Math.abs(bob.bob) < 0.05) {
+  console.error('✗ ghost motion should spin and tilt on a hit, bob in the air, and lean on the glide')
   process.exit(1)
 }
-const stretch = gesturePose('stretch', 0.14).stretch
-const flip = gesturePose('flip', 0.42).pitch
-const spin = gesturePose('spin', 0.55).roll
-const glidePitch = gesturePose('pitch', 2).pitch
-if (stretch < 1.2 || Math.abs(flip - 360) > 0.01 || Math.abs(spin - 360) > 0.01 || glidePitch !== GLIDE_PITCH_DEG) {
-  console.error('✗ code motion did not stretch, flip, spin, and pitch')
+if (Math.abs(STANDIN_SCALE * GHOST_CROWN_M - 1.8) > 0.001) {
+  console.error('✗ ghost scale should put the crown at avatar height')
   process.exit(1)
 }
-if (!puffOnClip('jump') || !puffOnClip('double') || puffOnClip('fall') || puffOnClip('glide') || puffOnClip('tumble')) {
-  console.error('✗ puff should fire on jump and double jump only')
+if (!standInModel(1).includes('ghost-red') || !standInModel(2).includes('ghost-blue')) {
+  console.error('✗ stand-in should use the team ghost models')
   process.exit(1)
 }
-if (motionFor('jump') !== 'stretch' || motionFor('double') !== 'flip' || motionFor('tumble') !== 'spin' || motionFor('glide') !== 'pitch') {
-  console.error('✗ clip motion mapping')
-  process.exit(1)
-}
-if (clipFor(1, 2) !== 'jump' || clipFor(1, 3) !== 'double' || clipFor(4, 4) !== 'glide' || clipFor(1, 5) !== 'fall' || clipFor(1, 1) !== 'tumble' || clipFor(2, 0) !== 'fall') {
-  console.error('✗ clipFor phase mapping')
+if (phaseFor(1, 2) !== 'jump' || phaseFor(4, 4) !== 'glide' || phaseFor(1, 5) !== 'fall' || phaseFor(1, 1) !== 'tumble' || phaseFor(2, 0) !== 'fall') {
+  console.error('✗ phaseFor mapping')
   process.exit(1)
 }
 if (standInFor(0) || standInFor(3) || !standInFor(1) || !standInFor(2) || !standInFor(4)) {
@@ -364,7 +365,7 @@ if (standInFor(0) || standInFor(3) || !standInFor(1) || !standInFor(2) || !stand
   process.exit(1)
 }
 
-function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: number; both: number; none: number; offDraw: number; clips: string } {
+function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: number; both: number; none: number; offDraw: number; phases: string; wingOn: number; wingOff: number } {
   const c = new Client()
   let showing = false
   let held = 0
@@ -373,6 +374,10 @@ function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: 
   let both = 0
   let none = 0
   let offDraw = 0
+  let phase = ''
+  let wing = false
+  let wingOn = 0
+  let wingOff = 0
   const seen = new Set<string>()
   for (let i = 0; i < packets.length; i++) {
     const p = packets[i]
@@ -388,27 +393,35 @@ function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: 
       }
       showing = step.showing
       held = step.groundHeld
+      if (showing && standInFor(st)) phase = phaseFor(st, p.an ?? 0)
+      else if (!showing) phase = ''
       const avatarOn = !showing
       const standOn = showing
       if (avatarOn && standOn) both++
       if (!avatarOn && !standOn) none++
-      // syncAirStandIn copies renderPos onto the mannequin, so this is its server error.
+      // The ghost's feet are the interpolated draw, plus a few centimetres of bob.
       if (standOn) offDraw = Math.max(offDraw, sub(c.render, { x: p.x, y: p.y, z: p.z }))
-      if (showing && standInFor(st)) seen.add(clipFor(st, p.an ?? 0))
+      if (phase) seen.add(phase)
+      const wingNow = showing && phase === 'glide'
+      if (wingNow !== wing) {
+        if (wingNow) wingOn++
+        else wingOff++
+        wing = wingNow
+      }
     }
   }
-  return { shows, hides, both, none, offDraw, clips: [...seen].join(',') }
+  return { shows, hides, both, none, offDraw, phases: [...seen].join(','), wingOn, wingOff }
 }
 
 const bodies = countBodies(knockPackets, false)
 const flappy = countBodies(knockPackets, true)
-console.log(`stand-in: show ${bodies.shows} hide ${bodies.hides} serverLag ${bodies.offDraw.toFixed(2)} m clips ${bodies.clips}; flap show ${flappy.shows} hide ${flappy.hides}`)
+console.log(`stand-in: show ${bodies.shows} hide ${bodies.hides} wing ${bodies.wingOn}/${bodies.wingOff} serverLag ${bodies.offDraw.toFixed(2)} m phases ${bodies.phases}; flap show ${flappy.shows} hide ${flappy.hides}`)
 if (bodies.shows !== 1 || bodies.hides !== 1 || bodies.both !== 0 || bodies.none !== 0 || !(bodies.offDraw < 15)) {
   console.error(`✗ want one show and one hide per knock and one body (server lag ${bodies.offDraw.toFixed(2)} m)`)
   process.exit(1)
 }
-if (!bodies.clips.includes('glide')) {
-  console.error('✗ the knock never played the glide clip')
+if (!bodies.phases.includes('glide') || bodies.wingOn !== 1 || bodies.wingOff !== 1) {
+  console.error('✗ the glider should appear once for the glide and go away once')
   process.exit(1)
 }
 if (flappy.shows !== 1 || flappy.hides !== 1) {
@@ -420,16 +433,20 @@ const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta
 const sync = visualSrc.slice(visualSrc.indexOf('function syncAirStandIn'), visualSrc.indexOf('export function initBotVisual'))
 const shapeWrites = (sync.match(/AvatarShape|paintAvatar/g) ?? []).length
 const parentWrites = (sync.match(/parent:/g) ?? []).length
-if (shapeWrites !== 0 || parentWrites !== 0 || !sync.includes('standTf.position = rec.renderPos')) {
-  console.error('✗ the airborne sync rewrites AvatarShape or reparents, or the stand-in left the draw')
+if (shapeWrites !== 0 || parentWrites !== 0 || !sync.includes('rec.renderPos.x') || !sync.includes('rec.renderPos.z')) {
+  console.error('✗ the airborne sync rewrites AvatarShape or reparents, or the ghost left the draw')
   process.exit(1)
 }
 if ((visualSrc.match(/AvatarShape\.createOrReplace/g) ?? []).length !== 1) {
   console.error('✗ AvatarShape should be written in paintAvatar only')
   process.exit(1)
 }
-if (!visualSrc.includes('engine.removeEntity(rec.stand)') || !visualSrc.includes('for (const puff of rec.puffs) engine.removeEntity(puff.e)')) {
-  console.error('✗ bot removal does not reap the stand-in and its puffs')
+if ((visualSrc.match(/GltfContainer\.createOrReplace/g) ?? []).length !== 1) {
+  console.error('✗ the ghost model should be rewritten only on a team change')
+  process.exit(1)
+}
+if (!visualSrc.includes('engine.removeEntityWithChildren(rec.stand)')) {
+  console.error('✗ bot removal does not reap the ghost, its eyes, and the glider')
   process.exit(1)
 }
 const setShown = visualSrc.slice(visualSrc.indexOf('function setShown'), visualSrc.indexOf('function createBotVisual'))
