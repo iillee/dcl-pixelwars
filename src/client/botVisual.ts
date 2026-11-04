@@ -10,9 +10,9 @@
  * whatever position you write) does not drag the body off that target.
  * Locomotion from that setup is untested until a preview pass.
  *
- * Off the ground the avatar stays on this entity. VisibilityComponent hides
- * it, and a rigged mannequin (botStandin.ts) plays the recovery clip. The
- * glider is a child of that mannequin while the glide clip plays.
+ * Off the ground the real avatar is moved once to AVATAR_PARK (Unity ignores
+ * VisibilityComponent on AvatarShape) and a rigged mannequin plays the
+ * recovery. The glider is a child of that mannequin during the glide clip.
  * The avatar is not reparented and AvatarShape is not rewritten to swap.
  *
  * ── Why per-frame lerp ──────────────────────────────────────────────
@@ -39,7 +39,7 @@ import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import {
   GLIDER_MODEL, GLIDER_OFFSET, STANDIN_MODEL, STANDIN_CLIPS, STANDIN_BLEND_S, AirPhase,
-  stepStandIn, standInFor, phaseFor, standPose,
+  AVATAR_PARK, YAW_DEG_PER_SEC, approachYaw, stepStandIn, standInFor, phaseFor, standPose,
 } from './botStandin'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
@@ -241,7 +241,7 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
   holdWalker(root, pos)
 
   const stand = engine.addEntity()
-  Transform.create(stand, { position: pos, rotation: Quaternion.Identity() })
+  Transform.create(stand, { position: pos, rotation: Quaternion.Identity(), scale: Vector3.create(0, 0, 0) })
   // The wing has its own flag so a tumble does not show it. The body inherits this one.
   VisibilityComponent.create(stand, { visible: false, propagateToChildren: true })
   const body = engine.addEntity()
@@ -317,36 +317,63 @@ function blendClip(rec: BotVisual, clip: AirPhase, dt: number): void {
   }
 }
 
-/** One visible body. The mannequin tracks the interpolated feet and yaw. */
+/** One write. A finished tween pins the avatar there so the walker cannot drag it back. */
+function parkAvatar(rec: BotVisual): void {
+  const parked = Vector3.create(AVATAR_PARK.x, AVATAR_PARK.y, AVATAR_PARK.z)
+  const tf = Transform.getMutable(rec.root)
+  tf.position = parked
+  tf.rotation = Quaternion.Identity()
+  holdWalker(rec.root, parked)
+}
+
+/** One visible body. The mannequin tracks the interpolated feet and smoothed yaw. */
 function syncAirStandIn(rec: BotVisual, dt: number): void {
-  const step = stepStandIn(rec.showing, rec.groundHeld, rec.st, dt)
+  const step = stepStandIn(rec.showing, rec.groundHeld, rec.st, rec.an, dt)
   rec.groundHeld = step.groundHeld
-  if (step.changed) {
-    rec.avatarShown = setShown(rec.root, !step.showing, rec.avatarShown)
-    rec.standShown = setShown(rec.stand, step.showing, rec.standShown)
-    if (!step.showing) rec.wingShown = setShown(rec.wing, false, rec.wingShown)
-  }
-  rec.showing = step.showing
-  if (rec.showing && standInFor(rec.st)) {
-    const phase = phaseFor(rec.st, rec.an)
-    if (phase !== rec.phase) { rec.phase = phase; rec.phaseAge = 0 }
-    blendClip(rec, phase, dt)
-  } else if (!rec.showing) {
+  if (step.changed && step.showing) {
+    rec.avatarShown = setShown(rec.root, false, rec.avatarShown)
+    parkAvatar(rec)
     rec.phase = ''
     rec.phaseAge = 0
+    rec.airTime = 0
+    rec.clip = ''
+    rec.prevClip = ''
+    rec.blend = 1
+    const standTf = Transform.getMutable(rec.stand)
+    standTf.scale = Vector3.One()
+    standTf.position = rec.renderPos
+    standTf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+    Transform.getMutable(rec.body).scale = Vector3.One()
+    rec.standShown = setShown(rec.stand, true, rec.standShown)
+  } else if (step.changed && !step.showing) {
+    rec.avatarShown = setShown(rec.root, true, rec.avatarShown)
+    rec.standShown = setShown(rec.stand, false, rec.standShown)
+    rec.wingShown = setShown(rec.wing, false, rec.wingShown)
+    Animator.stopAllAnimations(rec.body)
+    const standTf = Transform.getMutable(rec.stand)
+    standTf.scale = Vector3.create(0, 0, 0)
+    standTf.rotation = Quaternion.Identity()
+    Transform.getMutable(rec.body).scale = Vector3.One()
+    rec.phase = ''
+    rec.phaseAge = 0
+    rec.airTime = 0
     rec.clip = ''
   }
-  if (rec.showing) {
-    rec.phaseAge += dt
-    rec.airTime += dt
+  rec.showing = step.showing
+  if (!rec.showing) return
+  if (standInFor(rec.st, rec.an)) {
+    const phase = phaseFor(rec.st, rec.an, rec.airTime)
+    if (phase !== rec.phase) { rec.phase = phase; rec.phaseAge = 0 }
+    blendClip(rec, phase, dt)
   }
-
+  rec.phaseAge += dt
+  rec.airTime += dt
   const pose = standPose(rec.phase || 'fall', rec.phaseAge, rec.airTime)
   const standTf = Transform.getMutable(rec.stand)
-  standTf.position = Vector3.create(rec.renderPos.x, rec.renderPos.y + (rec.showing ? pose.bob : 0), rec.renderPos.z)
-  standTf.rotation = Quaternion.fromEulerDegrees(rec.showing ? pose.pitch : 0, rec.lastYawDeg + (rec.showing ? pose.yawExtra : 0), rec.showing ? pose.roll : 0)
-  Transform.getMutable(rec.body).scale = Vector3.create(1, rec.showing ? pose.stretch : 1, 1)
-  rec.wingShown = setShown(rec.wing, rec.showing && rec.phase === 'glide', rec.wingShown)
+  standTf.position = Vector3.create(rec.renderPos.x, rec.renderPos.y + pose.bob, rec.renderPos.z)
+  standTf.rotation = Quaternion.fromEulerDegrees(pose.pitch, rec.lastYawDeg + pose.yawExtra, pose.roll)
+  Transform.getMutable(rec.body).scale = Vector3.create(1, pose.stretch, 1)
+  rec.wingShown = setShown(rec.wing, rec.phase === 'glide', rec.wingShown)
 }
 
 export function initBotVisual(): void {
@@ -480,26 +507,27 @@ export function initBotVisual(): void {
         )
       }
 
-      const tf = Transform.getMutable(rec.root)
-      tf.position = rec.renderPos
-      holdWalker(rec.root, rec.renderPos)
-
-      // Yaw from smoothed VELOCITY, not from renderPos -> lastServerPos.
-      // The old approach flipped 180° the instant renderPos overshot its
-      // target (the delta reversed sign each frame), which produced the
-      // "facing forward then backward" flicker. Velocity is smoothed by
-      // the broadcast cadence and only reverses on a genuine direction
-      // change, so yaw stays stable.
+      // Yaw from smoothed velocity, stepped along the short arc. Assigning
+      // the raw atan2 flipped 180° when one velocity sample reversed.
       const vx = rec.velocity.x
       const vz = rec.velocity.z
       const speedSq = vx * vx + vz * vz
       // Threshold ≈ 0.5 m/s. Below this the bot is effectively idle;
       // holding lastYawDeg avoids yaw drift from tiny numerical noise.
       if (speedSq > 0.25) {
-        rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
+        const target = Math.atan2(vx, vz) * (180 / Math.PI)
+        rec.lastYawDeg = approachYaw(rec.lastYawDeg, target, YAW_DEG_PER_SEC * dt)
       }
-      tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
       syncAirStandIn(rec, dt)
+      // While the mannequin draws, the avatar stays at AVATAR_PARK. Writing
+      // the feet here would put it back in view on a client that ignores
+      // VisibilityComponent.
+      if (!rec.showing) {
+        const tf = Transform.getMutable(rec.root)
+        tf.position = rec.renderPos
+        tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+        holdWalker(rec.root, rec.renderPos)
+      }
     }
   })
 }

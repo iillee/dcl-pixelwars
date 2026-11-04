@@ -18,7 +18,7 @@ import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from
 import { readFileSync } from 'node:fs'
 import {
   STANDIN_MODEL, STANDIN_CLIPS, GLIDER_MODEL, GLIDE_PITCH_DEG,
-  stepStandIn, standInFor, phaseFor, standPose,
+  stepStandIn, standInFor, phaseFor, standPose, approachYaw,
 } from '../src/client/botStandin'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -350,12 +350,17 @@ if (Math.abs(spin.roll - 360) > 0.01 || Math.abs(tilt.pitch) < 10 || stretch.str
   console.error('✗ code motion should spin on a hit, stretch a jump, flip a double, and lean on the glide')
   process.exit(1)
 }
-if (phaseFor(1, 2) !== 'jump' || phaseFor(1, 3) !== 'double' || phaseFor(4, 4) !== 'glide' || phaseFor(1, 5) !== 'fall' || phaseFor(1, 1) !== 'tumble' || phaseFor(2, 0) !== 'fall') {
+if (phaseFor(1, 2, 1) !== 'jump' || phaseFor(1, 2, 0) !== 'tumble' || phaseFor(1, 3, 0) !== 'double' || phaseFor(4, 4, 0) !== 'glide' || phaseFor(1, 5, 1) !== 'fall' || phaseFor(2, 0, 0) !== 'fall') {
   console.error('✗ phaseFor mapping')
   process.exit(1)
 }
-if (standInFor(0) || standInFor(3) || !standInFor(1) || !standInFor(2) || !standInFor(4)) {
-  console.error('✗ stand-in should cover knock, rescue, and glide, not the wind-up')
+if (standInFor(0, 0) || standInFor(3, 0) || standInFor(1, 0) || standInFor(1, 1) || !standInFor(1, 2) || !standInFor(1, 5) || !standInFor(2, 0) || !standInFor(4, 4)) {
+  console.error('✗ stand-in should cover jump, fall, glide, and rescue, not a ground dash or slide')
+  process.exit(1)
+}
+const yawStep = approachYaw(0, 180, 20)
+if (Math.abs(Math.abs(yawStep) - 20) > 0.01) {
+  console.error(`✗ a 180° heading change must step, not snap (got ${yawStep})`)
   process.exit(1)
 }
 
@@ -369,6 +374,7 @@ function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: 
   let none = 0
   let offDraw = 0
   let phase = ''
+  let airTime = 0
   let wing = false
   let wingOn = 0
   let wingOff = 0
@@ -380,14 +386,18 @@ function countBodies(packets: Packet[], flap: boolean): { shows: number; hides: 
       c.frame(0.033)
       let st = p.st
       if (flap && st === 4 && i % 7 === 0) st = 0
-      const step = stepStandIn(showing, held, st, 0.033)
+      const an = p.an ?? 0
+      const step = stepStandIn(showing, held, st, an, 0.033)
+      if (step.changed && step.showing) airTime = 0
       if (step.changed) {
         if (step.showing) shows++
         else hides++
       }
       showing = step.showing
       held = step.groundHeld
-      if (showing && standInFor(st)) phase = phaseFor(st, p.an ?? 0)
+      if (showing) airTime += 0.033
+      else airTime = 0
+      if (showing && standInFor(st, an)) phase = phaseFor(st, an, airTime)
       else if (!showing) phase = ''
       const avatarOn = !showing
       const standOn = showing
@@ -422,6 +432,22 @@ if (flappy.shows !== 1 || flappy.hides !== 1) {
   console.error('✗ a one-packet st=0 during the glide flapped the body')
   process.exit(1)
 }
+const groundRun = countBodies(rampPackets.length ? rampPackets : live, false)
+const floorDash: Packet[] = []
+for (let i = 0; i < 40; i++) {
+  floorDash.push({
+    t: i * 0.1, x: i * 0.4, y: 90, z: 0,
+    st: i < 15 ? 0 : 1,
+    an: i < 28 ? 0 : 1,
+    vx: 4, vy: 0, vz: 0,
+  })
+}
+const grounded = countBodies(floorDash, false)
+console.log(`ground run shows=${groundRun.shows} hides=${groundRun.hides}; floor dash/slide shows=${grounded.shows}`)
+if (groundRun.shows !== 0 || groundRun.hides !== 0 || grounded.shows !== 0 || grounded.hides !== 0) {
+  console.error('✗ the stand-in appeared during a ground run, dash, or slide')
+  process.exit(1)
+}
 
 const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
 const sync = visualSrc.slice(visualSrc.indexOf('function syncAirStandIn'), visualSrc.indexOf('export function initBotVisual'))
@@ -448,7 +474,11 @@ if (visualSrc.includes('ghost-red') || visualSrc.includes('ghostFace') || visual
   process.exit(1)
 }
 if (!visualSrc.includes('engine.removeEntityWithChildren(rec.stand)')) {
-  console.error('✗ bot removal does not reap the ghost, its eyes, and the glider')
+  console.error('✗ bot removal does not reap the mannequin and the glider')
+  process.exit(1)
+}
+if (!visualSrc.includes('AVATAR_PARK') || !visualSrc.includes('if (!rec.showing)')) {
+  console.error('✗ the avatar must be parked while the mannequin draws, and left alone there')
   process.exit(1)
 }
 const setShown = visualSrc.slice(visualSrc.indexOf('function setShown'), visualSrc.indexOf('function createBotVisual'))
@@ -456,4 +486,4 @@ if (!setShown.includes('if (show === was) return was') || !setShown.includes('Vi
   console.error('✗ visibility is not write-on-change')
   process.exit(1)
 }
-console.log('✓ one body per bot; stand-in tracks the draw; avatar visibility changes twice and AvatarShape is not rewritten')
+console.log('✓ one body per bot; ground run keeps the avatar; avatar is parked in the air and AvatarShape is not rewritten')

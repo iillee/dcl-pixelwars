@@ -4,12 +4,12 @@
  * bot is off the ground, the renderer hides that avatar with
  * VisibilityComponent and draws STANDIN_MODEL instead.
  *
- * VisibilityComponent is the hide. The Godot explorer tags the AvatarShape
- * node as the entity's own visual and only sets that node's `visible` flag
- * when the component is dirty, so the avatar mesh is not freed and does not
- * play its fade-in. Scale 0 is not a hide: that explorer clamps a zero scale
- * to a speck, and a transform rewrite is what faded the mesh on the parent
- * experiment. Write the visibility flag only when it changes.
+ * The Unity explorer ignores VisibilityComponent on a scene AvatarShape, so
+ * the hide that actually moves the mesh is a single transform write to
+ * AVATAR_PARK on takeoff (and the matching write back to the feet on landing).
+ * A finished tween is aimed at that same point so the NPC walker does not
+ * stroll the body across the map. AvatarShape is not rewritten. Godot also
+ * gets visible:false on that one transition; it does not free the node.
  *
  * The model is one rigged mannequin (scripts/build-air-standin.py). Team
  * color is a material override, not a second file. Clips are tumble, jump,
@@ -41,18 +41,52 @@ export const GLIDE_PITCH_DEG = 18
 /** Grounded this long before the avatar comes back, so a one-frame st=0 does not flap. */
 export const STANDIN_GROUND_HOLD_S = 0.3
 
-/** Knocked / rescued / gliding. Not the lunge wind-up. */
-export function standInFor(st: number): boolean {
-  return st === 1 || st === 2 || st === 4
+/**
+ * Where the real avatar waits while the mannequin draws. Outside the arena
+ * and below every platform, so a client that ignores VisibilityComponent on
+ * AvatarShape still has nothing to render in view.
+ */
+export const AVATAR_PARK = { x: 8000, y: -400, z: 8000 }
+
+/** How fast the stand-in may change heading, degrees per second. */
+export const YAW_DEG_PER_SEC = 240
+
+/**
+ * Shortest-arc step toward `target`, capped so a one-frame velocity reversal
+ * cannot spin the body 180°.
+ */
+export function approachYaw(current: number, target: number, maxStep: number): number {
+  const wrap = (a: number) => {
+    let x = a % 360
+    if (x < 0) x += 360
+    return x
+  }
+  let d = wrap(target) - wrap(current)
+  if (d > 180) d -= 360
+  if (d < -180) d += 360
+  if (d > maxStep) d = maxStep
+  else if (d < -maxStep) d = -maxStep
+  return wrap(current) + d
+}
+
+/**
+ * In the air for real: rescue, glide, or a knock whose pose is jump, double,
+ * fall, or glide. A grounded dash (an 0) or floor slide (an 1) stays the avatar.
+ */
+export function standInFor(st: number, an: number): boolean {
+  if (st === 2 || st === 4) return true
+  if (st !== 1) return false
+  return an === 2 || an === 3 || an === 4 || an === 5
 }
 
 export function stepStandIn(
   showing: boolean,
   groundHeld: number,
   st: number,
+  an: number,
   dt: number,
 ): { showing: boolean; groundHeld: number; changed: boolean } {
-  if (standInFor(st)) {
+  if (standInFor(st, an)) {
     if (showing) return { showing, groundHeld: 0, changed: false }
     return { showing: true, groundHeld: 0, changed: true }
   }
@@ -62,13 +96,17 @@ export function stepStandIn(
   return { showing: false, groundHeld: 0, changed: true }
 }
 
-/** `an` is shared/botAnim.ts. Rescue (st 2) plays the fall clip. */
-export function phaseFor(st: number, an: number): AirPhase {
-  if (an === 3) return 'double'
-  if (an === 2) return 'jump'
+/**
+ * `an` is shared/botAnim.ts. The first moments of a knock flail; glide and
+ * the double jump take over immediately. Rescue (st 2) hangs in the fall.
+ */
+export function phaseFor(st: number, an: number, airTime: number): AirPhase {
   if (an === 4 || st === 4) return 'glide'
+  if (an === 3) return 'double'
+  if (airTime < 0.45 && st !== 2) return 'tumble'
+  if (an === 2) return 'jump'
   if (an === 5 || st === 2) return 'fall'
-  return 'tumble'
+  return 'fall'
 }
 
 export type StandPose = { pitch: number; roll: number; yawExtra: number; bob: number; stretch: number }
