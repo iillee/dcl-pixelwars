@@ -1,76 +1,73 @@
 /**
- * Ocean under the sky arena, and the fog that hides its edges.
- * Numbers only. The client in `src/client/water.ts` reads them.
+ * Ocean under the sky arena. Numbers only. `src/client/water.ts` reads them.
  *
- * The surface is clamped below the Lakitu line (MIN_Y − FALL_RESPAWN_DROP)
- * by `clearanceM`, and the plane has no collider, so paint, knock-offs and
- * the fall rescue are unchanged.
+ * The surface stays below the Lakitu line. Nothing here has a collider.
  *
- * Creator Hub 0.52's "water" is the Water Plane smart item: stacked
- * translucent planes, this normal map drifting, and a 5 cm bob. There is
- * no water shader in the SDK. Splashes are a player trigger on that item;
- * this sea does not use one.
+ * Explorers clip meshes outside the parcel box, and a World draws a default
+ * landscape of trees and pink ground beyond that box unless
+ * `landscapeTerrain` is false in scene.json. The sea is sized to the scene,
+ * not past it. The horizon skirt is what hides the cut.
  *
- * EnvironmentFog (SDK 7.32+) is exponential, `1 - e^(-density * metres)`.
- * It has no linear start or end. `startM` / `endM` are the distances the
- * density is chosen for: readable inside `startM`, about 90% fog by `endM`.
- * Fog is a desktop quality setting and is not applied on the mobile app
- * or the Bevy explorer. The water mesh still draws there.
+ * EnvironmentFog is global and exponential. It stays very thin so the arena
+ * stays clear. The skirt and the mist are the local fog.
  */
 export const WATER = {
   /** Wanted surface height (m). Clamped under the rescue line. */
   heightY: 4,
   /** Metres of open air kept between the surface and the rescue line. */
   clearanceM: 6,
-  /** Width and depth of the plane (m). The scene is 320 m. */
-  sizeM: 1600,
-  color: { r: 0.07, g: 0.32, b: 0.48, a: 0.78 },
-  metallic: 0.65,
-  roughness: 0.08,
   /**
-   * Ripple normal from the Creator Hub Water Plane
-   * (`packages/asset-packs/.../water_plane/PoolBake_normal.png`).
+   * Plane width (m). 0 means "fill the scene, a few metres inside the
+   * parcel box" so the bounds checker does not slice it.
    */
+  sizeM: 0,
+  /** Pulled in from each scene edge when sizeM is 0. */
+  edgeInsetM: 6,
+  color: { r: 0.07, g: 0.32, b: 0.48, a: 0.9 },
+  metallic: 0.45,
+  roughness: 0.12,
+  /** Ripple normal from the Creator Hub Water Plane. */
   normalSrc: 'assets/textures/water-normal.png',
-  /** Metres per ripple repeat. The Water Plane uses 512 / 38. */
+  /** Morph-target swell. Peak is 1 m in the file; Y scale is the amplitude. */
+  waveMesh: 'assets/models/water-wave.glb',
+  /** Crest height (m). The 5 cm Water Plane bob is only the `swellM` floor. */
+  waveAmplitudeM: 1.8,
+  /** Playback rate of the `wave` clip. 1 = the file's 8 s cycle. */
+  waveSpeed: 0.85,
+  /** Whole-surface rise and fall (m), on top of the mesh. */
+  swellM: 0.45,
+  swellSeconds: 8,
+  /** Metres per ripple repeat of the normal map. The Water Plane uses 512/38. */
   rippleSizeM: 512 / 38,
-  /** Texture repeats per second. The Water Plane uses 0.008 (~0.1 m/s). */
-  driftSpeed: 0.008,
-  drifts: [
-    { x: 1, y: 0.35 },
-    { x: -0.55, y: 1 },
-    { x: 0.8, y: -0.6 },
-  ],
-  /** Vertical bob of each sheet (m), over `bobSeconds`. */
-  bobM: 0.05,
-  bobSeconds: 5,
   /**
-   * Translucent sheets. Each one is a full-screen overdraw when you look
-   * across the sea, so mobile keeps a single sheet.
+   * Two crossed scrolls. Each entry is one transparent sheet.
+   * Mobile keeps only the first.
    */
-  layersDesktop: 3,
-  layersMobile: 1,
-  /** Gap between sheets so they don't flicker against each other (m). */
-  layerGapM: 0.12,
+  ripples: [
+    { speed: 0.018, scale: 1, x: 1, y: 0.35 },
+    { speed: 0.041, scale: 2.5, x: -0.45, y: 1 },
+  ],
 }
 
 export const WATER_FOG = {
-  /** Sea haze. The sky itself is left on the default cycle. */
+  /** Global exponential fog. Off, or a very low density, so the maze stays clear. */
+  environment: true,
+  /** Per metre. Default explorer fog is 0.0005. Higher than ~0.002 washes the arena. */
+  density: 0.00035,
   color: { r: 0.62, g: 0.74, b: 0.84 },
-  /** Inside this distance the platforms should stay easy to read. */
-  startM: 140,
-  /** By this distance the water's far edge should be mostly gone. */
-  endM: 700,
-}
-
-/** Density that puts about 90% fog at `endM`. */
-export function fogDensity(endM: number = WATER_FOG.endM): number {
-  return -Math.log(0.1) / endM
+  /** Vertical gradient cards standing just inside the parcel edge. */
+  skirt: true,
+  skirtHeightM: 90,
+  skirtSrc: 'assets/textures/water-skirt.png',
+  /** Soft sheet a few metres above the sea, still far below the platforms. */
+  mist: true,
+  mistAboveM: 14,
+  mistColor: { r: 0.75, g: 0.84, b: 0.9, a: 0.22 },
 }
 
 /** Fog fraction at `metres` for the configured density. */
-export function fogAt(metres: number, density: number = fogDensity()): number {
-  return 1 - Math.exp(-density * metres)
+export function fogAt(metres: number, density: number = WATER_FOG.density): number {
+  return 1 - Math.exp(-Math.max(0, density) * metres)
 }
 
 /**
@@ -80,4 +77,12 @@ export function fogAt(metres: number, density: number = fogDensity()): number {
 export function resolvedWaterY(minY: number, fallDrop: number): number {
   const rescue = minY - fallDrop
   return Math.min(WATER.heightY, rescue - WATER.clearanceM)
+}
+
+/** Plane width that stays inside the parcel box. */
+export function resolvedWaterSize(sceneM: number): number {
+  const inset = Math.max(1, WATER.edgeInsetM)
+  const fill = Math.max(16, sceneM - inset * 2)
+  if (WATER.sizeM <= 0) return fill
+  return Math.min(WATER.sizeM, fill)
 }

@@ -7,10 +7,9 @@
  *
  *   LEVEL_MODE = 'classic' → the original 5×5 centre-seeded maze (176 m, Y=0).
  *     Also switch scene.json back to the 11×11 parcel list + CenterSpawn.
- *   LEVEL_MODE = 'sky'     → 20×20 parcels (320 m). With the flags below
- *     (bases-only + base line): a 5×5 asymmetric-but-fair woven network over 80–240 m at
- *     SKY_ALTITUDE, three levels, 1-tile team bases in opposite corners
- *     (RED (0,0), BLUE (4,4)) that double as spawns. See generator.ts.
+ *   LEVEL_MODE = 'sky'     → SKY_PARCELS × SKY_PARCELS (a World; no LAND cost).
+ *     The play grid stays 5×5. The extra parcels are open water so the sea is
+ *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -36,11 +35,16 @@ export const SKY_BASES_ONLY = true
 export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
-/** World-space inset of the sky grid from every scene edge (m). 80 = five
- *  parcels → 5×5 tiles over 80–240 m (64 → 6×6 over 64–256, 96 → 4×4 over
- *  96–224 but only ~24 distinct 3-level layouts). Keep (320 - 2·inset) a
- *  multiple of 32 so the grid stays centred, and update scene.json spawns. */
-export const SKY_EDGE_INSET = 80
+/**
+ * Parcels on a side. 16 m each. 80 → 1280 m, so the sea can reach the
+ * horizon without leaving the scene. Worlds allow up to 300×300 and do not
+ * charge LAND for the extra parcels. The play grid stays 5×5 because the
+ * inset below grows with the scene. Keep scene.json's parcel list in step.
+ */
+export const SKY_PARCELS = 80
+export const SKY_SCENE_M = SKY_PARCELS * 16
+/** Inset that leaves a 5×32 m grid centred in the scene. */
+export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0
