@@ -33,7 +33,7 @@ export type Rgb = { r: number; g: number; b: number; a: number }
 /** Midday is the applied row: a pale blue horizon, water a step deeper. */
 export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
   midday: {
-    water: { r: 0.46, g: 0.66, b: 0.82, a: 1 },
+    water: { r: 0.1, g: 0.36, b: 0.64, a: 1 },
     rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
     haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
   },
@@ -94,15 +94,16 @@ export const WATER = {
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
   swellNearM: 640,
-  swellNearStepM: 8,
+  /** 32 m is the grid the preview already drew (about 1,700 verts). 8 m made a 5 MB morph file it did not draw. */
+  swellNearStepM: 32,
   /** Middle ring, half-extent (m). Continues the same waves at a coarser step. */
   swellMidM: 1280,
-  swellMidStepM: 16,
+  swellMidStepM: 64,
   /** Outer ring, half-extent (m). Displacement eases to 0 at this edge. */
   swellFarM: 2048,
-  swellFarStepM: 32,
+  swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
-  swellMobileStepM: 16,
+  swellMobileStepM: 32,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
   swellMobileFadeM: 220,
   swellNearSrc: 'assets/models/water-swell-near.glb',

@@ -397,6 +397,11 @@ function writeGlb(mesh: Built, file: string) {
       pMax[k] = Math.max(pMax[k], mesh.pos[i + k])
     }
   }
+  // Bind-pose Y is 0. Include the crest so a bounds check does not throw the deformed mesh away.
+  if (mesh.morphPos.length) {
+    pMin[1] = Math.min(pMin[1], -AMP)
+    pMax[1] = Math.max(pMax[1], AMP)
+  }
   const posA = putF32(mesh.pos, 'VEC3', pMin, pMax)
   const nrmA = putF32(mesh.nrm, 'VEC3')
   const uvA = putF32(mesh.uv, 'VEC2')

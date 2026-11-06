@@ -109,8 +109,12 @@ if (WATER.swellFarM < 1600 || WATER.swellFarM > size / 2) {
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
-if (gap > 0.45 || gap < 0.05) {
-  console.error('✗ near water should sit close to the horizon colour, a step deeper')
+if (gap < 0.25) {
+  console.error('✗ near water is so close to the horizon colour that the swells will not read')
+  process.exit(1)
+}
+if (!(WATER_COLOR.b > WATER_COLOR.r + 0.3 && WATER_COLOR.b > WATER_COLOR.g)) {
+  console.error('✗ near water should stay a clear blue')
   process.exit(1)
 }
 const lum = (c: { r: number; g: number; b: number }) => c.r * 0.3 + c.g * 0.5 + c.b * 0.2
