@@ -3,7 +3,7 @@
  * Knocks a bot standing on its base with each hit in four directions and reports
  * the KnockTrace line and what happened next (settled / fell → cloud → landed).
  */
-import { generateWithRetry, getPlacedTilesInOrder, baseSpawn } from '../src/maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, BASE_Y } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody, BotBodyEvent } from '../src/shared/botBody'
@@ -132,7 +132,8 @@ console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and w
 
 // Open floor: player-scale knock, and every step stays a normal physics step (no teleport).
 {
-  const Y = 90
+  // A flat floor at the raised L0. y 90 sat under the swell fall line after the +100 lift.
+  const Y = BASE_Y + 1
   const nodes = new Map<string, [number, number, number]>()
   for (let x = -4; x <= 120; x += 2) nodes.set('flat' + x, [x, Y, 0])
   const flat = { graph: { worldPos: nodes } as typeof graph, rampTiles: [] as typeof rampTiles, base }
