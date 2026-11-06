@@ -33,9 +33,9 @@ export type Rgb = { r: number; g: number; b: number; a: number }
 /** Midday is the applied row: a pale blue horizon, water a step deeper. */
 export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
   midday: {
-    water: { r: 0.1, g: 0.36, b: 0.64, a: 1 },
-    rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
-    haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
+    water: { r: 0.02, g: 0.22, b: 0.72, a: 1 },
+    rim: { r: 0.55, g: 0.7, b: 0.84, a: 1 },
+    haze: { r: 0.55, g: 0.7, b: 0.84, a: 0.4 },
   },
   sunset: {
     water: { r: 0.76, g: 0.58, b: 0.52, a: 1 },
@@ -70,13 +70,12 @@ export const WATER = {
   sizeM: 0,
   /** Pulled in from each scene edge when sizeM is 0. */
   edgeInsetM: 6,
-  /** Near water. A step deeper than `RIM_COLOR`, still in the horizon family. */
+  /** Test: ba05fa0 deep blue. The swell geometry is still the 110 m set. */
   color: WATER_COLOR,
-  /** Soft sheen. Metallic stays 0 so the highlights do not go white. */
   metallic: 0,
-  roughness: 0.48,
-  /** 1 is the engine default. */
-  specular: 0.4,
+  roughness: 0.7,
+  /** 1 is the engine default. ba05fa0 value. */
+  specular: 0.15,
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
@@ -167,7 +166,8 @@ export const WATER_FOG = {
    * Colour and opacity are `HAZE_COLOR` at runtime. The alpha curve in
    * `hazeMask` is baked.
    */
-  haze: true,
+  /** Off for the color test, so the ring cannot hide the swells. */
+  haze: false,
   hazeColor: HAZE_COLOR,
   hazeRadiusM: 2360,
   hazeBottomY: 36,

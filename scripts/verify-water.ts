@@ -71,8 +71,8 @@ if (WATER.swellPeriodS < 30 || WATER.swellPeriodS > 40) {
   console.error('✗ swell period should be a slow 30–40 s')
   process.exit(1)
 }
-if (WATER.metallic !== 0 || WATER.roughness < 0.45 || WATER.roughness > 0.55 || WATER.specular < 0.3 || WATER.specular > 0.5) {
-  console.error('✗ reflectivity should be a soft sheen, not matte and not a white streak')
+if (WATER.metallic !== 0 || Math.abs(WATER.roughness - 0.7) > 0.001 || Math.abs(WATER.specular - 0.15) > 0.001) {
+  console.error('✗ color test should use the ba05fa0 matte settings')
   process.exit(1)
 }
 if (size > SCENE_SIZE - 2 || size < SCENE_SIZE * 0.9) {
@@ -91,17 +91,8 @@ if (WATER_FOG.mist) {
   console.error('✗ the mist sheet over the water should be off')
   process.exit(1)
 }
-if (!WATER_FOG.haze) {
-  console.error('✗ the horizon haze ring should be on')
-  process.exit(1)
-}
-const seaHalf = size / 2
-if (WATER_FOG.hazeRadiusM < WATER.swellFarM || WATER_FOG.hazeRadiusM > seaHalf - 8) {
-  console.error('✗ the haze ring should sit just inside the sea edge, past the swell')
-  process.exit(1)
-}
-if (WATER_FOG.hazeBottomY > y || WATER_FOG.hazeTopY < 220 || WATER_FOG.hazeTopY > 320) {
-  console.error('✗ the haze should start under the waterline and rise past eye height, under the scene cap')
+if (WATER_FOG.haze) {
+  console.error('✗ haze is hidden for this color test')
   process.exit(1)
 }
 if (WATER.swellFarM < 1600 || WATER.swellFarM > size / 2) {

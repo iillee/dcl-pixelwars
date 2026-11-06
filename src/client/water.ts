@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { HAZE_COLOR, RIM_COLOR, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
+import { HAZE_COLOR, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
 import { swellCycleSeconds } from '../shared/swell'
 
 const swellClips: Entity[] = []
@@ -148,11 +148,12 @@ function addSwell(root: Entity, src: string): Entity {
         material: {
           $case: 'pbr',
           pbr: {
-            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+            texture: Material.Texture.Common({ src: WATER.colorSrc }),
+            albedoColor: Color4.create(1, 1, 1, c.a),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
             specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(c.r, c.g, c.b),
+            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },
@@ -180,14 +181,10 @@ function addFlat(root: Entity, src: string): Entity {
           $case: 'pbr',
           pbr: {
             texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-            albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
-            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
-            emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
-            emissiveIntensity: 1,
+            albedoColor: Color4.create(1, 1, 1, 1),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
             specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },

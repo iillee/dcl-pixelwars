@@ -549,10 +549,14 @@ function writeTextures() {
   for (let x = 0; x < W; x++) {
     const u = x / (W - 1)
     const t = smooth(Math.max(0, (u - 0.28) / 0.72))
-    const water = 1 - t
+    const r = WATER_RGB.r + (SKY_RGB.r - WATER_RGB.r) * t
+    const g = WATER_RGB.g + (SKY_RGB.g - WATER_RGB.g) * t
+    const b = WATER_RGB.b + (SKY_RGB.b - WATER_RGB.b) * t
     for (let y = 0; y < H; y++) {
       const o = (y * W + x) * 4
-      albedo[o] = albedo[o + 1] = albedo[o + 2] = byte(water)
+      albedo[o] = byte(r)
+      albedo[o + 1] = byte(g)
+      albedo[o + 2] = byte(b)
       albedo[o + 3] = 255
       glow[o] = glow[o + 1] = glow[o + 2] = byte(t)
       glow[o + 3] = 255
