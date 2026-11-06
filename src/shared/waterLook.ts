@@ -142,6 +142,38 @@ export const SWELL_TRAINS: Array<{
  */
 export const SWELL_VARIANT: '48m' | '110m' = '48m'
 
+/** The ba05fa0 trains. The live 48 m meshes were built from these, not from SWELL_TRAINS. */
+export const SWELL_TRAINS_48: Array<{ wavelengthM: number; weight: number; dirDeg: number; phase: number }> = [
+  { wavelengthM: 720, weight: 0.5, dirDeg: 15, phase: 0.4 },
+  { wavelengthM: 480, weight: 0.32, dirDeg: 48, phase: 1.8 },
+  { wavelengthM: 600, weight: 0.18, dirDeg: 80, phase: 3.1 },
+]
+export const SWELL_48_AMPLITUDE_M = 24
+export const SWELL_48_PERIOD_S = 28
+
+export const FOAM = {
+  /** Rings where each tile's column meets the sea. */
+  rings: true,
+  ringSrc: 'assets/textures/water-foam-ring.png',
+  /** Broken crest band. Scrolled in the primary train's direction. */
+  whitecapSrc: 'assets/textures/water-whitecap.png',
+  whitecaps: true,
+  /** Plane width (m). The pillar shaft is 20 m across. */
+  ringSizeM: 36,
+  /** Metres above the analytic surface, so the decal doesn't fight the swell. */
+  ringLiftM: 0.45,
+  baseAlpha: 0.4,
+  /** Added when the surface is at a crest (crest factor 0..1). */
+  crestBoost: 0.5,
+  spinDegPerSec: 6,
+  pulse: 0.06,
+  pulseSeconds: 5,
+  scrollPerSec: 0.03,
+  /** Mobile keeps the rings closest to centre. */
+  mobileMax: 12,
+  maxRings: 40,
+}
+
 export function swellMesh(part: 'near' | 'mid' | 'far' | 'lite'): string {
   if (SWELL_VARIANT === '48m') {
     if (part === 'near') return WATER.swell48NearSrc

@@ -5,7 +5,7 @@
  */
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { SWELL_TRAINS, WATER, resolvedWaterY } from './waterLook'
+import { SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, resolvedWaterY } from './waterLook'
 
 export type SwellPart = {
   k: number
@@ -15,16 +15,27 @@ export type SwellPart = {
   phase: number
 }
 
-export const SWELL_PARTS: SwellPart[] = SWELL_TRAINS.map((t) => {
-  const rad = (t.dirDeg * Math.PI) / 180
-  return {
-    k: (Math.PI * 2) / t.wavelengthM,
-    dx: Math.cos(rad),
-    dz: Math.sin(rad),
-    weight: t.weight,
-    phase: t.phase,
-  }
-})
+function toParts(trains: typeof SWELL_TRAINS): SwellPart[] {
+  return trains.map((t) => {
+    const rad = (t.dirDeg * Math.PI) / 180
+    return {
+      k: (Math.PI * 2) / t.wavelengthM,
+      dx: Math.cos(rad),
+      dz: Math.sin(rad),
+      weight: t.weight,
+      phase: t.phase,
+    }
+  })
+}
+
+/** 110 m set. The mesh builder uses this. */
+export const SWELL_PARTS: SwellPart[] = toParts(SWELL_TRAINS)
+const PARTS_48: SwellPart[] = toParts(SWELL_TRAINS_48)
+
+export function liveSwell(): { parts: SwellPart[]; amplitudeM: number; periodS: number } {
+  if (SWELL_VARIANT === '48m') return { parts: PARTS_48, amplitudeM: SWELL_48_AMPLITUDE_M, periodS: SWELL_48_PERIOD_S }
+  return { parts: SWELL_PARTS, amplitudeM: WATER.swellAmplitudeM, periodS: WATER.swellPeriodS }
+}
 
 /** One morph shape. kind 0 is sin, kind 1 is cos, before the global scale. */
 export function swellPartY(x: number, z: number, part: SwellPart, kind: 0 | 1): number {
@@ -33,16 +44,20 @@ export function swellPartY(x: number, z: number, part: SwellPart, kind: 0 | 1): 
 }
 
 /** Unnormalised sum at local XZ (metres from the scene centre). */
-export function swellSum(x: number, z: number, ang: number): number {
+export function swellSumParts(parts: SwellPart[], x: number, z: number, ang: number): number {
   let y = 0
-  for (const part of SWELL_PARTS) {
+  for (const part of parts) {
     const theta = part.k * (x * part.dx + z * part.dz) + part.phase + ang
     y += part.weight * Math.sin(theta)
   }
   return y
 }
 
-function sampleNorm(): number {
+export function swellSum(x: number, z: number, ang: number): number {
+  return swellSumParts(liveSwell().parts, x, z, ang)
+}
+
+function sampleNorm(parts: SwellPart[]): number {
   let hi = -Infinity
   let lo = Infinity
   const extent = 2200
@@ -50,7 +65,7 @@ function sampleNorm(): number {
   for (let z = -extent; z <= extent; z += step) {
     for (let x = -extent; x <= extent; x += step) {
       for (let a = 0; a < 24; a++) {
-        const y = swellSum(x, z, (a / 24) * Math.PI * 2)
+        const y = swellSumParts(parts, x, z, (a / 24) * Math.PI * 2)
         if (y > hi) hi = y
         if (y < lo) lo = y
       }
@@ -59,8 +74,13 @@ function sampleNorm(): number {
   return Math.max(hi, -lo, 1e-6)
 }
 
-/** Peak of the unnormalised sum. The mesh divides by this, then multiplies by swellAmplitudeM. */
-export const SWELL_NORM = sampleNorm()
+/** Peak of the unnormalised 110 m sum. The mesh builder divides by this. */
+export const SWELL_NORM = sampleNorm(SWELL_PARTS)
+const NORM_48 = sampleNorm(PARTS_48)
+
+export function liveSwellNorm(): number {
+  return SWELL_VARIANT === '48m' ? NORM_48 : SWELL_NORM
+}
 
 function smooth(t: number): number {
   const x = Math.min(1, Math.max(0, t))
@@ -79,21 +99,22 @@ export function swellFade(localX: number, localZ: number): number {
 
 /** Seconds into the shared cycle. Wall clock, so server and clients agree. */
 export function swellCycleSeconds(nowMs: number = Date.now()): number {
-  const t = WATER.swellPeriodS
+  const t = liveSwell().periodS
   return ((nowMs / 1000) % t + t) % t
 }
 
 export function swellAngle(cycleSeconds: number): number {
-  return (cycleSeconds / WATER.swellPeriodS) * Math.PI * 2
+  return (cycleSeconds / liveSwell().periodS) * Math.PI * 2
 }
 
-/** World Y of the visible surface. `cycleSeconds` is the clip time. */
+/** World Y of the visible surface. `cycleSeconds` is the clip time of the live variant. */
 export function swellSurfaceY(x: number, z: number, cycleSeconds: number = swellCycleSeconds()): number {
   const mid = SCENE_SIZE / 2
   const lx = x - mid
   const lz = z - mid
   const mean = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
-  const disp = (swellSum(lx, lz, swellAngle(cycleSeconds)) * swellFade(lx, lz) * WATER.swellAmplitudeM) / SWELL_NORM
+  const spec = liveSwell()
+  const disp = (swellSum(lx, lz, swellAngle(cycleSeconds)) * swellFade(lx, lz) * spec.amplitudeM) / liveSwellNorm()
   return mean + disp
 }
 

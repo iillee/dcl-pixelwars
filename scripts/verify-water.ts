@@ -163,15 +163,37 @@ if (pillarBottom > trough - 5) {
   process.exit(1)
 }
 let high = -Infinity
-for (let s = 0; s < WATER.swellPeriodS; s += 1) {
-  high = Math.max(high, swellSurfaceY(SCENE_SIZE / 2, SCENE_SIZE / 2, s))
+const period = SWELL_VARIANT === '48m' ? 28 : WATER.swellPeriodS
+for (let s = 0; s < period; s += 1.5) {
+  for (let dx = -400; dx <= 400; dx += 200) {
+    high = Math.max(high, swellSurfaceY(SCENE_SIZE / 2 + dx, SCENE_SIZE / 2, s))
+  }
 }
-if (high < rescue + 20) {
-  console.error(`✗ crest ${high.toFixed(1)} does not rise far enough above the fixed line ${rescue.toFixed(1)}`)
+if (high < y + (SWELL_VARIANT === '48m' ? 12 : 40)) {
+  console.error(`✗ crest ${high.toFixed(1)} does not rise with the live swell`)
   process.exit(1)
 }
 if (fallTriggerY(SCENE_SIZE / 2, SCENE_SIZE / 2, 0) < rescue) {
   console.error('✗ the fall trigger dropped below the fixed rescue line')
   process.exit(1)
+}
+if (SWELL_VARIANT === '48m') {
+  let hi = -Infinity
+  let lo = Infinity
+  for (let s = 0; s < 28; s += 2) {
+    for (let dx = -400; dx <= 400; dx += 80) {
+      for (let dz = -400; dz <= 400; dz += 80) {
+        const h = swellSurfaceY(SCENE_SIZE / 2 + dx, SCENE_SIZE / 2 + dz, s)
+        hi = Math.max(hi, h)
+        lo = Math.min(lo, h)
+      }
+    }
+  }
+  const span = hi - lo
+  console.log(`live surface span ${span.toFixed(1)} m (48 m meshes)`)
+  if (span > 60 || span < 40) {
+    console.error('✗ swellSurfaceY does not match the live 48 m meshes')
+    process.exit(1)
+  }
 }
 console.log('✓ swells stay under the rescue line; the arena has no fog layer')

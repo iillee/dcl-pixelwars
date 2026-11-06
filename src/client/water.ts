@@ -12,15 +12,16 @@
  */
 import {
   engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
-  Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
+  TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
-import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
+import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { HAZE_COLOR, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
-import { swellCycleSeconds } from '../shared/swell'
+import { FOAM, HAZE_COLOR, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { liveSwell, swellCycleSeconds } from '../shared/swell'
+import { initFoam, setFoamSeconds } from './foam'
 
 const swellClips: Entity[] = []
 let clipSeconds = 0
@@ -42,17 +43,19 @@ function setClipSpeed(speed: number): void {
 }
 
 function trackSwell(dt: number): void {
-  const period = WATER.swellPeriodS
+  const period = liveSwell().periodS
   const want = swellCycleSeconds()
   clipSeconds = (clipSeconds + dt * clipSpeed) % period
   const err = (want - clipSeconds + period) % period
   if (err < 0.04) {
     clipSeconds = want
     if (clipSpeed !== 1) setClipSpeed(1)
-    return
+  } else {
+    const catchUp = Math.min(8, Math.max(1, err / 0.4))
+    if (Math.abs(catchUp - clipSpeed) > 0.3) setClipSpeed(catchUp)
   }
-  const catchUp = Math.min(8, Math.max(1, err / 0.4))
-  if (Math.abs(catchUp - clipSpeed) > 0.3) setClipSpeed(catchUp)
+  if (FOAM.whitecaps) paintWhitecaps(clipSeconds)
+  if (FOAM.rings) setFoamSeconds(clipSeconds)
 }
 
 export function initWater(): void {
@@ -106,6 +109,7 @@ export function initWater(): void {
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
   if (WATER_FOG.haze) addHaze()
+  if (FOAM.rings) initFoam()
   const ahead = swellCycleSeconds()
   clipSeconds = 0
   setClipSpeed(ahead < 0.05 ? 1 : Math.min(8, Math.max(2, ahead / 0.5)))
@@ -113,6 +117,56 @@ export function initWater(): void {
 
   const crest = y + (SWELL_VARIANT === '48m' ? 24 : WATER.swellAmplitudeM) + Math.max(0, WATER.swellM)
   console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} waves=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
+}
+
+function foamOffset(seconds: number): number {
+  const primary = SWELL_TRAINS_48[0]
+  const period = liveSwell().periodS
+  const ang = (seconds / period) * Math.PI * 2
+  const uCrest = (Math.PI / 2 - primary.phase - ang) / (Math.PI * 2)
+  return uCrest - 0.5
+}
+
+function foamTex(seconds: number) {
+  return Material.Texture.Common({
+    src: FOAM.whitecapSrc,
+    wrapMode: TextureWrapMode.TWM_REPEAT,
+    offset: Vector2.create(foamOffset(seconds), 0),
+  })
+}
+
+function paintWhitecaps(seconds: number): void {
+  const c = WATER_COLOR
+  for (const wave of swellClips) {
+    GltfNodeModifiers.create(wave, {
+      modifiers: [{
+        path: '',
+        castShadows: false,
+        material: {
+          material: {
+            $case: 'pbr',
+            pbr: swellShade(c, seconds),
+          },
+        },
+      }],
+    })
+  }
+}
+
+function swellShade(c: { r: number; g: number; b: number; a: number }, seconds: number) {
+  return {
+    texture: Material.Texture.Common({ src: WATER.colorSrc }),
+    albedoColor: Color4.create(1, 1, 1, c.a),
+    emissiveTexture: FOAM.whitecaps ? foamTex(seconds) : undefined,
+    emissiveColor: Color3.create(0.82, 0.9, 0.95),
+    emissiveIntensity: FOAM.whitecaps ? 0.4 : 0,
+    metallic: WATER.metallic,
+    roughness: WATER.roughness,
+    specularIntensity: WATER.specular,
+    reflectivityColor: Color3.create(0.22, 0.3, 0.4),
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false as const,
+  }
 }
 
 function addSwell(root: Entity, src: string): Entity {
@@ -145,16 +199,7 @@ function addSwell(root: Entity, src: string): Entity {
       material: {
         material: {
           $case: 'pbr',
-          pbr: {
-            texture: Material.Texture.Common({ src: WATER.colorSrc }),
-            albedoColor: Color4.create(1, 1, 1, c.a),
-            metallic: WATER.metallic,
-            roughness: WATER.roughness,
-            specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
-            transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
-            castShadows: false,
-          },
+          pbr: swellShade(c, 0),
         },
       },
     }],
