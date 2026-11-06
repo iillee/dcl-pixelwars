@@ -18,13 +18,14 @@
  * no start/end distance, so density stays 0. The horizon is the flat rim
  * fading to sky colour, plus a short soft veil.
  */
+import { LEVEL_Y_OFFSET } from '../maze/level'
 export const WATER = {
   /**
    * Mean surface height (m). Crests are this plus the amplitude, troughs
-   * this minus it. Negative on purpose: a 12 m swell stays under the
-   * rescue line (~12.5). Fall rescue, bots and anvils use MIN_Y, not this.
+   * this minus it. The -1 is the pre-offset mean; LEVEL_Y_OFFSET keeps the
+   * troughs above the world floor. Fall rescue, bots and anvils use MIN_Y.
    */
-  heightY: -1,
+  heightY: -1 + LEVEL_Y_OFFSET,
   /** Metres of open air kept between the configured mean and the rescue line. */
   clearanceM: 6,
   /**

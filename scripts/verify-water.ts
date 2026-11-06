@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE } from '../src/maze/generator'
-import { FALL_RESPAWN_DROP, SKY_PARCELS } from '../src/maze/level'
+import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
 import { WATER, WATER_FOG, fogAt, resolvedWaterSize, resolvedWaterY, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
@@ -19,7 +19,8 @@ const peak = swellPeakY(y)
 const trough = swellTroughY(y)
 const red = baseSpawn(1)
 const blue = baseSpawn(2)
-console.log(`scene ${SCENE_SIZE}m grid ${GRID_W} water y=${y.toFixed(2)} crest=${peak.toFixed(2)} trough=${trough.toFixed(2)} size=${size.toFixed(0)}`)
+console.log(`offset ${LEVEL_Y_OFFSET} roof ${SKY_TOP_Y} rescue ${rescue.toFixed(2)} scene ${SCENE_SIZE}m grid ${GRID_W}`)
+console.log(`water y=${y.toFixed(2)} crest=${peak.toFixed(2)} trough=${trough.toFixed(2)} size=${size.toFixed(0)}`)
 console.log(`swell ${WATER.swellWavelengthM}m  ±${WATER.swellAmplitudeM}m  ${WATER.swellPeriodS}s  fog@120m=${near.toFixed(3)}`)
 console.log(`spawn red ${red.pos.x.toFixed(1)},${red.pos.y.toFixed(3)},${red.pos.z.toFixed(1)} blue ${blue.pos.x.toFixed(1)},${blue.pos.z.toFixed(1)} look ${red.look.x.toFixed(1)}`)
 
@@ -35,8 +36,12 @@ if (peak > rescue - 3) {
   console.error(`✗ swell crest ${peak.toFixed(2)} is too close to the rescue line ${rescue.toFixed(2)}`)
   process.exit(1)
 }
-if (trough > -4) {
-  console.error('✗ troughs should sit well under the mean so a 12 m swell fits under the rescue line')
+if (trough < 1) {
+  console.error(`✗ swell trough ${trough.toFixed(2)} meets the world floor`)
+  process.exit(1)
+}
+if (Math.abs(SKY_TOP_Y - (100 + LEVEL_Y_OFFSET)) > 0.01) {
+  console.error('✗ the arena roof is not the offset layout')
   process.exit(1)
 }
 const pk = WATER.swellAmplitudeM * 2
@@ -102,6 +107,11 @@ if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
 }
 if (scene.scene.base !== '-150,-150') {
   console.error('✗ the 300×300 block must sit inside the publisher box (-150..149), base -150,-150')
+  process.exit(1)
+}
+const spawnY = scene.spawnPoints?.[0]?.position?.y?.[0]
+if (typeof spawnY !== 'number' || Math.abs(spawnY - red.pos.y) > 0.01) {
+  console.error(`✗ scene.json spawn y ${spawnY} does not match the raised base ${red.pos.y.toFixed(3)}`)
   process.exit(1)
 }
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
