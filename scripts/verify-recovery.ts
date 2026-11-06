@@ -13,7 +13,7 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock, KnockSpec } from '../src/shared/knocks'
 import {
-  BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed,
+  BOT_GRAVITY, BOT_KNOCK_UNIT, BOT_RECOVERY_ENABLED, botJumpSpeed,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
 } from '../src/shared/pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP } from '../src/shared/botAnim'
@@ -119,6 +119,31 @@ function run(spot: Spot, spec: KnockSpec, rng: () => number): {
 const stream = (seq: number[]) => { let i = 0; return () => seq[Math.min(i++, seq.length - 1)] }
 const perfect = () => stream([0, 0, 0.99, 0])
 const never = () => stream([1])
+
+if (!BOT_RECOVERY_ENABLED) {
+  let found: Spot | null = null
+  let weak: ReturnType<typeof run> | null = null
+  let strong: ReturnType<typeof run> | null = null
+  for (const s of spots) {
+    const w = run(s, weakKnock(s.dx, s.dz), perfect())
+    const g = run(s, lungeKnock(s.dx, s.dz), perfect())
+    if (w.outcome === 'fell' && g.outcome === 'fell') { found = s; weak = w; strong = g; break }
+  }
+  if (!found || !weak || !strong) { console.error('✗ no lip where both knocks fall'); process.exit(1) }
+  console.log(`recovery off: weak ${weak.outcome} lunge ${strong.outcome} at (${found.x.toFixed(1)}, ${found.y.toFixed(1)}, ${found.z.toFixed(1)})`)
+  if (weak.jump || weak.doubled || weak.sawGlide || weak.sawDouble || strong.sawGlide || strong.sawDouble) {
+    fail('recovery off still jumped or opened the glider')
+  }
+  if (!weak.sawFall || !strong.sawFall) fail('a falling knock should use the fall pose')
+  let saved = 0
+  for (let i = 0; i < 24; i++) {
+    if (run(found, lungeKnock(found.dx, found.dz), mulberry32(5000 + i)).outcome === 'saved') saved++
+  }
+  if (saved > 0) fail(`recovery off saved ${saved}/24 lunges`)
+  if (failed) process.exit(1)
+  console.log('✓ recovery is off: edge knocks fall, no jump or glider')
+  process.exit(0)
+}
 
 let spot: Spot | null = null
 let weakPerfect: ReturnType<typeof run> | null = null

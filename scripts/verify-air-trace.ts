@@ -16,6 +16,7 @@ import { Bot } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
 import { BOT_ANIM_GLIDE } from '../src/shared/botAnim'
+import { BOT_RECOVERY_ENABLED } from '../src/shared/pvp'
 
 generateWithRetry(42)
 const tiles = getPlacedTilesInOrder()
@@ -197,6 +198,10 @@ for (let i = knockSamples.length - 1; i > 0; i--) {
 }
 const sawGlide = knockSamples.some(s => s.an === BOT_ANIM_GLIDE || s.st === 4)
 const knockReport = analyse(`knock-off dir ${dx},${dz} glide=${sawGlide}`, knockSamples, DT)
+if (!BOT_RECOVERY_ENABLED && (sawGlide || knockSamples[knockSamples.length - 1]?.mode !== 'rescue')) {
+  console.error('✗ recovery is off, so a knock off the lip should fall into rescue with no glider')
+  process.exit(1)
+}
 
 // Client: st != 0 holds snapshot interpolation for FAST_HOLD_S after the last
 // airborne packet. A single-tick flap does not alternate snap vs lerp.

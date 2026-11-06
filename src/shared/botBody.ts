@@ -6,9 +6,8 @@
  *   knock   a hit landed (shared/knocks.ts, same numbers a human victim gets): velocity,
  *           a held force, gravity and floor friction, exactly like the anvils. No floor
  *           under it = it falls. Back on a floor and slow = walk again.
- *           When that flight is over a gap or heading off the level, the bot may spend a
- *           jump, a double jump, and a glide to get back. The attempt is late and sloppy
- *           on purpose (shared/pvp.ts BOT_RECOVER_*).
+ *           Edge recovery (jump, double jump, glide, steer-home, glide dash) is
+ *           gated by BOT_RECOVERY_ENABLED. Off, the knock just falls into rescue.
  *   rescue  crossed the fall line: rides the Lakitu cloud home along the shared path
  *           (shared/rescuePath.ts) that every client draws for it.
  *   drop    the cloud let go above the base: falls onto it, then a land hold and
@@ -20,6 +19,7 @@ import { Placed } from '../maze/generator'
 import { fallTriggerY } from './swell'
 import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
+  BOT_RECOVERY_ENABLED,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_MIN_S, BOT_RECOVER_REACT_MAX_S, BOT_RECOVER_SKIP_DOUBLE_CHANCE,
   BOT_RECOVER_MISJUDGE_CHANCE, BOT_RECOVER_MISJUDGE_M, BOT_RECOVER_STEER_ACCEL,
   BOT_RECOVER_EDGE_SPEED, BOT_RECOVER_RUN_JUMP_AT, BOT_RECOVER_GIVE_UP_M, BOT_GLIDE_TURN,
@@ -306,7 +306,7 @@ export class BotBody {
     this.jumpTime = 0
     this.glideTime = 0
     this.noJumpLeft = blockS
-    this.willRecover = this.rng() < BOT_RECOVER_CHANCE
+    this.willRecover = BOT_RECOVERY_ENABLED && this.rng() < BOT_RECOVER_CHANCE
     if (!this.willRecover) { this.reactLeft = 0; return }
     if (this.reactS === null) {
       const span = BOT_RECOVER_REACT_MAX_S - BOT_RECOVER_REACT_MIN_S

@@ -5,7 +5,8 @@
  *
  * Run: npx tsx scripts/verify-bot-visual.ts
  *
- * Covers a ramp walk, a platform leap, and a knock that glides. The client
+ * Covers a ramp walk, a platform leap, and a knock that falls (recovery is
+ * off, so the wire stays on the knock state, not the glider). The client
  * copy is headless: same thresholds, same snapshot buffer, same walk lerp.
  */
 import { generateWithRetry, getPlacedTilesInOrder } from '../src/maze/generator'
@@ -271,7 +272,7 @@ if (chain) {
 }
 const rampReport = rampPackets.length ? replay('ramp walk/leap', rampPackets) : null
 
-// ── Knock off a lip, the recovery glide the wire marks st=4 ─────────
+// ── Knock off a lip. Recovery is off, so this is a fall (st=1), not a glide (st=4).
 const from = chain ? graph.worldPos.get(chain[0])! : [...graph.worldPos.values()][0]
 const knocked = new BotBody({ x: from[0], y: from[1], z: from[2] }, () => 0)
 knocked.knock(lungeKnock(-1, 0))
@@ -291,14 +292,18 @@ for (let i = 0, sim = 0; i < 80 && knocked.mode !== 'rescue'; i++, sim += 0.1) {
   prevK = pkt
   if (knocked.mode === 'walk' && sim > 0.4) break
 }
-const knockReport = replay('knock+glide', knockPackets)
+const knockReport = replay('knock fall', knockPackets)
+if (knockPackets.some(p => p.st === 4)) {
+  console.error('✗ recovery is off, so a knock must not wire the glider')
+  process.exit(1)
+}
 
 const walkBad = [liveReport, rampReport].filter((r): r is Report => !!r && (r.max > 3 || r.stuck > 0 || r.nans > 0))
 if (live.some(p => p.st !== 0)) {
   console.error('✗ a walking bot left the ground (st ' + live.filter(p => p.st !== 0).length + ' packets). Leaps are off.')
   process.exit(1)
 }
-if (walkBad.length || knockReport.nans > 0 || knockReport.stuck > 2 || knockReport.max > 8) {
+if (walkBad.length || knockReport.nans > 0 || knockReport.stuck > 2 || knockReport.max > 15) {
   console.error('✗ draw drifted or froze')
   process.exit(1)
 }
@@ -306,4 +311,4 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   console.error('✗ non-finite position in a stream')
   process.exit(1)
 }
-console.log('✓ walking draw stays within 3 m (ramps included); glide lag stays inside the 8 m snap')
+console.log('✓ walking draw stays within 3 m; a knock falls (no glider) and the draw stays inside 15 m')

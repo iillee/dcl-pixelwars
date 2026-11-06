@@ -509,11 +509,19 @@ export function botJumpSpeed(heightM: number): number {
 }
 
 /**
- * Recovery after a knock. The bot always attempts (CHANCE 1; set 0 to disable).
- * It is imperfect on purpose: each bot rolls one reaction delay in [REACT_MIN, REACT_MAX]
- * and keeps it, then each knock can skip the double jump or aim wide. Steering accelerates
- * toward the human glide speed instead of clamping the knock velocity away, so a hard hit
- * still carries them past the floor. Tune only these.
+ * Edge recovery after a knock. Off: the bot keeps the knock and just falls,
+ * then fallTriggerY (the swell, or y 112.47) starts the same cloud rescue a
+ * human gets. No jump, double jump, glide, steer-home, or glide dash.
+ * The attempt code below stays for when this comes back on.
+ */
+export const BOT_RECOVERY_ENABLED = false
+/**
+ * Recovery after a knock, when BOT_RECOVERY_ENABLED. The bot always attempts
+ * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
+ * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
+ * jump or aim wide. Steering accelerates toward the human glide speed instead
+ * of clamping the knock velocity away, so a hard hit still carries them past
+ * the floor. Tune only these.
  */
 /** 0 = never attempts, 1 = always attempts. Execution error is the other knobs. */
 export const BOT_RECOVER_CHANCE = 1

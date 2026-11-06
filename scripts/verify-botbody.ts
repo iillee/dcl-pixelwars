@@ -9,7 +9,7 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody, BotBodyEvent } from '../src/shared/botBody'
 import { lungeKnock, burstKnock, spikeKnock, KnockSpec } from '../src/shared/knocks'
 import { rescueTripSeconds } from '../src/shared/rescuePath'
-import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE } from '../src/shared/pvp'
+import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE, BOT_RECOVERY_ENABLED } from '../src/shared/pvp'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -28,7 +28,7 @@ const kinds: Array<[string, (dx: number, dz: number) => KnockSpec]> = [
 
 let fellCount = 0
 for (const recover of [false, true]) {
-console.log(recover ? '\n-- always tries to glide back (BOT_RECOVER roll forced on) --' : '-- never tries to recover --')
+console.log(recover ? '\n-- rng would recover, gated by BOT_RECOVERY_ENABLED --' : '-- rng refuses recovery --')
 for (const [kName, make] of kinds) {
   for (const [dName, dx, dz] of dirs) {
     const body = new BotBody(base)
@@ -65,7 +65,8 @@ for (const [kName, make] of kinds) {
 }
 }
 
-// A light shove off the same edge: a bot that tries should glide back; one that doesn't falls.
+// A light shove off the same edge. With recovery on, a bot that tries may glide back.
+// With it off, both rolls just fall into the cloud rescue.
 for (const strength of [85, 95, 105, 115]) {
   const res: string[] = []
   for (const recover of [false, true]) {
@@ -73,13 +74,18 @@ for (const strength of [85, 95, 105, 115]) {
     body.rng = () => (recover ? 0 : 1)
     body.knock({ kind: 'lunge', impulse: { x: -strength, y: 8, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0.3 })
     let out = 'unresolved'
+    let tried = false
     for (let t = 0; t < 15 && out === 'unresolved'; t += 0.1) {
       for (const e of body.tick(0.1, world)) {
+        if (e.type === 'recover') tried = true
         if (e.type === 'settled') out = `settled ${Math.hypot(body.pos.x - base.x, body.pos.z - base.z).toFixed(1)} m out`
         if (e.type === 'fell') out = 'fell'
       }
     }
-    res.push(`${recover ? 'tries' : 'no try'}: ${out}`)
+    if (!BOT_RECOVERY_ENABLED && (out !== 'fell' || tried || body.isGliding())) {
+      fail(`recovery off: shove ${strength} ${recover ? 'roll 0' : 'roll 1'} was ${out}${tried ? ' and tried to recover' : ''}`)
+    }
+    res.push(`${recover ? 'roll 0' : 'roll 1'}: ${out}`)
   }
   console.log(`shove ${strength} -x | ${res.join(' | ')}`)
 }
