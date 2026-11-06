@@ -39,6 +39,10 @@ function trackSwell(dt: number): void {
 }
 
 export function initWater(): void {
+  if (!LOOK.sea) {
+    console.log('[Water] LOOK.sea off — World default ocean only')
+    return
+  }
   const rescueY = MIN_Y - FALL_RESPAWN_DROP
   const y = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
   const size = resolvedWaterSize(SCENE_SIZE)

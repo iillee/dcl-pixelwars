@@ -45,6 +45,7 @@ import { CELL, STEP, lookupTile } from '../maze/generator'
 import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
 import { initWater } from './water'
+import { LOOK } from '../shared/waterLook'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -153,6 +154,7 @@ export async function setupClient(): Promise<void> {
   // sitting in front of it.
   engine.addSystem(function startWater() {
     engine.removeSystem(startWater)
+    if (!LOOK.sea) return
     initWater()
     startOceanAmbience()
   })

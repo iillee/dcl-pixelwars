@@ -11,10 +11,10 @@
  *     The play grid stays 5×5. The extra parcels are open water so the sea is
  *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
  *
- * World size (sky only). 'small' is 20×20 (320 m) around the arena, the deploy
- * default, so a connect-time test is not paying for 90,000 parcels. 'full' is
- * the 300×300 sea. Water meshes stay the big ones; outside a small scene they
- * clip. After changing this, run `npx tsx scripts/write-scene.ts`.
+ * World size (sky only). 'medium' is 64×64 (1024 m), the deploy default: the
+ * arena stays centred and the World's own sea carries the horizon.
+ * 'small' is 20×20. 'full' is the 300×300 sea. After changing this, run
+ * `npx tsx scripts/write-scene.ts`.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -46,12 +46,24 @@ export const SKY_BASE_LINE = true
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
  * Parcels on a side. 16 m each. `full` is the World maximum (300×300 = 90,000
- * parcels, 4800 m). `small` is 20×20. The play grid stays 5×5 because the
- * inset grows with the scene. Keep scene.json in step via scripts/write-scene.ts.
- * Genesis City cannot use the full layout.
+ * parcels, 4800 m). `medium` is 64×64. `small` is 20×20. The play grid stays
+ * 5×5 because the inset grows with the scene. Keep scene.json in step via
+ * scripts/write-scene.ts. Genesis City cannot use the full layout.
  */
-export const WORLD_SIZE = 'small' as 'small' | 'full'
-export const SKY_PARCELS = WORLD_SIZE === 'full' ? 300 : 20
+export const MEDIUM_PARCELS = 64
+export const WORLD_SIZE = 'medium' as 'small' | 'medium' | 'full'
+export const SKY_PARCELS = WORLD_SIZE === 'full' ? 300 : WORLD_SIZE === 'medium' ? MEDIUM_PARCELS : 20
+
+/** Southwest parcel. The 300×300 block must start at -150. Smaller blocks are
+ *  centred on parcel 0,0 and stay inside the publisher range (-150..149). */
+export function sceneOriginParcel(parcels = SKY_PARCELS): number {
+  if (parcels >= 300) return -150
+  const origin = -Math.floor(parcels / 2)
+  const end = origin + parcels - 1
+  if (end > 149) return 149 - (parcels - 1)
+  if (origin < -150) return -150
+  return origin
+}
 export const SKY_SCENE_M = SKY_PARCELS * 16
 /** Inset that leaves a 5×32 m grid centred in the scene. */
 export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2

@@ -4,8 +4,8 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The sea is sized a few
- * metres inside the scene. `landscapeTerrain: false` drops the default
- * trees on a World.
+ * metres inside the scene. `landscapeTerrain: true` is the World's own
+ * grassland, trees, and sea beyond the parcels. `LOOK.sea` is our swell.
  *
  * Swells are a displaced mesh with a plain color. Ripple and foam maps
  * exist behind `SURFACE.ripple` and `SURFACE.foam` (both off). The files under
@@ -205,6 +205,8 @@ export const SURFACE = {
  * alpha path stay here for a later try.
  */
 export const LOOK = {
+  /** Our swell, rim, and haze. Off leaves only the World's default ocean. */
+  sea: true,
   gloss: true,
   glossRoughness: 0.3,
   glossSpecular: 0.9,

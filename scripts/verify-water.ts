@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
-import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE } from '../src/maze/level'
+import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
 import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
@@ -145,15 +145,20 @@ for (const f of meshes) {
   }
 }
 const scene = JSON.parse(readFileSync(new URL('../scene.json', import.meta.url), 'utf8'))
-if (scene.landscapeTerrain !== false) {
-  console.error('✗ landscapeTerrain must be false so the World drops the default trees')
+if (scene.landscapeTerrain !== true) {
+  console.error('✗ landscapeTerrain must be true so the World sea reaches the horizon')
+  process.exit(1)
+}
+if (!LOOK.sea) {
+  console.error('✗ LOOK.sea should start on so our swell is in the scene')
   process.exit(1)
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
   process.exit(1)
 }
-const expectBase = WORLD_SIZE === 'full' ? '-150,-150' : '0,0'
+const origin = sceneOriginParcel(SKY_PARCELS)
+const expectBase = `${origin},${origin}`
 if (scene.scene.base !== expectBase) {
   console.error(`✗ scene.json base is ${scene.scene.base}, want ${expectBase} for WORLD_SIZE=${WORLD_SIZE}`)
   process.exit(1)
