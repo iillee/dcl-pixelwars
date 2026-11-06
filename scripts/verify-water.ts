@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
 import { fallTriggerY, swellSurfaceY } from '../src/shared/swell'
-import { HAZE_COLOR, RIM_COLOR, SWELL_TRAINS, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { HAZE_COLOR, RIM_COLOR, SWELL_TRAINS, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -113,7 +113,7 @@ if (!(lum(WATER_COLOR) < lum(RIM_COLOR) && lum(HAZE_COLOR) + 0.02 >= lum(RIM_COL
   console.error('✗ haze should match the horizon; near water should be a little deeper')
   process.exit(1)
 }
-const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc]
+const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near')]
 for (const f of meshes) {
   if (!existsSync(new URL('../' + f, import.meta.url))) {
     console.error(`✗ missing ${f}`)
@@ -143,7 +143,7 @@ if (/MeshCollider|TriggerArea/.test(src)) {
   console.error('✗ the sea must not collide or catch players')
   process.exit(1)
 }
-if (!src.includes('swellLiteSrc') || !src.includes('isMobile')) {
+if (!src.includes("swellMesh('lite')") || !src.includes('isMobile')) {
   console.error('✗ mobile should use the lighter swell mesh')
   process.exit(1)
 }

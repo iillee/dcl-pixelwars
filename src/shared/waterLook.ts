@@ -109,6 +109,11 @@ export const WATER = {
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',
   swellLiteSrc: 'assets/models/water-swell-lite.glb',
+  /** The meshes from ba05fa0, which the preview did draw. 48 m waves. */
+  swell48NearSrc: 'assets/models/water-swell-48-near.glb',
+  swell48MidSrc: 'assets/models/water-swell-48-mid.glb',
+  swell48FarSrc: 'assets/models/water-swell-48-far.glb',
+  swell48LiteSrc: 'assets/models/water-swell-48-lite.glb',
   flatSrc: 'assets/models/water-flat.glb',
   flatLiteSrc: 'assets/models/water-flat-lite.glb',
 }
@@ -129,6 +134,26 @@ export const SWELL_TRAINS: Array<{
   { wavelengthM: 280, weight: 0.3, dirDeg: 48, phase: 1.7 },
   { wavelengthM: 320, weight: 0.18, dirDeg: 80, phase: 2.9 },
 ]
+
+/**
+ * Which swell files to spawn. `48m` is the ba05fa0 set, placed at the
+ * current mean (y 114). `110m` is the tall set. The 110 m files stay in
+ * the repo either way.
+ */
+export const SWELL_VARIANT: '48m' | '110m' = '48m'
+
+export function swellMesh(part: 'near' | 'mid' | 'far' | 'lite'): string {
+  if (SWELL_VARIANT === '48m') {
+    if (part === 'near') return WATER.swell48NearSrc
+    if (part === 'mid') return WATER.swell48MidSrc
+    if (part === 'far') return WATER.swell48FarSrc
+    return WATER.swell48LiteSrc
+  }
+  if (part === 'near') return WATER.swellNearSrc
+  if (part === 'mid') return WATER.swellMidSrc
+  if (part === 'far') return WATER.swellFarSrc
+  return WATER.swellLiteSrc
+}
 
 export function meanSwellWavelength(): number {
   let sum = 0

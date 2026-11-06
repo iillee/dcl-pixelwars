@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { HAZE_COLOR, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
+import { HAZE_COLOR, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { swellCycleSeconds } from '../shared/swell'
 
 const swellClips: Entity[] = []
@@ -58,12 +58,10 @@ function trackSwell(dt: number): void {
 export function initWater(): void {
   const rescueY = MIN_Y - FALL_RESPAWN_DROP
   const y = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
-  if (!(y < rescueY)) {
-    console.log(`[Water] surface ${y.toFixed(2)} is not below the rescue line ${rescueY.toFixed(2)}; not spawned`)
-    return
-  }
   const size = resolvedWaterSize(SCENE_SIZE)
   const mid = SCENE_SIZE / 2
+  // Mean y 114 is above the fixed line at 112.5 on purpose (crests are higher).
+  // The old guard returned here and spawned nothing, so the preview showed only sky.
 
   if (WATER_FOG.environment && WATER_FOG.density > 0) {
     EnvironmentFog.create(engine.RootEntity, {
@@ -96,12 +94,12 @@ export function initWater(): void {
   const mobileNow = isMobile()
   const desktop: Entity[] = []
   if (mobileNow) {
-    addSwell(root, WATER.swellLiteSrc)
+    addSwell(root, swellMesh('lite'))
     addFlat(root, WATER.flatLiteSrc)
   } else {
-    desktop.push(addSwell(root, WATER.swellNearSrc))
-    desktop.push(addSwell(root, WATER.swellMidSrc))
-    desktop.push(addSwell(root, WATER.swellFarSrc))
+    desktop.push(addSwell(root, swellMesh('near')))
+    desktop.push(addSwell(root, swellMesh('mid')))
+    desktop.push(addSwell(root, swellMesh('far')))
     desktop.push(addFlat(root, WATER.flatSrc))
     watchMobile(root, desktop)
   }
@@ -113,8 +111,8 @@ export function initWater(): void {
   setClipSpeed(ahead < 0.05 ? 1 : Math.min(8, Math.max(2, ahead / 0.5)))
   engine.addSystem(trackSwell)
 
-  const crest = y + WATER.swellAmplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
+  const crest = y + (SWELL_VARIANT === '48m' ? 24 : WATER.swellAmplitudeM) + Math.max(0, WATER.swellM)
+  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} waves=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
 }
 
 function addSwell(root: Entity, src: string): Entity {
@@ -302,7 +300,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       for (const e of desktop) engine.removeEntity(e)
       swellClips.length = 0
       clipSeconds = 0
-      addSwell(root, WATER.swellLiteSrc)
+      addSwell(root, swellMesh('lite'))
       addFlat(root, WATER.flatLiteSrc)
       const ahead = swellCycleSeconds()
       setClipSpeed(ahead < 0.05 ? 1 : Math.min(8, Math.max(2, ahead / 0.5)))
