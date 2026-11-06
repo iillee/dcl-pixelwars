@@ -151,6 +151,10 @@ export const SWELL_TRAINS_48: Array<{ wavelengthM: number; weight: number; dirDe
 export const SWELL_48_AMPLITUDE_M = 24
 export const SWELL_48_PERIOD_S = 28
 
+/** Looping ocean bed. Global, started once. Kept under the trumpets and hits. */
+export const OCEAN_AMBIENCE_VOLUME = 0.2
+export const OCEAN_AMBIENCE_SRC = 'assets/sounds/ocean.mp3'
+
 export const FOAM = {
   /** Rings where each tile's column meets the sea. */
   rings: true,

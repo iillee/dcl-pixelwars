@@ -17,6 +17,7 @@
 import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
 import { events } from '../shared/events'
 import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_BOOM_VOL } from '../shared/pvp'
+import { OCEAN_AMBIENCE_SRC, OCEAN_AMBIENCE_VOLUME } from '../shared/waterLook'
 
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
@@ -56,6 +57,16 @@ export function initAudio(): void {
     playing: !musicMuted,
     loop: true,
     volume: MUSIC_VOLUME,
+    global: true,
+  })
+  // Own entity, started once. Round resets and one-shot SFX replace other sources, not this one.
+  const oceanEnt = engine.addEntity()
+  Transform.create(oceanEnt, { parent: engine.CameraEntity })
+  AudioSource.create(oceanEnt, {
+    audioClipUrl: OCEAN_AMBIENCE_SRC,
+    playing: true,
+    loop: true,
+    volume: OCEAN_AMBIENCE_VOLUME,
     global: true,
   })
   playStartMs = Date.now()
