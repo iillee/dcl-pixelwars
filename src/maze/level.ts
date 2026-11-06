@@ -10,6 +10,11 @@
  *   LEVEL_MODE = 'sky'     → SKY_PARCELS × SKY_PARCELS (a World; no LAND cost).
  *     The play grid stays 5×5. The extra parcels are open water so the sea is
  *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
+ *
+ * World size (sky only). 'small' is 20×20 (320 m) around the arena, the deploy
+ * default, so a connect-time test is not paying for 90,000 parcels. 'full' is
+ * the 300×300 sea. Water meshes stay the big ones; outside a small scene they
+ * clip. After changing this, run `npx tsx scripts/write-scene.ts`.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -40,13 +45,13 @@ export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
- * Parcels on a side. 16 m each. 300 is the World maximum (300×300 = 90,000
- * parcels, 4800 m). Docs: kinds of project, and scene metadata ("The largest
- * scene size you can set is of 300 x 300 parcels"). No LAND cost. The play
- * grid stays 5×5 because the inset grows with the scene. Keep scene.json's
- * parcel list in step. Genesis City cannot use this layout.
+ * Parcels on a side. 16 m each. `full` is the World maximum (300×300 = 90,000
+ * parcels, 4800 m). `small` is 20×20. The play grid stays 5×5 because the
+ * inset grows with the scene. Keep scene.json in step via scripts/write-scene.ts.
+ * Genesis City cannot use the full layout.
  */
-export const SKY_PARCELS = 300
+export const WORLD_SIZE = 'small' as 'small' | 'full'
+export const SKY_PARCELS = WORLD_SIZE === 'full' ? 300 : 20
 export const SKY_SCENE_M = SKY_PARCELS * 16
 /** Inset that leaves a 5×32 m grid centred in the scene. */
 export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2

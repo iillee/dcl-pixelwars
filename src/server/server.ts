@@ -38,7 +38,7 @@ import {
   dashEnabledForRound, SERVER_HIT_WINDOW_S, SERVER_MIN_DASH_GAP_S, SERVER_MAX_HITS_PER_DASH,
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
-  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY,
+  burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   nextRoundFormat, pvbBotCount, pvbHumanTeam,
 } from '../shared/pvp'
@@ -47,7 +47,7 @@ import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwav
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
-import { BURST_KNOCKBACK, BURST_STANCE_SLACK, LUNGE_KNOCKBACK } from '../shared/pvp'
+import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
@@ -74,12 +74,11 @@ export async function setupServer(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
 
   // Discord webhook + realm/preview detection. Wire the name resolver so
-  // the notifier can pull display names captured via updateName. Silent
-  // no-op if DISCORD_PLAYER_JOIN_WEBHOOK isn't set or we're in preview.
+  // the notifier can pull display names captured via updateName. Joins that
+  // arrive before this settles are queued inside discord.ts; they are not
+  // dropped, and joinRoster does not wait on getRealm or EnvVar.get.
   bindNameResolver(leaderboardGetName)
-  // getRealm and EnvVar.get have no timeout. A slow probe must not hold
-  // joinRoster. The webhook only matters after a player has already joined.
-  void initDiscord()
+  void initDiscord().catch((err) => console.log(`[Discord] init failed (${err})`))
 
   // Players' own feet positions (client botAim, ~5 Hz while a ghost is in the
   // round), so ghost bots can aim. Keyed by lower-case address.
@@ -680,21 +679,23 @@ export async function setupServer(): Promise<void> {
     bursts.place(from, id, origin)
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
     room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
-    // A press tagged air still paints now when the feet are within a step of a
-    // walkable cell. A real jump is higher than that and waits for burstLand.
-    // commitPaint runs once, so a later landing does not score the circle again.
+    // Paint the circle whenever a walkable cell resolves under the feet, even if
+    // the client tagged the press air. burstCentre's window is BURST_PAINT_MAX_DY+1
+    // (2.5 m). A real jump above that waits for burstLand. commitPaint runs once.
     const graphNow = getWalkableGraph()
     const centreNow = graphNow ? burstCentre(graphNow, cell, origin) : null
     const centreY = centreNow ? graphNow!.worldPos.get(centreNow)?.[1] : undefined
-    const closeToFloor = centreY !== undefined && Math.abs(centreY - y) <= BURST_STANCE_SLACK + 0.5
-    const fp = (!airborne || closeToFloor) ? paintBurstFootprint(from, team, cell, x, y, z) : []
+    const dy = centreY === undefined ? Infinity : Math.abs(centreY - y)
+    const nearFloor = centreNow !== null && dy <= BURST_PAINT_MAX_DY + 1
+    const fp = nearFloor || !airborne ? paintBurstFootprint(from, team, cell, x, y, z) : []
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
-    console.log(`[Server] burst ${from.slice(0, 8)} #${id} air=${airborne ? 1 : 0} close=${closeToFloor ? 1 : 0} footprint=${fp.length} | cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)} rampCells=${rampIds}`)
-    if (!airborne || closeToFloor) {
+    const reason = !graphNow ? 'no-graph' : fp.length === 0 && airborne ? 'air-above-floor' : fp.length === 0 ? 'no-centre' : airborne ? 'near-floor' : 'ground'
+    console.log(`[Burst] server footprint=${fp.length} reason=${reason} dy=${Number.isFinite(dy) ? dy.toFixed(2) : 'na'} air=${airborne ? 1 : 0} cell=${cell || '(none)'} ramps=${rampIds}`)
+    if (!airborne || nearFloor) {
       commitBurstPaint(from, id, fp)
       radialBotShock(from, id, team, origin, fx, fz, now, fp)
     }
-    if (airborne && !closeToFloor) {
+    if (airborne && !nearFloor) {
       for (const b of getBotPositions()) {
         if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
         let dx = b.x - x, dz = b.z - z

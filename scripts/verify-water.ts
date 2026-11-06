@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
-import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
+import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
 import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
@@ -119,7 +119,7 @@ if (!WATER_FOG.haze) {
   console.error('✗ the horizon haze ring should be on')
   process.exit(1)
 }
-if (WATER.swellFarM < 1600 || WATER.swellFarM > size / 2) {
+if (WATER.swellFarM < 1600 || (WORLD_SIZE === 'full' && WATER.swellFarM > size / 2)) {
   console.error('✗ the swell ring should reach toward the horizon and stay inside the sea')
   process.exit(1)
 }
@@ -153,8 +153,9 @@ if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
   process.exit(1)
 }
-if (scene.scene.base !== '-150,-150') {
-  console.error('✗ the 300×300 block must sit inside the publisher box (-150..149), base -150,-150')
+const expectBase = WORLD_SIZE === 'full' ? '-150,-150' : '0,0'
+if (scene.scene.base !== expectBase) {
+  console.error(`✗ scene.json base is ${scene.scene.base}, want ${expectBase} for WORLD_SIZE=${WORLD_SIZE}`)
   process.exit(1)
 }
 const spawnY = scene.spawnPoints?.[0]?.position?.y?.[0]

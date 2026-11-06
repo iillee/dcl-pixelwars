@@ -9,6 +9,9 @@
  *   - Debounced send (5s delay) so the player's real name has time to
  *     resolve via updateName before we fire. Falls back to short address
  *     after MAX_WAIT_MS if the name never arrives.
+ *   - Joins that arrive before getRealm / EnvVar.get finish stay queued.
+ *     They are sent once init reaches 'ready', or dropped with a log if
+ *     the realm is a preview or the webhook is missing.
  *   - allowed_mentions.parse = [] so a player named "@everyone" can't
  *     ping the whole Discord server.
  *
@@ -23,8 +26,14 @@ import { getRealm } from '~system/Runtime'
 // ─── Module state ───────────────────────────────────────────────────
 let webhookUrl = ''
 let isPreview = false
+/** 'pending' until getRealm + EnvVar.get settle. Joins that arrive early stay queued. */
+let phase: 'pending' | 'ready' | 'off' = 'pending'
 const NAME_RESOLVE_DELAY_MS = 5000
 const NAME_RESOLVE_MAX_WAIT_MS = 15000
+/** A hung realm probe must not keep the webhook from loading. Same outcome as a thrown getRealm: assume production. */
+const REALM_TIMEOUT_MS = 5000
+/** Server-side storage. A hang is logged and pings stay off; join handling does not wait on this. */
+const ENV_TIMEOUT_MS = 8000
 
 // userId (lowercase) → pending notification. Named players are pushed as
 // soon as their name is available (via notifyNameResolved); everyone else
@@ -43,24 +52,57 @@ export function bindNameResolver(fn: (userId: string) => string | null): void {
   resolveName = fn
 }
 
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    work.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (err) => { clearTimeout(timer); reject(err) },
+    )
+  })
+}
+
+function turnOff(reason: string): void {
+  phase = 'off'
+  const queued = pending.size
+  pending.clear()
+  console.log(`[Discord] init failed (${reason}${queued ? `, dropped ${queued} queued join(s)` : ''})`)
+}
+
 // ─── Boot: load webhook + realm mode ────────────────────────────────
 export async function initDiscord(): Promise<void> {
+  console.log('[Discord] init started')
   try {
-    const realm = await getRealm({})
+    const realm = await withTimeout(getRealm({}), REALM_TIMEOUT_MS, 'getRealm')
     isPreview = realm.realmInfo?.isPreview ?? false
-    if (isPreview) {
-      console.log('[Discord] preview realm detected — join notifications disabled')
-    }
   } catch (err) {
+    isPreview = false
     console.log(`[Discord] realm probe failed (${err}) — assuming production`)
   }
 
-  webhookUrl = (await EnvVar.get('DISCORD_PLAYER_JOIN_WEBHOOK')) || ''
-  if (webhookUrl) {
-    console.log('[Discord] webhook loaded from env')
-  } else {
-    console.log('[Discord] no DISCORD_PLAYER_JOIN_WEBHOOK set — join notifications disabled')
+  let loaded = ''
+  try {
+    loaded = (await withTimeout(EnvVar.get('DISCORD_PLAYER_JOIN_WEBHOOK'), ENV_TIMEOUT_MS, 'EnvVar.get')) || ''
+  } catch (err) {
+    turnOff(`EnvVar.get DISCORD_PLAYER_JOIN_WEBHOOK: ${err}`)
+    return
   }
+  webhookUrl = loaded
+  if (isPreview) {
+    phase = 'off'
+    const queued = pending.size
+    pending.clear()
+    console.log(`[Discord] init ok (preview realm, pings off${queued ? `, dropped ${queued} queued join(s)` : ''})`)
+    return
+  }
+  if (!webhookUrl) {
+    turnOff('no DISCORD_PLAYER_JOIN_WEBHOOK')
+    return
+  }
+  const hostMatch = /^https?:\/\/([^/?#]+)/i.exec(webhookUrl)
+  const host = hostMatch ? (hostMatch[1].split('@').pop() || 'unparsed') : 'unparsed'
+  phase = 'ready'
+  console.log(`[Discord] init ok (webhook loaded, host ${host}, ${pending.size} join(s) queued)`)
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
@@ -68,13 +110,17 @@ export async function initDiscord(): Promise<void> {
 /**
  * Schedule a join notification. Called from the roster/join handler.
  * Idempotent per userId — repeated calls just refresh the pending timer.
- * Early-returns if the webhook is unset or we're in preview, so no queue
- * memory leak on either.
+ * A join before init finishes is queued. A join after init decided pings
+ * are off (preview, or no webhook) is skipped.
  */
 export function schedulePlayerJoin(userId: string): void {
-  if (!webhookUrl || isPreview) return
+  if (phase === 'off') {
+    console.log(`[Discord] join skipped (${shortAddress(userId)}, pings off)`)
+    return
+  }
   const key = userId.toLowerCase()
   pending.set(key, { address: userId, scheduledAt: Date.now() })
+  if (phase === 'pending') console.log(`[Discord] join queued (${shortAddress(userId)}, init pending)`)
 }
 
 /**
@@ -84,7 +130,7 @@ export function schedulePlayerJoin(userId: string): void {
  * after MAX_WAIT.
  */
 export function flushPendingJoins(): void {
-  if (!webhookUrl || isPreview || pending.size === 0) return
+  if (phase !== 'ready' || pending.size === 0) return
   const now = Date.now()
   for (const [key, p] of pending) {
     const age = now - p.scheduledAt
@@ -104,16 +150,21 @@ export function flushPendingJoins(): void {
 async function sendDiscord(name: string, address: string): Promise<void> {
   const content = `👋 **${name}** joined Pixelwars (\`${shortAddress(address)}\`)`
   try {
-    await fetch(webhookUrl, {
+    const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // allowed_mentions: names are player-supplied — a player named
       // "@everyone" must never ping the whole Discord server.
       body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
     })
-    console.log(`[Discord] sent join notification for ${name}`)
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 120)
+      console.log(`[Discord] ping failed (${res.status}${detail ? ` ${detail}` : ''})`)
+      return
+    }
+    console.log(`[Discord] ping sent (${res.status})`)
   } catch (err) {
-    console.log(`[Discord] send failed for ${name}: ${err}`)
+    console.log(`[Discord] ping failed (${err})`)
   }
 }
 

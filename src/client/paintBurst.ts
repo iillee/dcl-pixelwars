@@ -55,7 +55,7 @@ import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE
 let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
 import { sampleBurstStance, isPlayerGrounded } from '../paint'
-import { initBurstRipple, startRipple, nearGround } from './burstRipple'
+import { initBurstRipple, startRipple, nearGround, footprintAt } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirHitSfx,
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
@@ -535,7 +535,10 @@ export function triggerBurst(): void {
   cooldownLeft = BURST_COOLDOWN_S
   // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
-  if (burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())) {
+  const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
+  const cells = footprintAt(p, stance.cell)
+  console.log(`[Burst] press stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
+  if (air) {
     fireAirSpike(id, team, p, f.x, f.z)
     return
   }
