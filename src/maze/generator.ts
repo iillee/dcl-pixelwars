@@ -21,7 +21,7 @@ import {
 } from './tiles'
 import { rand, setSeed } from './rng'
 import {
-  IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN,
+  IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
   SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, SKY_SYMMETRIC,
 } from './level'
 
@@ -34,10 +34,9 @@ export const CELL = 16 * TILE_SCALE                                  // one grid
 // maze grid (160 m) centered inside the scene with an 8 m border on all
 // sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
 // so cell (2,2) — the true center — lands exactly at world (88, 88).
-// Sky mode: 20×20 parcels = 320 m, inset SKY_EDGE_INSET (16 m = 1 parcel)
-// from every edge → 9×9 grid filling 16–304 m, centred on (160, 160) so the
-// 180° mirror (x → GRID_W-1-x) is also a mirror about the scene centre.
-export const SCENE_SIZE = IS_SKY ? 320 : 176
+// Sky mode: SKY_PARCELS × SKY_PARCELS. The inset keeps the play grid at 5×5,
+// centred, so the 180° mirror is also a mirror about the scene centre.
+export const SCENE_SIZE = IS_SKY ? SKY_SCENE_M : 176
 const EDGE_INSET = IS_SKY ? SKY_EDGE_INSET : 0
 export const GRID_W = Math.floor((SCENE_SIZE - 2 * EDGE_INSET) / CELL)
 export const GRID_H = Math.floor((SCENE_SIZE - 2 * EDGE_INSET) / CELL)

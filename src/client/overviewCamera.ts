@@ -63,8 +63,10 @@ const WIDE_MIN_SCALE = 60
 const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
-/** 20×20 parcels → height limit 20·log2(401) ≈ 172.9 m. */
-const SCENE_HEIGHT_LIMIT = 20 * Math.log2(400 + 1)
+/** 20·log2(parcels+1), and the docs cap every scene at 330 m.
+ *  300×300 is about 329 m. The old 20×20 figure (173 m) sat under the raised arena. */
+const SCENE_PARCELS = (SCENE_SIZE / 16) * (SCENE_SIZE / 16)
+const SCENE_HEIGHT_LIMIT = Math.min(330, 20 * Math.log2(SCENE_PARCELS + 1))
 const BOUNDS_INSET_M   = 2
 const CEILING_MARGIN_M = 3
 const MIN_ABOVE_FOCUS  = 3

@@ -44,6 +44,7 @@ import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
+import { initWater } from './water'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -97,6 +98,7 @@ export async function setupClient(): Promise<void> {
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
   setupOverviewCamera()
+  initWater()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
   // decorative lever entity from an earlier iteration where pulling it
