@@ -7,8 +7,8 @@
  * metres inside the scene. `landscapeTerrain: false` drops the default
  * trees on a World.
  *
- * Swells are a displaced mesh. A tiling ripple normal and a soft foam
- * layer sit on that mesh at runtime. The files under
+ * Swells are a displaced mesh with a plain color. Ripple and foam maps
+ * exist behind `SURFACE.ripple` and `SURFACE.foam` (both off). The files under
  * assets/models/water-swell*.glb and water-flat*.glb are built from the
  * wavelength, amplitude and ring sizes. Mesh UVs are metres / rippleTileM,
  * so changing that tile means a rebuild. After changing those, run
@@ -32,10 +32,13 @@ import { LEVEL_Y_OFFSET } from '../maze/level'
 
 export type Rgb = { r: number; g: number; b: number; a: number }
 
-/** Midday is the applied row: pale horizon, water one step deeper so the slopes still read. */
+/**
+ * Midday water is halfway between the pale horizon match {0.46, 0.66, 0.82}
+ * and the deep blue {0.02, 0.22, 0.72}. Rim and haze stay the pale horizon.
+ */
 export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
   midday: {
-    water: { r: 0.46, g: 0.66, b: 0.82, a: 1 },
+    water: { r: 0.24, g: 0.44, b: 0.77, a: 1 },
     rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
     haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
   },
@@ -75,9 +78,9 @@ export const WATER = {
   /** Near water. A step deeper than `RIM_COLOR`, still in the horizon family. */
   color: WATER_COLOR,
   metallic: 0,
-  /** Matte enough that ridges do not turn into white streaks. The ripple normal supplies the slope. */
+  /** Matte enough that ridges do not turn into white streaks. Slope comes from the swell mesh. */
   roughness: 0.48,
-  /** Moderate, so the normal map catches light. 1 is the engine default. */
+  /** Moderate. 1 is the engine default. */
   specular: 0.4,
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
@@ -165,6 +168,8 @@ export const OCEAN_AMBIENCE_SRC = 'assets/sounds/ocean.mp3'
  * Sticker rings and whitecap blobs stay off (`FOAM.rings`, `FOAM.whitecaps`).
  */
 export const SURFACE = {
+  /** Off. The 8 m normal read as a repeating bubbly grid. The swell is a plain color. */
+  ripple: false,
   /** Flat white. The tint is `WATER_COLOR`. Scrolling this is what drags the normal map. */
   albedoSrc: 'assets/textures/water-white.png',
   rippleSrc: 'assets/textures/water-ripple-normal.png',
@@ -175,7 +180,8 @@ export const SURFACE = {
   rippleDirZ: 0.42,
   /** UV repeats per second. At 8 m per repeat this is about half a metre per second. */
   rippleSpeed: 0.07,
-  foam: true,
+  /** Off. The veil sat on the bubbly normal and did not read as foam. */
+  foam: false,
   foamSrc: 'assets/textures/water-foam.png',
   /** Multiplier on the baked ripple UVs. 0.3 makes foam streaks about 27 m across. */
   foamTile: 0.3,

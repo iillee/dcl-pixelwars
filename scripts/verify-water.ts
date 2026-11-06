@@ -75,8 +75,8 @@ if (WATER.metallic !== 0 || Math.abs(WATER.roughness - 0.48) > 0.02 || Math.abs(
   console.error('✗ the sea should stay matte-moderate so the ripple normal can catch light')
   process.exit(1)
 }
-if (Math.abs(WATER_COLOR.r - 0.46) > 0.02 || Math.abs(WATER_COLOR.g - 0.66) > 0.02 || Math.abs(WATER_COLOR.b - 0.82) > 0.02) {
-  console.error('✗ near water should be the horizon-family blue')
+if (Math.abs(WATER_COLOR.r - 0.24) > 0.02 || Math.abs(WATER_COLOR.g - 0.44) > 0.02 || Math.abs(WATER_COLOR.b - 0.77) > 0.02) {
+  console.error('✗ near water should sit between the pale horizon match and the deep blue')
   process.exit(1)
 }
 if (Math.abs(RIM_COLOR.r - HAZE_COLOR.r) > 0.001 || Math.abs(RIM_COLOR.g - HAZE_COLOR.g) > 0.001 || Math.abs(RIM_COLOR.b - HAZE_COLOR.b) > 0.001) {
@@ -214,8 +214,12 @@ if (FOAM.rings || FOAM.whitecaps) {
   console.error('✗ sticker rings and whitecap blobs should stay off')
   process.exit(1)
 }
-if (!src.includes('bumpTexture') || !src.includes('setTextureMoveContinuous') || !src.includes('addFoam')) {
-  console.error('✗ the swell should carry a scrolling ripple normal and a soft foam sheet')
+if (SURFACE.ripple || SURFACE.foam) {
+  console.error('✗ the ripple normal and the foam veil should stay off')
+  process.exit(1)
+}
+if (!src.includes('if (!SURFACE.ripple) return plain')) {
+  console.error('✗ the swell must be a plain color while the ripple flag is off')
   process.exit(1)
 }
 if (SURFACE.foamAlpha < 0.2 || SURFACE.foamAlpha > 0.35) {

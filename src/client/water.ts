@@ -99,7 +99,7 @@ export function initWater(): void {
   const spec = liveSwell()
   const weights = spec.parts.map((p) => p.weight.toFixed(2)).join('/')
   const crest = y + spec.amplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} ripple=${SURFACE.rippleTileM}m foam=${foamOn(mobileNow)} haze=on`)
+  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} ripple=${SURFACE.ripple} foam=${foamOn(mobileNow)} haze=on`)
 }
 
 /** Base-texture scroll. ADR-255 moves the normal map with this offset; the bump's own offset is ignored. */
@@ -118,20 +118,26 @@ function repeatTex(src: string, tiling = 1) {
 }
 
 function swellShade(c: { r: number; g: number; b: number; a: number }) {
+  // No texture when the ripple is off. The mesh UVs are an 8 m grid, and a
+  // sampled map would tile across them. A plain albedo ignores those UVs.
+  const plain = {
+    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+    metallic: WATER.metallic,
+    roughness: WATER.roughness,
+    specularIntensity: WATER.specular,
+    reflectivityColor: Color3.create(c.r, c.g, c.b),
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false as const,
+  }
+  if (!SURFACE.ripple) return plain
   return {
+    ...plain,
     texture: repeatTex(SURFACE.albedoSrc),
     bumpTexture: Material.Texture.Common({
       src: SURFACE.rippleSrc,
       wrapMode: TextureWrapMode.TWM_REPEAT,
       filterMode: TextureFilterMode.TFM_TRILINEAR,
     }),
-    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
-    metallic: WATER.metallic,
-    roughness: WATER.roughness,
-    specularIntensity: WATER.specular,
-    reflectivityColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
-    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
-    castShadows: false as const,
   }
 }
 
@@ -182,7 +188,7 @@ function addSwell(root: Entity, src: string): Entity {
       },
     }],
   })
-  scrollTexture(wave, SURFACE.rippleDirX, SURFACE.rippleDirZ, SURFACE.rippleSpeed)
+  if (SURFACE.ripple) scrollTexture(wave, SURFACE.rippleDirX, SURFACE.rippleDirZ, SURFACE.rippleSpeed)
   return wave
 }
 
