@@ -1,18 +1,14 @@
 /**
- * Point the live 48 m swell UVs along the primary train, and write the
- * foam textures. Morph buffers are left alone, so the meshes stay small.
+ * Bake swell UVs as metres / 60 so the soft normal repeats broadly, and
+ * write that normal. Morph buffers are left alone. The flat rim is not
+ * touched, so its horizon fade stays put.
  *
  * Run: node scripts/patch-swell-foam-uv.mjs
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { deflateSync, crc32 } from 'node:zlib'
 
-const WL = 720
-const RAD = (15 * Math.PI) / 180
-const DX = Math.cos(RAD)
-const DZ = Math.sin(RAD)
-const PX = -DZ
-const PZ = DX
+const TILE_M = 60
 
 function patch(path) {
   const buf = readFileSync(path)
@@ -31,19 +27,15 @@ function patch(path) {
   for (let i = 0; i < posA.count; i++) {
     const x = bin.readFloatLE(posStart + i * 12)
     const z = bin.readFloatLE(posStart + i * 12 + 8)
-    const along = x * DX + z * DZ
-    const across = x * PX + z * PZ
-    bin.writeFloatLE(along / WL, uvStart + i * 8)
-    bin.writeFloatLE(across / 160, uvStart + i * 8 + 4)
+    bin.writeFloatLE(x / TILE_M, uvStart + i * 8)
+    bin.writeFloatLE(z / TILE_M, uvStart + i * 8 + 4)
   }
   bin.copy(buf, binOff + 8)
   writeFileSync(path, buf)
-  console.log('uv', path, posA.count)
+  console.log('uv', path, posA.count, `tile ${TILE_M}m`)
 }
 
-// Swell UVs are metres / rippleTileM, written by build-water-swell.ts.
-// Rewriting them here stretched one band across the whole sea.
-console.log('skipping swell UV patch; ripples use the baked metre grid')
+for (const name of ['near', 'mid', 'far', 'lite']) patch(`assets/models/water-swell-48-${name}.glb`)
 
 function png(w, h, rgba) {
   const raw = Buffer.alloc((w * 4 + 1) * h)
@@ -131,3 +123,35 @@ for (let y = 0; y < R; y++) {
 }
 writeFileSync('assets/textures/water-foam-ring.png', png(R, R, ring))
 console.log('foam textures')
+
+function softHeight(u, v) {
+  const tau = Math.PI * 2
+  return Math.sin(tau * u) * 0.55 + Math.sin(tau * v) * 0.35 + Math.sin(tau * (u + v)) * 0.22
+}
+
+const N = 128
+const soft = Buffer.alloc(N * N * 4)
+const e = 1 / N
+const strength = 0.45
+for (let y = 0; y < N; y++) {
+  for (let x = 0; x < N; x++) {
+    const u = x / N
+    const v = y / N
+    const hx = softHeight(u + e, v) - softHeight(u - e, v)
+    const hy = softHeight(u, v + e) - softHeight(u, v - e)
+    let nx = -hx * strength
+    let ny = -hy * strength
+    let nz = 1
+    const len = Math.hypot(nx, ny, nz) || 1
+    nx /= len
+    ny /= len
+    nz /= len
+    const o = (y * N + x) * 4
+    soft[o] = Math.round((nx * 0.5 + 0.5) * 255)
+    soft[o + 1] = Math.round((ny * 0.5 + 0.5) * 255)
+    soft[o + 2] = Math.round((nz * 0.5 + 0.5) * 255)
+    soft[o + 3] = 255
+  }
+}
+writeFileSync('assets/textures/water-soft-normal.png', png(N, N, soft))
+console.log('soft normal')

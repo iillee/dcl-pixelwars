@@ -33,12 +33,12 @@ import { LEVEL_Y_OFFSET } from '../maze/level'
 export type Rgb = { r: number; g: number; b: number; a: number }
 
 /**
- * Midday water is halfway between the pale horizon match {0.46, 0.66, 0.82}
- * and the deep blue {0.02, 0.22, 0.72}. Rim and haze stay the pale horizon.
+ * Midday water is a step deeper than the halfway tone {0.24, 0.44, 0.77},
+ * so the glossy swell does not wash out. Rim and haze stay the pale horizon.
  */
 export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
   midday: {
-    water: { r: 0.24, g: 0.44, b: 0.77, a: 1 },
+    water: { r: 0.2, g: 0.4, b: 0.74, a: 1 },
     rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
     haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
   },
@@ -193,6 +193,35 @@ export const SURFACE = {
   foamSpeed: 0.018,
   /** The extra morph draw is the heavy part. Mobile keeps ripples and skips this sheet. */
   mobileFoam: false,
+}
+
+/**
+ * Wet-look switches. Each one is independent.
+ * `gloss` is the swell only; the rim keeps `WATER.roughness`.
+ * `softNormal` is near, mid, and the mobile lite mesh. The far ring and the
+ * flat rim stay un-bumped so the horizon does not grow a lighting seam.
+ * `depth` clears near/mid (and lite) over a dark opaque sheet. The far ring
+ * and the rim stay opaque so they do not sort against the haze.
+ */
+export const LOOK = {
+  gloss: true,
+  glossRoughness: 0.15,
+  glossSpecular: 0.9,
+  /** Cooler and lighter than the body, so the sun streaks without turning the sea white. */
+  glossReflectivity: { r: 0.55, g: 0.72, b: 0.86 },
+  softNormal: true,
+  softNormalSrc: 'assets/textures/water-soft-normal.png',
+  /** Metres per repeat. Baked into swell TEXCOORD. bumpTexture ignores its own tiling. */
+  softNormalTileM: 60,
+  softNormalDirX: 1,
+  softNormalDirZ: 0.2,
+  /** UV repeats per second. At 60 m a repeat this is about 0.4 m/s. */
+  softNormalSpeed: 0.006,
+  depth: true,
+  depthAlpha: 0.85,
+  /** Metres under the lowest trough of the live swell. */
+  depthBelowTroughM: 4,
+  depthColor: { r: 0.015, g: 0.06, b: 0.16, a: 1 },
 }
 
 export const FOAM = {

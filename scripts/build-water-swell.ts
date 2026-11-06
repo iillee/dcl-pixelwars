@@ -13,7 +13,7 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
+import { LOOK, SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
 import { SWELL_NORM, SWELL_NORM_48, SWELL_PARTS, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
 
 let CLIP = WATER.swellClipS
@@ -138,9 +138,9 @@ function rangeAbs(from: number, to: number, step: number): number[] {
   return out
 }
 
-/** One UV unit is `rippleTileM` metres, so a repeat is a few metres, not the whole sea. */
+/** One UV unit is `softNormalTileM` metres. The flat rim keeps its own fade UVs. */
 function seaUv(x: number, z: number): [number, number] {
-  const tile = SURFACE.rippleTileM
+  const tile = LOOK.softNormalTileM
   return [x / tile, z / tile]
 }
 

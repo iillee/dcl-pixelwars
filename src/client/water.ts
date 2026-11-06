@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { FOAM, HAZE_COLOR, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
 import { initFoam, setFoamSeconds } from './foam'
 
@@ -78,17 +78,18 @@ export function initWater(): void {
   const desktop: Entity[] = []
   const foamOn = (mobile: boolean) => SURFACE.foam && (!mobile || SURFACE.mobileFoam)
   if (mobileNow) {
-    addSwell(root, swellMesh('lite'))
+    addSwell(root, swellMesh('lite'), true)
     if (foamOn(true)) addFoam(root, swellMesh('lite'))
     addFlat(root, WATER.flatLiteSrc)
   } else {
     for (const part of ['near', 'mid', 'far'] as const) {
-      desktop.push(addSwell(root, swellMesh(part)))
+      desktop.push(addSwell(root, swellMesh(part), part !== 'far'))
       if (foamOn(false)) desktop.push(addFoam(root, swellMesh(part)))
     }
     desktop.push(addFlat(root, WATER.flatSrc))
     watchMobile(root, desktop)
   }
+  if (LOOK.depth) addDepth(root)
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
   if (WATER_FOG.haze) addHaze()
@@ -99,7 +100,7 @@ export function initWater(): void {
   const spec = liveSwell()
   const weights = spec.parts.map((p) => p.weight.toFixed(2)).join('/')
   const crest = y + spec.amplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} ripple=${SURFACE.ripple} foam=${foamOn(mobileNow)} haze=on`)
+  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} gloss=${LOOK.gloss} softNormal=${LOOK.softNormal} depth=${LOOK.depth} haze=on`)
 }
 
 /** Base-texture scroll. ADR-255 moves the normal map with this offset; the bump's own offset is ignored. */
@@ -117,24 +118,27 @@ function repeatTex(src: string, tiling = 1) {
   })
 }
 
-function swellShade(c: { r: number; g: number; b: number; a: number }) {
-  // No texture when the ripple is off. The mesh UVs are an 8 m grid, and a
-  // sampled map would tile across them. A plain albedo ignores those UVs.
-  const plain = {
-    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+function swellShade(c: { r: number; g: number; b: number; a: number }, wet: boolean) {
+  const clear = wet && LOOK.depth
+  const gloss = LOOK.gloss
+  const hi = LOOK.glossReflectivity
+  const shade = {
+    albedoColor: Color4.create(c.r, c.g, c.b, clear ? LOOK.depthAlpha : c.a),
     metallic: WATER.metallic,
-    roughness: WATER.roughness,
-    specularIntensity: WATER.specular,
-    reflectivityColor: Color3.create(c.r, c.g, c.b),
-    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    roughness: gloss ? LOOK.glossRoughness : WATER.roughness,
+    specularIntensity: gloss ? LOOK.glossSpecular : WATER.specular,
+    reflectivityColor: gloss ? Color3.create(hi.r, hi.g, hi.b) : Color3.create(c.r, c.g, c.b),
+    transparencyMode: clear ? MaterialTransparencyMode.MTM_ALPHA_BLEND : MaterialTransparencyMode.MTM_OPAQUE,
     castShadows: false as const,
   }
-  if (!SURFACE.ripple) return plain
+  // No map unless this mesh is inside the far ring. A sampled texture would
+  // show the baked metre grid; the far ring and the rim stay a plain color.
+  if (!(wet && LOOK.softNormal)) return shade
   return {
-    ...plain,
+    ...shade,
     texture: repeatTex(SURFACE.albedoSrc),
     bumpTexture: Material.Texture.Common({
-      src: SURFACE.rippleSrc,
+      src: LOOK.softNormalSrc,
       wrapMode: TextureWrapMode.TWM_REPEAT,
       filterMode: TextureFilterMode.TFM_TRILINEAR,
     }),
@@ -153,7 +157,7 @@ function foamShade() {
   }
 }
 
-function addSwell(root: Entity, src: string): Entity {
+function addSwell(root: Entity, src: string, wet: boolean): Entity {
   const wave = engine.addEntity()
   Transform.create(wave, {
     parent: root,
@@ -183,13 +187,36 @@ function addSwell(root: Entity, src: string): Entity {
       material: {
         material: {
           $case: 'pbr',
-          pbr: swellShade(c),
+          pbr: swellShade(c, wet),
         },
       },
     }],
   })
-  if (SURFACE.ripple) scrollTexture(wave, SURFACE.rippleDirX, SURFACE.rippleDirZ, SURFACE.rippleSpeed)
+  if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
   return wave
+}
+
+/** Opaque deep blue a few metres under the trough. Near and mid are see-through onto it. */
+function addDepth(root: Entity): void {
+  const spec = liveSwell()
+  const bed = engine.addEntity()
+  const span = WATER.swellMidM * 2
+  Transform.create(bed, {
+    parent: root,
+    position: Vector3.create(0, -(spec.amplitudeM + LOOK.depthBelowTroughM), 0),
+    rotation: Quaternion.fromEulerDegrees(90, 0, 0),
+    scale: Vector3.create(span, span, 1),
+  })
+  MeshRenderer.setPlane(bed)
+  const c = LOOK.depthColor
+  Material.setPbrMaterial(bed, {
+    albedoColor: Color4.create(c.r, c.g, c.b, 1),
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false,
+  })
 }
 
 /** Same morph clip as the swell, a little higher, so the foam stays on the surface. */
@@ -372,7 +399,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       for (const e of desktop) engine.removeEntity(e)
       swellClips.length = 0
       clipSeconds = 0
-      addSwell(root, swellMesh('lite'))
+      addSwell(root, swellMesh('lite'), true)
       addFlat(root, WATER.flatLiteSrc)
     }
     engine.removeSystem(tick)

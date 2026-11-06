@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -75,8 +75,20 @@ if (WATER.metallic !== 0 || Math.abs(WATER.roughness - 0.48) > 0.02 || Math.abs(
   console.error('✗ the sea should stay matte-moderate so the ripple normal can catch light')
   process.exit(1)
 }
-if (Math.abs(WATER_COLOR.r - 0.24) > 0.02 || Math.abs(WATER_COLOR.g - 0.44) > 0.02 || Math.abs(WATER_COLOR.b - 0.77) > 0.02) {
-  console.error('✗ near water should sit between the pale horizon match and the deep blue')
+if (Math.abs(WATER_COLOR.r - 0.2) > 0.02 || Math.abs(WATER_COLOR.g - 0.4) > 0.02 || Math.abs(WATER_COLOR.b - 0.74) > 0.02) {
+  console.error('✗ near water should stay a little deeper than the halfway horizon tone')
+  process.exit(1)
+}
+if (!LOOK.gloss || Math.abs(LOOK.glossRoughness - 0.15) > 0.02 || LOOK.glossSpecular < 0.7) {
+  console.error('✗ the swell gloss switch should be a sharp wet highlight')
+  process.exit(1)
+}
+if (!LOOK.softNormal || LOOK.softNormalTileM < 40 || LOOK.softNormalTileM > 80) {
+  console.error('✗ the soft normal should repeat on a scale of tens of metres')
+  process.exit(1)
+}
+if (!LOOK.depth || LOOK.depthAlpha < 0.75 || LOOK.depthAlpha > 0.92) {
+  console.error('✗ the depth switch should leave the near swell slightly clear')
   process.exit(1)
 }
 if (Math.abs(RIM_COLOR.r - HAZE_COLOR.r) > 0.001 || Math.abs(RIM_COLOR.g - HAZE_COLOR.g) > 0.001 || Math.abs(RIM_COLOR.b - HAZE_COLOR.b) > 0.001) {
@@ -121,7 +133,7 @@ if (!(lum(WATER_COLOR) < lum(RIM_COLOR) && lum(HAZE_COLOR) + 0.02 >= lum(RIM_COL
   console.error('✗ haze should match the horizon; near water should be a little deeper')
   process.exit(1)
 }
-const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near'), SURFACE.albedoSrc, SURFACE.rippleSrc, SURFACE.foamSrc]
+const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near'), SURFACE.albedoSrc, LOOK.softNormalSrc]
 for (const f of meshes) {
   if (!existsSync(new URL('../' + f, import.meta.url))) {
     console.error(`✗ missing ${f}`)
@@ -218,8 +230,8 @@ if (SURFACE.ripple || SURFACE.foam) {
   console.error('✗ the ripple normal and the foam veil should stay off')
   process.exit(1)
 }
-if (!src.includes('if (!SURFACE.ripple) return plain')) {
-  console.error('✗ the swell must be a plain color while the ripple flag is off')
+if (!src.includes("part !== 'far'")) {
+  console.error('✗ the soft normal and the clear layer must stop before the far ring')
   process.exit(1)
 }
 if (SURFACE.foamAlpha < 0.2 || SURFACE.foamAlpha > 0.35) {
