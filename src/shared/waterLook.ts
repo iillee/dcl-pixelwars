@@ -55,7 +55,12 @@ export const WATER = {
    * and above the floor. Do not raise LEVEL_Y_OFFSET: the roof is already
    * at the 200 m sync warning. Fall rescue, bots and anvils use MIN_Y.
    */
-  heightY: LEVEL_Y_OFFSET - 22,
+  /**
+   * Mean height. With ±55 m the crest is ~169 (about 9 m under L-1 at 178)
+   * and the trough is ~59, still above the floor. The old mean of 78 would
+   * put a wave this tall through y 0 or leave the crest too low.
+   */
+  heightY: LEVEL_Y_OFFSET + 14,
   /** Metres of open air kept between the configured mean and the rescue line. */
   clearanceM: 6,
   /**
@@ -75,28 +80,29 @@ export const WATER = {
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
-   * Half the peak-to-trough of the combined sea (m). 24 → 48 m from trough
+   * Half the peak-to-trough of the combined sea (m). 55 → 110 m from trough
    * to crest. Baked into the morph, not a Y scale, so the normals match.
+   * Crests stay under the lowest floor. See resolvedWaterY.
    */
-  swellAmplitudeM: 24,
+  swellAmplitudeM: 55,
   /** Seconds for one shared cycle of every train. Longer waves travel further per cycle. */
-  swellPeriodS: 28,
+  swellPeriodS: 36,
   /** Length of the `wave` clip in the glb. Speed = clip / period. */
-  swellClipS: 28,
+  swellClipS: 36,
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
   swellNearM: 640,
-  swellNearStepM: 32,
+  swellNearStepM: 8,
   /** Middle ring, half-extent (m). Continues the same waves at a coarser step. */
   swellMidM: 1280,
-  swellMidStepM: 64,
+  swellMidStepM: 16,
   /** Outer ring, half-extent (m). Displacement eases to 0 at this edge. */
   swellFarM: 2048,
-  swellFarStepM: 128,
+  swellFarStepM: 32,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
-  swellMobileStepM: 32,
+  swellMobileStepM: 16,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
   swellMobileFadeM: 220,
   swellNearSrc: 'assets/models/water-swell-near.glb',
@@ -119,9 +125,9 @@ export const SWELL_TRAINS: Array<{
   dirDeg: number
   phase: number
 }> = [
-  { wavelengthM: 720, weight: 0.5, dirDeg: 15, phase: 0.4 },
-  { wavelengthM: 480, weight: 0.32, dirDeg: 48, phase: 1.8 },
-  { wavelengthM: 600, weight: 0.18, dirDeg: 80, phase: 3.1 },
+  { wavelengthM: 360, weight: 0.52, dirDeg: 16, phase: 0.4 },
+  { wavelengthM: 280, weight: 0.3, dirDeg: 48, phase: 1.7 },
+  { wavelengthM: 320, weight: 0.18, dirDeg: 80, phase: 2.9 },
 ]
 
 export function meanSwellWavelength(): number {
@@ -178,9 +184,11 @@ export function fogAt(metres: number, density: number = WATER_FOG.density): numb
  * Surface Y actually used. Never reaches the rescue line: a configured
  * height that would sit in the fall is pulled down by `clearanceM`.
  */
-export function resolvedWaterY(minY: number, fallDrop: number): number {
-  const rescue = minY - fallDrop
-  return Math.min(WATER.heightY, rescue - WATER.clearanceM)
+export function resolvedWaterY(minY: number, _fallDrop: number): number {
+  // Crests are allowed above the fixed rescue line. They stay under L-1.
+  const crestCap = minY - 8
+  const maxMean = crestCap - WATER.swellAmplitudeM - Math.max(0, WATER.swellM)
+  return Math.min(WATER.heightY, maxMean)
 }
 
 /** Plane width that stays inside the parcel box. */

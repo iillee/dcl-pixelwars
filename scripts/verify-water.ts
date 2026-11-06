@@ -6,8 +6,9 @@
  * Run: npx tsx scripts/verify-water.ts
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { GRID_W, MIN_Y, SCENE_SIZE } from '../src/maze/generator'
+import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
+import { fallTriggerY, swellSurfaceY } from '../src/shared/swell'
 import { HAZE_COLOR, RIM_COLOR, SWELL_TRAINS, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
@@ -28,12 +29,12 @@ if (GRID_W !== 5) {
   console.error('✗ growing the scene must not grow the play grid')
   process.exit(1)
 }
-if (!(y < rescue - 1)) {
-  console.error('✗ water reaches the fall-rescue line')
+if (peak > MIN_Y - 8) {
+  console.error(`✗ swell crest ${peak.toFixed(2)} reaches the lowest floor ${MIN_Y.toFixed(2)}`)
   process.exit(1)
 }
-if (peak > rescue - 8) {
-  console.error(`✗ swell crest ${peak.toFixed(2)} is too close to the rescue line ${rescue.toFixed(2)}`)
+if (peak < rescue + 20) {
+  console.error('✗ the crest should rise well above the fixed rescue line')
   process.exit(1)
 }
 if (trough < 1) {
@@ -45,13 +46,13 @@ if (Math.abs(SKY_TOP_Y - (100 + LEVEL_Y_OFFSET)) > 0.01) {
   process.exit(1)
 }
 const pk = WATER.swellAmplitudeM * 2
-if (pk < 44 || pk > 52) {
-  console.error(`✗ peak-to-trough is ${pk}m, want about 48`)
+if (pk < 100 || pk > 130) {
+  console.error(`✗ peak-to-trough is ${pk}m, want about 110`)
   process.exit(1)
 }
 const wl = meanSwellWavelength()
-if (wl < 520 || wl > 700) {
-  console.error(`✗ average wavelength ${wl.toFixed(0)} m should be about 600`)
+if (wl < 250 || wl > 420) {
+  console.error(`✗ average wavelength ${wl.toFixed(0)} m should be about 250–400`)
   process.exit(1)
 }
 if (SWELL_TRAINS.length < 2 || SWELL_TRAINS.length > 4) {
@@ -66,8 +67,8 @@ for (let i = 1; i < dirs.length; i++) {
     process.exit(1)
   }
 }
-if (WATER.swellPeriodS < 25 || WATER.swellPeriodS > 30) {
-  console.error('✗ swell period should be a slow 25–30 s')
+if (WATER.swellPeriodS < 30 || WATER.swellPeriodS > 40) {
+  console.error('✗ swell period should be a slow 30–40 s')
   process.exit(1)
 }
 if (WATER.metallic !== 0 || WATER.roughness < 0.45 || WATER.roughness > 0.55 || WATER.specular < 0.3 || WATER.specular > 0.5) {
@@ -157,6 +158,25 @@ if (src.includes('horizonSrcVeil') || src.includes('1.08')) {
 }
 if (!src.includes('hazeSrc')) {
   console.error('✗ the seamless haze ring is not spawned')
+  process.exit(1)
+}
+const pillarDrop = 99.75 * TILE_SCALE
+const pillarBottom = MIN_Y - pillarDrop
+console.log(`pillar bottom ${pillarBottom.toFixed(1)} trough ${trough.toFixed(1)} immersion ${(trough - pillarBottom).toFixed(1)}m`)
+if (pillarBottom > trough - 5) {
+  console.error('✗ the shortest pillar comes out of the water at a trough')
+  process.exit(1)
+}
+let high = -Infinity
+for (let s = 0; s < WATER.swellPeriodS; s += 1) {
+  high = Math.max(high, swellSurfaceY(SCENE_SIZE / 2, SCENE_SIZE / 2, s))
+}
+if (high < rescue + 20) {
+  console.error(`✗ crest ${high.toFixed(1)} does not rise far enough above the fixed line ${rescue.toFixed(1)}`)
+  process.exit(1)
+}
+if (fallTriggerY(SCENE_SIZE / 2, SCENE_SIZE / 2, 0) < rescue) {
+  console.error('✗ the fall trigger dropped below the fixed rescue line')
   process.exit(1)
 }
 console.log('✓ swells stay under the rescue line; the arena has no fog layer')

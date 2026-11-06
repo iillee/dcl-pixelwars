@@ -20,6 +20,40 @@ import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { HAZE_COLOR, RIM_COLOR, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
+import { swellCycleSeconds } from '../shared/swell'
+
+const swellClips: Entity[] = []
+let clipSeconds = 0
+let clipSpeed = 1
+
+/** Clip time the swell meshes are actually showing. Fall checks use this so a crest you can see still counts. */
+export function waterVisualSeconds(): number {
+  return clipSeconds
+}
+
+function setClipSpeed(speed: number): void {
+  clipSpeed = speed
+  const rate = speed * (WATER.swellClipS / WATER.swellPeriodS)
+  for (const e of swellClips) {
+    const anim = Animator.getMutableOrNull(e)
+    const state = anim?.states[0]
+    if (state) state.speed = rate
+  }
+}
+
+function trackSwell(dt: number): void {
+  const period = WATER.swellPeriodS
+  const want = swellCycleSeconds()
+  clipSeconds = (clipSeconds + dt * clipSpeed) % period
+  const err = (want - clipSeconds + period) % period
+  if (err < 0.04) {
+    clipSeconds = want
+    if (clipSpeed !== 1) setClipSpeed(1)
+    return
+  }
+  const catchUp = Math.min(8, Math.max(1, err / 0.4))
+  if (Math.abs(catchUp - clipSpeed) > 0.3) setClipSpeed(catchUp)
+}
 
 export function initWater(): void {
   const rescueY = MIN_Y - FALL_RESPAWN_DROP
@@ -74,6 +108,10 @@ export function initWater(): void {
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
   if (WATER_FOG.haze) addHaze()
+  const ahead = swellCycleSeconds()
+  clipSeconds = 0
+  setClipSpeed(ahead < 0.05 ? 1 : Math.min(8, Math.max(2, ahead / 0.5)))
+  engine.addSystem(trackSwell)
 
   const crest = y + WATER.swellAmplitudeM + Math.max(0, WATER.swellM)
   console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
@@ -96,10 +134,11 @@ function addSwell(root: Entity, src: string): Entity {
       clip: 'wave',
       playing: true,
       loop: true,
-      speed: WATER.swellClipS / WATER.swellPeriodS,
+      speed: clipSpeed * (WATER.swellClipS / WATER.swellPeriodS),
       weight: 1,
     }],
   })
+  swellClips.push(wave)
   const c = WATER_COLOR
   GltfNodeModifiers.create(wave, {
     modifiers: [{
@@ -264,8 +303,12 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
     if (!swapped) {
       swapped = true
       for (const e of desktop) engine.removeEntity(e)
+      swellClips.length = 0
+      clipSeconds = 0
       addSwell(root, WATER.swellLiteSrc)
       addFlat(root, WATER.flatLiteSrc)
+      const ahead = swellCycleSeconds()
+      setClipSpeed(ahead < 0.05 ? 1 : Math.min(8, Math.max(2, ahead / 0.5)))
     }
     engine.removeSystem(tick)
   }

@@ -13,21 +13,14 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { SWELL_TRAINS, WATER, WATER_FOG } from '../src/shared/waterLook'
+import { WATER, WATER_FOG } from '../src/shared/waterLook'
+import { SWELL_NORM, SWELL_PARTS, swellPartY } from '../src/shared/swell'
 
 const CLIP = WATER.swellClipS
 const AMP = WATER.swellAmplitudeM
-const TRAINS = SWELL_TRAINS.map((t) => {
-  const rad = (t.dirDeg * Math.PI) / 180
-  return {
-    k: (Math.PI * 2) / t.wavelengthM,
-    dx: Math.cos(rad),
-    dz: Math.sin(rad),
-    weight: t.weight,
-    phase: t.phase,
-  }
-})
+const TRAINS = SWELL_PARTS
 const TARGETS = TRAINS.length * 2
+const NORM = SWELL_NORM
 const SEA_HALF = (SCENE_SIZE - WATER.edgeInsetM * 2) / 2
 const FLAT_OVERLAP = 4
 
@@ -42,36 +35,8 @@ function smooth(t: number): number {
 }
 
 function trainShape(x: number, z: number, train: (typeof TRAINS)[number], kind: 0 | 1): number {
-  const theta = train.k * (x * train.dx + z * train.dz) + train.phase
-  return train.weight * (kind === 0 ? Math.sin(theta) : Math.cos(theta))
+  return swellPartY(x, z, train, kind)
 }
-
-function sumY(x: number, z: number, ang: number): number {
-  let y = 0
-  for (const train of TRAINS) {
-    const theta = train.k * (x * train.dx + z * train.dz) + train.phase + ang
-    y += train.weight * Math.sin(theta)
-  }
-  return y
-}
-
-let hi = -Infinity
-let lo = Infinity
-{
-  const extent = 2200
-  const step = 48
-  for (let z = -extent; z <= extent; z += step) {
-    for (let x = -extent; x <= extent; x += step) {
-      for (let a = 0; a < 24; a++) {
-        const y = sumY(x, z, (a / 24) * Math.PI * 2)
-        hi = Math.max(hi, y)
-        lo = Math.min(lo, y)
-      }
-    }
-  }
-}
-/** Scale so neither crest nor trough of the sum exceeds swellAmplitudeM. */
-const NORM = Math.max(hi, -lo, 1e-6)
 
 function envelope(x: number, z: number, inner: number, outer: number): number {
   if (!(outer > inner)) return 1
@@ -794,7 +759,7 @@ function rasterRim(mesh: Built, file: string) {
 }
 rasterRim(flat, '/tmp/water-rim.png')
 
-console.log(`sum range ${lo.toFixed(3)}..${hi.toFixed(3)}  scale ${NORM.toFixed(3)}  trains ${TRAINS.length}  clip ${CLIP}s`)
+console.log(`swell norm ${NORM.toFixed(3)}  trains ${TRAINS.length}  clip ${CLIP}s`)
 console.log(`desktop swell+flat tris ${deskTris}  morph verts ${deskVerts}`)
 console.log(`mobile swell+flat tris ${mobTris}  morph verts ${mobVerts}`)
 console.log(`sea half ${SEA_HALF.toFixed(0)}m  far ring ${WATER.swellFarM}m`)
