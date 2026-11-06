@@ -144,12 +144,12 @@ export const SWELL_VARIANT: '48m' | '110m' = '48m'
 
 /** The ba05fa0 trains. The live 48 m meshes were built from these, not from SWELL_TRAINS. */
 export const SWELL_TRAINS_48: Array<{ wavelengthM: number; weight: number; dirDeg: number; phase: number }> = [
-  { wavelengthM: 720, weight: 0.5, dirDeg: 15, phase: 0.4 },
-  { wavelengthM: 480, weight: 0.32, dirDeg: 48, phase: 1.8 },
-  { wavelengthM: 600, weight: 0.18, dirDeg: 80, phase: 3.1 },
+  { wavelengthM: 720, weight: 0.84, dirDeg: 15, phase: 0.4 },
+  { wavelengthM: 480, weight: 0.1, dirDeg: 48, phase: 1.8 },
+  { wavelengthM: 600, weight: 0.06, dirDeg: 80, phase: 3.1 },
 ]
 export const SWELL_48_AMPLITUDE_M = 24
-export const SWELL_48_PERIOD_S = 28
+export const SWELL_48_PERIOD_S = 45
 
 /** Looping ocean bed. Global, started once. Kept under the trumpets and hits. */
 export const OCEAN_AMBIENCE_VOLUME = 0.2
@@ -159,16 +159,20 @@ export const FOAM = {
   /** Rings where each tile's column meets the sea. */
   rings: true,
   ringSrc: 'assets/textures/water-foam-ring.png',
-  /** Broken crest band. Scrolled in the primary train's direction. */
+  /** Broken white patches. Drawn as their own meshes along the main crest. */
   whitecapSrc: 'assets/textures/water-whitecap.png',
   whitecaps: true,
+  whitecapCount: 24,
+  whitecapSizeM: 40,
+  whitecapThickM: 22,
+  whitecapLiftM: 2.2,
   /** Plane width (m). The pillar shaft is 20 m across. */
-  ringSizeM: 36,
-  /** Metres above the analytic surface, so the decal doesn't fight the swell. */
-  ringLiftM: 0.45,
-  baseAlpha: 0.4,
+  ringSizeM: 48,
+  /** Metres above the analytic surface, so the decal doesn't sink into the swell. */
+  ringLiftM: 2,
+  baseAlpha: 0.9,
   /** Added when the surface is at a crest (crest factor 0..1). */
-  crestBoost: 0.5,
+  crestBoost: 0.1,
   spinDegPerSec: 6,
   pulse: 0.06,
   pulseSeconds: 5,

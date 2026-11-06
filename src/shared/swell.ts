@@ -30,7 +30,8 @@ function toParts(trains: typeof SWELL_TRAINS): SwellPart[] {
 
 /** 110 m set. The mesh builder uses this. */
 export const SWELL_PARTS: SwellPart[] = toParts(SWELL_TRAINS)
-const PARTS_48: SwellPart[] = toParts(SWELL_TRAINS_48)
+export const SWELL_PARTS_48: SwellPart[] = toParts(SWELL_TRAINS_48)
+const PARTS_48 = SWELL_PARTS_48
 
 export function liveSwell(): { parts: SwellPart[]; amplitudeM: number; periodS: number } {
   if (SWELL_VARIANT === '48m') return { parts: PARTS_48, amplitudeM: SWELL_48_AMPLITUDE_M, periodS: SWELL_48_PERIOD_S }
@@ -76,7 +77,8 @@ function sampleNorm(parts: SwellPart[]): number {
 
 /** Peak of the unnormalised 110 m sum. The mesh builder divides by this. */
 export const SWELL_NORM = sampleNorm(SWELL_PARTS)
-const NORM_48 = sampleNorm(PARTS_48)
+export const SWELL_NORM_48 = sampleNorm(PARTS_48)
+const NORM_48 = SWELL_NORM_48
 
 export function liveSwellNorm(): number {
   return SWELL_VARIANT === '48m' ? NORM_48 : SWELL_NORM

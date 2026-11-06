@@ -5,11 +5,11 @@
  *
  * Run: npx tsx scripts/verify-water.ts
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
-import { fallTriggerY, swellSurfaceY } from '../src/shared/swell'
-import { HAZE_COLOR, RIM_COLOR, SWELL_TRAINS, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
+import { FOAM, HAZE_COLOR, RIM_COLOR, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -162,8 +162,53 @@ if (pillarBottom > trough - 5) {
   console.error('✗ the shortest pillar comes out of the water at a trough')
   process.exit(1)
 }
+function glbClipSeconds(rel: string): number {
+  const buf = readFileSync(new URL('../' + rel, import.meta.url))
+  const jlen = buf.readUInt32LE(12)
+  const json = JSON.parse(buf.slice(20, 20 + jlen).toString()) as {
+    animations?: Array<{ name: string; samplers: Array<{ input: number }> }>
+    accessors: Array<{ max?: number[] }>
+  }
+  const anim = json.animations?.find((a) => a.name === 'wave')
+  if (!anim) return -1
+  return json.accessors[anim.samplers[0].input].max?.[0] ?? -1
+}
+if (SWELL_VARIANT === '48m') {
+  if (SWELL_48_PERIOD_S < 40 || SWELL_48_PERIOD_S > 50) {
+    console.error(`✗ live swell period is ${SWELL_48_PERIOD_S}s, want about 45`)
+    process.exit(1)
+  }
+  const clip = glbClipSeconds(WATER.swell48NearSrc)
+  if (Math.abs(clip - SWELL_48_PERIOD_S) > 0.05) {
+    console.error(`✗ live swell clip is ${clip}s but the surface uses ${SWELL_48_PERIOD_S}s`)
+    process.exit(1)
+  }
+  const nearBytes = statSync(new URL('../' + WATER.swell48NearSrc, import.meta.url)).size
+  if (nearBytes > 800_000) {
+    console.error(`✗ live near swell is ${(nearBytes / 1e6).toFixed(2)} MB; keep it near 0.3 MB`)
+    process.exit(1)
+  }
+  const secondary = SWELL_TRAINS_48.slice(1).reduce((a, t) => a + t.weight, 0)
+  if (SWELL_TRAINS_48[0].weight < 0.7 || secondary > 0.35) {
+    console.error('✗ the live swell should be one dominant train with small companions')
+    process.exit(1)
+  }
+}
+const foamSrc = readFileSync(new URL('../src/client/foam.ts', import.meta.url), 'utf8')
+if (src.includes('paintWhitecaps') || src.includes('Math.min(8')) {
+  console.error('✗ the swell clock is still catching up to the wall clock')
+  process.exit(1)
+}
+if (!src.includes('speed: 1')) {
+  console.error('✗ the swell clip should play at a constant speed')
+  process.exit(1)
+}
+if (FOAM.ringLiftM < 1.5 || !foamSrc.includes('MTM_ALPHA_TEST') || !foamSrc.includes('whitecaps')) {
+  console.error('✗ foam should be its own alpha-tested meshes, lifted off the swell')
+  process.exit(1)
+}
 let high = -Infinity
-const period = SWELL_VARIANT === '48m' ? 28 : WATER.swellPeriodS
+const period = liveSwell().periodS
 for (let s = 0; s < period; s += 1.5) {
   for (let dx = -400; dx <= 400; dx += 200) {
     high = Math.max(high, swellSurfaceY(SCENE_SIZE / 2 + dx, SCENE_SIZE / 2, s))
@@ -180,7 +225,7 @@ if (fallTriggerY(SCENE_SIZE / 2, SCENE_SIZE / 2, 0) < rescue) {
 if (SWELL_VARIANT === '48m') {
   let hi = -Infinity
   let lo = Infinity
-  for (let s = 0; s < 28; s += 2) {
+  for (let s = 0; s < period; s += 3) {
     for (let dx = -400; dx <= 400; dx += 80) {
       for (let dz = -400; dz <= 400; dz += 80) {
         const h = swellSurfaceY(SCENE_SIZE / 2 + dx, SCENE_SIZE / 2 + dz, s)

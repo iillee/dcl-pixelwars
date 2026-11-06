@@ -13,14 +13,14 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { WATER, WATER_FOG } from '../src/shared/waterLook'
-import { SWELL_NORM, SWELL_PARTS, swellPartY } from '../src/shared/swell'
+import { SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
+import { SWELL_NORM, SWELL_NORM_48, SWELL_PARTS, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
 
-const CLIP = WATER.swellClipS
-const AMP = WATER.swellAmplitudeM
-const TRAINS = SWELL_PARTS
-const TARGETS = TRAINS.length * 2
-const NORM = SWELL_NORM
+let CLIP = WATER.swellClipS
+let AMP = WATER.swellAmplitudeM
+let TRAINS = SWELL_PARTS
+let TARGETS = TRAINS.length * 2
+let NORM = SWELL_NORM
 const SEA_HALF = (SCENE_SIZE - WATER.edgeInsetM * 2) / 2
 const FLAT_OVERLAP = 4
 
@@ -639,69 +639,79 @@ function edgeDelta(mesh: Built, x: number, z: number, phaseIndex: number): numbe
 }
 
 const one = () => 1
-const near = squareGrid(WATER.swellNearM, WATER.swellNearStepM, one, 'SwellNear')
-const mid = frameGrid(WATER.swellNearM, WATER.swellMidM, WATER.swellNearStepM, WATER.swellMidStepM, one, 'SwellMid')
-const far = frameGrid(
-  WATER.swellMidM,
-  WATER.swellFarM,
-  WATER.swellMidStepM,
-  WATER.swellFarStepM,
-  (x, z) => envelope(x, z, WATER.swellMidM, WATER.swellFarM),
-  'SwellFar',
-)
-const lite = squareGrid(
-  WATER.swellNearM,
-  WATER.swellMobileStepM,
-  (x, z) => envelope(x, z, WATER.swellNearM - WATER.swellMobileFadeM, WATER.swellNearM),
-  'SwellLite',
-)
-const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 24, 'FlatSea')
-const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
-const haze = hazeRing()
-
-const join = edgeDelta(near, WATER.swellNearM, 0, 0)
-const joinMid = edgeDelta(mid, WATER.swellNearM, 0, 0)
-const farOuter = edgeDelta(far, WATER.swellFarM, 0, 0)
-const farInner = edgeDelta(far, WATER.swellMidM, 0, 0)
-const midOuter = edgeDelta(mid, WATER.swellMidM, 0, 0)
-if (join === null || joinMid === null || Math.abs(join - joinMid) > 1e-4) {
-  throw new Error(`near/mid join mismatch ${join} vs ${joinMid}`)
+function makeSwells() {
+  TARGETS = TRAINS.length * 2
+  const near = squareGrid(WATER.swellNearM, WATER.swellNearStepM, one, 'SwellNear')
+  const mid = frameGrid(WATER.swellNearM, WATER.swellMidM, WATER.swellNearStepM, WATER.swellMidStepM, one, 'SwellMid')
+  const far = frameGrid(
+    WATER.swellMidM,
+    WATER.swellFarM,
+    WATER.swellMidStepM,
+    WATER.swellFarStepM,
+    (x, z) => envelope(x, z, WATER.swellMidM, WATER.swellFarM),
+    'SwellFar',
+  )
+  const lite = squareGrid(
+    WATER.swellNearM,
+    WATER.swellMobileStepM,
+    (x, z) => envelope(x, z, WATER.swellNearM - WATER.swellMobileFadeM, WATER.swellNearM),
+    'SwellLite',
+  )
+  const join = edgeDelta(near, WATER.swellNearM, 0, 0)
+  const joinMid = edgeDelta(mid, WATER.swellNearM, 0, 0)
+  const farOuter = edgeDelta(far, WATER.swellFarM, 0, 0)
+  const farInner = edgeDelta(far, WATER.swellMidM, 0, 0)
+  const midOuter = edgeDelta(mid, WATER.swellMidM, 0, 0)
+  if (join === null || joinMid === null || Math.abs(join - joinMid) > 1e-4) {
+    throw new Error(`near/mid join mismatch ${join} vs ${joinMid}`)
+  }
+  if (farInner === null || midOuter === null || Math.abs(farInner - midOuter) > 1e-4) {
+    throw new Error(`mid/far join mismatch ${midOuter} vs ${farInner}`)
+  }
+  if (farOuter === null || Math.abs(farOuter) > 1e-4) {
+    throw new Error(`far edge is still displaced (${farOuter})`)
+  }
+  return { near, mid, far, lite }
 }
-if (farInner === null || midOuter === null || Math.abs(farInner - midOuter) > 1e-4) {
-  throw new Error(`mid/far join mismatch ${midOuter} vs ${farInner}`)
-}
-if (farOuter === null || Math.abs(farOuter) > 1e-4) {
-  throw new Error(`far edge is still displaced (${farOuter})`)
-}
-
 writeTextures()
-const files: Array<[Built, string]> = [
-  [near, WATER.swellNearSrc],
-  [mid, WATER.swellMidSrc],
-  [far, WATER.swellFarSrc],
-  [lite, WATER.swellLiteSrc],
-  [flat, WATER.flatSrc],
-  [flatLite, WATER.flatLiteSrc],
-  [haze, WATER_FOG.hazeSrc],
-]
 let deskTris = 0
 let deskVerts = 0
 let mobTris = 0
 let mobVerts = 0
-for (const [mesh, rel] of files) {
+function emit(mesh: Built, rel: string): void {
   const bytes = writeGlb(mesh, new URL('../' + rel, import.meta.url))
   const s = report(mesh, bytes)
-  if (rel === WATER.swellNearSrc || rel === WATER.swellMidSrc || rel === WATER.swellFarSrc) {
+  if (rel === WATER.swellNearSrc || rel === WATER.swellMidSrc || rel === WATER.swellFarSrc || rel === WATER.swell48NearSrc || rel === WATER.swell48MidSrc || rel === WATER.swell48FarSrc) {
     deskTris += s.tris
     deskVerts += s.verts
   }
   if (rel === WATER.flatSrc) deskTris += s.tris
-  if (rel === WATER.swellLiteSrc) {
+  if (rel === WATER.swellLiteSrc || rel === WATER.swell48LiteSrc) {
     mobTris += s.tris
     mobVerts += s.verts
   }
   if (rel === WATER.flatLiteSrc) mobTris += s.tris
 }
+const swells110 = makeSwells()
+emit(swells110.near, WATER.swellNearSrc)
+emit(swells110.mid, WATER.swellMidSrc)
+emit(swells110.far, WATER.swellFarSrc)
+emit(swells110.lite, WATER.swellLiteSrc)
+TRAINS = SWELL_PARTS_48
+AMP = SWELL_48_AMPLITUDE_M
+CLIP = SWELL_48_PERIOD_S
+NORM = SWELL_NORM_48
+const swells48 = makeSwells()
+emit(swells48.near, WATER.swell48NearSrc)
+emit(swells48.mid, WATER.swell48MidSrc)
+emit(swells48.far, WATER.swell48FarSrc)
+emit(swells48.lite, WATER.swell48LiteSrc)
+const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 24, 'FlatSea')
+const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
+const haze = hazeRing()
+emit(flat, WATER.flatSrc)
+emit(flatLite, WATER.flatLiteSrc)
+emit(haze, WATER_FOG.hazeSrc)
 function longestEdge(mesh: Built): number {
   let max = 0
   for (let t = 0; t < mesh.idx.length; t += 3) {

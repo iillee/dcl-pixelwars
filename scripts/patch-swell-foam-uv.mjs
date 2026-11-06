@@ -87,17 +87,24 @@ function noise(x, y) {
 
 const W = 128
 const cap = Buffer.alloc(W * W * 4)
+function blob(u, v, cx, cy, rx, ry) {
+  const dx = (u - cx) / rx
+  const dy = (v - cy) / ry
+  return dx * dx + dy * dy < 1 ? 1 : 0
+}
 for (let y = 0; y < W; y++) {
   for (let x = 0; x < W; x++) {
-    const u = x / W
-    const v = y / W
-    const band = Math.exp(-((u - 0.5) ** 2) / (2 * 0.045 ** 2))
-    const n = noise(u * 7, v * 4)
-    const broken = n > 0.35 ? (n - 0.35) / 0.65 : 0.15 * n
-    const k = band * broken
+    const u = (x + 0.5) / W
+    const v = (y + 0.5) / W
+    let k = Math.max(
+      blob(u, v, 0.42, 0.55, 0.28, 0.22),
+      blob(u, v, 0.68, 0.42, 0.2, 0.18),
+      blob(u, v, 0.5, 0.28, 0.16, 0.14),
+    )
+    if (k && noise(u * 5, v * 5) < 0.22) k = 0
     const o = (y * W + x) * 4
-    cap[o] = cap[o + 1] = cap[o + 2] = Math.round(k * 255)
-    cap[o + 3] = 255
+    cap[o] = cap[o + 1] = cap[o + 2] = 255
+    cap[o + 3] = k ? 255 : 0
   }
 }
 writeFileSync('assets/textures/water-whitecap.png', png(W, W, cap))
@@ -110,18 +117,14 @@ for (let y = 0; y < R; y++) {
     const v = y / (R - 1) - 0.5
     const d = Math.hypot(u, v) * 2
     const ang = Math.atan2(v, u)
-    const wobble = 0.08 * Math.sin(ang * 5) + 0.05 * Math.sin(ang * 11 + 1.3)
-    const edge = 0.72 + wobble
-    const inner = 0.38
-    let k = 0
-    if (d > inner && d < edge) {
-      const rim = Math.min(1, (d - inner) / 0.12, (edge - d) / 0.1)
-      const n = noise(Math.cos(ang) * 3 + 4, Math.sin(ang) * 3 + 2)
-      k = rim * (0.45 + 0.55 * n)
-    }
+    const wobble = 0.06 * Math.sin(ang * 5) + 0.04 * Math.sin(ang * 9 + 1.3)
+    const edge = 0.96 + wobble
+    const inner = 0.46
+    let k = d > inner && d < edge ? 1 : 0
+    if (k && noise(Math.cos(ang) * 2 + 4, Math.sin(ang) * 2 + 2) < 0.18) k = 0
     const o = (y * R + x) * 4
     ring[o] = ring[o + 1] = ring[o + 2] = 255
-    ring[o + 3] = Math.round(Math.max(0, Math.min(1, k)) * 255)
+    ring[o + 3] = k ? 255 : 0
   }
 }
 writeFileSync('assets/textures/water-foam-ring.png', png(R, R, ring))
