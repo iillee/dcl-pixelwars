@@ -83,12 +83,16 @@ if (!LOOK.gloss || Math.abs(LOOK.glossRoughness - 0.15) > 0.02 || LOOK.glossSpec
   console.error('✗ the swell gloss switch should be a sharp wet highlight')
   process.exit(1)
 }
-if (!LOOK.softNormal || LOOK.softNormalTileM < 40 || LOOK.softNormalTileM > 80) {
-  console.error('✗ the soft normal should repeat on a scale of tens of metres')
+if (!LOOK.softNormal || LOOK.softNormalTileM < 100 || LOOK.softNormalTileM > 150) {
+  console.error('✗ the soft normal should repeat about every 120 m')
   process.exit(1)
 }
-if (!LOOK.depth || LOOK.depthAlpha < 0.75 || LOOK.depthAlpha > 0.92) {
-  console.error('✗ the depth switch should leave the near swell slightly clear')
+if (LOOK.depth) {
+  console.error('✗ the clear layer is off: it showed the far ring and rim as pale patches')
+  process.exit(1)
+}
+if (LOOK.depthAlpha < 0.75 || LOOK.depthAlpha > 0.92) {
+  console.error('✗ the depth alpha should stay a light veil if the switch comes back on')
   process.exit(1)
 }
 if (Math.abs(RIM_COLOR.r - HAZE_COLOR.r) > 0.001 || Math.abs(RIM_COLOR.g - HAZE_COLOR.g) > 0.001 || Math.abs(RIM_COLOR.b - HAZE_COLOR.b) > 0.001) {

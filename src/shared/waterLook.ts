@@ -200,8 +200,9 @@ export const SURFACE = {
  * `gloss` is the swell only; the rim keeps `WATER.roughness`.
  * `softNormal` is near, mid, and the mobile lite mesh. The far ring and the
  * flat rim stay un-bumped so the horizon does not grow a lighting seam.
- * `depth` clears near/mid (and lite) over a dark opaque sheet. The far ring
- * and the rim stay opaque so they do not sort against the haze.
+ * `depth` is off. Near/mid at alpha 0.85 ended on the opaque far ring and the
+ * pale rim, and that handoff read as flat light patches. The sheet and the
+ * alpha path stay here for a later try.
  */
 export const LOOK = {
   gloss: true,
@@ -212,12 +213,13 @@ export const LOOK = {
   softNormal: true,
   softNormalSrc: 'assets/textures/water-soft-normal.png',
   /** Metres per repeat. Baked into swell TEXCOORD. bumpTexture ignores its own tiling. */
-  softNormalTileM: 60,
+  softNormalTileM: 120,
   softNormalDirX: 1,
   softNormalDirZ: 0.2,
-  /** UV repeats per second. At 60 m a repeat this is about 0.4 m/s. */
-  softNormalSpeed: 0.006,
-  depth: true,
+  /** UV repeats per second. At 120 m a repeat this is about 0.4 m/s. */
+  softNormalSpeed: 0.003,
+  /** Off. The clear near/mid layer showed the opaque far ring and pale rim through the handoff. */
+  depth: false,
   depthAlpha: 0.85,
   /** Metres under the lowest trough of the live swell. */
   depthBelowTroughM: 4,

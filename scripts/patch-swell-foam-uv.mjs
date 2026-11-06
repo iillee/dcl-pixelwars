@@ -1,5 +1,5 @@
 /**
- * Bake swell UVs as metres / 60 so the soft normal repeats broadly, and
+ * Bake swell UVs as metres / 120 so the soft normal repeats broadly, and
  * write that normal. Morph buffers are left alone. The flat rim is not
  * touched, so its horizon fade stays put.
  *
@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { deflateSync, crc32 } from 'node:zlib'
 
-const TILE_M = 60
+const TILE_M = 120
 
 function patch(path) {
   const buf = readFileSync(path)
