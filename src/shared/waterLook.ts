@@ -16,9 +16,38 @@
  * EnvironmentFog (component 1225) is exponential only: color gradient and
  * density, `1 - e^(-density * metres)`. The protocol has no linear mode and
  * no start/end distance, so density stays 0. The horizon is the flat rim
- * fading to sky colour, plus a short soft veil.
+ * plus one seamless haze ring.
+ *
+ * Colours: `WATER_COLOR`, `RIM_COLOR` and `HAZE_COLOR`. The swell and the
+ * haze read them at runtime. The rim mesh only stores a fade mask; those
+ * two colours are applied when the scene runs. The mask shape is baked, so
+ * changing where the fade starts means re-running
+ * `npx tsx scripts/build-water-swell.ts`. The scene does not lock the sky
+ * (`src/client/skybox.ts`), and SDK7's SkyboxTime can only set the clock,
+ * not read the Explorer's. `SEA_TONE` picks a row; it does not follow sunset.
  */
 import { LEVEL_Y_OFFSET } from '../maze/level'
+
+export type Rgb = { r: number; g: number; b: number; a: number }
+
+/** Midday is the applied row: a pale blue horizon, water a step deeper. */
+export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
+  midday: {
+    water: { r: 0.46, g: 0.66, b: 0.82, a: 1 },
+    rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
+    haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
+  },
+  sunset: {
+    water: { r: 0.76, g: 0.58, b: 0.52, a: 1 },
+    rim: { r: 0.91, g: 0.72, b: 0.64, a: 1 },
+    haze: { r: 0.91, g: 0.72, b: 0.64, a: 0.92 },
+  },
+}
+
+export const SEA_TONE: keyof typeof HORIZON_TONES = 'midday'
+export const WATER_COLOR: Rgb = HORIZON_TONES[SEA_TONE].water
+export const RIM_COLOR: Rgb = HORIZON_TONES[SEA_TONE].rim
+export const HAZE_COLOR: Rgb = HORIZON_TONES[SEA_TONE].haze
 export const WATER = {
   /**
    * Mean surface height (m). Crests are this plus the amplitude, troughs
@@ -36,13 +65,13 @@ export const WATER = {
   sizeM: 0,
   /** Pulled in from each scene edge when sizeM is 0. */
   edgeInsetM: 6,
-  /** Deep ocean blue. The flat rim's inner edge uses this same colour. */
-  color: { r: 0.02, g: 0.22, b: 0.72, a: 1 },
-  /** Matte. Metallic and a low roughness were the white streaks on each ridge. */
+  /** Near water. A step deeper than `RIM_COLOR`, still in the horizon family. */
+  color: WATER_COLOR,
+  /** Soft sheen. Metallic stays 0 so the highlights do not go white. */
   metallic: 0,
-  roughness: 0.7,
-  /** 1 is the engine default. Kept low so the sky doesn't glare off the sea. */
-  specular: 0.15,
+  roughness: 0.48,
+  /** 1 is the engine default. */
+  specular: 0.4,
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
@@ -108,8 +137,8 @@ export const WATER_FOG = {
    */
   environment: false,
   density: 0,
-  /** Sky colour the rim fades toward. Not used while environment is off. */
-  color: { r: 0.55, g: 0.7, b: 0.84 },
+  /** Sky colour the rim fades toward. Applied at runtime on the rim mask. */
+  color: RIM_COLOR,
   /** Vertical cards at the parcel edge. Off: they read as walls. */
   skirt: false,
   skirtHeightM: 90,
@@ -118,18 +147,26 @@ export const WATER_FOG = {
   mist: false,
   mistAboveM: 14,
   mistColor: { r: 0.05, g: 0.28, b: 0.7, a: 0.06 },
-  /** Flat outer sea. UV 0 is the swell colour, UV 1 is the sky colour. */
-  horizonSrc: 'assets/textures/water-horizon.png',
   /**
-   * Overlapping curtain cards. Off: the flat rim's colour fade hides the
-   * edge, and the cards were doubling up into bright seams.
+   * Rim masks. `horizonSrc` is white at the swell and black at the sky edge
+   * (multiplied by `WATER_COLOR`). `horizonGlowSrc` is the opposite
+   * (multiplied by `RIM_COLOR`). Recolouring does not require a rebuild.
    */
-  horizon: false,
-  horizonRadiusM: 2300,
-  horizonHeightM: 42,
-  horizonSegments: 48,
-  horizonSrcVeil: 'assets/textures/water-veil.png',
-  horizonColor: { r: 0.55, g: 0.7, b: 0.84, a: 0.4 },
+  horizonSrc: 'assets/textures/water-horizon.png',
+  horizonGlowSrc: 'assets/textures/water-horizon-glow.png',
+  /**
+   * One closed ring, shared vertices, no overlapping cards. Sits just inside
+   * the parcel edge, from below the waterline to above eye height (~190).
+   * Colour and opacity are `HAZE_COLOR` at runtime. The alpha curve in
+   * `hazeMask` is baked.
+   */
+  haze: true,
+  hazeColor: HAZE_COLOR,
+  hazeRadiusM: 2360,
+  hazeBottomY: 36,
+  hazeTopY: 270,
+  hazeSrc: 'assets/models/water-haze.glb',
+  hazeMask: 'assets/textures/water-haze.png',
 }
 
 /** Fog fraction at `metres` for the configured density. */

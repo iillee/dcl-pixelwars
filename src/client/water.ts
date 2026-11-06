@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { WATER, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
+import { HAZE_COLOR, RIM_COLOR, WATER, WATER_COLOR, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
 
 export function initWater(): void {
   const rescueY = MIN_Y - FALL_RESPAWN_DROP
@@ -73,6 +73,7 @@ export function initWater(): void {
   }
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
+  if (WATER_FOG.haze) addHaze()
 
   const crest = y + WATER.swellAmplitudeM + Math.max(0, WATER.swellM)
   console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
@@ -99,7 +100,7 @@ function addSwell(root: Entity, src: string): Entity {
       weight: 1,
     }],
   })
-  const c = WATER.color
+  const c = WATER_COLOR
   GltfNodeModifiers.create(wave, {
     modifiers: [{
       path: '',
@@ -108,12 +109,11 @@ function addSwell(root: Entity, src: string): Entity {
         material: {
           $case: 'pbr',
           pbr: {
-            texture: Material.Texture.Common({ src: WATER.colorSrc }),
-            albedoColor: Color4.create(1, 1, 1, c.a),
+            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
             specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
+            reflectivityColor: Color3.create(c.r, c.g, c.b),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },
@@ -141,11 +141,14 @@ function addFlat(root: Entity, src: string): Entity {
           $case: 'pbr',
           pbr: {
             texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-            albedoColor: Color4.create(1, 1, 1, 1),
+            albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
+            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
+            emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
+            emissiveIntensity: 1,
             metallic: WATER.metallic,
             roughness: WATER.roughness,
             specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
+            reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },
@@ -154,6 +157,47 @@ function addFlat(root: Entity, src: string): Entity {
     }],
   })
   return sea
+}
+
+/** One inward ring. Scale carries the radius and the height; the mesh is the unit circle. */
+function addHaze(): void {
+  const mid = SCENE_SIZE / 2
+  const bottom = WATER_FOG.hazeBottomY
+  const height = Math.max(1, WATER_FOG.hazeTopY - bottom)
+  const ring = engine.addEntity()
+  Transform.create(ring, {
+    position: Vector3.create(mid, bottom, mid),
+    scale: Vector3.create(WATER_FOG.hazeRadiusM, height, WATER_FOG.hazeRadiusM),
+  })
+  GltfContainer.create(ring, {
+    src: WATER_FOG.hazeSrc,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  const c = HAZE_COLOR
+  GltfNodeModifiers.create(ring, {
+    modifiers: [{
+      path: '',
+      castShadows: false,
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: {
+            texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+            emissiveColor: Color3.create(c.r, c.g, c.b),
+            emissiveIntensity: 0.65,
+            roughness: 1,
+            metallic: 0,
+            specularIntensity: 0,
+            transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+            castShadows: false,
+          },
+        },
+      },
+    }],
+  })
 }
 
 function addMist(root: Entity, size: number): void {

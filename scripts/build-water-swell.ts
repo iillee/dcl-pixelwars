@@ -574,41 +574,77 @@ function writeTextures() {
 
   const W = 256
   const H = 4
-  const grad = Buffer.alloc(W * H * 4)
+  const albedo = Buffer.alloc(W * H * 4)
+  const glow = Buffer.alloc(W * H * 4)
   for (let x = 0; x < W; x++) {
     const u = x / (W - 1)
     const t = smooth(Math.max(0, (u - 0.28) / 0.72))
-    const r = WATER_RGB.r + (SKY_RGB.r - WATER_RGB.r) * t
-    const g = WATER_RGB.g + (SKY_RGB.g - WATER_RGB.g) * t
-    const b = WATER_RGB.b + (SKY_RGB.b - WATER_RGB.b) * t
+    const water = 1 - t
     for (let y = 0; y < H; y++) {
       const o = (y * W + x) * 4
-      grad[o] = byte(r)
-      grad[o + 1] = byte(g)
-      grad[o + 2] = byte(b)
-      grad[o + 3] = 255
+      albedo[o] = albedo[o + 1] = albedo[o + 2] = byte(water)
+      albedo[o + 3] = 255
+      glow[o] = glow[o + 1] = glow[o + 2] = byte(t)
+      glow[o + 3] = 255
     }
   }
-  writeFileSync(new URL('../' + WATER_FOG.horizonSrc, import.meta.url), png(W, H, grad))
+  writeFileSync(new URL('../' + WATER_FOG.horizonSrc, import.meta.url), png(W, H, albedo))
+  writeFileSync(new URL('../' + WATER_FOG.horizonGlowSrc, import.meta.url), png(W, H, glow))
 
+  // glTF v=0 is the top of the image. The ring's bottom (waterline) uses v=0.
   const vw = 4
   const vh = 128
   const veil = Buffer.alloc(vw * vh * 4)
-  const hc = WATER_FOG.horizonColor
   for (let y = 0; y < vh; y++) {
     const v = y / (vh - 1)
-    const rise = smooth(Math.max(0, (v - 0.08) / 0.32))
-    const fall = 1 - smooth(Math.max(0, (v - 0.42) / 0.45))
-    const a = hc.a * rise * fall
+    const rise = smooth(Math.min(1, v / 0.07))
+    const fall = 1 - smooth(Math.max(0, (v - 0.28) / 0.5))
+    const k = rise * fall
     for (let x = 0; x < vw; x++) {
       const o = (y * vw + x) * 4
-      veil[o] = byte(hc.r)
-      veil[o + 1] = byte(hc.g)
-      veil[o + 2] = byte(hc.b)
-      veil[o + 3] = byte(a)
+      veil[o] = veil[o + 1] = veil[o + 2] = byte(k)
+      veil[o + 3] = byte(k)
     }
   }
-  writeFileSync(new URL('../' + WATER_FOG.horizonSrcVeil, import.meta.url), png(vw, vh, veil))
+  writeFileSync(new URL('../' + WATER_FOG.hazeMask, import.meta.url), png(vw, vh, veil))
+}
+
+function hazeRing(): Built {
+  const seg = 96
+  const pos: number[] = []
+  const nrm: number[] = []
+  const uv: number[] = []
+  const idx: number[] = []
+  const at = (i: number, j: number) => j * (seg + 1) + i
+  for (let j = 0; j <= 1; j++) {
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2
+      const s = Math.sin(a)
+      const c = Math.cos(a)
+      pos.push(s, j, c)
+      nrm.push(-s, 0, -c)
+      uv.push(i / seg, j === 0 ? 0 : 1)
+    }
+  }
+  for (let i = 0; i < seg; i++) {
+    const a = at(i, 0)
+    const b = at(i + 1, 0)
+    const c = at(i, 1)
+    const d = at(i + 1, 1)
+    const abx = pos[b * 3] - pos[a * 3]
+    const aby = pos[b * 3 + 1] - pos[a * 3 + 1]
+    const abz = pos[b * 3 + 2] - pos[a * 3 + 2]
+    const acx = pos[c * 3] - pos[a * 3]
+    const acy = pos[c * 3 + 1] - pos[a * 3 + 1]
+    const acz = pos[c * 3 + 2] - pos[a * 3 + 2]
+    const nx = aby * acz - abz * acy
+    const ny = abz * acx - abx * acz
+    const nz = abx * acy - aby * acx
+    const inward = nx * nrm[a * 3] + ny * nrm[a * 3 + 1] + nz * nrm[a * 3 + 2]
+    if (inward >= 0) idx.push(a, b, c, b, d, c)
+    else idx.push(a, c, b, b, c, d)
+  }
+  return { name: 'Haze', pos, nrm, uv, idx, morphPos: [], morphNrm: [], tris: seg * 2 }
 }
 
 function report(mesh: Built, bytes: number) {
@@ -647,6 +683,7 @@ const lite = squareGrid(
 )
 const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 24, 'FlatSea')
 const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
+const haze = hazeRing()
 
 const join = edgeDelta(near, WATER.swellNearM, 0, 0)
 const joinMid = edgeDelta(mid, WATER.swellNearM, 0, 0)
@@ -671,6 +708,7 @@ const files: Array<[Built, string]> = [
   [lite, WATER.swellLiteSrc],
   [flat, WATER.flatSrc],
   [flatLite, WATER.flatLiteSrc],
+  [haze, WATER_FOG.hazeSrc],
 ]
 let deskTris = 0
 let deskVerts = 0
