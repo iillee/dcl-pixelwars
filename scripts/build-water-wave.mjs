@@ -139,7 +139,7 @@ const gltf = {
     name: 'Sea',
     alphaMode: 'BLEND',
     pbrMetallicRoughness: {
-      baseColorFactor: [0.07, 0.32, 0.48, 0.92],
+      baseColorFactor: [0.02, 0.22, 0.72, 0.96],
       metallicFactor: 0.45,
       roughnessFactor: 0.12,
     },

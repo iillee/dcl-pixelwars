@@ -36,12 +36,13 @@ export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
- * Parcels on a side. 16 m each. 80 → 1280 m, so the sea can reach the
- * horizon without leaving the scene. Worlds allow up to 300×300 and do not
- * charge LAND for the extra parcels. The play grid stays 5×5 because the
- * inset below grows with the scene. Keep scene.json's parcel list in step.
+ * Parcels on a side. 16 m each. 300 is the World maximum (300×300 = 90,000
+ * parcels, 4800 m). Docs: kinds of project, and scene metadata ("The largest
+ * scene size you can set is of 300 x 300 parcels"). No LAND cost. The play
+ * grid stays 5×5 because the inset grows with the scene. Keep scene.json's
+ * parcel list in step. Genesis City cannot use this layout.
  */
-export const SKY_PARCELS = 80
+export const SKY_PARCELS = 300
 export const SKY_SCENE_M = SKY_PARCELS * 16
 /** Inset that leaves a 5×32 m grid centred in the scene. */
 export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2

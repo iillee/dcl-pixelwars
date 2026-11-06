@@ -23,7 +23,8 @@ export const WATER = {
   sizeM: 0,
   /** Pulled in from each scene edge when sizeM is 0. */
   edgeInsetM: 6,
-  color: { r: 0.07, g: 0.32, b: 0.48, a: 0.9 },
+  /** Deep ocean blue. Alpha stays high so the mist cannot grey it out. */
+  color: { r: 0.02, g: 0.22, b: 0.72, a: 0.96 },
   metallic: 0.45,
   roughness: 0.12,
   /** Ripple normal from the Creator Hub Water Plane. */
@@ -50,19 +51,23 @@ export const WATER = {
 }
 
 export const WATER_FOG = {
-  /** Global exponential fog. Off, or a very low density, so the maze stays clear. */
+  /** Global exponential fog. Thin enough that the arena stays clear; the far edge of a 4800 m scene still fades. */
   environment: true,
-  /** Per metre. Default explorer fog is 0.0005. Higher than ~0.002 washes the arena. */
-  density: 0.00035,
-  color: { r: 0.62, g: 0.74, b: 0.84 },
-  /** Vertical gradient cards standing just inside the parcel edge. */
-  skirt: true,
+  /**
+   * Per metre. Explorer default is 0.0005. ~0.00065 is about 9% at 150 m
+   * (the maze) and about 80% at 2400 m (halfway to the parcel edge).
+   */
+  density: 0.00065,
+  /** Blue, not grey, so the distance fade doesn't bleach the sea. */
+  color: { r: 0.1, g: 0.28, b: 0.62 },
+  /** Vertical cards at the parcel edge. Off: they read as walls. */
+  skirt: false,
   skirtHeightM: 90,
   skirtSrc: 'assets/textures/water-skirt.png',
-  /** Soft sheet a few metres above the sea, still far below the platforms. */
+  /** Thin blue sheet above the sea. Low alpha so it doesn't grey the water. */
   mist: true,
   mistAboveM: 14,
-  mistColor: { r: 0.75, g: 0.84, b: 0.9, a: 0.22 },
+  mistColor: { r: 0.05, g: 0.28, b: 0.7, a: 0.06 },
 }
 
 /** Fog fraction at `metres` for the configured density. */

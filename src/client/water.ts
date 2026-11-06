@@ -8,7 +8,7 @@
  * No collider and no splash trigger.
  */
 import {
-  engine, Entity, Animator, GltfContainer, Material, MaterialTransparencyMode, MeshRenderer,
+  engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
   TextureMovementType, TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
@@ -83,6 +83,22 @@ function addWaveMesh(root: Entity, size: number): Entity {
   })
   Animator.create(wave, {
     states: [{ clip: 'wave', playing: true, loop: true, speed: WATER.waveSpeed, weight: 1 }],
+  })
+  const c = WATER.color
+  GltfNodeModifiers.create(wave, {
+    modifiers: [{
+      path: '',
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: {
+            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+            metallic: WATER.metallic,
+            roughness: WATER.roughness,
+          },
+        },
+      },
+    }],
   })
   return wave
 }

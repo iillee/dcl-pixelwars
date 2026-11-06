@@ -36,8 +36,20 @@ if (near > 0.12) {
   console.error('✗ global fog is still thick over the arena')
   process.exit(1)
 }
-if (!WATER_FOG.skirt || !WATER_FOG.mist) {
-  console.error('✗ the perimeter skirt and the mist should start enabled')
+if (far < 0.7) {
+  console.error('✗ global fog does not fade the far edge of the sea')
+  process.exit(1)
+}
+if (WATER_FOG.skirt) {
+  console.error('✗ the horizon skirt should start off')
+  process.exit(1)
+}
+if (WATER.color.b < 0.55 || WATER.color.b < WATER.color.r * 8 || WATER.color.g > WATER.color.b * 0.6) {
+  console.error('✗ the sea should be a deep saturated blue')
+  process.exit(1)
+}
+if (WATER_FOG.mistColor.a > 0.12 || WATER_FOG.mistColor.r > 0.2) {
+  console.error('✗ the mist is still grey enough to wash the sea')
   process.exit(1)
 }
 if (WATER.waveAmplitudeM < 0.5 || WATER.swellM < 0.2) {
@@ -51,6 +63,10 @@ if (scene.landscapeTerrain !== false) {
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
+  process.exit(1)
+}
+if (scene.scene.base !== '-150,-150') {
+  console.error('✗ the 300×300 block must sit inside the publisher box (-150..149), base -150,-150')
   process.exit(1)
 }
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
