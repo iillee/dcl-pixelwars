@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
 import { initFoam, setFoamSeconds } from './foam'
 
@@ -96,7 +96,7 @@ export function initWater(): void {
   if (LOOK.depth) addDepth(root)
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
-  if (WATER_FOG.haze) addHaze()
+  if (WATER_FOG.haze) addHaze(y)
   if (FOAM.rings || FOAM.whitecaps) initFoam()
   clipSeconds = 0
   engine.addSystem(trackSwell)
@@ -296,15 +296,16 @@ function addFlat(root: Entity, src: string): Entity {
   return sea
 }
 
-/** One inward ring. Scale carries the radius and the height; the mesh is the unit circle. */
-function addHaze(): void {
+/** One inward ring just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle. */
+function addHaze(waterY: number): void {
   const mid = SCENE_SIZE / 2
-  const bottom = WATER_FOG.hazeBottomY
-  const height = Math.max(1, WATER_FOG.hazeTopY - bottom)
+  const radius = horizonRadiusM(SCENE_SIZE)
+  const bottom = waterY - WATER_FOG.hazeBelowM
+  const height = WATER_FOG.hazeBelowM + WATER_FOG.hazeAboveM
   const ring = engine.addEntity()
   Transform.create(ring, {
     position: Vector3.create(mid, bottom, mid),
-    scale: Vector3.create(WATER_FOG.hazeRadiusM, height, WATER_FOG.hazeRadiusM),
+    scale: Vector3.create(radius, height, radius),
   })
   GltfContainer.create(ring, {
     src: WATER_FOG.hazeSrc,

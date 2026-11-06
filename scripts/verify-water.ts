@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -119,8 +119,18 @@ if (!WATER_FOG.haze) {
   console.error('✗ the horizon haze ring should be on')
   process.exit(1)
 }
-if (WATER.swellFarM < 1600 || (WORLD_SIZE === 'full' && WATER.swellFarM > size / 2)) {
-  console.error('✗ the swell ring should reach toward the horizon and stay inside the sea')
+const seaHalf = size / 2
+if (WATER.swellNearM >= WATER.swellMidM || WATER.swellMidM >= WATER.swellFarM) {
+  console.error('✗ swell rings should grow outward: near, mid, far')
+  process.exit(1)
+}
+if (WATER.swellFarM > seaHalf || seaHalf - WATER.swellFarM > 250) {
+  console.error(`✗ the far ring (${WATER.swellFarM} m) should end just inside the sea (${seaHalf.toFixed(0)} m)`)
+  process.exit(1)
+}
+const hazeR = horizonRadiusM(SCENE_SIZE)
+if (Math.abs(hazeR - (SCENE_SIZE / 2 - 8)) > 0.1) {
+  console.error('✗ the haze ring should sit 8 m inside the parcel edge')
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
@@ -145,8 +155,8 @@ for (const f of meshes) {
   }
 }
 const scene = JSON.parse(readFileSync(new URL('../scene.json', import.meta.url), 'utf8'))
-if (scene.landscapeTerrain !== true) {
-  console.error('✗ landscapeTerrain must be true so the World sea reaches the horizon')
+if (scene.landscapeTerrain !== false) {
+  console.error('✗ landscapeTerrain must be false — the default surround brings trees back with the sea')
   process.exit(1)
 }
 if (!LOOK.sea) {

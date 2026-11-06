@@ -2,10 +2,12 @@
  * Rewrite scene.json's parcel list and spawns from WORLD_SIZE in src/maze/level.ts.
  *
  *   small   20×20, centred on parcel 0,0.
- *   medium  64×64, centred on parcel 0,0. Deploy default.
+ *   medium  64×64, centred on parcel 0,0.
+ *   large   150×150, centred on parcel 0,0. Deploy default.
  *   full    300×300 at base -150,-150, inside the publisher box.
  *
- * Also sets landscapeTerrain true: the World's grassland, trees, and sea.
+ * landscapeTerrain stays false: the default grassland, trees, and sea
+ * come back together, and we do not want that surround.
  * Flip the size: edit WORLD_SIZE, then `npx tsx scripts/write-scene.ts`.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -15,7 +17,7 @@ import { baseSpawn } from '../src/maze/generator'
 const scene = JSON.parse(readFileSync(new URL('../scene.json', import.meta.url), 'utf8'))
 const n = SKY_PARCELS
 const origin = sceneOriginParcel(n)
-scene.landscapeTerrain = true
+scene.landscapeTerrain = false
 const parcels: string[] = []
 for (let z = origin + n - 1; z >= origin; z--) {
   for (let x = origin; x < origin + n; x++) parcels.push(`${x},${z}`)
