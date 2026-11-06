@@ -9,9 +9,9 @@
  *
  * Swells are a displaced mesh, not a normal map. The files under
  * assets/models/water-swell*.glb and water-flat*.glb are built from the
- * wavelength and the ring sizes. After changing those, run
- * `npx tsx scripts/build-water-swell.ts`. Amplitude and period apply at
- * runtime (Y scale and clip speed).
+ * wavelength, amplitude and ring sizes. After changing those, run
+ * `npx tsx scripts/build-water-swell.ts`. The crest height is baked so the
+ * normals match the real slope. Period is the clip speed.
  *
  * EnvironmentFog (component 1225) is exponential only: color gradient and
  * density, `1 - e^(-density * metres)`. The protocol has no linear mode and
@@ -19,8 +19,12 @@
  * fading to sky colour, plus a short soft veil.
  */
 export const WATER = {
-  /** Mean surface height (m). Clamped under the rescue line. Troughs sit this far below the mean. */
-  heightY: 4.5,
+  /**
+   * Mean surface height (m). Crests are this plus the amplitude, troughs
+   * this minus it. Negative on purpose: a 12 m swell stays under the
+   * rescue line (~12.5). Fall rescue, bots and anvils use MIN_Y, not this.
+   */
+  heightY: -1,
   /** Metres of open air kept between the configured mean and the rescue line. */
   clearanceM: 6,
   /**
@@ -32,21 +36,24 @@ export const WATER = {
   edgeInsetM: 6,
   /** Deep ocean blue. The flat rim's inner edge uses this same colour. */
   color: { r: 0.02, g: 0.22, b: 0.72, a: 1 },
-  metallic: 0.45,
-  roughness: 0.12,
+  /** Matte. Metallic and a low roughness were the white streaks on each ridge. */
+  metallic: 0,
+  roughness: 0.7,
+  /** 1 is the engine default. Kept low so the sky doesn't glare off the sea. */
+  specular: 0.15,
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
-   * Half the peak-to-trough height (m). 4 → crests 8 m above troughs.
-   * The mesh morph is ±1; the entity's Y scale is this number.
+   * Half the peak-to-trough height (m). 6 → crests 12 m above troughs.
+   * Baked into the morph (metres), not a Y scale, so the normals stay smooth.
    */
-  swellAmplitudeM: 4,
+  swellAmplitudeM: 6,
   /** Crest-to-crest distance (m). Baked into the swell meshes. */
-  swellWavelengthM: 48,
+  swellWavelengthM: 160,
   /** Seconds for one crest to travel one wavelength. */
-  swellPeriodS: 10,
+  swellPeriodS: 13,
   /** Length of the `wave` clip in the glb. Speed = clip / period. */
-  swellClipS: 10,
+  swellClipS: 13,
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,

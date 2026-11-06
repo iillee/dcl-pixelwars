@@ -35,21 +35,25 @@ if (peak > rescue - 3) {
   console.error(`✗ swell crest ${peak.toFixed(2)} is too close to the rescue line ${rescue.toFixed(2)}`)
   process.exit(1)
 }
-if (trough < 0.2) {
-  console.error('✗ swell troughs meet the world floor')
+if (trough > -4) {
+  console.error('✗ troughs should sit well under the mean so a 12 m swell fits under the rescue line')
   process.exit(1)
 }
 const pk = WATER.swellAmplitudeM * 2
-if (pk < 6 || pk > 10) {
-  console.error(`✗ peak-to-trough is ${pk}m, want 6–10`)
+if (pk < 11 || pk > 13) {
+  console.error(`✗ peak-to-trough is ${pk}m, want about 12`)
   process.exit(1)
 }
-if (WATER.swellWavelengthM < 30 || WATER.swellWavelengthM > 80) {
-  console.error('✗ wavelength should be tens of metres')
+if (WATER.swellWavelengthM < 120 || WATER.swellWavelengthM > 160) {
+  console.error('✗ wavelength should be 120–160 m')
   process.exit(1)
 }
-if (WATER.swellPeriodS < 8 || WATER.swellPeriodS > 12) {
-  console.error('✗ swell period should be a slow 8–12 s')
+if (WATER.swellPeriodS < 12 || WATER.swellPeriodS > 14) {
+  console.error('✗ swell period should be a slow 12–14 s')
+  process.exit(1)
+}
+if (WATER.metallic !== 0 || WATER.roughness < 0.6 || WATER.specular > 0.25) {
+  console.error('✗ the sea is still shiny enough to streak white')
   process.exit(1)
 }
 if (size > SCENE_SIZE - 2 || size < SCENE_SIZE * 0.9) {

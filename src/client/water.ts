@@ -84,7 +84,7 @@ function addSwell(root: Entity, src: string): Entity {
   Transform.create(wave, {
     parent: root,
     position: Vector3.Zero(),
-    scale: Vector3.create(1, Math.max(0.05, WATER.swellAmplitudeM), 1),
+    scale: Vector3.One(),
   })
   GltfContainer.create(wave, {
     src,
@@ -113,6 +113,8 @@ function addSwell(root: Entity, src: string): Entity {
             albedoColor: Color4.create(1, 1, 1, c.a),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
+            specularIntensity: WATER.specular,
+            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },
@@ -143,6 +145,8 @@ function addFlat(root: Entity, src: string): Entity {
             albedoColor: Color4.create(1, 1, 1, 1),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
+            specularIntensity: WATER.specular,
+            reflectivityColor: Color3.create(0.22, 0.3, 0.4),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },

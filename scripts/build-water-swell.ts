@@ -4,7 +4,9 @@
  * The wave is a function of world XZ. Rings share that function, so the
  * crest runs across the joins. Displacement is ±1 in the file; the scene
  * scales Y by swellAmplitudeM. Eight morph targets sample the peaked
- * shape around the cycle so the blend stays a high crest and a low trough.
+ * One sine, two morph targets a quarter-cycle apart, weights sin/cos.
+ * That is a smooth traveling swell. A second crossing wave is what made
+ * the crests zigzag. Displacement is in metres (swellAmplitudeM).
  *
  * Run: npx tsx scripts/build-water-swell.ts
  * Numbers live in src/shared/waterLook.ts.
@@ -16,7 +18,8 @@ import { WATER, WATER_FOG } from '../src/shared/waterLook'
 
 const WL = WATER.swellWavelengthM
 const CLIP = WATER.swellClipS
-const TARGETS = 8
+const AMP = WATER.swellAmplitudeM
+const TARGETS = 2
 const SEA_HALF = (SCENE_SIZE - WATER.edgeInsetM * 2) / 2
 const FLAT_OVERLAP = 4
 
@@ -30,23 +33,16 @@ function smooth(t: number): number {
   return x * x * (3 - 2 * x)
 }
 
-/** Peaked crest, broad trough. Input is a sine-like value, output is -1..1 before normalisation. */
-function shape(s: number): number {
-  const u = Math.min(1, Math.max(0, s * 0.5 + 0.5))
-  return Math.pow(u, 1.75) * 2 - 1
-}
-
+/** One long swell, running diagonally. No second harmonic and no cross wave. */
 function raw(x: number, z: number, phase: number): number {
   const k = (Math.PI * 2) / WL
-  const along = x * 0.86 + z * 0.51
-  const theta = k * along + phase
-  const cross = k * 0.62 * (-0.28 * x + 0.96 * z) + phase * 0.7
-  const primary = Math.sin(theta)
-  const crossed = 0.32 * Math.sin(cross)
-  return shape(primary) * 0.82 + crossed
+  const dx = 0.78
+  const dz = 0.626
+  const len = Math.hypot(dx, dz)
+  return Math.sin(k * ((x * dx + z * dz) / len) + phase)
 }
 
-const PHASES = Array.from({ length: TARGETS }, (_, i) => (i / TARGETS) * Math.PI * 2)
+const PHASES = [0, Math.PI / 2]
 
 let peak = 1e-6
 {
@@ -56,15 +52,11 @@ let peak = 1e-6
     for (let i = 0; i <= n; i++) {
       const x = (i / n - 0.5) * span
       const z = (j / n - 0.5) * span
-      for (let a = 0; a < TARGETS; a++) {
-        const t = a / TARGETS
-        const w0 = 1 - t
-        const i0 = a % TARGETS
-        const i1 = (a + 1) % TARGETS
-        const y = w0 * raw(x, z, PHASES[i0]) + t * raw(x, z, PHASES[i1])
+      for (let a = 0; a < 24; a++) {
+        const th = (a / 24) * Math.PI * 2
+        const y = Math.sin(th) * raw(x, z, PHASES[0]) + Math.cos(th) * raw(x, z, PHASES[1])
         peak = Math.max(peak, Math.abs(y))
       }
-      for (const p of PHASES) peak = Math.max(peak, Math.abs(raw(x, z, p)))
     }
   }
 }
@@ -131,7 +123,7 @@ function displace(base: number[], idx: number[], phase: number, envAt: (x: numbe
   const pos = base.slice()
   for (let v = 0; v < base.length; v += 3) {
     const e = envAt(base[v], base[v + 2])
-    pos[v + 1] = disp(base[v], base[v + 2], phase) * e
+    pos[v + 1] = disp(base[v], base[v + 2], phase) * e * AMP
   }
   return { pos, nrm: normalsOf(pos, idx) }
 }
@@ -430,13 +422,14 @@ function writeGlb(mesh: Built, file: string) {
       NORMAL: putF32(mesh.morphNrm[t], 'VEC3'),
     }))
     : []
-  const keys = TARGETS
+  const keys = 24
   const times: number[] = []
   const weights: number[] = []
   if (animate) {
     for (let i = 0; i <= keys; i++) {
+      const ang = (i / keys) * Math.PI * 2
       times.push((i / keys) * CLIP)
-      for (let t = 0; t < TARGETS; t++) weights.push(i % TARGETS === t ? 1 : 0)
+      weights.push(Math.sin(ang), Math.cos(ang))
     }
   }
   const tA = animate ? putF32(times, 'SCALAR', [times[0]], [times[times.length - 1]]) : 0
