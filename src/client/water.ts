@@ -1,18 +1,21 @@
 /**
  * Sea under the sky arena. Tunables live in shared/waterLook.ts.
  *
- * The swell is a morph-target mesh (`wave` clip). Ripples are two
- * transparent sheets scrolling the same normal map at different speeds
- * and scales — the Creator Hub Water Plane does one scroll; this crosses
- * a second over it. Mobile keeps a single sheet and skips the mesh.
- * No collider and no splash trigger.
+ * Swells are morph-target meshes (`wave` clip): a dense centre, a coarser
+ * middle ring and a far ring whose crests ease to nothing. The flat rim
+ * beyond that is the same blue and fades to the sky colour, with a short
+ * soft veil at the horizon. Mobile keeps one coarse mesh and a larger flat
+ * rim. No collider and no splash trigger.
+ *
+ * EnvironmentFog has no start distance, so it stays off. A density high
+ * enough to hide the parcel edge would also sit on the arena.
  */
 import {
   engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
-  TextureMovementType, TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
+  Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
-import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
+import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
@@ -37,64 +40,81 @@ export function initWater(): void {
 
   const root = engine.addEntity()
   const at = Vector3.create(mid, y, mid)
-  const up = Vector3.create(mid, y + WATER.swellM, mid)
   Transform.create(root, { position: at })
-  const swell = Math.max(0.5, WATER.swellSeconds)
-  Tween.create(root, {
-    duration: swell,
-    easingFunction: EasingFunction.EF_EASESINE,
-    mode: Tween.Mode.Move({ start: at, end: up }),
-  })
-  TweenSequence.create(root, {
-    sequence: [{
+  if (WATER.swellM > 0) {
+    const up = Vector3.create(mid, y + WATER.swellM, mid)
+    const swell = Math.max(0.5, WATER.swellSeconds)
+    Tween.create(root, {
       duration: swell,
       easingFunction: EasingFunction.EF_EASESINE,
-      mode: Tween.Mode.Move({ start: up, end: at }),
-    }],
-    loop: TweenLoop.TL_RESTART,
-  })
+      mode: Tween.Mode.Move({ start: at, end: up }),
+    })
+    TweenSequence.create(root, {
+      sequence: [{
+        duration: swell,
+        easingFunction: EasingFunction.EF_EASESINE,
+        mode: Tween.Mode.Move({ start: up, end: at }),
+      }],
+      loop: TweenLoop.TL_RESTART,
+    })
+  }
 
   const mobileNow = isMobile()
-  const extra: Entity[] = []
-  if (!mobileNow) extra.push(addWaveMesh(root, size))
-  for (let i = 0; i < WATER.ripples.length; i++) {
-    if (mobileNow && i > 0) continue
-    const sheet = addRipple(root, i, size)
-    if (i > 0) extra.push(sheet)
+  const desktop: Entity[] = []
+  if (mobileNow) {
+    addSwell(root, WATER.swellLiteSrc)
+    addFlat(root, WATER.flatLiteSrc)
+  } else {
+    desktop.push(addSwell(root, WATER.swellNearSrc))
+    desktop.push(addSwell(root, WATER.swellMidSrc))
+    desktop.push(addSwell(root, WATER.swellFarSrc))
+    desktop.push(addFlat(root, WATER.flatSrc))
+    watchMobile(root, desktop)
   }
-  if (!mobileNow && extra.length) watchMobile(extra)
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
+  if (WATER_FOG.horizon) addHorizon(root)
 
-  console.log(`[Water] y=${y.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} fog=${WATER_FOG.environment ? WATER_FOG.density : 0}`)
+  const crest = y + WATER.swellAmplitudeM + Math.max(0, WATER.swellM)
+  console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${WATER.swellWavelengthM}m/${WATER.swellPeriodS}s`)
 }
 
-function addWaveMesh(root: Entity, size: number): Entity {
+function addSwell(root: Entity, src: string): Entity {
   const wave = engine.addEntity()
   Transform.create(wave, {
     parent: root,
     position: Vector3.Zero(),
-    scale: Vector3.create(size, Math.max(0.05, WATER.waveAmplitudeM), size),
+    scale: Vector3.create(1, Math.max(0.05, WATER.swellAmplitudeM), 1),
   })
   GltfContainer.create(wave, {
-    src: WATER.waveMesh,
+    src,
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
   Animator.create(wave, {
-    states: [{ clip: 'wave', playing: true, loop: true, speed: WATER.waveSpeed, weight: 1 }],
+    states: [{
+      clip: 'wave',
+      playing: true,
+      loop: true,
+      speed: WATER.swellClipS / WATER.swellPeriodS,
+      weight: 1,
+    }],
   })
   const c = WATER.color
   GltfNodeModifiers.create(wave, {
     modifiers: [{
       path: '',
+      castShadows: false,
       material: {
         material: {
           $case: 'pbr',
           pbr: {
-            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+            texture: Material.Texture.Common({ src: WATER.colorSrc }),
+            albedoColor: Color4.create(1, 1, 1, c.a),
             metallic: WATER.metallic,
             roughness: WATER.roughness,
+            transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+            castShadows: false,
           },
         },
       },
@@ -103,37 +123,34 @@ function addWaveMesh(root: Entity, size: number): Entity {
   return wave
 }
 
-function addRipple(root: Entity, index: number, size: number): Entity {
-  const ripple = WATER.ripples[index]
-  const sheet = engine.addEntity()
-  Transform.create(sheet, {
-    parent: root,
-    position: Vector3.create(0, 0.15 + index * 0.2, 0),
-    rotation: Quaternion.fromEulerDegrees(90, 0, 0),
-    scale: Vector3.create(size, size, 1),
+function addFlat(root: Entity, src: string): Entity {
+  const sea = engine.addEntity()
+  Transform.create(sea, { parent: root, position: Vector3.Zero() })
+  GltfContainer.create(sea, {
+    src,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
   })
-  MeshRenderer.setPlane(sheet)
-  const repeats = (size / WATER.rippleSizeM) * ripple.scale
-  const len = Math.hypot(ripple.x, ripple.y) || 1
-  Material.setPbrMaterial(sheet, {
-    albedoColor: Color4.create(WATER.color.r, WATER.color.g, WATER.color.b, index === 0 ? WATER.color.a : WATER.color.a * 0.45),
-    metallic: WATER.metallic,
-    roughness: WATER.roughness,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-    castShadows: false,
-    bumpTexture: Material.Texture.Common({
-      src: WATER.normalSrc,
-      wrapMode: TextureWrapMode.TWM_REPEAT,
-      tiling: Vector2.create(repeats, repeats),
-    }),
+  GltfNodeModifiers.create(sea, {
+    modifiers: [{
+      path: '',
+      castShadows: false,
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: {
+            texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
+            albedoColor: Color4.create(1, 1, 1, 1),
+            metallic: WATER.metallic,
+            roughness: WATER.roughness,
+            transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+            castShadows: false,
+          },
+        },
+      },
+    }],
   })
-  Tween.setTextureMoveContinuous(
-    sheet,
-    Vector2.create(ripple.x / len, ripple.y / len),
-    ripple.speed,
-    TextureMovementType.TMT_OFFSET,
-  )
-  return sheet
+  return sea
 }
 
 function addMist(root: Entity, size: number): void {
@@ -188,15 +205,50 @@ function addSkirt(waterY: number, size: number): void {
   }
 }
 
-function watchMobile(extra: Entity[]): void {
+/** Inward curtain. The texture is clear at the top and at the waterline. */
+function addHorizon(root: Entity): void {
+  const seg = WATER_FOG.horizonSegments
+  const r = WATER_FOG.horizonRadiusM
+  const h = WATER_FOG.horizonHeightM
+  const width = 2 * r * Math.sin(Math.PI / seg) * 1.08
+  for (let i = 0; i < seg; i++) {
+    const a = ((i + 0.5) / seg) * Math.PI * 2
+    const card = engine.addEntity()
+    Transform.create(card, {
+      parent: root,
+      position: Vector3.create(Math.sin(a) * r, h * 0.5 - 6, Math.cos(a) * r),
+      rotation: Quaternion.fromEulerDegrees(0, (a * 180) / Math.PI + 180, 0),
+      scale: Vector3.create(width, h, 1),
+    })
+    MeshRenderer.setPlane(card)
+    Material.setPbrMaterial(card, {
+      texture: Material.Texture.Common({ src: WATER_FOG.horizonSrcVeil }),
+      albedoColor: Color4.create(1, 1, 1, 1),
+      roughness: 1,
+      metallic: 0,
+      transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+      castShadows: false,
+      emissiveColor: Color3.create(WATER_FOG.horizonColor.r, WATER_FOG.horizonColor.g, WATER_FOG.horizonColor.b),
+      emissiveIntensity: 0.55,
+    })
+  }
+}
+
+function watchMobile(root: Entity, desktop: Entity[]): void {
   let age = 0
+  let swapped = false
   function tick(dt: number): void {
     age += dt
     if (!isMobile()) {
       if (age > 5) engine.removeSystem(tick)
       return
     }
-    for (const e of extra) engine.removeEntity(e)
+    if (!swapped) {
+      swapped = true
+      for (const e of desktop) engine.removeEntity(e)
+      addSwell(root, WATER.swellLiteSrc)
+      addFlat(root, WATER.flatLiteSrc)
+    }
     engine.removeSystem(tick)
   }
   engine.addSystem(tick)
