@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
-import { WATER, WATER_FOG, fogAt, resolvedWaterSize, resolvedWaterY, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { SWELL_TRAINS, WATER, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -21,7 +21,7 @@ const red = baseSpawn(1)
 const blue = baseSpawn(2)
 console.log(`offset ${LEVEL_Y_OFFSET} roof ${SKY_TOP_Y} rescue ${rescue.toFixed(2)} scene ${SCENE_SIZE}m grid ${GRID_W}`)
 console.log(`water y=${y.toFixed(2)} crest=${peak.toFixed(2)} trough=${trough.toFixed(2)} size=${size.toFixed(0)}`)
-console.log(`swell ${WATER.swellWavelengthM}m  ±${WATER.swellAmplitudeM}m  ${WATER.swellPeriodS}s  fog@120m=${near.toFixed(3)}`)
+console.log(`swell ~${meanSwellWavelength().toFixed(0)}m  ±${WATER.swellAmplitudeM}m  ${WATER.swellPeriodS}s  trains ${SWELL_TRAINS.length}  fog@120m=${near.toFixed(3)}`)
 console.log(`spawn red ${red.pos.x.toFixed(1)},${red.pos.y.toFixed(3)},${red.pos.z.toFixed(1)} blue ${blue.pos.x.toFixed(1)},${blue.pos.z.toFixed(1)} look ${red.look.x.toFixed(1)}`)
 
 if (GRID_W !== 5) {
@@ -32,7 +32,7 @@ if (!(y < rescue - 1)) {
   console.error('✗ water reaches the fall-rescue line')
   process.exit(1)
 }
-if (peak > rescue - 3) {
+if (peak > rescue - 8) {
   console.error(`✗ swell crest ${peak.toFixed(2)} is too close to the rescue line ${rescue.toFixed(2)}`)
   process.exit(1)
 }
@@ -45,16 +45,29 @@ if (Math.abs(SKY_TOP_Y - (100 + LEVEL_Y_OFFSET)) > 0.01) {
   process.exit(1)
 }
 const pk = WATER.swellAmplitudeM * 2
-if (pk < 11 || pk > 13) {
-  console.error(`✗ peak-to-trough is ${pk}m, want about 12`)
+if (pk < 44 || pk > 52) {
+  console.error(`✗ peak-to-trough is ${pk}m, want about 48`)
   process.exit(1)
 }
-if (WATER.swellWavelengthM < 120 || WATER.swellWavelengthM > 160) {
-  console.error('✗ wavelength should be 120–160 m')
+const wl = meanSwellWavelength()
+if (wl < 520 || wl > 700) {
+  console.error(`✗ average wavelength ${wl.toFixed(0)} m should be about 600`)
   process.exit(1)
 }
-if (WATER.swellPeriodS < 12 || WATER.swellPeriodS > 14) {
-  console.error('✗ swell period should be a slow 12–14 s')
+if (SWELL_TRAINS.length < 2 || SWELL_TRAINS.length > 4) {
+  console.error('✗ the sea needs a few crossing swell trains, not one stripe')
+  process.exit(1)
+}
+const dirs = SWELL_TRAINS.map((t) => t.dirDeg).sort((a, b) => a - b)
+for (let i = 1; i < dirs.length; i++) {
+  const gap = dirs[i] - dirs[i - 1]
+  if (gap < 20 || gap > 45) {
+    console.error(`✗ swell directions are ${gap.toFixed(0)}° apart, want 20–40`)
+    process.exit(1)
+  }
+}
+if (WATER.swellPeriodS < 25 || WATER.swellPeriodS > 30) {
+  console.error('✗ swell period should be a slow 25–30 s')
   process.exit(1)
 }
 if (WATER.metallic !== 0 || WATER.roughness < 0.6 || WATER.specular > 0.25) {
@@ -77,8 +90,8 @@ if (WATER_FOG.mist) {
   console.error('✗ the mist sheet over the water should be off')
   process.exit(1)
 }
-if (!WATER_FOG.horizon || WATER_FOG.horizonRadiusM < 2000 || WATER_FOG.horizonHeightM > 60) {
-  console.error('✗ the horizon veil should be a short curtain near the parcel edge')
+if (WATER_FOG.horizon) {
+  console.error('✗ the horizon curtain should stay off; the rim fade hides the edge')
   process.exit(1)
 }
 if (WATER.swellFarM < 1600 || WATER.swellFarM > size / 2) {
@@ -121,6 +134,10 @@ if (/MeshCollider|TriggerArea/.test(src)) {
 }
 if (!src.includes('swellLiteSrc') || !src.includes('isMobile')) {
   console.error('✗ mobile should use the lighter swell mesh')
+  process.exit(1)
+}
+if (src.includes('horizonSrcVeil')) {
+  console.error('✗ the overlapping horizon curtain is still in the client')
   process.exit(1)
 }
 console.log('✓ swells stay under the rescue line; the arena has no fog layer')

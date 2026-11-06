@@ -1,12 +1,11 @@
 /**
  * Geometric ocean swells plus the flat rim that hides the parcel edge.
  *
- * The wave is a function of world XZ. Rings share that function, so the
- * crest runs across the joins. Displacement is ±1 in the file; the scene
- * scales Y by swellAmplitudeM. Eight morph targets sample the peaked
- * One sine, two morph targets a quarter-cycle apart, weights sin/cos.
- * That is a smooth traveling swell. A second crossing wave is what made
- * the crests zigzag. Displacement is in metres (swellAmplitudeM).
+ * Several sine trains share one period. Each train is a pair of morph
+ * targets (sin and cos of its phase); the clip's weights are cos(ωt) and
+ * sin(ωt), so the sum is a smooth traveling interference pattern and the
+ * loop closes. Rings share the same function, so crests cross the joins.
+ * Displacement is in metres (swellAmplitudeM).
  *
  * Run: npx tsx scripts/build-water-swell.ts
  * Numbers live in src/shared/waterLook.ts.
@@ -14,12 +13,21 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { WATER, WATER_FOG } from '../src/shared/waterLook'
+import { SWELL_TRAINS, WATER, WATER_FOG } from '../src/shared/waterLook'
 
-const WL = WATER.swellWavelengthM
 const CLIP = WATER.swellClipS
 const AMP = WATER.swellAmplitudeM
-const TARGETS = 2
+const TRAINS = SWELL_TRAINS.map((t) => {
+  const rad = (t.dirDeg * Math.PI) / 180
+  return {
+    k: (Math.PI * 2) / t.wavelengthM,
+    dx: Math.cos(rad),
+    dz: Math.sin(rad),
+    weight: t.weight,
+    phase: t.phase,
+  }
+})
+const TARGETS = TRAINS.length * 2
 const SEA_HALF = (SCENE_SIZE - WATER.edgeInsetM * 2) / 2
 const FLAT_OVERLAP = 4
 
@@ -33,37 +41,37 @@ function smooth(t: number): number {
   return x * x * (3 - 2 * x)
 }
 
-/** One long swell, running diagonally. No second harmonic and no cross wave. */
-function raw(x: number, z: number, phase: number): number {
-  const k = (Math.PI * 2) / WL
-  const dx = 0.78
-  const dz = 0.626
-  const len = Math.hypot(dx, dz)
-  return Math.sin(k * ((x * dx + z * dz) / len) + phase)
+function trainShape(x: number, z: number, train: (typeof TRAINS)[number], kind: 0 | 1): number {
+  const theta = train.k * (x * train.dx + z * train.dz) + train.phase
+  return train.weight * (kind === 0 ? Math.sin(theta) : Math.cos(theta))
 }
 
-const PHASES = [0, Math.PI / 2]
+function sumY(x: number, z: number, ang: number): number {
+  let y = 0
+  for (const train of TRAINS) {
+    const theta = train.k * (x * train.dx + z * train.dz) + train.phase + ang
+    y += train.weight * Math.sin(theta)
+  }
+  return y
+}
 
-let peak = 1e-6
+let hi = -Infinity
+let lo = Infinity
 {
-  const span = WL * 2
-  const n = 36
-  for (let j = 0; j <= n; j++) {
-    for (let i = 0; i <= n; i++) {
-      const x = (i / n - 0.5) * span
-      const z = (j / n - 0.5) * span
+  const extent = 2200
+  const step = 48
+  for (let z = -extent; z <= extent; z += step) {
+    for (let x = -extent; x <= extent; x += step) {
       for (let a = 0; a < 24; a++) {
-        const th = (a / 24) * Math.PI * 2
-        const y = Math.sin(th) * raw(x, z, PHASES[0]) + Math.cos(th) * raw(x, z, PHASES[1])
-        peak = Math.max(peak, Math.abs(y))
+        const y = sumY(x, z, (a / 24) * Math.PI * 2)
+        hi = Math.max(hi, y)
+        lo = Math.min(lo, y)
       }
     }
   }
 }
-
-function disp(x: number, z: number, phase: number): number {
-  return raw(x, z, phase) / peak
-}
+/** Scale so neither crest nor trough of the sum exceeds swellAmplitudeM. */
+const NORM = Math.max(hi, -lo, 1e-6)
 
 function envelope(x: number, z: number, inner: number, outer: number): number {
   if (!(outer > inner)) return 1
@@ -119,13 +127,22 @@ function normalsOf(pos: number[], idx: number[]): number[] {
   return nrm
 }
 
-function displace(base: number[], idx: number[], phase: number, envAt: (x: number, z: number) => number): { pos: number[]; nrm: number[] } {
+function displaceComponent(
+  base: number[],
+  idx: number[],
+  train: (typeof TRAINS)[number],
+  kind: 0 | 1,
+  envAt: (x: number, z: number) => number,
+): { delta: number[]; nrm: number[] } {
   const pos = base.slice()
+  const delta = new Array(base.length).fill(0)
   for (let v = 0; v < base.length; v += 3) {
     const e = envAt(base[v], base[v + 2])
-    pos[v + 1] = disp(base[v], base[v + 2], phase) * e * AMP
+    const y = (trainShape(base[v], base[v + 2], train, kind) * e * AMP) / NORM
+    delta[v + 1] = y
+    pos[v + 1] = y
   }
-  return { pos, nrm: normalsOf(pos, idx) }
+  return { delta, nrm: normalsOf(pos, idx) }
 }
 
 class MeshBuilder {
@@ -251,27 +268,20 @@ function frameGrid(
 function finish(m: MeshBuilder, envAt: (x: number, z: number) => number, name: string): Built {
   const morphPos: number[][] = []
   const morphNrm: number[][] = []
-  const posedNrm: number[][] = []
-  const baseNrm = new Array(m.pos.length).fill(0)
-  for (const phase of PHASES) {
-    const posed = displace(m.pos, m.idx, phase, envAt)
-    const delta = new Array(m.pos.length)
-    for (let i = 0; i < m.pos.length; i++) delta[i] = posed.pos[i] - m.pos[i]
-    morphPos.push(delta)
-    posedNrm.push(posed.nrm)
-    for (let i = 0; i < baseNrm.length; i++) baseNrm[i] += posed.nrm[i]
+  const baseNrm = new Array(m.pos.length)
+  for (let v = 0; v < m.pos.length; v += 3) {
+    baseNrm[v] = 0
+    baseNrm[v + 1] = 1
+    baseNrm[v + 2] = 0
   }
-  for (let v = 0; v < baseNrm.length; v += 3) {
-    const len = Math.hypot(baseNrm[v], baseNrm[v + 1], baseNrm[v + 2]) || 1
-    baseNrm[v] /= len
-    baseNrm[v + 1] /= len
-    baseNrm[v + 2] /= len
-  }
-  for (let t = 0; t < PHASES.length; t++) {
-    const nd = new Array(baseNrm.length)
-    const src = posedNrm[t]
-    for (let i = 0; i < nd.length; i++) nd[i] = src[i] - baseNrm[i]
-    morphNrm.push(nd)
+  for (const train of TRAINS) {
+    for (const kind of [0, 1] as const) {
+      const posed = displaceComponent(m.pos, m.idx, train, kind, envAt)
+      morphPos.push(posed.delta)
+      const nd = new Array(baseNrm.length)
+      for (let i = 0; i < nd.length; i++) nd[i] = posed.nrm[i] - baseNrm[i]
+      morphNrm.push(nd)
+    }
   }
   return {
     name,
@@ -299,16 +309,24 @@ function flatRing(inner: number, outer: number, step: number, name: string): Bui
   }
   const xs = [...xsSet].sort((a, b) => a - b)
   const m = new MeshBuilder()
-  const ids: number[][] = []
   const span = Math.max(1, outer - inner)
-  for (let j = 0; j < xs.length; j++) {
-    ids[j] = []
-    for (let i = 0; i < xs.length; i++) {
-      const x = xs[i], z = xs[j]
-      const d = Math.max(Math.abs(x), Math.abs(z))
-      const u = Math.min(1, Math.max(0, (d - inner) / span))
-      ids[j][i] = m.add(x, z, u, 0.5)
-    }
+  const idAt = new Map<string, number>()
+  /** Distance outside the swell square. Zero on the whole inner edge, so the
+   *  fade starts at the water colour and does not ray out from the origin. */
+  const fadeU = (x: number, z: number) => {
+    const ox = Math.max(0, Math.abs(x) - inner)
+    const oz = Math.max(0, Math.abs(z) - inner)
+    return Math.min(1, Math.hypot(ox, oz) / span)
+  }
+  const add = (i: number, j: number) => {
+    const key = `${i},${j}`
+    const hit = idAt.get(key)
+    if (hit !== undefined) return hit
+    const x = xs[i]
+    const z = xs[j]
+    const id = m.add(x, z, fadeU(x, z), 0.5)
+    idAt.set(key, id)
+    return id
   }
   for (let j = 0; j < xs.length - 1; j++) {
     for (let i = 0; i < xs.length - 1; i++) {
@@ -320,8 +338,12 @@ function flatRing(inner: number, outer: number, step: number, name: string): Bui
       ]
       const outside = corners.some(([x, z]) => Math.max(Math.abs(x), Math.abs(z)) >= inner - 1e-3)
       if (!outside) continue
-      m.tri(ids[j][i], ids[j][i + 1], ids[j + 1][i + 1])
-      m.tri(ids[j][i], ids[j + 1][i + 1], ids[j + 1][i])
+      const a = add(i, j)
+      const b = add(i + 1, j)
+      const c = add(i, j + 1)
+      const d = add(i + 1, j + 1)
+      m.tri(a, b, d)
+      m.tri(a, d, c)
     }
   }
   const flatEnv = () => 0
@@ -429,7 +451,7 @@ function writeGlb(mesh: Built, file: string) {
     for (let i = 0; i <= keys; i++) {
       const ang = (i / keys) * Math.PI * 2
       times.push((i / keys) * CLIP)
-      weights.push(Math.sin(ang), Math.cos(ang))
+      for (let n = 0; n < TRAINS.length; n++) weights.push(Math.cos(ang), Math.sin(ang))
     }
   }
   const tA = animate ? putF32(times, 'SCALAR', [times[0]], [times[times.length - 1]]) : 0
@@ -623,8 +645,8 @@ const lite = squareGrid(
   (x, z) => envelope(x, z, WATER.swellNearM - WATER.swellMobileFadeM, WATER.swellNearM),
   'SwellLite',
 )
-const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 64, 'FlatSea')
-const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 96, 'FlatLite')
+const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 24, 'FlatSea')
+const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
 
 const join = edgeDelta(near, WATER.swellNearM, 0, 0)
 const joinMid = edgeDelta(mid, WATER.swellNearM, 0, 0)
@@ -668,7 +690,73 @@ for (const [mesh, rel] of files) {
   }
   if (rel === WATER.flatLiteSrc) mobTris += s.tris
 }
-console.log(`normalised peak ${peak.toFixed(3)}  wavelength ${WL}m  clip ${CLIP}s`)
+function longestEdge(mesh: Built): number {
+  let max = 0
+  for (let t = 0; t < mesh.idx.length; t += 3) {
+    for (const [a, b] of [[0, 1], [1, 2], [2, 0]] as const) {
+      const ia = mesh.idx[t + a] * 3
+      const ib = mesh.idx[t + b] * 3
+      max = Math.max(max, Math.hypot(mesh.pos[ia] - mesh.pos[ib], mesh.pos[ia + 2] - mesh.pos[ib + 2]))
+    }
+  }
+  return max
+}
+const rimEdge = longestEdge(flat)
+if (rimEdge > 48) throw new Error(`flat rim triangles are too long (${rimEdge.toFixed(1)} m) and will streak`)
+
+function rasterRim(mesh: Built, file: string) {
+  const N = 640
+  const rgba = Buffer.alloc(N * N * 4)
+  for (let i = 0; i < N * N; i++) {
+    rgba[i * 4] = byte(WATER_RGB.r)
+    rgba[i * 4 + 1] = byte(WATER_RGB.g)
+    rgba[i * 4 + 2] = byte(WATER_RGB.b)
+    rgba[i * 4 + 3] = 255
+  }
+  const pix = (x: number) => (x / SEA_HALF) * 0.5 + 0.5
+  const col = (u: number) => {
+    const t = smooth(Math.max(0, (u - 0.28) / 0.72))
+    return [
+      WATER_RGB.r + (SKY_RGB.r - WATER_RGB.r) * t,
+      WATER_RGB.g + (SKY_RGB.g - WATER_RGB.g) * t,
+      WATER_RGB.b + (SKY_RGB.b - WATER_RGB.b) * t,
+    ]
+  }
+  for (let t = 0; t < mesh.idx.length; t += 3) {
+    const id = [mesh.idx[t], mesh.idx[t + 1], mesh.idx[t + 2]]
+    const xy = id.map((v) => [pix(mesh.pos[v * 3]) * (N - 1), pix(mesh.pos[v * 3 + 2]) * (N - 1)])
+    const rgb = id.map((v) => col(mesh.uv[v * 2]))
+    let minx = N, miny = N, maxx = 0, maxy = 0
+    for (const [x, y] of xy) {
+      minx = Math.min(minx, Math.floor(x))
+      miny = Math.min(miny, Math.floor(y))
+      maxx = Math.max(maxx, Math.ceil(x))
+      maxy = Math.max(maxy, Math.ceil(y))
+    }
+    minx = Math.max(0, minx)
+    miny = Math.max(0, miny)
+    maxx = Math.min(N - 1, maxx)
+    maxy = Math.min(N - 1, maxy)
+    const area = (xy[1][0] - xy[0][0]) * (xy[2][1] - xy[0][1]) - (xy[2][0] - xy[0][0]) * (xy[1][1] - xy[0][1])
+    if (Math.abs(area) < 1e-6) continue
+    for (let y = miny; y <= maxy; y++) {
+      for (let x = minx; x <= maxx; x++) {
+        const w0 = ((xy[1][0] - x) * (xy[2][1] - y) - (xy[2][0] - x) * (xy[1][1] - y)) / area
+        const w1 = ((xy[2][0] - x) * (xy[0][1] - y) - (xy[0][0] - x) * (xy[2][1] - y)) / area
+        const w2 = 1 - w0 - w1
+        if (w0 < -0.01 || w1 < -0.01 || w2 < -0.01) continue
+        const o = (y * N + x) * 4
+        rgba[o] = byte(w0 * rgb[0][0] + w1 * rgb[1][0] + w2 * rgb[2][0])
+        rgba[o + 1] = byte(w0 * rgb[0][1] + w1 * rgb[1][1] + w2 * rgb[2][1])
+        rgba[o + 2] = byte(w0 * rgb[0][2] + w1 * rgb[1][2] + w2 * rgb[2][2])
+      }
+    }
+  }
+  writeFileSync(file, png(N, N, rgba))
+}
+rasterRim(flat, '/tmp/water-rim.png')
+
+console.log(`sum range ${lo.toFixed(3)}..${hi.toFixed(3)}  scale ${NORM.toFixed(3)}  trains ${TRAINS.length}  clip ${CLIP}s`)
 console.log(`desktop swell+flat tris ${deskTris}  morph verts ${deskVerts}`)
 console.log(`mobile swell+flat tris ${mobTris}  morph verts ${mobVerts}`)
 console.log(`sea half ${SEA_HALF.toFixed(0)}m  far ring ${WATER.swellFarM}m`)

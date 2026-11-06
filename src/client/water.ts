@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { WATER, WATER_FOG, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
+import { WATER, WATER_FOG, meanSwellWavelength, resolvedWaterSize, resolvedWaterY } from '../shared/waterLook'
 
 export function initWater(): void {
   const rescueY = MIN_Y - FALL_RESPAWN_DROP
@@ -73,10 +73,9 @@ export function initWater(): void {
   }
   if (WATER_FOG.skirt) addSkirt(y, size)
   if (WATER_FOG.mist) addMist(root, size)
-  if (WATER_FOG.horizon) addHorizon(root)
 
   const crest = y + WATER.swellAmplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${WATER.swellWavelengthM}m/${WATER.swellPeriodS}s`)
+  console.log(`[Water] y=${y.toFixed(2)} crest=${crest.toFixed(2)} size=${size.toFixed(0)} rescue=${rescueY.toFixed(2)} swell=${meanSwellWavelength().toFixed(0)}m/${WATER.swellPeriodS}s`)
 }
 
 function addSwell(root: Entity, src: string): Entity {
@@ -205,35 +204,6 @@ function addSkirt(waterY: number, size: number): void {
       castShadows: false,
       emissiveColor: Color3.create(0.45, 0.62, 0.75),
       emissiveIntensity: 0.35,
-    })
-  }
-}
-
-/** Inward curtain. The texture is clear at the top and at the waterline. */
-function addHorizon(root: Entity): void {
-  const seg = WATER_FOG.horizonSegments
-  const r = WATER_FOG.horizonRadiusM
-  const h = WATER_FOG.horizonHeightM
-  const width = 2 * r * Math.sin(Math.PI / seg) * 1.08
-  for (let i = 0; i < seg; i++) {
-    const a = ((i + 0.5) / seg) * Math.PI * 2
-    const card = engine.addEntity()
-    Transform.create(card, {
-      parent: root,
-      position: Vector3.create(Math.sin(a) * r, h * 0.5 - 6, Math.cos(a) * r),
-      rotation: Quaternion.fromEulerDegrees(0, (a * 180) / Math.PI + 180, 0),
-      scale: Vector3.create(width, h, 1),
-    })
-    MeshRenderer.setPlane(card)
-    Material.setPbrMaterial(card, {
-      texture: Material.Texture.Common({ src: WATER_FOG.horizonSrcVeil }),
-      albedoColor: Color4.create(1, 1, 1, 1),
-      roughness: 1,
-      metallic: 0,
-      transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-      castShadows: false,
-      emissiveColor: Color3.create(WATER_FOG.horizonColor.r, WATER_FOG.horizonColor.g, WATER_FOG.horizonColor.b),
-      emissiveIntensity: 0.55,
     })
   }
 }

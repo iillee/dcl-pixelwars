@@ -22,10 +22,11 @@ import { LEVEL_Y_OFFSET } from '../maze/level'
 export const WATER = {
   /**
    * Mean surface height (m). Crests are this plus the amplitude, troughs
-   * this minus it. The -1 is the pre-offset mean; LEVEL_Y_OFFSET keeps the
-   * troughs above the world floor. Fall rescue, bots and anvils use MIN_Y.
+   * this minus it. 78 keeps a 48 m swell under the rescue line (~112.5)
+   * and above the floor. Do not raise LEVEL_Y_OFFSET: the roof is already
+   * at the 200 m sync warning. Fall rescue, bots and anvils use MIN_Y.
    */
-  heightY: -1 + LEVEL_Y_OFFSET,
+  heightY: LEVEL_Y_OFFSET - 22,
   /** Metres of open air kept between the configured mean and the rescue line. */
   clearanceM: 6,
   /**
@@ -45,30 +46,28 @@ export const WATER = {
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
-   * Half the peak-to-trough height (m). 6 → crests 12 m above troughs.
-   * Baked into the morph (metres), not a Y scale, so the normals stay smooth.
+   * Half the peak-to-trough of the combined sea (m). 24 → 48 m from trough
+   * to crest. Baked into the morph, not a Y scale, so the normals match.
    */
-  swellAmplitudeM: 6,
-  /** Crest-to-crest distance (m). Baked into the swell meshes. */
-  swellWavelengthM: 160,
-  /** Seconds for one crest to travel one wavelength. */
-  swellPeriodS: 13,
+  swellAmplitudeM: 24,
+  /** Seconds for one shared cycle of every train. Longer waves travel further per cycle. */
+  swellPeriodS: 28,
   /** Length of the `wave` clip in the glb. Speed = clip / period. */
-  swellClipS: 13,
+  swellClipS: 28,
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
   swellNearM: 640,
-  swellNearStepM: 8,
-  /** Middle ring, half-extent (m). Continues the same wave at a coarser step. */
+  swellNearStepM: 32,
+  /** Middle ring, half-extent (m). Continues the same waves at a coarser step. */
   swellMidM: 1280,
-  swellMidStepM: 16,
+  swellMidStepM: 64,
   /** Outer ring, half-extent (m). Displacement eases to 0 at this edge. */
-  swellFarM: 1984,
-  swellFarStepM: 32,
+  swellFarM: 2048,
+  swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
-  swellMobileStepM: 16,
+  swellMobileStepM: 32,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
   swellMobileFadeM: 220,
   swellNearSrc: 'assets/models/water-swell-near.glb',
@@ -77,6 +76,29 @@ export const WATER = {
   swellLiteSrc: 'assets/models/water-swell-lite.glb',
   flatSrc: 'assets/models/water-flat.glb',
   flatLiteSrc: 'assets/models/water-flat-lite.glb',
+}
+
+/**
+ * Crossing swells. Relative `weight`s are normalised so the combined crest
+ * is `swellAmplitudeM`. Directions sit 20–40° apart so the crests do not
+ * line up into stripes. All trains share `swellPeriodS`, which lets one
+ * looping clip play the sum.
+ */
+export const SWELL_TRAINS: Array<{
+  wavelengthM: number
+  weight: number
+  dirDeg: number
+  phase: number
+}> = [
+  { wavelengthM: 720, weight: 0.5, dirDeg: 15, phase: 0.4 },
+  { wavelengthM: 480, weight: 0.32, dirDeg: 48, phase: 1.8 },
+  { wavelengthM: 600, weight: 0.18, dirDeg: 80, phase: 3.1 },
+]
+
+export function meanSwellWavelength(): number {
+  let sum = 0
+  for (const t of SWELL_TRAINS) sum += t.wavelengthM
+  return sum / SWELL_TRAINS.length
 }
 
 export const WATER_FOG = {
@@ -99,10 +121,10 @@ export const WATER_FOG = {
   /** Flat outer sea. UV 0 is the swell colour, UV 1 is the sky colour. */
   horizonSrc: 'assets/textures/water-horizon.png',
   /**
-   * Short inward curtain near the parcel edge. Transparent at the top and
-   * at the waterline, so it reads as horizon haze rather than a wall.
+   * Overlapping curtain cards. Off: the flat rim's colour fade hides the
+   * edge, and the cards were doubling up into bright seams.
    */
-  horizon: true,
+  horizon: false,
   horizonRadiusM: 2300,
   horizonHeightM: 42,
   horizonSegments: 48,
