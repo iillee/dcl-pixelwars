@@ -281,6 +281,9 @@ export const SERVER_BURST_HIT_WINDOW_S = 1.0
  *  inside the server paint height band and below a real jump, so the press
  *  stays a ground Burst and the landing still resolves a centre. */
 export const BURST_STANCE_SLACK = 1.15
+/** Above this, the press is off the floor even if vertical speed is ~0 (the top of a jump).
+ *  A step, the 0.55 m surface offset, and a short hop stay under it. */
+export const BURST_AIR_LIFT_M = 2.2
 /** Client keeps resending a shockwave's paint until the server confirms a footprint. */
 export const BURST_PAINT_RETRY_S = 2.5
 export const BURST_PAINT_RETRY_GAP_S = 0.25

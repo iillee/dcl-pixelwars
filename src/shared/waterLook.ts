@@ -206,7 +206,7 @@ export const SURFACE = {
  */
 export const LOOK = {
   gloss: true,
-  glossRoughness: 0.15,
+  glossRoughness: 0.3,
   glossSpecular: 0.9,
   /** Cooler and lighter than the body, so the sun streaks without turning the sea white. */
   glossReflectivity: { r: 0.55, g: 0.72, b: 0.86 },

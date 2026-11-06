@@ -33,7 +33,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_STANCE_SLACK, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
@@ -45,7 +45,7 @@ import {
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
-import { inBurst, inAirSpike, burstDir, shockwaveHits, V3 } from '../shared/burst'
+import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
@@ -54,7 +54,7 @@ import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
 let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
-import { sampleBurstStance } from '../paint'
+import { sampleBurstStance, isPlayerGrounded } from '../paint'
 import { initBurstRipple, startRipple, nearGround } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirHitSfx,
@@ -297,7 +297,17 @@ function tickStamps(dt: number): void {
       }
       console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
-    } else if (s.left <= 0) stampWatch.splice(i, 1)
+    } else if (s.left <= 0) {
+      // The stamp window is 1.4 s, inside the server's 4.5 s landing window.
+      // If the feet never read as landed, paint the last known point anyway.
+      if (s.who === '' && pos) {
+        queuePaint('land', s.id, stance?.cell ?? '', pos, s.fx, s.fz)
+        if (safeSend('burstLand', () => sendBurstLand(s.id, stance?.cell ?? '', pos.x, pos.y, pos.z))) radialKnock(pos, s.team, s.fx, s.fz, s.id)
+        else kickPaint(s.id)
+        console.log(`[Burst] #${s.id} landing fallback pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`)
+      }
+      stampWatch.splice(i, 1)
+    }
   }
 }
 
@@ -523,11 +533,9 @@ export function triggerBurst(): void {
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
   cooldownLeft = BURST_COOLDOWN_S
-  // Gliding just above the slab is still inside BURST_STANCE_SLACK (1.15 m), so a
-  // height-only check calls it a ground Burst and never closes the glider. The
-  // glider holds fall at ~1 m/s; a real stand, and a walk down a ramp, sit on the surface.
-  const gliding = stance.lift > 0.45 && stance.lift <= BURST_STANCE_SLACK && fallVy < -0.55 && fallVy > -1.8
-  if (!stance.grounded || gliding) {
+  // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
+  // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
+  if (burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())) {
     fireAirSpike(id, team, p, f.x, f.z)
     return
   }

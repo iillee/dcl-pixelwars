@@ -59,7 +59,12 @@ export function initAudio(): void {
     volume: MUSIC_VOLUME,
     global: true,
   })
-  // Own entity, started once. Round resets and one-shot SFX replace other sources, not this one.
+  playStartMs = Date.now()
+}
+
+/** The ocean bed is 2.28 MB. Create it after the join is on the wire so the
+ *  download does not sit in front of the first round messages. */
+export function startOceanAmbience(): void {
   const oceanEnt = engine.addEntity()
   Transform.create(oceanEnt, { parent: engine.CameraEntity })
   AudioSource.create(oceanEnt, {
@@ -69,7 +74,6 @@ export function initAudio(): void {
     volume: OCEAN_AMBIENCE_VOLUME,
     global: true,
   })
-  playStartMs = Date.now()
 }
 
 export function isMusicMuted(): boolean {

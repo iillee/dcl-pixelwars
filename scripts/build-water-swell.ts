@@ -277,59 +277,57 @@ function finish(m: MeshBuilder, envAt: (x: number, z: number) => number, name: s
   }
 }
 
-function flatRing(inner: number, outer: number, step: number, name: string): Built {
-  const must = [inner, outer]
-  const xsSet = new Set<number>()
-  const n = Math.ceil(outer / step)
-  for (let i = -n; i <= n; i++) {
-    const v = i * step
-    if (Math.abs(v) <= outer + 1e-3) xsSet.add(Math.max(-outer, Math.min(outer, v)))
-  }
-  for (const v of must) {
-    xsSet.add(v)
-    xsSet.add(-v)
-  }
-  const xs = [...xsSet].sort((a, b) => a - b)
-  const m = new MeshBuilder()
+/**
+ * Square rings. Each ring is one chebyshev radius, so the fade UV is constant
+ * along it and a long tangential edge cannot streak. Radial steps stay short
+ * once the horizon gradient starts (u > 0.28) and get coarser inside that,
+ * where the mask is still the water colour.
+ */
+function flatRing(inner: number, outer: number, gradStep: number, name: string): Built {
   const span = Math.max(1, outer - inner)
-  const idAt = new Map<string, number>()
-  /** Distance outside the swell square. Zero on the whole inner edge, so the
-   *  fade starts at the water colour and does not ray out from the origin. */
-  const fadeU = (x: number, z: number) => {
-    const ox = Math.max(0, Math.abs(x) - inner)
-    const oz = Math.max(0, Math.abs(z) - inner)
-    return Math.min(1, Math.hypot(ox, oz) / span)
+  const gradAt = inner + span * 0.28
+  const radii = [inner]
+  const push = (r: number) => {
+    const prev = radii[radii.length - 1]
+    if (r <= prev + 0.5 || r > outer - 0.5) return
+    radii.push(r)
   }
-  const add = (i: number, j: number) => {
-    const key = `${i},${j}`
-    const hit = idAt.get(key)
-    if (hit !== undefined) return hit
-    const x = xs[i]
-    const z = xs[j]
-    const id = m.add(x, z, fadeU(x, z), 0.5)
-    idAt.set(key, id)
-    return id
+  // Coarse while the mask is still the water colour. The ring just before
+  // the gradient sits one step back, so the first fading triangle is short.
+  const solidEnd = gradAt - gradStep
+  const solidStep = Math.max(gradStep * 3, (solidEnd - inner) / 3)
+  for (let r = inner + solidStep; r < solidEnd; r += solidStep) push(r)
+  push(solidEnd)
+  push(gradAt)
+  for (let r = gradAt + gradStep; r < outer - 0.5; r += gradStep) push(r)
+  radii.push(outer)
+  const n = Math.max(12, Math.ceil((outer * 2) / 128))
+  const m = new MeshBuilder()
+  const rings: number[][] = []
+  for (const R of radii) {
+    const u = Math.min(1, Math.max(0, (R - inner) / span))
+    const ids: number[] = []
+    for (let s = 0; s < 4; s++) {
+      for (let i = 0; i < n; i++) {
+        const t = -R + (2 * R * i) / n
+        const x = s === 0 ? t : s === 1 ? R : s === 2 ? -t : -R
+        const z = s === 0 ? R : s === 1 ? -t : s === 2 ? -R : t
+        ids.push(m.add(x, z, u, 0.5))
+      }
+    }
+    rings.push(ids)
   }
-  for (let j = 0; j < xs.length - 1; j++) {
-    for (let i = 0; i < xs.length - 1; i++) {
-      const corners = [
-        [xs[i], xs[j]],
-        [xs[i + 1], xs[j]],
-        [xs[i], xs[j + 1]],
-        [xs[i + 1], xs[j + 1]],
-      ]
-      const outside = corners.some(([x, z]) => Math.max(Math.abs(x), Math.abs(z)) >= inner - 1e-3)
-      if (!outside) continue
-      const a = add(i, j)
-      const b = add(i + 1, j)
-      const c = add(i, j + 1)
-      const d = add(i + 1, j + 1)
-      m.tri(a, b, d)
-      m.tri(a, d, c)
+  const count = rings[0].length
+  for (let k = 0; k < rings.length - 1; k++) {
+    const a = rings[k]
+    const b = rings[k + 1]
+    for (let i = 0; i < count; i++) {
+      const j = (i + 1) % count
+      m.tri(a[i], b[i], b[j])
+      m.tri(a[i], b[j], a[j])
     }
   }
-  const flatEnv = () => 0
-  return finish(m, flatEnv, name)
+  return finish(m, () => 0, name)
 }
 
 class Buf {
@@ -801,25 +799,27 @@ emit(swells48.near, WATER.swell48NearSrc)
 emit(swells48.mid, WATER.swell48MidSrc)
 emit(swells48.far, WATER.swell48FarSrc)
 emit(swells48.lite, WATER.swell48LiteSrc)
-const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 24, 'FlatSea')
-const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
+const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 32, 'FlatSea')
+const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 64, 'FlatLite')
 const haze = hazeRing()
 emit(flat, WATER.flatSrc)
 emit(flatLite, WATER.flatLiteSrc)
 emit(haze, WATER_FOG.hazeSrc)
-function longestEdge(mesh: Built): number {
-  let max = 0
+function gradientSpan(mesh: Built): number {
+  let worst = 0
   for (let t = 0; t < mesh.idx.length; t += 3) {
-    for (const [a, b] of [[0, 1], [1, 2], [2, 0]] as const) {
-      const ia = mesh.idx[t + a] * 3
-      const ib = mesh.idx[t + b] * 3
-      max = Math.max(max, Math.hypot(mesh.pos[ia] - mesh.pos[ib], mesh.pos[ia + 2] - mesh.pos[ib + 2]))
-    }
+    const us = [0, 1, 2].map((k) => mesh.uv[mesh.idx[t + k] * 2])
+    const maxU = Math.max(...us)
+    const minU = Math.min(...us)
+    if (maxU >= 0.28) worst = Math.max(worst, maxU - minU)
   }
-  return max
+  return worst
 }
-const rimEdge = longestEdge(flat)
-if (rimEdge > 48) throw new Error(`flat rim triangles are too long (${rimEdge.toFixed(1)} m) and will streak`)
+for (const mesh of [flat, flatLite]) {
+  const du = gradientSpan(mesh)
+  if (du > 0.1) throw new Error(`${mesh.name} gradient jumps ${du.toFixed(3)} of the fade in one triangle`)
+  console.log(`${mesh.name} gradient step ${du.toFixed(3)}`)
+}
 
 function rasterRim(mesh: Built, file: string) {
   const N = 640

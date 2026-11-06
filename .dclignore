@@ -21,3 +21,19 @@ README.md
 src
 
 *.skp
+
+# Parked water. Still in git so a switch can be flipped, but a deployed
+# flip 404s until that line is removed. Live 48 m swells, the flat rim,
+# haze, the soft normal, the white albedo, and the ocean bed stay shipped.
+assets/models/water-swell-near.glb
+assets/models/water-swell-mid.glb
+assets/models/water-swell-far.glb
+assets/models/water-swell-lite.glb
+assets/textures/water-ripple-normal.png
+assets/textures/water-foam.png
+assets/textures/water-foam-ring.png
+assets/textures/water-whitecap.png
+assets/textures/water-normal.png
+assets/textures/water-veil.png
+assets/textures/water-skirt.png
+assets/textures/water-blue.png

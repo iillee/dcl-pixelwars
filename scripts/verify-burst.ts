@@ -7,7 +7,7 @@
  * uses the same radius, direction, and hit ledger as a ground Burst. Feel,
  * LOS raycast and networking need an Explorer playtest.
  */
-import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre, shockwaveHits, shockwaveHitsBot, burstBotInRange } from '../src/shared/burst'
+import { BurstLedger, inBurst, inAirSpike, burstDir, burstFootprint, burstCentre, burstPressIsAir, shockwaveHits, shockwaveHitsBot, burstBotInRange } from '../src/shared/burst'
 import { BURST_COOLDOWN_S, SERVER_MIN_BURST_GAP_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, SERVER_BURST_HIT_WINDOW_S, SERVER_BURST_LAND_WINDOW_S, AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE } from '../src/shared/pvp'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, STEP, MAZE_ORIGIN, lookupTile } from '../src/maze/generator'
 import { buildWalkableGraph, rampSurfaceY } from '../src/shared/mazeGraph'
@@ -282,6 +282,16 @@ check('a stale footprint cell outside the radius is not a hit', !shockwaveHitsBo
 check('render lag a couple of metres outside the radius still validates', burstBotInRange(P(0, 0), P(BURST_RADIUS + 2, 0), false))
 check('an air report beside the attacker is not a spike', !burstBotInRange(P(0, 0, 6), P(1.2, 0, 6), true))
 check('an air report just outside the cylinder, clearly below, still validates', burstBotInRange(P(0, 0, 6), P(AIR_SPIKE_RADIUS + 1.5, 0, 4), true))
+
+check('a stand paints on the press', !burstPressIsAir(0, 0))
+check('a few centimetres of lift still paints on the press', !burstPressIsAir(0.05, 0))
+check('walking off a tile stays a ground press', !burstPressIsAir(0.8, -0.2))
+check('the old gliding band paints the circle immediately', !burstPressIsAir(1.0, -1.2))
+check('a step down paints the circle immediately', !burstPressIsAir(1.5, -1.0))
+check('the movement floor test keeps a 1.2 m sample on the ground', !burstPressIsAir(1.2, -1, true))
+check('a jump that has cleared the surface is air', burstPressIsAir(3.5, 0))
+check('leaving the floor with upward speed is air', burstPressIsAir(2.5, 4))
+check('a real fall is air', burstPressIsAir(3, -8))
 
 if (fails) { console.log(`✗ ${fails} burst check(s) failed`); process.exit(1) }
 console.log('✓ all burst checks passed')

@@ -4,6 +4,7 @@
  */
 import {
   BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
+  BURST_STANCE_SLACK, BURST_AIR_LIFT_M,
   SERVER_BURST_HIT_WINDOW_S, SERVER_LUNGE_BOT_SLACK,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE,
 } from './pvp'
@@ -16,6 +17,19 @@ const CELL_M = 2 // CELL / SIZE
  *  within `radius`, and within `maxDy` in height (default BURST_HIT_MAX_DY). */
 export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS, maxDy = BURST_HIT_MAX_DY): boolean {
   return Math.hypot(t.x - origin.x, t.z - origin.z) <= radius && Math.abs(t.y - origin.y) <= maxDy
+}
+
+/**
+ * True only for a real jump or fall. Standing, walking, a small step, and the
+ * half-metre difference between the stance surface and the mesh stay a ground
+ * Burst and paint the full circle on the press. `vy` is metres/second, up positive.
+ * `paintGrounded` is the movement system's own floor test when it has one.
+ */
+export function burstPressIsAir(lift: number, vy: number, paintGrounded = false): boolean {
+  if (paintGrounded && lift <= BURST_AIR_LIFT_M) return false
+  if (!(lift > BURST_STANCE_SLACK)) return false
+  if (lift <= BURST_AIR_LIFT_M) return vy > 4 || vy < -8
+  return true
 }
 
 /** Ground shockwave vs a bot's server feet. The cylinder is the same one players use.

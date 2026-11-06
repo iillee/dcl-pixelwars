@@ -79,7 +79,7 @@ if (Math.abs(WATER_COLOR.r - 0.2) > 0.02 || Math.abs(WATER_COLOR.g - 0.4) > 0.02
   console.error('✗ near water should stay a little deeper than the halfway horizon tone')
   process.exit(1)
 }
-if (!LOOK.gloss || Math.abs(LOOK.glossRoughness - 0.15) > 0.02 || LOOK.glossSpecular < 0.7) {
+if (!LOOK.gloss || Math.abs(LOOK.glossRoughness - 0.3) > 0.02 || LOOK.glossSpecular < 0.7) {
   console.error('✗ the swell gloss switch should be a sharp wet highlight')
   process.exit(1)
 }

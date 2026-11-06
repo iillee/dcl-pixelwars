@@ -31,7 +31,7 @@ import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
-import { initAudio } from './audio'
+import { initAudio, startOceanAmbience } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
@@ -98,7 +98,6 @@ export async function setupClient(): Promise<void> {
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
   setupOverviewCamera()
-  initWater()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
   // decorative lever entity from an earlier iteration where pulling it
@@ -149,4 +148,12 @@ export async function setupClient(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
+  // Water meshes and the ocean bed start the frame after joinRoster is
+  // registered, so their downloads share the wire with the round instead of
+  // sitting in front of it.
+  engine.addSystem(function startWater() {
+    engine.removeSystem(startWater)
+    initWater()
+    startOceanAmbience()
+  })
 }
