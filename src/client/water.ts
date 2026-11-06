@@ -12,14 +12,14 @@
  */
 import {
   engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
-  Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
+  TextureFilterMode, TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
-import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
+import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { FOAM, HAZE_COLOR, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { FOAM, HAZE_COLOR, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
 import { initFoam, setFoamSeconds } from './foam'
 
@@ -76,13 +76,16 @@ export function initWater(): void {
 
   const mobileNow = isMobile()
   const desktop: Entity[] = []
+  const foamOn = (mobile: boolean) => SURFACE.foam && (!mobile || SURFACE.mobileFoam)
   if (mobileNow) {
     addSwell(root, swellMesh('lite'))
+    if (foamOn(true)) addFoam(root, swellMesh('lite'))
     addFlat(root, WATER.flatLiteSrc)
   } else {
-    desktop.push(addSwell(root, swellMesh('near')))
-    desktop.push(addSwell(root, swellMesh('mid')))
-    desktop.push(addSwell(root, swellMesh('far')))
+    for (const part of ['near', 'mid', 'far'] as const) {
+      desktop.push(addSwell(root, swellMesh(part)))
+      if (foamOn(false)) desktop.push(addFoam(root, swellMesh(part)))
+    }
     desktop.push(addFlat(root, WATER.flatSrc))
     watchMobile(root, desktop)
   }
@@ -96,18 +99,50 @@ export function initWater(): void {
   const spec = liveSwell()
   const weights = spec.parts.map((p) => p.weight.toFixed(2)).join('/')
   const crest = y + spec.amplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights}`)
+  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} ripple=${SURFACE.rippleTileM}m foam=${foamOn(mobileNow)} haze=on`)
+}
+
+/** Base-texture scroll. ADR-255 moves the normal map with this offset; the bump's own offset is ignored. */
+function scrollTexture(ent: Entity, x: number, z: number, speed: number): void {
+  const len = Math.hypot(x, z) || 1
+  Tween.setTextureMoveContinuous(ent, Vector2.create(x / len, z / len), speed)
+}
+
+function repeatTex(src: string, tiling = 1) {
+  return Material.Texture.Common({
+    src,
+    wrapMode: TextureWrapMode.TWM_REPEAT,
+    filterMode: TextureFilterMode.TFM_TRILINEAR,
+    tiling: Vector2.create(tiling, tiling),
+  })
 }
 
 function swellShade(c: { r: number; g: number; b: number; a: number }) {
   return {
-    texture: Material.Texture.Common({ src: WATER.colorSrc }),
-    albedoColor: Color4.create(1, 1, 1, c.a),
+    texture: repeatTex(SURFACE.albedoSrc),
+    bumpTexture: Material.Texture.Common({
+      src: SURFACE.rippleSrc,
+      wrapMode: TextureWrapMode.TWM_REPEAT,
+      filterMode: TextureFilterMode.TFM_TRILINEAR,
+    }),
+    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
     metallic: WATER.metallic,
     roughness: WATER.roughness,
     specularIntensity: WATER.specular,
-    reflectivityColor: Color3.create(0.22, 0.3, 0.4),
+    reflectivityColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
     transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false as const,
+  }
+}
+
+function foamShade() {
+  return {
+    texture: repeatTex(SURFACE.foamSrc, SURFACE.foamTile),
+    albedoColor: Color4.create(1, 1, 1, SURFACE.foamAlpha),
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
     castShadows: false as const,
   }
 }
@@ -147,7 +182,46 @@ function addSwell(root: Entity, src: string): Entity {
       },
     }],
   })
+  scrollTexture(wave, SURFACE.rippleDirX, SURFACE.rippleDirZ, SURFACE.rippleSpeed)
   return wave
+}
+
+/** Same morph clip as the swell, a little higher, so the foam stays on the surface. */
+function addFoam(root: Entity, src: string): Entity {
+  const veil = engine.addEntity()
+  Transform.create(veil, {
+    parent: root,
+    position: Vector3.create(0, SURFACE.foamLiftM, 0),
+    scale: Vector3.One(),
+  })
+  GltfContainer.create(veil, {
+    src,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  Animator.create(veil, {
+    states: [{
+      clip: 'wave',
+      playing: true,
+      loop: true,
+      speed: 1,
+      weight: 1,
+    }],
+  })
+  GltfNodeModifiers.create(veil, {
+    modifiers: [{
+      path: '',
+      castShadows: false,
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr: foamShade(),
+        },
+      },
+    }],
+  })
+  scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
+  return veil
 }
 
 function addFlat(root: Entity, src: string): Entity {
@@ -167,10 +241,14 @@ function addFlat(root: Entity, src: string): Entity {
           $case: 'pbr',
           pbr: {
             texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-            albedoColor: Color4.create(1, 1, 1, 1),
+            albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
+            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
+            emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
+            emissiveIntensity: 1,
             metallic: WATER.metallic,
             roughness: WATER.roughness,
             specularIntensity: WATER.specular,
+            reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
             transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
             castShadows: false,
           },

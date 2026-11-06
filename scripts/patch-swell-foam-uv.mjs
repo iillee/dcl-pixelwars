@@ -41,7 +41,9 @@ function patch(path) {
   console.log('uv', path, posA.count)
 }
 
-for (const name of ['near', 'mid', 'far', 'lite']) patch(`assets/models/water-swell-48-${name}.glb`)
+// Swell UVs are metres / rippleTileM, written by build-water-swell.ts.
+// Rewriting them here stretched one band across the whole sea.
+console.log('skipping swell UV patch; ripples use the baked metre grid')
 
 function png(w, h, rgba) {
   const raw = Buffer.alloc((w * 4 + 1) * h)

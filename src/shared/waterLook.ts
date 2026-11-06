@@ -7,11 +7,13 @@
  * metres inside the scene. `landscapeTerrain: false` drops the default
  * trees on a World.
  *
- * Swells are a displaced mesh, not a normal map. The files under
+ * Swells are a displaced mesh. A tiling ripple normal and a soft foam
+ * layer sit on that mesh at runtime. The files under
  * assets/models/water-swell*.glb and water-flat*.glb are built from the
- * wavelength, amplitude and ring sizes. After changing those, run
+ * wavelength, amplitude and ring sizes. Mesh UVs are metres / rippleTileM,
+ * so changing that tile means a rebuild. After changing those, run
  * `npx tsx scripts/build-water-swell.ts`. The crest height is baked so the
- * normals match the real slope. Period is the clip speed.
+ * geometric normals match the real slope. Period is the clip length.
  *
  * EnvironmentFog (component 1225) is exponential only: color gradient and
  * density, `1 - e^(-density * metres)`. The protocol has no linear mode and
@@ -30,12 +32,12 @@ import { LEVEL_Y_OFFSET } from '../maze/level'
 
 export type Rgb = { r: number; g: number; b: number; a: number }
 
-/** Midday is the applied row: a pale blue horizon, water a step deeper. */
+/** Midday is the applied row: pale horizon, water one step deeper so the slopes still read. */
 export const HORIZON_TONES: Record<'midday' | 'sunset', { water: Rgb; rim: Rgb; haze: Rgb }> = {
   midday: {
-    water: { r: 0.02, g: 0.22, b: 0.72, a: 1 },
-    rim: { r: 0.55, g: 0.7, b: 0.84, a: 1 },
-    haze: { r: 0.55, g: 0.7, b: 0.84, a: 0.4 },
+    water: { r: 0.46, g: 0.66, b: 0.82, a: 1 },
+    rim: { r: 0.73, g: 0.83, b: 0.91, a: 1 },
+    haze: { r: 0.73, g: 0.83, b: 0.91, a: 0.92 },
   },
   sunset: {
     water: { r: 0.76, g: 0.58, b: 0.52, a: 1 },
@@ -70,12 +72,13 @@ export const WATER = {
   sizeM: 0,
   /** Pulled in from each scene edge when sizeM is 0. */
   edgeInsetM: 6,
-  /** Test: ba05fa0 deep blue. The swell geometry is still the 110 m set. */
+  /** Near water. A step deeper than `RIM_COLOR`, still in the horizon family. */
   color: WATER_COLOR,
   metallic: 0,
-  roughness: 0.7,
-  /** 1 is the engine default. ba05fa0 value. */
-  specular: 0.15,
+  /** Matte enough that ridges do not turn into white streaks. The ripple normal supplies the slope. */
+  roughness: 0.48,
+  /** Moderate, so the normal map catches light. 1 is the engine default. */
+  specular: 0.4,
   /** Solid albedo so the swell and the rim share one texture path. */
   colorSrc: 'assets/textures/water-blue.png',
   /**
@@ -155,13 +158,44 @@ export const SWELL_48_PERIOD_S = 45
 export const OCEAN_AMBIENCE_VOLUME = 0.2
 export const OCEAN_AMBIENCE_SRC = 'assets/sounds/ocean.mp3'
 
+/**
+ * Surface detail on the swell meshes. Ripple scale is baked into the mesh
+ * UVs (`rippleTileM`). The foam sheet is a second copy of the same morph
+ * clip, lifted a little, and its tile is a runtime texture scale.
+ * Sticker rings and whitecap blobs stay off (`FOAM.rings`, `FOAM.whitecaps`).
+ */
+export const SURFACE = {
+  /** Flat white. The tint is `WATER_COLOR`. Scrolling this is what drags the normal map. */
+  albedoSrc: 'assets/textures/water-white.png',
+  rippleSrc: 'assets/textures/water-ripple-normal.png',
+  /** Metres per ripple repeat. Baked into TEXCOORD. Rebuild after changing. */
+  rippleTileM: 8,
+  /** Scroll direction, not necessarily unit length. */
+  rippleDirX: 0.82,
+  rippleDirZ: 0.42,
+  /** UV repeats per second. At 8 m per repeat this is about half a metre per second. */
+  rippleSpeed: 0.07,
+  foam: true,
+  foamSrc: 'assets/textures/water-foam.png',
+  /** Multiplier on the baked ripple UVs. 0.3 makes foam streaks about 27 m across. */
+  foamTile: 0.3,
+  foamAlpha: 0.28,
+  /** Metres above the swell mesh. The morph still matches, so the sheet stays on the surface. */
+  foamLiftM: 0.4,
+  foamDirX: -0.25,
+  foamDirZ: 0.92,
+  foamSpeed: 0.018,
+  /** The extra morph draw is the heavy part. Mobile keeps ripples and skips this sheet. */
+  mobileFoam: false,
+}
+
 export const FOAM = {
-  /** Rings where each tile's column meets the sea. */
-  rings: true,
+  /** Parked. The rings read as pinwheel stickers, so they do not spawn. */
+  rings: false,
   ringSrc: 'assets/textures/water-foam-ring.png',
-  /** Broken white patches. Drawn as their own meshes along the main crest. */
+  /** Parked. The crest blobs read as floating stickers, so they do not spawn. */
   whitecapSrc: 'assets/textures/water-whitecap.png',
-  whitecaps: true,
+  whitecaps: false,
   whitecapCount: 24,
   whitecapSizeM: 40,
   whitecapThickM: 22,
@@ -231,8 +265,8 @@ export const WATER_FOG = {
    * Colour and opacity are `HAZE_COLOR` at runtime. The alpha curve in
    * `hazeMask` is baked.
    */
-  /** Off for the color test, so the ring cannot hide the swells. */
-  haze: false,
+  /** One ring at the horizon. The pale sea was not the missing-swell bug. */
+  haze: true,
   hazeColor: HAZE_COLOR,
   hazeRadiusM: 2360,
   hazeBottomY: 36,

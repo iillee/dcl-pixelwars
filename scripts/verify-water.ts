@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, RIM_COLOR, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -71,8 +71,16 @@ if (WATER.swellPeriodS < 30 || WATER.swellPeriodS > 40) {
   console.error('✗ swell period should be a slow 30–40 s')
   process.exit(1)
 }
-if (WATER.metallic !== 0 || Math.abs(WATER.roughness - 0.7) > 0.001 || Math.abs(WATER.specular - 0.15) > 0.001) {
-  console.error('✗ color test should use the ba05fa0 matte settings')
+if (WATER.metallic !== 0 || Math.abs(WATER.roughness - 0.48) > 0.02 || Math.abs(WATER.specular - 0.4) > 0.02) {
+  console.error('✗ the sea should stay matte-moderate so the ripple normal can catch light')
+  process.exit(1)
+}
+if (Math.abs(WATER_COLOR.r - 0.46) > 0.02 || Math.abs(WATER_COLOR.g - 0.66) > 0.02 || Math.abs(WATER_COLOR.b - 0.82) > 0.02) {
+  console.error('✗ near water should be the horizon-family blue')
+  process.exit(1)
+}
+if (Math.abs(RIM_COLOR.r - HAZE_COLOR.r) > 0.001 || Math.abs(RIM_COLOR.g - HAZE_COLOR.g) > 0.001 || Math.abs(RIM_COLOR.b - HAZE_COLOR.b) > 0.001) {
+  console.error('✗ haze should use the rim horizon colour')
   process.exit(1)
 }
 if (size > SCENE_SIZE - 2 || size < SCENE_SIZE * 0.9) {
@@ -91,8 +99,8 @@ if (WATER_FOG.mist) {
   console.error('✗ the mist sheet over the water should be off')
   process.exit(1)
 }
-if (WATER_FOG.haze) {
-  console.error('✗ haze is hidden for this color test')
+if (!WATER_FOG.haze) {
+  console.error('✗ the horizon haze ring should be on')
   process.exit(1)
 }
 if (WATER.swellFarM < 1600 || WATER.swellFarM > size / 2) {
@@ -113,7 +121,7 @@ if (!(lum(WATER_COLOR) < lum(RIM_COLOR) && lum(HAZE_COLOR) + 0.02 >= lum(RIM_COL
   console.error('✗ haze should match the horizon; near water should be a little deeper')
   process.exit(1)
 }
-const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near')]
+const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near'), SURFACE.albedoSrc, SURFACE.rippleSrc, SURFACE.foamSrc]
 for (const f of meshes) {
   if (!existsSync(new URL('../' + f, import.meta.url))) {
     console.error(`✗ missing ${f}`)
@@ -194,7 +202,6 @@ if (SWELL_VARIANT === '48m') {
     process.exit(1)
   }
 }
-const foamSrc = readFileSync(new URL('../src/client/foam.ts', import.meta.url), 'utf8')
 if (src.includes('paintWhitecaps') || src.includes('Math.min(8')) {
   console.error('✗ the swell clock is still catching up to the wall clock')
   process.exit(1)
@@ -203,8 +210,24 @@ if (!src.includes('speed: 1')) {
   console.error('✗ the swell clip should play at a constant speed')
   process.exit(1)
 }
-if (FOAM.ringLiftM < 1.5 || !foamSrc.includes('MTM_ALPHA_TEST') || !foamSrc.includes('whitecaps')) {
-  console.error('✗ foam should be its own alpha-tested meshes, lifted off the swell')
+if (FOAM.rings || FOAM.whitecaps) {
+  console.error('✗ sticker rings and whitecap blobs should stay off')
+  process.exit(1)
+}
+if (!src.includes('bumpTexture') || !src.includes('setTextureMoveContinuous') || !src.includes('addFoam')) {
+  console.error('✗ the swell should carry a scrolling ripple normal and a soft foam sheet')
+  process.exit(1)
+}
+if (SURFACE.foamAlpha < 0.2 || SURFACE.foamAlpha > 0.35) {
+  console.error('✗ the foam sheet should stay a light veil')
+  process.exit(1)
+}
+if (SURFACE.rippleTileM < 4 || SURFACE.rippleTileM > 24) {
+  console.error('✗ ripple tiles should be a few metres, not a stretch across the sea')
+  process.exit(1)
+}
+if (!SURFACE.mobileFoam && !src.includes('mobileFoam')) {
+  console.error('✗ mobile should be able to skip the foam sheet')
   process.exit(1)
 }
 let high = -Infinity

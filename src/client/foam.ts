@@ -1,10 +1,7 @@
 /**
- * Foam the swell material cannot draw.
- *
- * The renderer keeps one albedo on a glTF. A second UV set, an emissive
- * texture, and vertex colours on that material never showed up. Rings and
- * whitecaps are their own planes: one albedo, alpha-tested, lifted clear of
- * the opaque swell so they are not buried in the surface or lost to sorting.
+ * Parked sticker foam. `FOAM.rings` and `FOAM.whitecaps` are off: the
+ * alpha-tested rings and crest blobs read as decals. Surface ripples and
+ * the soft foam sheet live on the swell meshes in water.ts.
  */
 import {
   engine, Entity, Material, MaterialTransparencyMode, MeshRenderer, TextureWrapMode, Transform,

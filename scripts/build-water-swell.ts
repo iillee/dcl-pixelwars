@@ -13,7 +13,7 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
+import { SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
 import { SWELL_NORM, SWELL_NORM_48, SWELL_PARTS, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
 
 let CLIP = WATER.swellClipS
@@ -138,6 +138,12 @@ function rangeAbs(from: number, to: number, step: number): number[] {
   return out
 }
 
+/** One UV unit is `rippleTileM` metres, so a repeat is a few metres, not the whole sea. */
+function seaUv(x: number, z: number): [number, number] {
+  const tile = SURFACE.rippleTileM
+  return [x / tile, z / tile]
+}
+
 function squareGrid(half: number, step: number, envAt: (x: number, z: number) => number, name: string): Built {
   const m = new MeshBuilder()
   const n = Math.round((half * 2) / step)
@@ -146,7 +152,10 @@ function squareGrid(half: number, step: number, envAt: (x: number, z: number) =>
   const ids: number[][] = []
   for (let j = 0; j <= n; j++) {
     ids[j] = []
-    for (let i = 0; i <= n; i++) ids[j][i] = m.add(xs[i], xs[j], 0.5, 0.5)
+    for (let i = 0; i <= n; i++) {
+      const [u, v] = seaUv(xs[i], xs[j])
+      ids[j][i] = m.add(xs[i], xs[j], u, v)
+    }
   }
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
@@ -174,7 +183,12 @@ function sidePanel(
   const acrossFine = rangeAbs(-inner, inner, innerStep)
   const acrossCoarse = rangeAbs(-inner, inner, outerStep)
   const col = (outward: number, across: number[]): number[] =>
-    across.map((a) => (axis === 'x' ? m.add(sign * outward, a, 0.5, 0.5) : m.add(a, sign * outward, 0.5, 0.5)))
+    across.map((a) => {
+      const x = axis === 'x' ? sign * outward : a
+      const z = axis === 'x' ? a : sign * outward
+      const [u, v] = seaUv(x, z)
+      return m.add(x, z, u, v)
+    })
   const fine = col(absOut[0], acrossFine)
   const coarseCols = absOut.slice(1).map((x) => col(x, acrossCoarse))
   const spans = acrossCoarse.length - 1
@@ -201,7 +215,10 @@ function sidePanel(
 function corner(m: MeshBuilder, x0: number, x1: number, z0: number, z1: number, step: number) {
   const xs = rangeAbs(Math.min(x0, x1), Math.max(x0, x1), step)
   const zs = rangeAbs(Math.min(z0, z1), Math.max(z0, z1), step)
-  const ids: number[][] = zs.map((z) => xs.map((x) => m.add(x, z, 0.5, 0.5)))
+  const ids: number[][] = zs.map((z) => xs.map((x) => {
+    const [u, v] = seaUv(x, z)
+    return m.add(x, z, u, v)
+  }))
   for (let j = 0; j < zs.length - 1; j++) {
     for (let i = 0; i < xs.length - 1; i++) {
       m.tri(ids[j][i], ids[j][i + 1], ids[j + 1][i + 1])
@@ -549,14 +566,10 @@ function writeTextures() {
   for (let x = 0; x < W; x++) {
     const u = x / (W - 1)
     const t = smooth(Math.max(0, (u - 0.28) / 0.72))
-    const r = WATER_RGB.r + (SKY_RGB.r - WATER_RGB.r) * t
-    const g = WATER_RGB.g + (SKY_RGB.g - WATER_RGB.g) * t
-    const b = WATER_RGB.b + (SKY_RGB.b - WATER_RGB.b) * t
+    const water = 1 - t
     for (let y = 0; y < H; y++) {
       const o = (y * W + x) * 4
-      albedo[o] = byte(r)
-      albedo[o + 1] = byte(g)
-      albedo[o + 2] = byte(b)
+      albedo[o] = albedo[o + 1] = albedo[o + 2] = byte(water)
       albedo[o + 3] = 255
       glow[o] = glow[o + 1] = glow[o + 2] = byte(t)
       glow[o + 3] = 255
@@ -564,6 +577,11 @@ function writeTextures() {
   }
   writeFileSync(new URL('../' + WATER_FOG.horizonSrc, import.meta.url), png(W, H, albedo))
   writeFileSync(new URL('../' + WATER_FOG.horizonGlowSrc, import.meta.url), png(W, H, glow))
+
+  const white = Buffer.alloc(2 * 2 * 4, 255)
+  writeFileSync(new URL('../' + SURFACE.albedoSrc, import.meta.url), png(2, 2, white))
+  writeRippleNormal()
+  writeFoam()
 
   // glTF v=0 is the top of the image. The ring's bottom (waterline) uses v=0.
   const vw = 4
@@ -581,6 +599,83 @@ function writeTextures() {
     }
   }
   writeFileSync(new URL('../' + WATER_FOG.hazeMask, import.meta.url), png(vw, vh, veil))
+}
+
+function rippleHeight(u: number, v: number): number {
+  const tau = Math.PI * 2
+  return (
+    Math.sin(tau * (3 * u + 0.15 * Math.sin(tau * 2 * v))) * 0.5 +
+    Math.sin(tau * (5 * v + 0.2)) * 0.28 +
+    Math.sin(tau * (4 * u + 4 * v)) * 0.18 +
+    Math.sin(tau * (2 * u - 3 * v)) * 0.16
+  )
+}
+
+function writeRippleNormal() {
+  const N = 128
+  const rgba = Buffer.alloc(N * N * 4)
+  const e = 1 / N
+  const strength = 2.4
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N
+      const v = y / N
+      const hx = rippleHeight(u + e, v) - rippleHeight(u - e, v)
+      const hy = rippleHeight(u, v + e) - rippleHeight(u, v - e)
+      let nx = -hx * strength
+      let ny = -hy * strength
+      let nz = 1
+      const len = Math.hypot(nx, ny, nz)
+      nx /= len
+      ny /= len
+      nz /= len
+      const o = (y * N + x) * 4
+      rgba[o] = byte(nx * 0.5 + 0.5)
+      rgba[o + 1] = byte(ny * 0.5 + 0.5)
+      rgba[o + 2] = byte(nz * 0.5 + 0.5)
+      rgba[o + 3] = 255
+    }
+  }
+  writeFileSync(new URL('../' + SURFACE.rippleSrc, import.meta.url), png(N, N, rgba))
+}
+
+function hash2(ix: number, iy: number, px: number, py: number): number {
+  const x = ((ix % px) + px) % px
+  const y = ((iy % py) + py) % py
+  let n = Math.imul(x, 374761393) + Math.imul(y, 668265263)
+  n = Math.imul(n ^ (n >> 13), 1274126177)
+  return ((n ^ (n >> 16)) >>> 0) / 4294967296
+}
+
+function vnoise(x: number, y: number, px: number, py: number): number {
+  const x0 = Math.floor(x)
+  const y0 = Math.floor(y)
+  const fx = x - x0
+  const fy = y - y0
+  const ux = fx * fx * (3 - 2 * fx)
+  const uy = fy * fy * (3 - 2 * fy)
+  const a = hash2(x0, y0, px, py)
+  const b = hash2(x0 + 1, y0, px, py)
+  const c = hash2(x0, y0 + 1, px, py)
+  const d = hash2(x0 + 1, y0 + 1, px, py)
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
+}
+
+function writeFoam() {
+  const N = 128
+  const rgba = Buffer.alloc(N * N * 4)
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N
+      const v = y / N
+      const n = vnoise(u * 3, v * 7, 3, 7) * 0.62 + vnoise(u * 6, v * 14, 6, 14) * 0.38
+      const k = smooth(Math.min(1, Math.max(0, (n - 0.42) / 0.36)))
+      const o = (y * N + x) * 4
+      rgba[o] = rgba[o + 1] = rgba[o + 2] = 255
+      rgba[o + 3] = byte(k)
+    }
+  }
+  writeFileSync(new URL('../' + SURFACE.foamSrc, import.meta.url), png(N, N, rgba))
 }
 
 function hazeRing(): Built {
