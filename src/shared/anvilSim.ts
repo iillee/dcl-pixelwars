@@ -18,9 +18,9 @@ import {
   ANVIL_PUSH_HOLD_S,
 } from './pvp'
 import { WalkableGraph, rampSurfaceY } from './mazeGraph'
-import { baseTeamOfTile, MIN_Y, CELL, MAZE_ORIGIN, STEP, Placed } from '../maze/generator'
+import { baseTeamOfTile, CELL, MAZE_ORIGIN, STEP, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
-import { FALL_RESPAWN_DROP } from '../maze/level'
+import { fallTriggerY } from './swell'
 
 type V3 = { x: number; y: number; z: number }
 export type Anvil = {
@@ -221,7 +221,7 @@ export class AnvilWorld {
         this.log(`[Anvil ${i}] stopped after ${Math.hypot(a.pos.x - a.hitFrom.x, a.pos.z - a.hitFrom.z).toFixed(2)} m`)
       }
     }
-    if (a.pos.y < MIN_Y - FALL_RESPAWN_DROP) {
+    if (a.pos.y < fallTriggerY(a.pos.x, a.pos.z)) {
       a.alive = false
       a.tracking = false
       a.vel = { x: 0, y: 0, z: 0 }

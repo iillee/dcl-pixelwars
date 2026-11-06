@@ -16,8 +16,8 @@
  */
 import { WalkableGraph, leapPlan } from './mazeGraph'
 import { graphFloorAt } from './anvilSim'
-import { MIN_Y, Placed } from '../maze/generator'
-import { FALL_RESPAWN_DROP } from '../maze/level'
+import { Placed } from '../maze/generator'
+import { fallTriggerY } from './swell'
 import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_MIN_S, BOT_RECOVER_REACT_MAX_S, BOT_RECOVER_SKIP_DOUBLE_CHANCE,
@@ -257,7 +257,7 @@ export class BotBody {
         this.steerRecovery(dt, world, out)
         this.physics(dt, world)
         if (this.lockLeft > 0) this.lockLeft -= dt
-        if (this.pos.y < MIN_Y - FALL_RESPAWN_DROP) {
+        if (this.pos.y < fallTriggerY(this.pos.x, this.pos.z)) {
           this.mode = 'rescue'
           this.rescueAge = 0
           this.catchP = { ...this.pos }
