@@ -87,11 +87,15 @@ export function respawnDummy(): void {
 const ANVIL_LAUNCH_GRACE_S = 0.35
 /** Lunge (kind 0) or burst (kind 1) `id` hit anvil i: the server applies the knock (mult is
  *  applied server-side from kind). */
+const anvilHitAt = new Map<number, { t: number; slide: number }>()
 export function hitDummy(i: number, dx: number, dz: number, kind: 0 | 1, id: number): void {
   const d = dummies[i]
   if (!d || !d.alive) return
   d.launchGraceS = ANVIL_LAUNCH_GRACE_S
-  room.send('anvilHit', { kind, id, i, dx, dz })
+  const ct = Date.now()
+  console.log(`[Anvil] hit send i=${i} #${id} t=${ct}`)
+  anvilHitAt.set(i, { t: ct, slide: d.slide })
+  room.send('anvilHit', { kind, id, i, dx, dz, ct })
   if (ANVIL_PREDICT_ENABLED && predictReady) startPredict(d, i, dx, dz, kind)
 }
 
@@ -263,10 +267,15 @@ export function initLungeDummy(): void {
     dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
       predicted: false, confirmed: false, predictDir: { ...z }, predictLeft: 0, predictSlide: -1, offset: { ...z }, blendLeft: 0, blendTotal: 1 })
   }
-  room.onMessage('anvilState', ({ a }) => {
+  room.onMessage('anvilState', ({ a, st }) => {
     a.forEach((s, i) => {
       const d = dummies[i]
       if (!d) return
+      const hit = anvilHitAt.get(i)
+      if (hit && s.slide !== hit.slide) {
+        console.log(`[Anvil] state i=${i} rtt=${Date.now() - hit.t}ms serverSt=${st || 0}`)
+        anvilHitAt.delete(i)
+      }
       const respawned = s.alive === 1 && (!d.alive || (s.slide !== d.slide && s.moving === 0))
       d.srv = { x: s.x, y: s.y, z: s.z }
       d.vel = { x: s.vx, y: s.vy, z: s.vz }

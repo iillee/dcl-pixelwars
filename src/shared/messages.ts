@@ -194,15 +194,15 @@ export const Messages = {
   // air: 0 grounded radial (server paints the circle now), non-zero airborne spike
   // (no paint yet — a later burstLand paints the same footprint once, on a miss that lands).
   // Server checks the shared cooldown and rebroadcasts burstFired.
-  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int }),
+  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int, ct: Schemas.Number }),
   // Client → Server: airborne burst `id` met the floor at (x, y, z) on `cell`.
   // Same centre + footprint + applyPaint path as a grounded burstUse. Once per id.
   // The first accepted sample also opens the ground shockwave (burstFired air 0,
   // then the same burstHit validation). A retry only finishes the paint.
-  burstLand: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  burstLand: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, ct: Schemas.Number }),
   // Server → attacker only: footprint for burst `id` was applied (n = cell count).
   // The client retries burstUse / burstLand until this arrives. n > 0 only.
-  burstPainted: Schemas.Map({ id: Schemas.Int, n: Schemas.Int }),
+  burstPainted: Schemas.Map({ id: Schemas.Int, n: Schemas.Int, ct: Schemas.Number, sin: Schemas.Number, sout: Schemas.Number }),
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   // air 1 is the airborne press. A second burstFired with air 0, same id, is that
   // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
@@ -215,7 +215,7 @@ export const Messages = {
 
   // Shared anvil dummies (server/anvils.ts owns them; shared/anvilSim.ts).
   // Client → Server: lunge (kind 0) or burst (kind 1) `id` hit anvil `i`, knock direction (dx, dz).
-  anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number }),
+  anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, ct: Schemas.Number }),
   // Client → Server: key 2, re-roll all anvils.
   anvilRespawn: Schemas.Map({ n: Schemas.Int }),
   // Client → Server (round stats): anvil i launched me / I fell off and respawned.
@@ -236,10 +236,13 @@ export const Messages = {
   // Client → Server: walking/running into anvil i (direction dx,dz; our position x,z). Server moves it slowly.
   anvilPush: Schemas.Map({ i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, z: Schemas.Number, run: Schemas.Int }),
   // Server → Clients: all anvils (feet pos, velocity, yaw, alive, moving, slide = hit/respawn counter).
-  anvilState: Schemas.Map({ a: Schemas.Array(Schemas.Map({
-    x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, vx: Schemas.Number, vy: Schemas.Number, vz: Schemas.Number,
-    yaw: Schemas.Int, alive: Schemas.Int, moving: Schemas.Int, slide: Schemas.Int,
-  })) }),
+  anvilState: Schemas.Map({
+    st: Schemas.Number,
+    a: Schemas.Array(Schemas.Map({
+      x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, vx: Schemas.Number, vy: Schemas.Number, vz: Schemas.Number,
+      yaw: Schemas.Int, alive: Schemas.Int, moving: Schemas.Int, slide: Schemas.Int,
+    })),
+  }),
 
   // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
   // sender's position. Server checks round mode, team and cooldown, snaps

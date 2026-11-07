@@ -4,7 +4,7 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 150×150 world: waves through the near and mid squares, easing
+ * for the 100×100 world: waves through the near and mid squares, easing
  * out across the far ring, then a flat fade to the parcel edge. The haze
  * cylinder sits on that edge. `landscapeTerrain` stays false.
  * `LOOK.sea` hides our swell and leaves the sky.
@@ -100,16 +100,16 @@ export const WATER = {
   swellM: 0,
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
-  swellNearM: 640,
+  swellNearM: 384,
   /** 32 m is the grid the preview already drew. 8 m made a morph file it did not draw. */
   swellNearStepM: 32,
   /** Middle ring, half-extent (m). Continues the same waves at a coarser step.
-   *  640 + 4×64. Stays inside the 150×150 sea so the far ring can ease off. */
-  swellMidM: 896,
+   *  384 + 2×64. Inside the 100×100 sea (half ~794 m). */
+  swellMidM: 512,
   swellMidStepM: 64,
   /** Outer ring, half-extent (m). Displacement eases to 0 at this edge.
-   *  896 + 128. The flat rim carries the colour fade from here to the parcel edge. */
-  swellFarM: 1024,
+   *  512 + 128. The flat rim fades from here to the parcel edge. */
+  swellFarM: 640,
   swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 32,

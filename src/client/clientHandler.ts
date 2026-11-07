@@ -139,7 +139,10 @@ function wireInbound(): void {
   room.onMessage('burstImpact', ({ attacker, id, target, dx, dz, air }) => {
     events.emit('burst:impact', { attacker, id, target, dx, dz, air })
   })
-  room.onMessage('burstPainted', ({ id, n }) => {
+  room.onMessage('burstPainted', ({ id, n, ct, sin, sout }) => {
+    const rtt = ct ? Date.now() - ct : -1
+    const proc = sin && sout ? sout - sin : -1
+    console.log(`[Burst] ack #${id} rtt=${rtt}ms server=${proc}ms n=${n}`)
     events.emit('burst:painted', { id, n })
   })
 
@@ -293,14 +296,14 @@ export function sendLungeHit(id: number, target: string, dx: number, dz: number,
 }
 
 /** Paint Burst (client/paintBurst.ts). */
-export function sendBurstUse(id: number, cell: string, x: number, y: number, z: number, fx: number, fz: number, air = 0): void {
-  console.log(`[Client] → burstUse #${id}${air ? ` air=${air}` : ''}`)
-  room.send('burstUse', { id, cell, x, y, z, fx, fz, air })
+export function sendBurstUse(id: number, cell: string, x: number, y: number, z: number, fx: number, fz: number, air = 0, ct = Date.now()): void {
+  console.log(`[Client] → burstUse #${id}${air ? ` air=${air}` : ''} t=${ct}`)
+  room.send('burstUse', { id, cell, x, y, z, fx, fz, air, ct })
 }
 /** Airborne Burst met the floor. Server paints the ground-Burst footprint once. */
-export function sendBurstLand(id: number, cell: string, x: number, y: number, z: number): void {
-  console.log(`[Client] → burstLand #${id} cell=${cell || '(none)'}`)
-  room.send('burstLand', { id, cell, x, y, z })
+export function sendBurstLand(id: number, cell: string, x: number, y: number, z: number, ct = Date.now()): void {
+  console.log(`[Client] → burstLand #${id} cell=${cell || '(none)'} t=${ct}`)
+  room.send('burstLand', { id, cell, x, y, z, ct })
 }
 export function sendBurstHit(id: number, target: string, dx: number, dz: number): void {
   console.log(`[Client] → burstHit #${id} ${target.slice(0, 8)}`)

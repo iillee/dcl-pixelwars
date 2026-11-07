@@ -541,9 +541,9 @@ export function triggerBurst(): void {
   const cells = footprintAt(p, stance.cell)
   const tPress = Date.now()
   pressAt.set(id, tPress)
-  console.log(`[Burst] press stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
+  console.log(`[Burst] press t=${tPress} #${id} stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
   if (air) {
-    fireAirSpike(id, team, p, f.x, f.z)
+    fireAirSpike(id, team, p, f.x, f.z, tPress)
     console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
     return
   }
@@ -552,7 +552,7 @@ export function triggerBurst(): void {
   showShockwave(p, team, true, cell)
   console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
   queuePaint('ground', id, cell, p, f.x, f.z)
-  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0))) kickPaint(id)
+  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress))) kickPaint(id)
   if (BURST_EMOTE_ENABLED) {
     // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
     holdForEmote(BURST_EMOTE_FREEZE_S)
@@ -573,7 +573,7 @@ let attackerDiveSawAir = false
  *  Hit: keep a fraction of the fall, no landing shockwave, no landing knock, no burst paint.
  *  Miss: full dive (a void miss keeps falling). The landing shockwave, its knock,
  *  and its paint wait until the feet meet the floor. */
-function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
+function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct = Date.now()): void {
   // Close the glider before the impulse. An open glider clamps fall to ~1 m/s
   // and swallows the downward force. Ground Burst never reaches here.
   startDiveGlideLock(AIR_SPIKE_DIVE_GLIDE_LOCK_S)
@@ -586,7 +586,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
   // is the hit clip only.
   showAirTrail(p, team, fx, fz)
   queueUse(id, '', p, fx, fz)
-  if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1))) kickUse(id)
+  if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1, ct))) kickUse(id)
   const anvils = knockAirAnvils(p, fx, fz, id)
   const hits = airPlayerHits(p, team, fx, fz)
   const bots = airBotHits(p, team, fx, fz)
@@ -740,9 +740,15 @@ export function initPaintBurst(): void {
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
   events.on('burst:painted', ({ id, n }) => {
-    const t0 = pressAt.get(id)
-    if (t0 !== undefined) console.log(`[Burst] press -> server ack ${Date.now() - t0}ms n=${n}`)
     if (n > 0) { clearPaint(id); clearUse(id) }
+  })
+  events.on('paint:delta', () => {
+    const now = Date.now()
+    for (const [id, t0] of pressAt) {
+      if (now - t0 > 3000) { pressAt.delete(id); continue }
+      console.log(`[Burst] paintDelta #${id} rtt=${now - t0}ms`)
+      pressAt.delete(id)
+    }
   })
 
   engine.addSystem((dt: number) => {

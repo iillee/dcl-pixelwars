@@ -3,7 +3,8 @@
  *
  *   small   20×20, centred on parcel 0,0.
  *   medium  64×64, centred on parcel 0,0.
- *   large   150×150, centred on parcel 0,0. Deploy default.
+ *   large   100×100, centred on parcel 0,0. Deploy default.
+ *   wide    150×150, centred on parcel 0,0.
  *   full    300×300 at base -150,-150, inside the publisher box.
  *
  * landscapeTerrain stays false: the default grassland, trees, and sea

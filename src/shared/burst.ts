@@ -150,13 +150,14 @@ export class BurstLedger {
     id: number; at: number; hits: Set<string>; air: number; painted: boolean
     fx: number; fz: number; landed: boolean; landAt: number
     ox: number; oy: number; oz: number; hasOrigin: boolean
+    cells: string[]
   }>()
   /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing).
    *  `fx, fz` is the press facing, kept for the landing shockwave's overlap fallback. */
   start(from: string, id: number, now: number, air = 0, fx = 0, fz = 1): void {
     this.last.set(from, {
       id, at: now, hits: new Set(), air, painted: false, fx, fz, landed: false, landAt: now,
-      ox: 0, oy: 0, oz: 0, hasOrigin: false,
+      ox: 0, oy: 0, oz: 0, hasOrigin: false, cells: [],
     })
   }
   /** Feet the shockwave is judged from. Ground press, then the landing sample once that opens. */
@@ -216,6 +217,27 @@ export class BurstLedger {
   hasPaint(from: string, id: number): boolean {
     const l = this.last.get(from)
     return !!l && l.id === id && l.painted
+  }
+  /** Why a landing cannot paint, or null when it can. Does not consume. */
+  landBlock(from: string, id: number, now: number, windowS: number): string | null {
+    const l = this.last.get(from)
+    if (!l) return 'unknown-id'
+    if (l.id !== id) return `id-mismatch server=#${l.id}`
+    if (l.air === 0) return 'not-air'
+    if (now - l.at > windowS * 1000) return `window ${now - l.at}ms`
+    if (l.painted) return 'already-painted'
+    return null
+  }
+  liveId(from: string): number | null {
+    return this.last.get(from)?.id ?? null
+  }
+  rememberCells(from: string, id: number, cells: string[]): void {
+    const l = this.last.get(from)
+    if (l && l.id === id) l.cells = cells
+  }
+  paintedCells(from: string, id: number): string[] {
+    const l = this.last.get(from)
+    return l && l.id === id ? l.cells : []
   }
   /** Landing may paint: airborne, same id, inside `windowS`, not yet painted. Does not consume. */
   paintReady(from: string, id: number, now: number, windowS: number): boolean {

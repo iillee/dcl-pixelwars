@@ -16,7 +16,7 @@ import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
-import { applyPaint, ownerCounts, coverage, drainDelta, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
@@ -49,6 +49,7 @@ import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statId
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
+import { SKY_TOP_Y } from '../maze/level'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -60,7 +61,7 @@ const MAX_IDS_PER_TICK = 100
 const MAX_CHANGES_PER_MSG = 200
 
 export async function setupServer(): Promise<void> {
-  console.log('[Server] Starting Pixelwars server...')
+  console.log(`[Server] Starting Pixelwars server... scene=${SCENE_SIZE}m parcels=${(SCENE_SIZE / 16) * (SCENE_SIZE / 16)}`)
 
   // Load leaderboard from Storage before any paintTicks land, so we don't
   // clobber persisted state with a fresh empty board. loadFromStorage()
@@ -462,15 +463,36 @@ export async function setupServer(): Promise<void> {
   // frame's bot paint rides out on that frame's broadcast). Ticking them only
   // at 5 Hz made the 10 Hz botPositions repeat every other packet: knocked and
   // rescued ghosts lurched and stopped.
+  let botMax = 0
+  let frameMax = 0
+  let frames = 0
+  let tickLogAt = Date.now()
   engine.addSystem((dt: number) => {
+    const t0 = Date.now()
     if (isRoundActive()) tickBots(dt) // bots idle while no round runs
+    const ms = Date.now() - t0
+    if (ms > botMax) botMax = ms
+    const frame = dt * 1000
+    if (frame > frameMax) frameMax = frame
+    frames++
+    const now = Date.now()
+    if (now - tickLogAt < 5000) return
+    console.log(`[Server] tick frames=${frames}/5s botMax=${botMax}ms frameMax=${frameMax.toFixed(1)}ms scene=${SCENE_SIZE}m`)
+    botMax = 0
+    frameMax = 0
+    frames = 0
+    tickLogAt = now
   })
   engine.addSystem((dt: number) => {
     broadcastClock += dt
     if (broadcastClock < BROADCAST_INTERVAL) return
     broadcastClock = 0
+    const queued = paintWaitMs()
+    const t0 = Date.now()
     const changes = drainDelta()
+    const work = Date.now() - t0
     if (changes.length === 0) return
+    console.log(`[Server] paintFlush n=${changes.length} wait=${queued}ms work=${work}ms`)
     const c = coverage()
     // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
     // message. Every chunk carries the same coverage counters.
@@ -646,13 +668,21 @@ export async function setupServer(): Promise<void> {
     }
     return fp
   }
-  const commitBurstPaint = (from: string, id: number, fp: string[]) => {
+  const commitBurstPaint = (from: string, id: number, fp: string[], ct: number, sin: number) => {
     // Empty centre is not a paint. The client retries with a later grounded sample.
     if (fp.length === 0 || !bursts.commitPaint(from, id)) return
-    room.send('burstPainted', { id, n: fp.length }, { to: [from] })
+    bursts.rememberCells(from, id, fp)
+    sendPainted(from, id, fp.length, ct, sin)
   }
-  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air }, context) => {
+  const sendPainted = (from: string, id: number, n: number, ct: number, sin: number) => {
+    const sout = Date.now()
+    room.send('burstPainted', { id, n, ct, sin, sout }, { to: [from] })
+    console.log(`[Server] burstPainted #${id} n=${n} proc=${sout - sin}ms`)
+  }
+  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air, ct }, context) => {
+    const sin = Date.now()
     const from = context?.from
+    console.log(`[Server] burstUse recv #${id} air=${air ?? 0} ct=${ct || 0} sin=${sin}`)
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) { logDrop(from, 'burstUse', team === null ? 'no team' : 'bad position'); return }
@@ -663,7 +693,7 @@ export async function setupServer(): Promise<void> {
       if (bursts.mode(from, id) === 0 && !bursts.hasPaint(from, id)) {
         const fp = paintBurstFootprint(from, team, cell, x, y, z)
         console.log(`[Server] burstUse ${from.slice(0, 8)} #${id} replay footprint=${fp.length} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
-        commitBurstPaint(from, id, fp)
+        commitBurstPaint(from, id, fp, ct || 0, sin)
       }
       return
     }
@@ -692,7 +722,7 @@ export async function setupServer(): Promise<void> {
     const reason = !graphNow ? 'no-graph' : fp.length === 0 && airborne ? 'air-above-floor' : fp.length === 0 ? 'no-centre' : airborne ? 'near-floor' : 'ground'
     console.log(`[Burst] server footprint=${fp.length} reason=${reason} dy=${Number.isFinite(dy) ? dy.toFixed(2) : 'na'} air=${airborne ? 1 : 0} cell=${cell || '(none)'} ramps=${rampIds}`)
     if (!airborne || nearFloor) {
-      commitBurstPaint(from, id, fp)
+      commitBurstPaint(from, id, fp, ct || 0, sin)
       radialBotShock(from, id, team, origin, fx, fz, now, fp)
     }
     if (airborne && !nearFloor) {
@@ -717,14 +747,21 @@ export async function setupServer(): Promise<void> {
   // The first accepted sample also opens the ground shockwave: same bot shove,
   // and a burstFired (air 0) so victims anticipate exactly as they do for a press.
   // Player hits arrive as burstHit after this message and share that validation.
-  room.onMessage('burstLand', ({ id, cell, x, y, z }, context) => {
+  room.onMessage('burstLand', ({ id, cell, x, y, z, ct }, context) => {
+    const sin = Date.now()
     const from = context?.from
+    console.log(`[Server] burstLand recv #${id} ct=${ct || 0} sin=${sin} cell=${cell || '(none)'}`)
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) return
     const now = Date.now()
-    if (!bursts.paintReady(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
-      console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} rejected`)
+    const why = bursts.landBlock(from, id, now, SERVER_BURST_LAND_WINDOW_S)
+    if (why) {
+      if (why === 'already-painted') {
+        const cells = bursts.paintedCells(from, id)
+        sendPainted(from, id, cells.length, ct || 0, sin)
+      }
+      console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} rejected: ${why}`)
       return
     }
     markActive(from)
@@ -743,19 +780,30 @@ export async function setupServer(): Promise<void> {
     }
     const fp = paintBurstFootprint(from, team, cell, x, y, z)
     console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} footprint=${fp.length} cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
-    if (fp.length === 0) return
-    commitBurstPaint(from, id, fp)
+    if (fp.length === 0) {
+      console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} no-centre pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
+      return
+    }
+    commitBurstPaint(from, id, fp, ct || 0, sin)
   })
 
   // Shared anvils: the attacker's client detected the hit; same ledgers (once per lunge/burst id
   // per anvil, within the window) as player hits, then the server knocks the anvil.
-  room.onMessage('anvilHit', ({ kind, id, i, dx, dz }, context) => {
+  room.onMessage('anvilHit', ({ kind, id, i, dx, dz, ct }, context) => {
+    const sin = Date.now()
     const from = context?.from
     if (!from || ![dx, dz].every(isFinite)) return
     const len = Math.hypot(dx, dz)
     if (len < 1e-3) return
-    const verdict = (kind === 1 ? bursts : lunges).hit(from, id, `anvil:${i}`, Date.now())
-    if (verdict !== 'ok') { console.log(`[Server] anvilHit ${from.slice(0, 8)} #${id} anvil ${i} rejected: ${verdict}`); return }
+    const book = kind === 1 ? bursts : lunges
+    const verdict = book.hit(from, id, `anvil:${i}`, Date.now())
+    const proc = Date.now() - sin
+    if (verdict !== 'ok') {
+      const live = book.liveId(from)
+      console.log(`[Server] anvilHit ${from.slice(0, 8)} #${id} anvil ${i} rejected: ${verdict} live=${live === null ? 'none' : '#' + live} ct=${ct || 0} proc=${proc}ms`)
+      return
+    }
+    console.log(`[Server] anvilHit #${id} anvil ${i} ok proc=${proc}ms ct=${ct || 0}`)
     noteAnvilTouch(i, from)
     anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
   })
@@ -862,7 +910,7 @@ export async function setupServer(): Promise<void> {
     if (!bombEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null) return
-    if (![x, y, z].every(isFinite) || x < 0 || z < 0 || x > SCENE_SIZE || z > SCENE_SIZE || y < -50 || y > 200) {
+    if (![x, y, z].every(isFinite) || x < 0 || z < 0 || x > SCENE_SIZE || z > SCENE_SIZE || y < -50 || y > SKY_TOP_Y + 40) {
       console.log(`[Server] bombDrop from ${from.slice(0, 8)} rejected: bad position`)
       return
     }
