@@ -126,18 +126,20 @@ function stepSea(): boolean {
     return false
   }
   if (seaPhase === 3) {
-    // The far square is not spawned: its corners would pass the haze circle.
-    // A spawned far mesh would skip the soft normal with `part !== 'far'`.
+    if (!seaMobile) {
+      const part = 'far' as const
+      seaDesktop.push(addSwell(seaRoot, swellMesh(part), part !== 'far'))
+    }
     seaMark('far')
     seaPhase = 4
     return false
   }
   if (seaPhase === 4) {
-    // No flat sheet under or outside the disk. LOOK.depth (the under-sheet) stays off.
+    addFlat(seaRoot, seaMobile ? WATER.flatLiteSrc : WATER.flatSrc)
     if (LOOK.depth) addDepth(seaRoot)
     if (WATER_FOG.skirt) addSkirt(seaY, seaSize)
     if (WATER_FOG.mist) addMist(seaRoot, seaSize)
-    seaMark(seaMobile ? 'rim' : 'rim-skipped')
+    seaMark('rim')
     seaPhase = 5
     return false
   }
@@ -489,7 +491,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       swellClips.length = 0
       clipSeconds = 0
       addSwell(root, swellMesh('lite'), true)
-      addSwell(root, swellMesh('mid'), true)
+      addFlat(root, WATER.flatLiteSrc)
     }
     engine.removeSystem(tick)
   }

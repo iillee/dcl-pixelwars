@@ -21,31 +21,3 @@ README.md
 src
 
 *.skp
-
-# Water assets stay in git. LOOK.sea is off, so none of these ship.
-# Remove the live 48 m / haze / albedo lines before turning LOOK.sea back on.
-assets/models/water-swell-near.glb
-assets/models/water-swell-mid.glb
-assets/models/water-swell-far.glb
-assets/models/water-swell-lite.glb
-assets/textures/water-ripple-normal.png
-assets/textures/water-foam.png
-assets/textures/water-foam-ring.png
-assets/textures/water-whitecap.png
-assets/textures/water-normal.png
-assets/textures/water-veil.png
-assets/textures/water-skirt.png
-assets/textures/water-blue.png
-assets/sounds/ocean.mp3
-assets/models/water-swell-48-far.glb
-assets/models/water-swell-48-near.glb
-assets/models/water-swell-48-mid.glb
-assets/models/water-swell-48-lite.glb
-assets/models/water-flat.glb
-assets/models/water-flat-lite.glb
-assets/models/water-haze.glb
-assets/textures/water-haze.png
-assets/textures/water-soft-normal.png
-assets/textures/water-white.png
-assets/textures/water-horizon.png
-assets/textures/water-horizon-glow.png

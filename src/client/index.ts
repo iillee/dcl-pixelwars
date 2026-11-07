@@ -31,7 +31,7 @@ import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
-import { initAudio } from './audio'
+import { initAudio, startOceanAmbience } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
@@ -152,6 +152,6 @@ export async function setupClient(): Promise<void> {
   // above builds the maze the moment a non-zero seed arrives.
   // Sea meshes wait until the player has a team and the burst/lunge clips
   // have loaded (LOOK.seaLast). Each mesh is one frame apart. The ocean
-  // audio bed is not started.
-  armSea(() => {})
+  // bed starts after the haze.
+  armSea(() => startOceanAmbience())
 }

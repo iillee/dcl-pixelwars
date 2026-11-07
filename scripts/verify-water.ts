@@ -124,18 +124,13 @@ if (WATER.swellNearM >= WATER.swellMidM || WATER.swellMidM >= WATER.swellFarM) {
   console.error('✗ swell rings should grow outward: near, mid, far')
   process.exit(1)
 }
-if (HAZE_RING_M < 400 || HAZE_RING_M > 500) {
-  console.error(`✗ haze radius ${HAZE_RING_M} m should sit around 400–500 m`)
+if (WATER.swellFarM > seaHalf || seaHalf - WATER.swellFarM > 250) {
+  console.error(`✗ the far ring (${WATER.swellFarM} m) should end just inside the sea (${seaHalf.toFixed(0)} m)`)
   process.exit(1)
 }
-if (WATER.swellNearM * Math.SQRT2 > HAZE_RING_M + 1 || WATER.swellFarM > HAZE_RING_M) {
-  console.error('✗ the swell square or the disk sticks past the haze circle')
-  process.exit(1)
-}
-const hazeR = horizonRadiusM(SCENE_SIZE)
-const hazeCap = Math.max(16, SCENE_SIZE / 2 - 8)
-if (hazeR !== Math.min(HAZE_RING_M, hazeCap)) {
-  console.error(`✗ haze radius ${hazeR} m is not the 460 m ring clamped inside this scene`)
+const horizon = Math.max(16, SCENE_SIZE / 2 - 8)
+if (HAZE_RING_M !== horizon || horizonRadiusM(SCENE_SIZE) !== horizon) {
+  console.error(`✗ haze should sit on the parcel horizon (${horizon} m), got ${HAZE_RING_M}`)
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
@@ -164,8 +159,8 @@ if (scene.landscapeTerrain !== false) {
   console.error('✗ landscapeTerrain must be false — the default surround brings trees back with the sea')
   process.exit(1)
 }
-if (LOOK.sea || !LOOK.seaLast) {
-  console.error('✗ LOOK.sea should be off for the lag A/B, and seaLast stays on for when it is turned back on')
+if (!LOOK.sea || !LOOK.seaLast || !LOOK.gloss || !LOOK.softNormal) {
+  console.error('✗ the sea, its gloss, and the soft normal should be on')
   process.exit(1)
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
@@ -184,8 +179,23 @@ if (typeof spawnY !== 'number' || Math.abs(spawnY - red.pos.y) > 0.01) {
   process.exit(1)
 }
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
-if (src.includes("swellMesh('far')") || src.includes('addFlat(seaRoot, WATER.flatSrc)')) {
-  console.error('✗ desktop should not draw the far swell or the outer rim past the haze')
+if (!src.includes("part !== 'far'") || !src.includes('addFlat(seaRoot')) {
+  console.error('✗ desktop should draw the far swell and the flat rim')
+  process.exit(1)
+}
+const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+if (!indexSrc.includes('startOceanAmbience')) {
+  console.error('✗ the ocean bed should start after the sea meshes')
+  process.exit(1)
+}
+const ignored = readFileSync(new URL('../.dclignore', import.meta.url), 'utf8')
+if (ignored.includes('assets/sounds/ocean.mp3') || ignored.includes('water-haze.glb')) {
+  console.error('✗ water assets are still in .dclignore')
+  process.exit(1)
+}
+const rescueSrc = readFileSync(new URL('../src/client/fallRescue.ts', import.meta.url), 'utf8')
+if (!rescueSrc.includes('isLobbyLayout()') || !rescueSrc.includes('lobbyFeet')) {
+  console.error('✗ lobby fall rescue should still return to the cross with the sea on')
   process.exit(1)
 }
 if (/MeshCollider|TriggerArea/.test(src)) {

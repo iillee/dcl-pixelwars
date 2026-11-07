@@ -4,10 +4,10 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 100×100 world: waves through the near and mid squares, easing
- * out across the far ring, then a flat fade to the parcel edge. The haze
+ * for the 300×300 world: waves through the near and mid squares, easing
+ * out across the far square, then a flat rim to the parcel edge. The haze
  * cylinder sits on that edge. `landscapeTerrain` stays false.
- * `LOOK.sea` hides our swell and leaves the sky.
+ * `LOOK.sea` turns the swell, the rim, and the haze on.
  *
  * Swells are a displaced mesh with a plain color. Ripple and foam maps
  * exist behind `SURFACE.ripple` and `SURFACE.foam` (both off). The files under
@@ -30,7 +30,7 @@
  * (`src/client/skybox.ts`), and SDK7's SkyboxTime can only set the clock,
  * not read the Explorer's. `SEA_TONE` picks a row; it does not follow sunset.
  */
-import { LEVEL_Y_OFFSET } from '../maze/level'
+import { LEVEL_Y_OFFSET, SKY_SCENE_M } from '../maze/level'
 
 export type Rgb = { r: number; g: number; b: number; a: number }
 
@@ -100,20 +100,20 @@ export const WATER = {
   swellM: 0,
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
-  swellNearM: 256,
+  swellNearM: 512,
   /** 32 m is the grid the preview already drew. 8 m made a morph file it did not draw. */
   swellNearStepM: 32,
-  /** Middle ring, half-extent (m). 256 + 64. This square is the last mesh:
-   *  its corners still sit inside the 460 m haze circle. */
-  swellMidM: 320,
+  /** Middle ring, half-extent (m). Full-height waves continue out to here. */
+  swellMidM: 2048,
   swellMidStepM: 64,
-  /** Analytic fade ends here, 8 m inside the haze circle. The mid mesh is the disk. */
-  swellFarM: 452,
+  /** Far square, half-extent (m). Displacement eases to 0 at this edge.
+   *  The flat rim then fades from here to the parcel edge. */
+  swellFarM: 2304,
   swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 32,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 80,
+  swellMobileFadeM: 220,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',
@@ -208,8 +208,8 @@ export const SURFACE = {
  * alpha path stay here for a later try.
  */
 export const LOOK = {
-  /** Our swell, rim, and haze. Off for the Burst-lag A/B: nothing from the sea is created. */
-  sea: false,
+  /** Our swell, rim, and haze. */
+  sea: true,
   /** Load the sea only after teamAssigned and the combat sounds are in.
    *  Off starts the sea on the first frame, for an A/B of Burst lag. */
   seaLast: true,
@@ -340,14 +340,12 @@ export function resolvedWaterY(minY: number, _fallDrop: number): number {
   return Math.min(WATER.heightY, maxMean)
 }
 
-/** Haze cylinder radius (m). Close enough that spawn height hides the sea edge,
- *  far enough that the ring is not a wall around the arena. The square swells
- *  stop inside this circle so no corner is drawn past it. */
-export const HAZE_RING_M = 460
+/** Haze cylinder radius (m) for the current scene: the parcel horizon. */
+export const HAZE_RING_M = Math.max(16, SKY_SCENE_M / 2 - 8)
 
-/** Haze cylinder radius (m). Never outside the parcel box. */
+/** Haze cylinder radius (m). Just inside the parcel edge. */
 export function horizonRadiusM(sceneM: number): number {
-  return Math.min(HAZE_RING_M, Math.max(16, sceneM / 2 - 8))
+  return Math.max(16, sceneM / 2 - 8)
 }
 
 /** Plane width that stays inside the parcel box. */

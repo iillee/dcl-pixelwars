@@ -7,13 +7,13 @@
     "start:server": "npx @dcl/hammurabi-server@next",
     "deploy": "sdk-commands deploy",
     "build": "sdk-commands build",
-    "server-logs": "sdk-commands sdk-server-logs",
+    "server-logs": "sdk-commands scene-insights tail",
     "upgrade-sdk": "npm install --save-dev @dcl/sdk@auth-server",
     "upgrade-sdk:next": "npm install --save-dev @dcl/sdk@next"
   },
   "devDependencies": {
-    "@dcl/js-runtime": "7.30.2-39796956377.commit-4223559",
-    "@dcl/sdk": "7.30.2-39796956377.commit-4223559"
+    "@dcl/js-runtime": "7.32.1-41691874543.commit-3063788",
+    "@dcl/sdk": "7.32.1-41691874543.commit-3063788"
   },
   "engines": {
     "node": ">=16.0.0",
