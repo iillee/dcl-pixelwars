@@ -73,6 +73,9 @@ import { events } from '../shared/events'
 import { isMazeReady } from '../maze/rebuild'
 import { baseSpawn, MIN_Y } from '../maze/generator'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
+import { fallTriggerY } from '../shared/swell'
+import { LOOK } from '../shared/waterLook'
+import { waterVisualSeconds } from './water'
 import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { localTeam, myAddress } from './knockback'
@@ -939,7 +942,7 @@ function tick(dt: number): void {
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
   const p = playerPos()
-  if (p && phase === 'idle' && rearm && isMazeReady() && p.y < line) begin(p)
+  if (p && phase === 'idle' && rearm && isMazeReady() && p.y < (LOOK.sea ? fallTriggerY(p.x, p.z, waterVisualSeconds()) : fallTriggerY(p.x, p.z))) begin(p)
   // Sample after the trip so the lead uses the fall, not the frame we just caught.
   if (p && phase === 'idle') remember(p)
 }

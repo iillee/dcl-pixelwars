@@ -7,10 +7,16 @@
  *
  *   LEVEL_MODE = 'classic' → the original 5×5 centre-seeded maze (176 m, Y=0).
  *     Also switch scene.json back to the 11×11 parcel list + CenterSpawn.
- *   LEVEL_MODE = 'sky'     → 20×20 parcels (320 m). With the flags below
- *     (bases-only + base line): a 5×5 asymmetric-but-fair woven network over 80–240 m at
- *     SKY_ALTITUDE, three levels, 1-tile team bases in opposite corners
- *     (RED (0,0), BLUE (4,4)) that double as spawns. See generator.ts.
+ *   LEVEL_MODE = 'sky'     → SKY_PARCELS × SKY_PARCELS (a World; no LAND cost).
+ *     The play grid stays 5×5. The extra parcels are open water so the sea is
+ *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
+ *
+ * World size (sky only). 'small' is 20×20 (320 m), the current deploy.
+ * The arena stays centred and our sea fills the box out to the haze.
+ * 'small' is 20×20, 'medium' is 64×64, 'wide' is 150×150, 'full' is 300×300.
+ * After changing this, run `npx tsx scripts/write-scene.ts`. The swell meshes
+ * are built for 'large'; run `npx tsx scripts/build-water-swell.ts` after a
+ * size change so the rings still meet the parcel edge.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -18,13 +24,17 @@ export const LEVEL_MODE: LevelMode = 'sky'
 export const IS_SKY: boolean = LEVEL_MODE === 'sky'
 
 // ─── Sky tuning ─────────────────────────────────────────────────────
-/** Floor of the lowest level (m). Base tiles sit here; WALKABLE_TOP is +0.5. */
-/** World Y of the top level (L+1). Luke: 100. Everything else derives from it.
- *  Raise or lower the whole sky arena here (and the scene.json spawn y). */
-export const SKY_TOP_Y = 100
+/**
+ * Added to every sky height (floors, spawns, rescue, water). The swell
+ * troughs were clipped by the world floor at y 0. 100 lifts the old layout
+ * clear of that floor. scene.json spawn y must match baseSpawn (L0 + 1.5).
+ */
+export const LEVEL_Y_OFFSET = 100
+/** World Y of the top level (L+1). The 100 is the pre-offset roof. */
+export const SKY_TOP_Y = 100 + LEVEL_Y_OFFSET
 /** L0 world Y = top minus one level rise (generator STEP = 5.3835 x TILE_SCALE 2
- *  = 10.767; keep in sync). L-1 78.466 / L0 89.233 / L+1 100; spawns at L0 + 1.5
- *  = 90.733; fall respawn below MIN_Y - FALL_RESPAWN_DROP = ~12.47. Was 32. */
+ *  = 10.767). With the offset: L-1 178.466 / L0 189.233 / L+1 200; spawns at
+ *  L0 + 1.5 = 190.733; fall line MIN_Y - FALL_RESPAWN_DROP ≈ 112.47. */
 export const SKY_ALTITUDE = SKY_TOP_Y - 5.3835 * 2
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
@@ -36,11 +46,36 @@ export const SKY_BASES_ONLY = true
 export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
-/** World-space inset of the sky grid from every scene edge (m). 80 = five
- *  parcels → 5×5 tiles over 80–240 m (64 → 6×6 over 64–256, 96 → 4×4 over
- *  96–224 but only ~24 distinct 3-level layouts). Keep (320 - 2·inset) a
- *  multiple of 32 so the grid stays centred, and update scene.json spawns. */
-export const SKY_EDGE_INSET = 80
+/**
+ * Parcels on a side. 16 m each. `full` is the World maximum (300×300 = 90,000
+ * parcels, 4800 m). `large` is 100×100 (1600 m). `medium` is 64×64.
+ * `small` is 20×20. The play grid stays 5×5 because the inset grows with
+ * the scene. Keep scene.json in step via scripts/write-scene.ts.
+ */
+export const MEDIUM_PARCELS = 64
+export const LARGE_PARCELS = 100
+export const WIDE_PARCELS = 150
+export const WORLD_SIZE = 'small' as 'small' | 'medium' | 'large' | 'wide' | 'full'
+export const SKY_PARCELS =
+  WORLD_SIZE === 'full' ? 300
+    : WORLD_SIZE === 'wide' ? WIDE_PARCELS
+      : WORLD_SIZE === 'large' ? LARGE_PARCELS
+        : WORLD_SIZE === 'medium' ? MEDIUM_PARCELS
+          : 20
+
+/** Southwest parcel. The 300×300 block must start at -150. Smaller blocks are
+ *  centred on parcel 0,0 and stay inside the publisher range (-150..149). */
+export function sceneOriginParcel(parcels = SKY_PARCELS): number {
+  if (parcels >= 300) return -150
+  const origin = -Math.floor(parcels / 2)
+  const end = origin + parcels - 1
+  if (end > 149) return 149 - (parcels - 1)
+  if (origin < -150) return -150
+  return origin
+}
+export const SKY_SCENE_M = SKY_PARCELS * 16
+/** Inset that leaves a 5×32 m grid centred in the scene. */
+export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0
@@ -64,7 +99,7 @@ export const BASE_PAINT_LOCK = false
 /** Spawn the teleport orb pair in-world? Off (Luke): playtesters found them unclear. The generator still
  *  places and fairness-checks the pair, so layouts are unchanged and turning this back on is one flag. */
 export const TELEPORT_ORBS = false
-/** The fall rescue (and anvil respawn) triggers this far below the lowest floor (MIN_Y 78.466 → line ~12.5).
+/** The fall rescue (and anvil respawn) triggers this far below the lowest floor (MIN_Y ≈ 178.5 → line ≈ 112.5).
  *  Luke: was 12 (line ~66.5); lowered so a fall costs a couple more seconds of free fall. Keep the line
  *  above the ground (y 0) and MIN_Y > this value, or the rescue disables itself. */
 export const FALL_RESPAWN_DROP = 66

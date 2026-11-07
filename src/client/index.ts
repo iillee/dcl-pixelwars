@@ -44,6 +44,7 @@ import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
 import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
+import { armSea } from './water'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -147,4 +148,8 @@ export async function setupClient(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
+  // Sea meshes wait until the player has a team and the burst/lunge clips
+  // have loaded (LOOK.seaLast). Each mesh is one frame apart. The ocean
+  // audio bed is not started.
+  armSea(() => {})
 }

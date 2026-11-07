@@ -3,13 +3,13 @@
  * Knocks a bot standing on its base with each hit in four directions and reports
  * the KnockTrace line and what happened next (settled / fell → cloud → landed).
  */
-import { generateWithRetry, getPlacedTilesInOrder, baseSpawn } from '../src/maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, BASE_Y } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody, BotBodyEvent } from '../src/shared/botBody'
 import { lungeKnock, burstKnock, spikeKnock, KnockSpec } from '../src/shared/knocks'
 import { rescueTripSeconds } from '../src/shared/rescuePath'
-import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE } from '../src/shared/pvp'
+import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE, BOT_RECOVERY_ENABLED } from '../src/shared/pvp'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -28,7 +28,7 @@ const kinds: Array<[string, (dx: number, dz: number) => KnockSpec]> = [
 
 let fellCount = 0
 for (const recover of [false, true]) {
-console.log(recover ? '\n-- always tries to glide back (BOT_RECOVER roll forced on) --' : '-- never tries to recover --')
+console.log(recover ? '\n-- rng would recover, gated by BOT_RECOVERY_ENABLED --' : '-- rng refuses recovery --')
 for (const [kName, make] of kinds) {
   for (const [dName, dx, dz] of dirs) {
     const body = new BotBody(base)
@@ -65,7 +65,8 @@ for (const [kName, make] of kinds) {
 }
 }
 
-// A light shove off the same edge: a bot that tries should glide back; one that doesn't falls.
+// A light shove off the same edge. With recovery on, a bot that tries may glide back.
+// With it off, both rolls just fall into the cloud rescue.
 for (const strength of [85, 95, 105, 115]) {
   const res: string[] = []
   for (const recover of [false, true]) {
@@ -73,13 +74,18 @@ for (const strength of [85, 95, 105, 115]) {
     body.rng = () => (recover ? 0 : 1)
     body.knock({ kind: 'lunge', impulse: { x: -strength, y: 8, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0.3 })
     let out = 'unresolved'
+    let tried = false
     for (let t = 0; t < 15 && out === 'unresolved'; t += 0.1) {
       for (const e of body.tick(0.1, world)) {
+        if (e.type === 'recover') tried = true
         if (e.type === 'settled') out = `settled ${Math.hypot(body.pos.x - base.x, body.pos.z - base.z).toFixed(1)} m out`
         if (e.type === 'fell') out = 'fell'
       }
     }
-    res.push(`${recover ? 'tries' : 'no try'}: ${out}`)
+    if (!BOT_RECOVERY_ENABLED && (out !== 'fell' || tried || body.isGliding())) {
+      fail(`recovery off: shove ${strength} ${recover ? 'roll 0' : 'roll 1'} was ${out}${tried ? ' and tried to recover' : ''}`)
+    }
+    res.push(`${recover ? 'roll 0' : 'roll 1'}: ${out}`)
   }
   console.log(`shove ${strength} -x | ${res.join(' | ')}`)
 }
@@ -128,6 +134,37 @@ console.log(`${fellCount} of ${2 * kinds.length * dirs.length} knocks fell and w
   }
   if (!down) fail('dive did not descend')
   else console.log(`✓ jump then dive: peak +${(peak - base.y).toFixed(2)} m, then down`)
+}
+
+// Open floor: player-scale knock, and every step stays a normal physics step (no teleport).
+{
+  // A flat floor at the raised L0. y 90 sat under the swell fall line after the +100 lift.
+  const Y = BASE_Y + 1
+  const nodes = new Map<string, [number, number, number]>()
+  for (let x = -4; x <= 120; x += 2) nodes.set('flat' + x, [x, Y, 0])
+  const flat = { graph: { worldPos: nodes } as typeof graph, rampTiles: [] as typeof rampTiles, base }
+  const slide = (spec: KnockSpec) => {
+    const body = new BotBody({ x: 0, y: Y - 0.05, z: 0 })
+    body.rng = () => 1
+    body.knock(spec)
+    let peak = body.pos.y
+    let prev = { ...body.pos }
+    let maxStep = 0
+    for (let t = 0; t < 8 && body.mode === 'knock'; t += 0.05) {
+      body.tick(0.05, flat)
+      maxStep = Math.max(maxStep, Math.hypot(body.pos.x - prev.x, body.pos.y - prev.y, body.pos.z - prev.z))
+      prev = { ...body.pos }
+      if (body.pos.y > peak) peak = body.pos.y
+    }
+    return { d: body.pos.x, hop: peak - (Y - 0.05), maxStep, mode: body.mode }
+  }
+  const lunge = slide(lungeKnock(1, 0))
+  const burst = slide(burstKnock(1, 0))
+  console.log(`open floor: lunge ${lunge.d.toFixed(1)} m (hop ${lunge.hop.toFixed(2)}, step ${lunge.maxStep.toFixed(2)}), burst ${burst.d.toFixed(1)} m (hop ${burst.hop.toFixed(2)}, step ${burst.maxStep.toFixed(2)})`)
+  if (lunge.d < 30 || lunge.d > 60) fail(`lunge on open floor ${lunge.d.toFixed(1)} m; player-scale band is 30–60 m`)
+  if (burst.d < 14 || burst.d > 30) fail(`burst on open floor ${burst.d.toFixed(1)} m; player-scale band is 14–30 m`)
+  if (lunge.maxStep > 4 || burst.maxStep > 4) fail(`knock stepped ${Math.max(lunge.maxStep, burst.maxStep).toFixed(2)} m in one tick`)
+  if (lunge.mode !== 'walk' || burst.mode !== 'walk') fail(`open-floor knock did not settle (lunge ${lunge.mode}, burst ${burst.mode})`)
 }
 
 if (failed) process.exit(1)

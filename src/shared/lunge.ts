@@ -86,6 +86,9 @@ export class LungeLedger {
     l.hits.add(key)
     return 'ok'
   }
+  liveId(from: string): number | null {
+    return this.last.get(from)?.id ?? null
+  }
   forget(from: string): void { this.last.delete(from) }
 }
 

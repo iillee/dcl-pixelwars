@@ -24,6 +24,8 @@ const cellPainter = new Map<string, string>()
 // last-write-wins within a tick — if Red then Blue paint the same cell
 // in the same 200ms window, only Blue ends up in the broadcast.
 const dirty = new Map<string, number>()
+/** When the current dirty batch started. 0 if the batch is empty. */
+let dirtyAt = 0
 
 /**
  * Apply a paint from a validated sender. Overwrites existing color.
@@ -41,8 +43,14 @@ export function applyPaint(id: string, team: number, painter: string): boolean {
   const prev = cellTeam.get(id)
   if (prev === team) return false
   cellTeam.set(id, team)
+  if (dirty.size === 0) dirtyAt = Date.now()
   dirty.set(id, team)
   return true
+}
+
+/** How long the oldest unsent paint change has been waiting, or 0. */
+export function paintWaitMs(now = Date.now()): number {
+  return dirty.size === 0 || dirtyAt === 0 ? 0 : now - dirtyAt
 }
 
 /**
@@ -54,6 +62,7 @@ export function drainDelta(): Array<{ id: string; team: number }> {
   const out: Array<{ id: string; team: number }> = []
   for (const [id, team] of dirty) out.push({ id, team })
   dirty.clear()
+  dirtyAt = 0
   return out
 }
 

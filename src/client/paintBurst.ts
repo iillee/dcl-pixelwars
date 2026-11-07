@@ -16,7 +16,9 @@
  *     through the same radial path as a ground Burst (radialKnock → burstHit).
  *     A connect does not play, paint, or knock with it: the landing stays disarmed,
  *     most of the downward speed is cancelled, nothing is added upward, and the
- *     victim is spiked with the glider forced shut. Ground Burst does not dive.
+ *     victim is spiked with the glider forced shut. The attacker's own glider
+ *     is forced shut for the dive (startDiveGlideLock) and cleared on landing.
+ *     Ground Burst does not dive.
  *   The hotbar only queues the press. Ground vs air uses a live stance sample
  *   (BURST_STANCE_SLACK), not the previous frame's grounded flag. A shockwave
  *   keeps resending its paint until the server confirms the footprint.
@@ -38,22 +40,22 @@ import {
   AIR_SPIKE_TRAIL_N, AIR_SPIKE_TRAIL_DROP, AIR_SPIKE_TRAIL_S, AIR_SPIKE_TRAIL_SIZE,
   AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_WINDOW_S,
   BURST_PAINT_RETRY_S, BURST_PAINT_RETRY_GAP_S, BURST_USE_RETRY_S,
-  AIR_SPIKE_GLIDE_LOCK_S,
+  AIR_SPIKE_GLIDE_LOCK_S, AIR_SPIKE_DIVE_GLIDE_LOCK_S,
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
 } from '../shared/pvp'
-import { inBurst, inAirSpike, burstDir, shockwaveHits, V3 } from '../shared/burst'
+import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
-import { holdForEmote, startKnockLock, startGlideLock } from './lunge'
+import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
 let emoteLeft = 0 // > 0 while the burst one-shot plays; at 0 we stopEmote so it always releases
 import { ImpactGate } from '../shared/lunge'
-import { sampleBurstStance } from '../paint'
-import { initBurstRipple, startRipple, nearGround } from './burstRipple'
+import { sampleBurstStance, isPlayerGrounded } from '../paint'
+import { initBurstRipple, startRipple, nearGround, footprintAt } from './burstRipple'
 import {
   playDashHitSfx, playBurstSfx, playAirHitSfx,
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
@@ -172,6 +174,8 @@ const STAMP_ARM_S = 0.08
 /** One hitch must not burn the whole landing window. Low fps still gets later frames. */
 const STAMP_STEP_CAP_S = 0.25
 const stampWatch: Array<{ who: string; team: Team; id: number; left: number; fx: number; fz: number }> = []
+/** Press time for the local burst id, so the server ack can be timed. */
+const pressAt = new Map<number, number>()
 
 /** Shockwave already played. Resend until burstPainted, with a fresh grounded sample. */
 type PaintHold = { id: number; kind: 'ground' | 'land'; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
@@ -295,7 +299,17 @@ function tickStamps(dt: number): void {
       }
       console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
-    } else if (s.left <= 0) stampWatch.splice(i, 1)
+    } else if (s.left <= 0) {
+      // The stamp window is 1.4 s, inside the server's 4.5 s landing window.
+      // If the feet never read as landed, paint the last known point anyway.
+      if (s.who === '' && pos) {
+        queuePaint('land', s.id, stance?.cell ?? '', pos, s.fx, s.fz)
+        if (safeSend('burstLand', () => sendBurstLand(s.id, stance?.cell ?? '', pos.x, pos.y, pos.z))) radialKnock(pos, s.team, s.fx, s.fz, s.id)
+        else kickPaint(s.id)
+        console.log(`[Burst] #${s.id} landing fallback pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`)
+      }
+      stampWatch.splice(i, 1)
+    }
   }
 }
 
@@ -389,12 +403,15 @@ function airPlayerHits(p: V3, team: Team, fx: number, fz: number): Array<{ addr:
   return out
 }
 
-function airBotBelow(p: V3, team: Team): boolean {
+function airBotHits(p: V3, team: Team, fx: number, fz: number): Array<{ id: number; pos: V3; k: { x: number; z: number } }> {
+  const out: Array<{ id: number; pos: V3; k: { x: number; z: number } }> = []
   for (const b of getBotRenderPositions()) {
     if (b.team === team) continue
-    if (inAirSpike(p, { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })) return true
+    const feet: V3 = { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }
+    if (!inAirSpike(p, feet)) continue
+    out.push({ id: b.id, pos: feet, k: burstDir(p, feet, fx, fz) })
   }
-  return false
+  return out
 }
 
 function knockAirAnvils(p: V3, fx: number, fz: number, id: number): number {
@@ -485,6 +502,20 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
   for (const h of shockwaveHits(p, dummies, fx, fz)) {
     losThen(p, h.at, () => hitDummy(h.id, h.x, h.z, 1, id), DUMMY_LOS_SLACK)
   }
+  // Same cylinder and outward burstKnock as players. Feet, not the avatar origin.
+  // The server range-checks those feet (with lunge slack) and applies the knock.
+  const bots: Array<V3 & { id: string }> = []
+  for (const b of getBotRenderPositions()) {
+    if (b.team === team) continue
+    bots.push({ id: `bot:${b.id}`, x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
+  }
+  for (const h of shockwaveHits(p, bots, fx, fz)) {
+    losThen(p, h.at, () => {
+      sendBurstHit(id, h.id, h.x, h.z)
+      playDashHitSfx()
+      playAt(h.at)
+    })
+  }
 }
 
 /** Hotbar press (mobile circle, desktop slot). The gameplay system fires it, so the
@@ -504,15 +535,24 @@ export function triggerBurst(): void {
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
   cooldownLeft = BURST_COOLDOWN_S
-  if (!stance.grounded) {
-    fireAirSpike(id, team, p, f.x, f.z)
+  // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
+  // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
+  const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
+  const cells = footprintAt(p, stance.cell)
+  const tPress = Date.now()
+  pressAt.set(id, tPress)
+  console.log(`[Burst] press t=${tPress} #${id} stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
+  if (air) {
+    fireAirSpike(id, team, p, f.x, f.z, tPress)
+    console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
     return
   }
   const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
   showShockwave(p, team, true, cell)
+  console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
   queuePaint('ground', id, cell, p, f.x, f.z)
-  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0))) kickPaint(id)
+  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress))) kickPaint(id)
   if (BURST_EMOTE_ENABLED) {
     // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
     holdForEmote(BURST_EMOTE_FREEZE_S)
@@ -524,22 +564,33 @@ export function triggerBurst(): void {
   console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
+/** Local aerial Burst: glider stays shut until the feet land (or the lock times out).
+ *  sawAir ignores a grounded sample on the frame the press is still at the jump. */
+let attackerDiveGlide = false
+let attackerDiveSawAir = false
+
 /** Airborne F: downward spike. A player or bot in the cylinder is combat.
  *  Hit: keep a fraction of the fall, no landing shockwave, no landing knock, no burst paint.
  *  Miss: full dive (a void miss keeps falling). The landing shockwave, its knock,
  *  and its paint wait until the feet meet the floor. */
-function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): void {
+function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct = Date.now()): void {
+  // Close the glider before the impulse. An open glider clamps fall to ~1 m/s
+  // and swallows the downward force. Ground Burst never reaches here.
+  startDiveGlideLock(AIR_SPIKE_DIVE_GLIDE_LOCK_S)
+  attackerDiveGlide = true
+  attackerDiveSawAir = false
+  console.log(`[Burst] air dive — glider shut ${AIR_SPIKE_DIVE_GLIDE_LOCK_S}s`)
   // No press clip. A miss plays burst_impact once, at the landing, the same
   // single sound as a ground Burst. Playing air_spike_dive here as well made
   // the local player hear the burst twice. A connect has no landing; its sound
   // is the hit clip only.
   showAirTrail(p, team, fx, fz)
   queueUse(id, '', p, fx, fz)
-  if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1))) kickUse(id)
+  if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1, ct))) kickUse(id)
   const anvils = knockAirAnvils(p, fx, fz, id)
   const hits = airPlayerHits(p, team, fx, fz)
-  const bot = airBotBelow(p, team)
-  if (hits.length > 0 || bot || anvils > 0) {
+  const bots = airBotHits(p, team, fx, fz)
+  if (hits.length > 0 || bots.length > 0 || anvils > 0) {
     partialStopDive(fx, fz)
     disarmLandingStamp('')
     if (hits.length === 0) playAirHitSfx()
@@ -548,7 +599,11 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number): vo
       playAirHitSfx()
       showAirHit(h.pos, team)
     }
-    console.log(`[Burst] #${id} air spike hit players=${hits.length} bot=${bot} anvils=${anvils} pos=${p.y.toFixed(2)}`)
+    for (const b of bots) {
+      sendBurstHit(id, `bot:${b.id}`, b.k.x, b.k.z)
+      showAirHit(b.pos, team)
+    }
+    console.log(`[Burst] #${id} air spike hit players=${hits.length} bots=${bots.length} anvils=${anvils} pos=${p.y.toFixed(2)}`)
     return
   }
   // Full dive, including the sustained downward force. Nothing cancels this.
@@ -684,10 +739,34 @@ export function initPaintBurst(): void {
     else applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
-  events.on('burst:painted', ({ id, n }) => { if (n > 0) { clearPaint(id); clearUse(id) } })
+  events.on('burst:painted', ({ id, n }) => {
+    if (n > 0) { clearPaint(id); clearUse(id) }
+  })
+  events.on('paint:delta', () => {
+    const now = Date.now()
+    for (const [id, t0] of pressAt) {
+      if (now - t0 > 3000) { pressAt.delete(id); continue }
+      console.log(`[Burst] paintDelta #${id} rtt=${now - t0}ms`)
+      pressAt.delete(id)
+    }
+  })
 
   engine.addSystem((dt: number) => {
     sampleFall(dt)
+    if (attackerDiveGlide) {
+      // 1.15 m slack still counts as "ground" while a glider is open just over the
+      // slab. Clearing on that flag dropped the lock a frame after the press, before
+      // Explorer applied it. Only a real stand (paint tolerance) ends the dive lock.
+      const stance = sampleBurstStance()
+      const lift = stance?.lift ?? Infinity
+      if (lift > 0.45) attackerDiveSawAir = true
+      else if (lift <= 0.35 && attackerDiveSawAir) {
+        attackerDiveGlide = false
+        attackerDiveSawAir = false
+        clearDiveGlideLock()
+        console.log('[Burst] dive landed — glider lock cleared')
+      }
+    }
     if (cooldownLeft > 0) cooldownLeft -= dt
     // Key and hotbar share this call, after the paint system has run. One press, one burst.
     if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {

@@ -4,7 +4,8 @@
  */
 import {
   BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS, BURST_PAINT_MAX_DY,
-  SERVER_BURST_HIT_WINDOW_S,
+  BURST_STANCE_SLACK, BURST_AIR_LIFT_M,
+  SERVER_BURST_HIT_WINDOW_S, SERVER_LUNGE_BOT_SLACK,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, AIR_SPIKE_MIN_ABOVE,
 } from './pvp'
 import type { WalkableGraph } from './mazeGraph'
@@ -13,9 +14,47 @@ export type V3 = { x: number; y: number; z: number }
 const CELL_M = 2 // CELL / SIZE
 
 /** Is target inside the shockwave? Horizontal feet-to-feet distance (like the paint footprint)
- *  within `radius`, and within BURST_HIT_MAX_DY in height. */
-export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS): boolean {
-  return Math.hypot(t.x - origin.x, t.z - origin.z) <= radius && Math.abs(t.y - origin.y) <= BURST_HIT_MAX_DY
+ *  within `radius`, and within `maxDy` in height (default BURST_HIT_MAX_DY). */
+export function inBurst(origin: V3, t: V3, radius = BURST_RADIUS, maxDy = BURST_HIT_MAX_DY): boolean {
+  return Math.hypot(t.x - origin.x, t.z - origin.z) <= radius && Math.abs(t.y - origin.y) <= maxDy
+}
+
+/**
+ * True only for a real jump or fall. Standing, walking, a small step, and the
+ * half-metre difference between the stance surface and the mesh stay a ground
+ * Burst and paint the full circle on the press. `vy` is metres/second, up positive.
+ * `paintGrounded` is the movement system's own floor test when it has one.
+ */
+export function burstPressIsAir(lift: number, vy: number, paintGrounded = false): boolean {
+  if (paintGrounded && lift <= BURST_AIR_LIFT_M) return false
+  if (!(lift > BURST_STANCE_SLACK)) return false
+  if (lift <= BURST_AIR_LIFT_M) return vy > 4 || vy < -8
+  return true
+}
+
+/** Ground shockwave vs a bot's server feet. The cylinder is the same one players use.
+ *  A bot standing on a cell this burst paints is also hit: the footprint already stayed
+ *  on one level, and a ramp run can put those feet just past BURST_HIT_MAX_DY. */
+export function shockwaveHitsBot(origin: V3, feet: V3, onFootprint: boolean): boolean {
+  if (inBurst(origin, feet, BURST_RADIUS + 1)) return true
+  if (!onFootprint) return false
+  return Math.hypot(feet.x - origin.x, feet.z - origin.z) <= BURST_RADIUS + 2
+    && Math.abs(feet.y - origin.y) <= BURST_HIT_MAX_DY + 2.5
+}
+
+/** Client reported a bot hit from the rendered feet. Server feet can lag that draw
+ *  (snapshot interpolation), so the same slack a lunge uses is allowed. Air keeps
+ *  the "attacker is above" gate so a sideways report is not a spike. */
+export function burstBotInRange(origin: V3, feet: V3, air: boolean): boolean {
+  if (air) {
+    return inAirSpike(
+      origin, feet,
+      AIR_SPIKE_RADIUS + SERVER_LUNGE_BOT_SLACK,
+      AIR_SPIKE_DEPTH + 1,
+      Math.max(0.35, AIR_SPIKE_MIN_ABOVE - 0.5),
+    )
+  }
+  return inBurst(origin, feet, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 2)
 }
 
 /** Air spike volume: attacker is clearly above the target, inside a short vertical cylinder.
@@ -110,11 +149,26 @@ export class BurstLedger {
   private last = new Map<string, {
     id: number; at: number; hits: Set<string>; air: number; painted: boolean
     fx: number; fz: number; landed: boolean; landAt: number
+    ox: number; oy: number; oz: number; hasOrigin: boolean
+    cells: string[]
   }>()
   /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing).
    *  `fx, fz` is the press facing, kept for the landing shockwave's overlap fallback. */
   start(from: string, id: number, now: number, air = 0, fx = 0, fz = 1): void {
-    this.last.set(from, { id, at: now, hits: new Set(), air, painted: false, fx, fz, landed: false, landAt: now })
+    this.last.set(from, {
+      id, at: now, hits: new Set(), air, painted: false, fx, fz, landed: false, landAt: now,
+      ox: 0, oy: 0, oz: 0, hasOrigin: false, cells: [],
+    })
+  }
+  /** Feet the shockwave is judged from. Ground press, then the landing sample once that opens. */
+  place(from: string, id: number, o: V3): void {
+    const l = this.last.get(from)
+    if (!l || l.id !== id) return
+    l.ox = o.x; l.oy = o.y; l.oz = o.z; l.hasOrigin = true
+  }
+  origin(from: string, id: number): V3 | null {
+    const l = this.last.get(from)
+    return l && l.id === id && l.hasOrigin ? { x: l.ox, y: l.oy, z: l.oz } : null
   }
   /** 0 when this burst is the grounded radial (or unknown). Non-zero means the downward spike.
    *  Stays the press mode after the landing opens, so an air paint retry is not treated as a ground replay. */
@@ -163,6 +217,27 @@ export class BurstLedger {
   hasPaint(from: string, id: number): boolean {
     const l = this.last.get(from)
     return !!l && l.id === id && l.painted
+  }
+  /** Why a landing cannot paint, or null when it can. Does not consume. */
+  landBlock(from: string, id: number, now: number, windowS: number): string | null {
+    const l = this.last.get(from)
+    if (!l) return 'unknown-id'
+    if (l.id !== id) return `id-mismatch server=#${l.id}`
+    if (l.air === 0) return 'not-air'
+    if (now - l.at > windowS * 1000) return `window ${now - l.at}ms`
+    if (l.painted) return 'already-painted'
+    return null
+  }
+  liveId(from: string): number | null {
+    return this.last.get(from)?.id ?? null
+  }
+  rememberCells(from: string, id: number, cells: string[]): void {
+    const l = this.last.get(from)
+    if (l && l.id === id) l.cells = cells
+  }
+  paintedCells(from: string, id: number): string[] {
+    const l = this.last.get(from)
+    return l && l.id === id ? l.cells : []
   }
   /** Landing may paint: airborne, same id, inside `windowS`, not yet painted. Does not consume. */
   paintReady(from: string, id: number, now: number, windowS: number): boolean {

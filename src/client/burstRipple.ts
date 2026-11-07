@@ -80,6 +80,15 @@ export function nearGround(p: V3): boolean {
   return best < 0.5 && best > -0.7
 }
 
+/** Cells the ripple would raise. -1 when the maze graph is not built yet. */
+export function footprintAt(p: V3, cell: string): number {
+  const g = ensureGraph()
+  if (!g) return -1
+  const centre = burstCentre(g, cell, p)
+  if (!centre) return 0
+  return burstFootprint(g, centre).length
+}
+
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
 export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return

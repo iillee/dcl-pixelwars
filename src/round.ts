@@ -21,6 +21,8 @@ export {
 } from './shared/roundTiming'
 
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
+import { FORMAT_ALTERNATE, type RoundFormat } from './shared/pvp'
+import { loadSplashCovering } from './client/splash'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -161,7 +163,53 @@ export function initRoundNet(): void {
     )
     showRoundEndBanner(finalRed, finalBlue, localTotal)
   })
-  events.on('round:reset', ({ seed }) => {
-    console.log(`[Client] roundReset seed=${seed} (maze rebuild after summary)`)
+  events.on('round:clock', ({ idx, active, format }) => {
+    // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
+    if (active) armFormatSplash(format, idx, false)
   })
+  events.on('round:reset', ({ seed, format }) => {
+    console.log(`[Client] roundReset seed=${seed} format=${format} (maze rebuild after summary)`)
+    armFormatSplash(format, seed, true)
+  })
+}
+
+// ─── Format splash (playtest) ────────────────────────────────────────
+// Big centered banner for ~2.5s when a round starts, and when a late joiner
+// enters a round already running. No countdown and no input lock — the round
+// is already going. The load splash can cover the first seconds, so the
+// timer starts once that cover is gone.
+export const FORMAT_SPLASH_MS = 2500
+
+let currentFormat: RoundFormat = 'pvp'
+let shownIdx = -1
+let armedFormat: RoundFormat | null = null
+let formatStartedAt = 0
+
+function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): void {
+  currentFormat = format
+  if (!fromReset && shownIdx === idx) return
+  shownIdx = idx
+  armedFormat = format
+  formatStartedAt = 0
+}
+
+/** The round that just finished (or is live). Summary uses this for "Next round". */
+export function nextRoundBlurb(): string {
+  if (!FORMAT_ALTERNATE) return 'Next round: PvP'
+  return currentFormat === 'pvb' ? 'Next round: PvP' : 'Next round: PvB'
+}
+
+export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
+  if (!armedFormat) return null
+  if (formatStartedAt === 0) {
+    if (loadSplashCovering()) return null
+    formatStartedAt = Date.now()
+  }
+  if (Date.now() - formatStartedAt > FORMAT_SPLASH_MS) {
+    armedFormat = null
+    return null
+  }
+  return armedFormat === 'pvb'
+    ? { format: 'pvb', title: 'PVB — BOT INVASION', sub: 'Humans vs Bots' }
+    : { format: 'pvp', title: 'PVP — TEAM BATTLE', sub: 'Red vs Blue' }
 }

@@ -27,6 +27,7 @@ const lastRespawnReq = new Map<string, number>()
 
 function send(): void {
   room.send('anvilState', {
+    st: Date.now(),
     a: world.anvils.map(a => ({
       x: a.pos.x, y: a.pos.y, z: a.pos.z, vx: a.vel.x + world.pushVel(a).x, vy: a.vel.y, vz: a.vel.z + world.pushVel(a).z,
       yaw: a.yaw, alive: a.alive ? 1 : 0, moving: world.isMoving(a) ? 1 : 0, slide: a.slide,

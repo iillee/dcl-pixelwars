@@ -67,19 +67,23 @@ export type Events = {
     finalTotal: number
   }
 
+  // Round clock (join + periodic resync). format is the live round; inactive clocks do not open the splash.
+  'round:clock': { idx: number; active: boolean; format: 'pvp' | 'pvb' }
+
   // After summary wait: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
   'round:reset': {
     seed: number
     finalRed: number
     finalBlue: number
     finalTotal: number
+    format: 'pvp' | 'pvb'
   }
 
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
   // Subscriber: client/botVisual renders one box per entry.
   'bots:positions': {
-    bots: Array<{ id: number; team: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number }>
+    bots: Array<{ id: number; team: number; x: number; y: number; z: number; st: number; vx: number; vy: number; vz: number; an: number }>
     /** Server bot-simulation clock (s) for these positions. */
     t: number
   }

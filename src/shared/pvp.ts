@@ -12,6 +12,38 @@
  * knockback reuses flagtag's tuned bomb values. Tune in a two-player playtest.
  */
 
+// ═══ Playtest round format (temporary) ══════════════════════════════
+// One switch. FORMAT_ALTERNATE false → every round is PvP (normal Pixelwars).
+// true → startNextRound flips pvp/pvb after each round that continues from
+// the summary. A cold start or an idle start is always PvP.
+// PvB: every human on one colour (Red, then Blue, … across PvB rounds);
+// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)),
+// taken at round start. Mid-round the count may grow as humans join; it does
+// not shrink until the next round, unless no humans are left.
+export const FORMAT_ALTERNATE = true
+/** Bots per active human in a PvB round. 1 = one bot each. */
+export const PVB_RATIO = 1.0
+/** Hard cap on PvB bots (playtest: up to 15). */
+export const PVB_BOT_MAX = 15
+
+export type RoundFormat = 'pvp' | 'pvb'
+
+export function pvbBotCount(activeHumans: number): number {
+  if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
+  return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
+}
+
+/** Next round's format. `continuing` is false for a cold start and an idle start. */
+export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
+  return current === 'pvb' ? 'pvp' : 'pvb'
+}
+
+/** Human colour for PvB round `index` (0-based, PvB rounds only). Red, then Blue, then Red… */
+export function pvbHumanTeam(index: number): 1 | 2 {
+  return index % 2 === 0 ? 1 : 2
+}
+
 /**
  * 'on'        — every round.
  * 'off'       — disabled everywhere (no slot, server drops requests).
@@ -184,6 +216,10 @@ export const AIR_SPIKE_FORCE_S = 0.28
 export const AIR_SPIKE_GROUND_OUT = 85
 export const AIR_SPIKE_GROUND_LIFT = 16
 export const AIR_SPIKE_GLIDE_LOCK_S = 1.0
+/** Attacker aerial Burst: same glider shut as a spiked victim, held for the dive.
+ *  Long enough to fall from the top of the sky maze if the landing clear is missed.
+ *  The client clears it when the feet land. Ground Burst does not use this. */
+export const AIR_SPIKE_DIVE_GLIDE_LOCK_S = 4
 /**
  * Attacker recovery after a connect. One block so a playtest can tune the risk.
  * A miss does not use these: the full dive (impulse + downward force) keeps going,
@@ -245,6 +281,9 @@ export const SERVER_BURST_HIT_WINDOW_S = 1.0
  *  inside the server paint height band and below a real jump, so the press
  *  stays a ground Burst and the landing still resolves a centre. */
 export const BURST_STANCE_SLACK = 1.15
+/** Above this, the press is off the floor even if vertical speed is ~0 (the top of a jump).
+ *  A step, the 0.55 m surface offset, and a short hop stay under it. */
+export const BURST_AIR_LIFT_M = 2.2
 /** Client keeps resending a shockwave's paint until the server confirms a footprint. */
 export const BURST_PAINT_RETRY_S = 2.5
 export const BURST_PAINT_RETRY_GAP_S = 0.25
@@ -440,25 +479,88 @@ export const VICTIM_SPECULATIVE_KNOCK = true
 // ─── Ghost bot body (shared/botBody.ts, run by the server) ──────────
 /** Bots take the same knocks as players (shared/knocks.ts) through a server body sim. These convert
  *  Physics-API units to the body's m/s and set its gravity and ground friction. Tune them until the
- *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit. */
-export const BOT_KNOCK_UNIT = 0.15 // m/s per impulse unit (guess: lunge ≈ 12 m on flat floor; the anvil's 0.25 gave ≈ 49 m)
+ *  "[KnockTrace] bot ..." server lines match "[KnockTrace] human ..." victim lines for the same hit.
+ *  0.15 guessed a 12 m lunge. A human gets the raw impulse; the anvil stand-in for that impulse
+ *  (LUNGE_DUMMY_UNIT) is 0.25 and slides about 40 m. Same number here. Motion stays the body's
+ *  normal steps — no extra snap. */
+export const BOT_KNOCK_UNIT = 0.25 // m/s per impulse unit; matches LUNGE_DUMMY_UNIT
 export const BOT_GRAVITY = 20 // m/s²
 export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
 /** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */
 export const BOT_RECOVER_SPEED = 1.5
-/** Knocked out over the void, a bot tries to glide back like a player: chance per knock it tries
- *  (skill knob: 0 never, 1 always), reaction after its control lock (spike: after the glide lock),
- *  air steering, top glide speed, and the glider's capped fall speed. Guesses until playtested. */
-export const BOT_RECOVER_CHANCE = 0.5
-export const BOT_RECOVER_REACT_S = 0.35
-export const BOT_AIR_ACCEL = 14 // m/s²
-export const BOT_GLIDE_SPEED = 7 // m/s horizontal
-export const BOT_GLIDE_FALL = 3 // m/s
-/** The one air (double) jump it spends to start the recovery (m/s up; ≈ 1.2 m at BOT_GRAVITY). */
-export const BOT_AIR_JUMP_V = 7
+/**
+ * Human locomotion the scene does not override.
+ * client/speed.ts writes jog 8 and run 10 (the docs defaults). Jump, double jump, and glide
+ * stay at the explorer defaults (docs.decentraland.org locomotion): jump 1 m, run-jump 1.5 m,
+ * double jump 2 m, glide 6 m/s, glide fall 1 m/s. Walk is listed so the set stays complete.
+ * The body integrates at BOT_GRAVITY (20), not explorer gravity (~10), so a jump's vertical
+ * speed is solved to reach the same apex inside this integrator (botJumpSpeed). Glide speed
+ * and the fall cap are already m/s and are used as-is.
+ */
+export const HUMAN_WALK_SPEED = 1.5
+export const HUMAN_JOG_SPEED = 8
+export const HUMAN_RUN_SPEED = 10
+export const HUMAN_JUMP_HEIGHT = 1
+export const HUMAN_RUN_JUMP_HEIGHT = 1.5
+export const HUMAN_DOUBLE_JUMP_HEIGHT = 2
+export const HUMAN_GLIDE_SPEED = 6
+export const HUMAN_GLIDE_FALL = 1
+
+/** Upward speed (m/s) whose apex under BOT_GRAVITY equals `heightM`. */
+export function botJumpSpeed(heightM: number): number {
+  return Math.sqrt(Math.max(0, 2 * BOT_GRAVITY * heightM))
+}
+
+/**
+ * Edge recovery after a knock. Off: the bot keeps the knock and just falls,
+ * then fallTriggerY (the swell, or y 112.47) starts the same cloud rescue a
+ * human gets. No jump, double jump, glide, steer-home, or glide dash.
+ * The attempt code below stays for when this comes back on.
+ */
+export const BOT_RECOVERY_ENABLED = false
+/**
+ * Recovery after a knock, when BOT_RECOVERY_ENABLED. The bot always attempts
+ * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
+ * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
+ * jump or aim wide. Steering accelerates toward the human glide speed instead
+ * of clamping the knock velocity away, so a hard hit still carries them past
+ * the floor. Tune only these.
+ */
+/** 0 = never attempts, 1 = always attempts. Execution error is the other knobs. */
+export const BOT_RECOVER_CHANCE = 1
+/** Per-bot reaction after control returns (the knock lock, or a spike's glide lock). Seconds. */
+export const BOT_RECOVER_REACT_MIN_S = 0.15
+export const BOT_RECOVER_REACT_MAX_S = 0.45
+/** Chance this knock skips the double jump even when the first jump comes up short. */
+export const BOT_RECOVER_SKIP_DOUBLE_CHANCE = 0.34
+/** Chance this knock aims beside the floor it wanted. */
+export const BOT_RECOVER_MISJUDGE_CHANCE = 0.30
+/** Sideways miss when they misjudge (m). */
+export const BOT_RECOVER_MISJUDGE_M = 3.5
+/**
+ * Air steering (m/s²) toward a glide of HUMAN_GLIDE_SPEED. The human glider also clamps
+ * horizontal speed to that number, which would erase a knock; this accel does not.
+ */
+export const BOT_RECOVER_STEER_ACCEL = 4.5
+/** How fast a glide's heading can swing toward the floor (rad/s). ~180°/s, an arc not a snap. */
+export const BOT_GLIDE_TURN = 3.2
+/** Below this horizontal speed a grounded bot is not "heading off" (m/s). */
+export const BOT_RECOVER_EDGE_SPEED = 2.5
+/** At or above this horizontal speed the first jump is the run jump; below it, the standing jump. */
+export const BOT_RECOVER_RUN_JUMP_AT = 4
+/** Give up once this far below the floor they were aiming at (m). */
+export const BOT_RECOVER_GIVE_UP_M = 2.2
+/** Stop steering after this long in the glide and just fall (s). */
+export const BOT_RECOVER_MAX_S = 3.5
+/** Ignore floors farther than this when picking a landing (m). */
+export const BOT_RECOVER_MAX_SEEK_M = 36
 /** Ground hop: up a low ledge, or the jump that starts a spike (m/s). Apex ≈ 1.6 m at BOT_GRAVITY — a player hop, not a whole level. */
 export const BOT_JUMP_V = 8
 /** Horizontal cap when the bot leaps off a ledge (player run, m/s). */
+/** Planned platform hops. Off: a leap's airborne wire state (st=1) makes the
+ *  74cc09b client draw from its snapshot buffer, and the explorer's grounded
+ *  avatar stays on the ramp while that transform flies. Routes walk around. */
+export const BOT_LEAP_ROUTES = false
 export const BOT_LEAP_SPEED = 10
 /** Path cost of a drop or jump, in walk-steps. Beats a ramp detour; loses to a short walk. */
 export const BOT_LEAP_COST = 5
@@ -476,9 +578,22 @@ export const BOT_AIM_REPORT_HZ = 5
 export const BOT_AIM_STALE_S = 1.0
 /** The bot decides how often (s). Each decision is one roll per ability, so chance × rate = aggression. */
 export const BOT_THINK_S = 0.25
-/** Chase a human this close (m, horizontal) and within BOT_SAME_LEVEL_DY. */
+/** Chase a human this close (m, horizontal) and within BOT_SAME_LEVEL_DY. Bots roll their own inside the band below. */
 export const BOT_ENGAGE_RANGE = 14
 export const BOT_SAME_LEVEL_DY = 1.5
+/** Seeded pace: each bot's step rate is multiplied by 1 ± this. */
+export const BOT_SPEED_SPREAD = 0.10
+/** How often a bot drops its path and picks again, before the per-bot jitter. */
+export const BOT_RETARGET_S = 5.5
+/** Retarget interval is multiplied by 1 ± this. */
+export const BOT_RETARGET_SPREAD = 0.35
+/** Preferred engagement distance is rolled inside this band (m). */
+export const BOT_ENGAGE_MIN_M = 8
+export const BOT_ENGAGE_MAX_M = 18
+/** Keep walking bots about this far apart (m). 3.5 sits in the 3–4 m band. */
+export const BOT_SEPARATE_M = 3.5
+/** Hard cap on how far separation may pull a bot off its path point (m). Two bots can sit ~3.6 m apart. */
+export const BOT_SEPARATE_MAX_M = 1.8
 /** Lunge when the target is this close (m): the dash covers LUNGE_DISTANCE 9.2 m, so well inside it. */
 export const BOT_LUNGE_RANGE = 5.5
 export const BOT_LUNGE_CHANCE = 0.35

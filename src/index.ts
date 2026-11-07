@@ -26,6 +26,7 @@ import { isServer } from '@dcl/sdk/network'
 // Same pattern as flagtag/src/index.ts.
 import './shared/messages'
 import './shared/components'
+import './shared/environmentFog'
 
 export async function main() {
   if (isServer()) {
