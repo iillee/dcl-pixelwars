@@ -36,8 +36,11 @@ export const LOBBY_VOTE_MS = 15_000
 export const LOBBY_FIRST_VOTE_MS = 5_000
 /** Standing still this long drops the vote. */
 export const LOBBY_AFK_MS = 60_000
-/** A position sample older than this is not a vote. */
-export const LOBBY_SAMPLE_MS = 1_500
+/** A position sample older than this is not a vote.
+ *  1.5 s was short enough that a stored sample (feet still 1) was already
+ *  stale at the next scoring tick, so the tally stayed 0 and the phase
+ *  stayed idle. Hold for the same window as presence. */
+export const LOBBY_SAMPLE_MS = 15_000
 /** Metres of movement that refresh the AFK timer. */
 export const LOBBY_MOVE_M = 0.75
 

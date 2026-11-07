@@ -144,7 +144,7 @@ export async function setupClient(): Promise<void> {
   // Cross exists before the first frame the player can fall. The server
   // also starts in the lobby and sends roundReset; this is the local floor
   // so join does not wait on that message. A match clock replaces it.
-  rebuildMaze(1, 'lobby')
+  rebuildMaze(1, 'lobby', 'boot')
   setHoldMazeSeed(true)
   setupTouchControls()
 

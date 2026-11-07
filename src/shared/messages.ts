@@ -98,6 +98,9 @@ export const Messages = {
     // Who the server is scoring, and how many feet samples it has stored.
     present: Schemas.Int,
     feet: Schemas.Int,
+    // Server's own reading of the stored sample, and why it did or didn't count.
+    srvZone: Schemas.String,
+    why: Schemas.String,
   }),
 
   // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.

@@ -68,8 +68,13 @@ export function isLobbyLayout(): boolean {
 }
 
 // ─── Rebuild entry point ────────────────────────────────────────────
-export function rebuildMaze(seed: number, layout: MazeLayout = 'arena'): void {
+export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'call'): void {
   const nextLobby = layout === 'lobby'
+  if (nextLobby && layoutKind === 'lobby' && spawnQueue.length === 0 && gridSize() === 5) {
+    console.log(`[Lobby] rebuild skipped (${why}) — cross already up`)
+    return
+  }
+  console.log(`[Lobby] rebuild ${layout} (${why})`)
   // A layout change drops latched bases. Lobby tiles themselves never latch,
   // so the next arena can place its own bases instead of keeping the cross.
   const dropLatched = nextLobby || layoutKind === 'lobby'
@@ -144,7 +149,7 @@ export function ensureMazeSeed(seed: number): void {
   if (holdSeed || layoutKind === 'lobby') return
   if (seed === 0 || seed === requestedSeed) return
   requestedSeed = seed
-  rebuildMaze(seed, 'arena')
+  rebuildMaze(seed, 'arena', 'seed')
 }
 
 /** True once a maze has been generated and its reveal cascade has finished. */
@@ -170,14 +175,14 @@ export function initMazeNet(): void {
   events.on('round:reset', ({ seed, layout }) => {
     if (layout === 'lobby') {
       // Do not write SeedHolder. The arena seed stays put, and ensureMazeSeed ignores it.
-      rebuildMaze(seed, 'lobby')
+      rebuildMaze(seed, 'lobby', 'roundReset')
       return
     }
     // Arena seed goes through the watcher so a late joiner on the CRDT takes the same path.
     // requestedSeed is set inside rebuildMaze only for the lobby; the watcher still owns the arena.
     if (layoutKind === 'lobby') {
       // Leaving the lobby: build now. The watcher would no-op while layoutKind is still lobby.
-      rebuildMaze(seed, 'arena')
+      rebuildMaze(seed, 'arena', 'roundReset')
     }
     SeedHolder.createOrReplace(seedHolder, { seed })
   })

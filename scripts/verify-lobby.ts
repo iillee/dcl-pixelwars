@@ -2,7 +2,7 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, noteLobbyPos, tallyVotes } from '../src/server/lobbyVote'
+import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
@@ -105,11 +105,55 @@ for (const m of LOBBY_MODES.filter(x => x.live)) {
     console.error(`✗ server tally missed scene-local ${m.id}`)
     process.exit(1)
   }
-  const ignored = tallyVotes([], now)
-  if (ignored.counts[m.id] !== 0) {
-    console.error(`✗ an empty present list must not score ${m.id}`)
+  // The sample itself is the vote. An empty present list must not hide it.
+  const fromSample = tallyVotes([], now)
+  if (fromSample.counts[m.id] !== 1) {
+    console.error(`✗ a stored ${m.id} sample was dropped with nobody in presentIds`)
     process.exit(1)
   }
+}
+clearLobbyVotes()
+
+// Luke @15f09ef, standing on the west end. Client zone was pvp, server tally stayed 0.
+const lukeAt = 1_700_000_000_000
+if (voteModeAt(2372, 2398, MAZE_ORIGIN, CELL) !== 'pvp') {
+  console.error('✗ 2372,2398 must be the west PvP end')
+  process.exit(1)
+}
+if (!noteLobbyPos('0xAbC', 2372, 190, 2398, lukeAt)) {
+  console.error('✗ server rejected Luke\'s west-end sample')
+  process.exit(1)
+}
+const aged = lukeAt + 2_000 // past the old 1.5 s freshness window
+const mismatch = tallyVotes(['0xabc'], aged)
+if (mismatch.counts.pvp !== 1) {
+  console.error(`✗ west-end sample 2s old under a different id case scored pvp ${mismatch.counts.pvp}`)
+  process.exit(1)
+}
+const verdict = lobbyVerdict(['0xabc'], aged)
+if (verdict.zone !== 'pvp' || verdict.why !== 'ok') {
+  console.error(`✗ verdict zone=${verdict.zone} why=${verdict.why}, want pvp / ok`)
+  process.exit(1)
+}
+const split = lobbyVerdict(['peer-1'], aged)
+if (split.counts.pvp !== 1 || split.why !== 'ok-id') {
+  console.error(`✗ sample under a different id was dropped (pvp ${split.counts.pvp} why ${split.why})`)
+  process.exit(1)
+}
+const clock = { wantFull: false, countdownEnds: 0, shortCountdown: false, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
+const step = stepLobby(clock, ['0xabc'], aged)
+if (step.log !== 'start-5s' || step.next.countdownEnds !== aged + 5_000) {
+  console.error(`✗ idle phase with this sample did not start the 5s countdown (${step.log})`)
+  process.exit(1)
+}
+// Still standing on the same tile a minute later. That is a vote, not AFK.
+if (!noteLobbyPos('0xAbC', 2372, 190, 2398, lukeAt + 61_000)) {
+  console.error('✗ standing still on the end tile was rate-limited')
+  process.exit(1)
+}
+if (tallyVotes(['0xabc'], lukeAt + 61_000).counts.pvp !== 1) {
+  console.error('✗ standing still on the west end dropped the vote')
+  process.exit(1)
 }
 clearLobbyVotes()
 
@@ -119,7 +163,7 @@ if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
   process.exit(1)
 }
 const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-if (!indexSrc.includes("rebuildMaze(1, 'lobby')") || !indexSrc.includes('not rolling a local arena seed')) {
+if (!indexSrc.includes("rebuildMaze(1, 'lobby', 'boot')") || !indexSrc.includes('not rolling a local arena seed')) {
   console.error('✗ client boot should lay the lobby and not roll an arena seed over it')
   process.exit(1)
 }

@@ -15,6 +15,8 @@ let winner = ''
 let serverPresent = 0
 let serverFeet = 0
 let clocks = 0
+let serverZone = 'none'
+let serverWhy = 'no-clock'
 
 export function gamePhase(): LobbyPhase {
   return phase
@@ -54,13 +56,15 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
 }
 
 /** present = players the server is scoring. feet = stored lobby samples. */
-export function setServerLobbyCounts(present: number, feet: number): void {
+export function setServerLobbyCounts(present: number, feet: number, zone: string, why: string): void {
   serverPresent = present
   serverFeet = feet
+  serverZone = zone
+  serverWhy = why
 }
 
-export function serverLobbyCounts(): { present: number; feet: number; clocks: number } {
-  return { present: serverPresent, feet: serverFeet, clocks }
+export function serverLobbyCounts(): { present: number; feet: number; clocks: number; zone: string; why: string } {
+  return { present: serverPresent, feet: serverFeet, clocks, zone: serverZone, why: serverWhy }
 }
 
 export function voteWinner(): string {
