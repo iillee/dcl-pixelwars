@@ -133,8 +133,9 @@ if (WATER.swellNearM * Math.SQRT2 > HAZE_RING_M + 1 || WATER.swellFarM > HAZE_RI
   process.exit(1)
 }
 const hazeR = horizonRadiusM(SCENE_SIZE)
-if (hazeR !== HAZE_RING_M) {
-  console.error(`✗ this scene should use the ${HAZE_RING_M} m haze, got ${hazeR}`)
+const hazeCap = Math.max(16, SCENE_SIZE / 2 - 8)
+if (hazeR !== Math.min(HAZE_RING_M, hazeCap)) {
+  console.error(`✗ haze radius ${hazeR} m is not the 460 m ring clamped inside this scene`)
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
