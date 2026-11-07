@@ -55,7 +55,7 @@ export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 export const MEDIUM_PARCELS = 64
 export const LARGE_PARCELS = 100
 export const WIDE_PARCELS = 150
-export const WORLD_SIZE = 'small' as 'small' | 'medium' | 'large' | 'wide' | 'full'
+export const WORLD_SIZE = 'full' as 'small' | 'medium' | 'large' | 'wide' | 'full'
 export const SKY_PARCELS =
   WORLD_SIZE === 'full' ? 300
     : WORLD_SIZE === 'wide' ? WIDE_PARCELS
