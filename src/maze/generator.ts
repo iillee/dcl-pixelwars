@@ -19,6 +19,7 @@ import {
   GROWTH_PRIMARY, GROWTH_FALLBACK,
   openingsAt, highDirAt,
 } from './tiles'
+import { LOBBY_CROSS, LOBBY_MODES } from '../shared/lobby'
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
@@ -97,6 +98,30 @@ export function gridSize(): number {
 /** BFS-order iteration — seeds first, then neighbors, ideal for reveal cascade. */
 export function getPlacedTilesInOrder(): Placed[] {
   return [...grid.values()].sort((a, b) => a.order - b.order)
+}
+
+/**
+ * Fixed lobby: center cross, one straight off each side, an end tile at the
+ * far cell. End openings face back toward the cross so validate() passes.
+ * The cross is placed first. Not a generated maze.
+ */
+export function placeLobbyLayout(): Placed[] {
+  if (GRID_W !== 5 || GRID_H !== 5) throw new Error('lobby layout is the 5×5 cross')
+  resetGrid()
+  const y = BASE_Y
+  const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
+  place('cross', 0, LOBBY_CROSS.x, LOBBY_CROSS.z)
+  // Straights sit between the cross and the end. Rotation matches the axis.
+  place('straight', 0, 2, 3) // north, opens N/S
+  place('straight', 0, 2, 1) // south
+  place('straight', 1, 3, 2) // east, opens E/W
+  place('straight', 1, 1, 2) // west
+  for (const m of LOBBY_MODES) {
+    // West end opens east, east opens west, north opens south, south opens north.
+    const r = m.cell.x === 0 ? 1 : m.cell.x === 4 ? 3 : m.cell.z === 4 ? 2 : 0
+    place('end', r, m.cell.x, m.cell.z)
+  }
+  return getPlacedTilesInOrder()
 }
 
 /**
