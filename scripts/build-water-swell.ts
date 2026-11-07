@@ -13,7 +13,7 @@
 import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
-import { HAZE_RING_M, LOOK, SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
+import { LOOK, SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
 import { SWELL_NORM, SWELL_NORM_48, SWELL_PARTS, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
 
 let CLIP = WATER.swellClipS
@@ -772,16 +772,15 @@ const one = () => 1
 function makeSwells() {
   TARGETS = TRAINS.length * 2
   const near = squareGrid(WATER.swellNearM, WATER.swellNearStepM, one, 'SwellNear')
-  const diskOuter = HAZE_RING_M - 8
-  const mid = diskRing(
-    WATER.swellNearM,
-    diskOuter,
-    64,
-    48,
-    (x, z) => envelope(x, z, WATER.swellMidM, diskOuter),
-    'SwellMid',
+  const mid = frameGrid(WATER.swellNearM, WATER.swellMidM, WATER.swellNearStepM, WATER.swellMidStepM, one, 'SwellMid')
+  const far = frameGrid(
+    WATER.swellMidM,
+    WATER.swellFarM,
+    WATER.swellMidStepM,
+    WATER.swellFarStepM,
+    (x, z) => envelope(x, z, WATER.swellMidM, WATER.swellFarM),
+    'SwellFar',
   )
-  const far = mid
   const lite = squareGrid(
     WATER.swellNearM,
     WATER.swellMobileStepM,
@@ -790,7 +789,7 @@ function makeSwells() {
   )
   const join = edgeDelta(near, WATER.swellNearM, 0, 0)
   const joinMid = edgeDelta(mid, WATER.swellNearM, 0, 0)
-  const farOuter = edgeDelta(far, diskOuter, 0, 0)
+  const farOuter = edgeDelta(far, WATER.swellFarM, 0, 0)
   const farInner = edgeDelta(far, WATER.swellMidM, 0, 0)
   const midOuter = edgeDelta(mid, WATER.swellMidM, 0, 0)
   if (join === null || joinMid === null || Math.abs(join - joinMid) > 1e-4) {
@@ -837,8 +836,8 @@ emit(swells48.near, WATER.swell48NearSrc)
 emit(swells48.mid, WATER.swell48MidSrc)
 emit(swells48.far, WATER.swell48FarSrc)
 emit(swells48.lite, WATER.swell48LiteSrc)
-const flat = flatRing(WATER.swellNearM - FLAT_OVERLAP, WATER.swellMidM, 6, 'FlatSea')
-const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, WATER.swellMidM, 6, 'FlatLite')
+const flat = flatRing(WATER.swellFarM - FLAT_OVERLAP, SEA_HALF, 8, 'FlatSea')
+const flatLite = flatRing(WATER.swellNearM - FLAT_OVERLAP, SEA_HALF, 40, 'FlatLite')
 const haze = hazeRing()
 emit(flat, WATER.flatSrc)
 emit(flatLite, WATER.flatLiteSrc)
