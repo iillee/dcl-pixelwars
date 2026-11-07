@@ -163,8 +163,8 @@ if (scene.landscapeTerrain !== false) {
   console.error('✗ landscapeTerrain must be false — the default surround brings trees back with the sea')
   process.exit(1)
 }
-if (!LOOK.sea || !LOOK.seaLast) {
-  console.error('✗ LOOK.sea and LOOK.seaLast should start on so the sea waits for the round')
+if (LOOK.sea || !LOOK.seaLast) {
+  console.error('✗ LOOK.sea should be off for the lag A/B, and seaLast stays on for when it is turned back on')
   process.exit(1)
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {

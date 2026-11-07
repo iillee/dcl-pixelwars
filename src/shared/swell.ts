@@ -5,7 +5,7 @@
  */
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, resolvedWaterY } from './waterLook'
+import { LOOK, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, resolvedWaterY } from './waterLook'
 
 export type SwellPart = {
   k: number
@@ -124,6 +124,10 @@ export function swellSurfaceY(x: number, z: number, cycleSeconds: number = swell
  * Falling through the fixed rescue line or through the crest, whichever
  * is higher. A crest above y 112 still counts as a fall.
  */
-export function fallTriggerY(x: number, z: number, cycleSeconds: number = swellCycleSeconds()): number {
-  return Math.max(MIN_Y - FALL_RESPAWN_DROP, swellSurfaceY(x, z, cycleSeconds))
+const FLAT_FALL_Y = MIN_Y - FALL_RESPAWN_DROP
+
+export function fallTriggerY(x: number, z: number, cycleSeconds?: number): number {
+  // Sea off: the pre-water rescue line. No sine, no clock read.
+  if (!LOOK.sea) return FLAT_FALL_Y
+  return Math.max(FLAT_FALL_Y, swellSurfaceY(x, z, cycleSeconds ?? swellCycleSeconds()))
 }
