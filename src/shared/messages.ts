@@ -85,7 +85,17 @@ export const Messages = {
   // Server → Client: the server-owned round (round-on-join). Broadcast on start / boundary / idle, and sent to
   // each joiner (joinRoster, requestSnapshot). remainingMs is relative so client clock skew doesn't matter.
   // format: 'pvp' | 'pvb' (playtest alternation, shared/pvp.ts FORMAT_ALTERNATE). Late joiners read it here.
-  roundClock: Schemas.Map({ idx: Schemas.Int, remainingMs: Schemas.Int, active: Schemas.Boolean, format: Schemas.String }),
+  roundClock: Schemas.Map({
+    idx: Schemas.Int,
+    remainingMs: Schemas.Int,
+    active: Schemas.Boolean,
+    format: Schemas.String,
+    // match | summary | lobby | idle. voteMs is the countdown still left (0 when idle).
+    phase: Schemas.String,
+    voteMs: Schemas.Int,
+    winner: Schemas.String,
+    votes: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })),
+  }),
 
   // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.
   roundEnded: Schemas.Map({
@@ -101,7 +111,13 @@ export const Messages = {
     finalBlue: Schemas.Int,
     finalTotal: Schemas.Int,
     format: Schemas.String,
+    // 'arena' grows the match maze. 'lobby' grows the voting cross in its place.
+    layout: Schemas.String,
   }),
+  // Client → Server, ~2 Hz, only while the phase is lobby or idle. Feet, not a zone id.
+  lobbyPos: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Client → Server, once the center cross is full size and the player has been moved onto it.
+  lobbyReady: Schemas.Map({}),
 
   // Client → Server: send this player's display name once on join so
   // the leaderboard shows human-readable names instead of wallet hashes.

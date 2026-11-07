@@ -17,7 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation } from './bots/manager'
+import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation, sleepBots } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -40,13 +40,15 @@ import {
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
-  nextRoundFormat, pvbBotCount, pvbHumanTeam,
+  pvbBotCount, pvbHumanTeam,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHitsBot, burstBotInRange, burstDir } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
-import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush } from './anvils'
+import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
+import { LOBBY_FIRST_VOTE_MS, LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
+import { clearLobbyVotes, everyoneInZone, forgetLobbyPlayer, noteLobbyPos, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 import { SKY_TOP_Y } from '../maze/level'
@@ -227,11 +229,21 @@ export async function setupServer(): Promise<void> {
 
   /** Round-on-join state → one client (to) or everyone. `format` lets a late joiner show the splash. */
   function sendRoundClock(to?: string): void {
+    const voteMs = countdownEnds > Date.now() ? Math.max(0, countdownEnds - Date.now()) : 0
+    const phase = isRoundActive() ? 'match'
+      : intermission === 'summaryWait' ? 'summary'
+      : intermission === 'lobby' ? (voteMs > 0 || wantFull ? 'lobby' : 'idle')
+      : 'idle'
+    const { counts } = tallyVotes(presentIds(), Date.now())
     const msg = {
       idx: currentRoundIndex(),
       remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())),
       active: isRoundActive(),
       format: roundFormat,
+      phase,
+      voteMs,
+      winner: '',
+      votes: (['pvp', 'pvb', 'garden', 'pots'] as const).map(id => ({ id, n: counts[id] })),
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }
@@ -240,26 +252,98 @@ export async function setupServer(): Promise<void> {
   // the roster's connected set, which any straggler message re-adds via markActive() after onLeaveScene.
   const PRESENCE_TIMEOUT_MS = 15000
   const lastPingAt = new Map<string, number>()
-  const presentCount = (): number => {
-    const now = Date.now(); let n = 0
-    for (const [uid, t] of lastPingAt) { if (now - t <= PRESENCE_TIMEOUT_MS) n++; else lastPingAt.delete(uid) }
-    return n
+  const presentCount = (): number => presentIds().length
+  const presentIds = (): string[] => {
+    const now = Date.now()
+    const ids: string[] = []
+    for (const [uid, t] of lastPingAt) {
+      if (now - t <= PRESENCE_TIMEOUT_MS) ids.push(uid)
+      else lastPingAt.delete(uid)
+    }
+    return ids
   }
 
-  // ─── Intermission (Pixelwars-only) ──────────────────────────────────
-  // After a round ends: summaryWait → roundReset / next round.
-  // Cold start / idle join: start a round immediately (no mode pick).
-  type IntermissionPhase = 'idle' | 'summaryWait'
+  // ─── Intermission ───────────────────────────────────────────────────
+  // summaryWait holds the arena for the result. lobby is the voting cross.
+  // A match starts only when a vote picks a mode.
+  type IntermissionPhase = 'idle' | 'summaryWait' | 'lobby'
   let intermission: IntermissionPhase = 'idle'
   let summaryEndsAt = 0
-  // Scores held from round end until roundReset (after summary).
+  // Scores held from round end until the arena regen (after the vote).
   let pendingFinal = { red: 0, blue: 0, total: 0 }
   let pendingNextIdx = 0
+  let lobbyOpen = false
+  /** After a summary, wait until the cross is walkable, then run the 15 s vote. */
+  let wantFull = false
+  let readyAt = 0
+  let countdownEnds = 0
+  /** The 5 s countdown (first vote while idle). It does not end early. */
+  let shortCountdown = false
+  let hadVotes = false
 
-  /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. Between-rounds and cold-start. */
-  function startNextRound(): void {
-    const continuing = intermission === 'summaryWait'
-    roundFormat = nextRoundFormat(roundFormat, continuing)
+  function sendLobbyLayout(to?: string): void {
+    const msg = {
+      seed: currentRoundIndex(),
+      finalRed: pendingFinal.red, finalBlue: pendingFinal.blue, finalTotal: pendingFinal.total,
+      format: roundFormat,
+      layout: 'lobby',
+    }
+    if (to) room.send('roundReset', msg, { to: [to] })
+    else room.send('roundReset', msg)
+  }
+
+  /** Swap the arena for the voting cross. Does not start a match or touch bots' graph. */
+  function openLobby(fromSummary: boolean): void {
+    intermission = 'lobby'
+    wantFull = fromSummary
+    readyAt = Date.now()
+    countdownEnds = 0
+    shortCountdown = false
+    hadVotes = false
+    setRoundState(currentRoundIndex(), Date.now(), false)
+    sleepBots()
+    anvilsAwake(false)
+    if (!lobbyOpen) {
+      lobbyOpen = true
+      clearLobbyVotes()
+      sendLobbyLayout()
+      console.log(`[Lobby] open ${fromSummary ? '15s after the cross is walkable' : 'idle until a vote'}`)
+    }
+    sendRoundClock()
+  }
+
+  /** Paint, hits, and knockback. Lobby abilities still broadcast their own movement and VFX. */
+  function matchLive(): boolean { return isRoundActive() }
+  function vfxLive(): boolean { return isRoundActive() || intermission === 'lobby' }
+
+  function closeCountdown(): void {
+    countdownEnds = 0
+    shortCountdown = false
+    hadVotes = false
+    wantFull = false
+    sendRoundClock()
+  }
+
+  function resolveVote(): void {
+    const now = Date.now()
+    const { counts } = tallyVotes(presentIds(), now)
+    const winner = pickWinner(counts, roundFormat)
+    countdownEnds = 0
+    shortCountdown = false
+    hadVotes = false
+    wantFull = false
+    if (!winner) {
+      console.log('[Lobby] no votes → idle')
+      sendRoundClock()
+      return
+    }
+    console.log(`[Lobby] winner ${winner} pvp=${counts.pvp} pvb=${counts.pvb}`)
+    startNextRound(winner)
+  }
+
+  /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
+  function startNextRound(mode: ModeId): void {
+    roundFormat = mode === 'pvb' ? 'pvb' : 'pvp'
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
     const c = pendingFinal
     const pruned = pruneForNewRound()
@@ -285,7 +369,9 @@ export async function setupServer(): Promise<void> {
       plannedBots = counts.red + counts.blue === 0 || counts.red === counts.blue ? 0 : Math.abs(counts.red - counts.blue)
       console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
     }
-    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat })
+    lobbyOpen = false
+    anvilsAwake(true)
+    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena' })
     clearPaintState()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
@@ -300,28 +386,34 @@ export async function setupServer(): Promise<void> {
     sendRoundClock()
   }
 
-  /** Idle server + someone present: start a round immediately. */
-  function ensureRoundStarted(by: string): void {
-    if (isRoundActive()) return
-    if (intermission === 'summaryWait') return
-    pendingNextIdx = currentRoundIndex()
-    pendingFinal = { red: 0, blue: 0, total: 0 }
-    console.log(`[Server] idle join by ${by.slice(0, 10)} → starting round`)
-    startNextRound()
-  }
-
   room.onMessage('presencePing', (_d, context) => {
     const from = context?.from
     if (!from) return
     lastPingAt.set(from, Date.now())
-    // Ping keeps the round alive. It does not refresh the 60s idle window:
-    // a connected human with no paint (or fight) for 60s is AFK, and a bot fills for them.
-    if (getTeam(from) !== null && !isRoundActive() && intermission === 'idle') ensureRoundStarted(from)
+    // A ping only proves someone is here. It does not start a match, and it
+    // does not refresh the 60s play window that bots use to fill a side.
+  })
+
+  room.onMessage('lobbyPos', ({ x, y, z }, context) => {
+    const from = context?.from
+    if (!from || intermission !== 'lobby') return
+    noteLobbyPos(from, x, y, z, Date.now())
+  })
+
+  room.onMessage('lobbyReady', (_d, context) => {
+    const from = context?.from
+    if (!from || intermission !== 'lobby' || !wantFull || countdownEnds !== 0) return
+    countdownEnds = Date.now() + LOBBY_VOTE_MS
+    shortCountdown = false
+    wantFull = false
+    console.log(`[Lobby] cross walkable (${from.slice(0, 8)}) → ${LOBBY_VOTE_MS / 1000}s`)
+    sendRoundClock()
   })
 
 
   onLeaveScene((userId: string) => {
     lastPingAt.delete(userId)
+    forgetLobbyPlayer(userId)
     markInactive(userId)
     // Clear snapshot cooldown so a fast rejoin gets a fresh snapshot
     // instead of being rate-limited into a blank map.
@@ -365,23 +457,20 @@ export async function setupServer(): Promise<void> {
     // them so the sides even out and the fill bots retire on the next tick. New
     // joiners already take the side with fewer active humans (humans only, not bots).
     // PvB skips this — assignTeam already put them on the human colour.
-    if (roundFormat === 'pvp') {
+    // Mid-match PvP only. A lobby join keeps the team they already have until the vote starts a round.
+    if (isRoundActive() && roundFormat === 'pvp') {
       const other = activeSoloHumanTeam(from)
       if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
     }
     markActive(from) // count them as present immediately; paint activity will refresh it
-    // Round-on-join: live round → join as-is. Idle → start immediately. Mid-summary → wait for next reset.
     lastPingAt.set(from, Date.now())
-    if (isRoundActive()) {
+    if (isRoundActive() || intermission === 'summaryWait') {
       sendRoundClock(from)
-    } else if (intermission === 'summaryWait') {
+    } else if (lobbyOpen) {
+      sendLobbyLayout(from)
       sendRoundClock(from)
     } else {
-      // startNextRound() reshuffles roster teams. Re-read after so we never
-      // echo the pre-shuffle assignTeam value (that desync made the client
-      // teleport to the wrong base - stacking on the opposite-team ghost -
-      // and optimistic local paint used the other colour vs server applyPaint).
-      ensureRoundStarted(from)
+      openLobby(false)
       sendRoundClock(from)
     }
     team = getTeam(from) ?? team
@@ -410,7 +499,7 @@ export async function setupServer(): Promise<void> {
   room.onMessage('paintTick', ({ ids }, context) => {
     const from = context?.from
     if (!from) return
-    if (!isRoundActive()) { logDrop(from, 'paintTick', 'round inactive (intermission/idle)'); return }
+    if (!matchLive()) { logDrop(from, 'paintTick', 'round inactive (intermission/idle)'); return }
     const team = getTeam(from)
     if (team === null) { logDrop(from, 'paintTick', 'no team (not in roster)'); return }  // pre-roster paint
     if (ids.length > MAX_IDS_PER_TICK) {
@@ -546,7 +635,7 @@ export async function setupServer(): Promise<void> {
   // distance can't be validated (anti-cheat deferred, see design doc).
   room.onMessage('dashHit', ({ target, dx, dz }, context) => {
     const from = context?.from
-    if (!from) return
+    if (!from || !matchLive()) return
     if (!dashEnabledForRound(currentRoundIndex())) return
     const attackerTeam = getTeam(from)
     const want = target.toLowerCase()
@@ -583,7 +672,7 @@ export async function setupServer(): Promise<void> {
   // SERVER_LUNGE_HIT_WINDOW_S of the accepted start.
   room.onMessage('lungeStart', ({ id, dx, dz, x, y, z }, context) => {
     const from = context?.from
-    if (!from || !lungeEnabledForRound(currentRoundIndex())) return
+    if (!from || !lungeEnabledForRound(currentRoundIndex()) || !vfxLive()) return
     if (getTeam(from) === null) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
@@ -591,13 +680,13 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] lungeStart ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
-    markActive(from)
+    if (matchLive()) markActive(from)
     room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z })
   })
 
   room.onMessage('lungeHit', ({ id, target, dx, dz, x, y, z }, context) => {
     const from = context?.from
-    if (!from || !lungeEnabledForRound(currentRoundIndex())) return
+    if (!from || !matchLive() || !lungeEnabledForRound(currentRoundIndex())) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
     const ux = dx / len, uz = dz / len
@@ -686,6 +775,21 @@ export async function setupServer(): Promise<void> {
     if (!from || !burstEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) { logDrop(from, 'burstUse', team === null ? 'no team' : 'bad position'); return }
+    if (!vfxLive()) return
+    if (!matchLive()) {
+      // Lobby: the shockwave plays for everyone. It does not paint or hit.
+      if (!bursts.matches(from, id)) {
+        const now = Date.now()
+        if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) return
+        lastBurstAt.set(from, now)
+        const airborne = air !== 0
+        bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
+        bursts.place(from, id, { x, y, z })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
+      }
+      sendPainted(from, id, 0, ct || 0, sin)
+      return
+    }
     const now = Date.now()
     // Same id is the shockwave retrying its paint. Cooldown must not drop it, and
     // it must not broadcast or punch a second time.
@@ -751,10 +855,18 @@ export async function setupServer(): Promise<void> {
     const sin = Date.now()
     const from = context?.from
     console.log(`[Server] burstLand recv #${id} ct=${ct || 0} sin=${sin} cell=${cell || '(none)'}`)
-    if (!from || !burstEnabledForRound(currentRoundIndex())) return
+    if (!from || !burstEnabledForRound(currentRoundIndex()) || !vfxLive()) return
     const team = getTeam(from)
     if (team === null || ![x, y, z].every(isFinite)) return
     const now = Date.now()
+    if (!matchLive()) {
+      if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
+        bursts.place(from, id, { x, y, z })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0 })
+      }
+      sendPainted(from, id, 0, ct || 0, sin)
+      return
+    }
     const why = bursts.landBlock(from, id, now, SERVER_BURST_LAND_WINDOW_S)
     if (why) {
       if (why === 'already-painted') {
@@ -792,7 +904,7 @@ export async function setupServer(): Promise<void> {
   room.onMessage('anvilHit', ({ kind, id, i, dx, dz, ct }, context) => {
     const sin = Date.now()
     const from = context?.from
-    if (!from || ![dx, dz].every(isFinite)) return
+    if (!from || !matchLive() || ![dx, dz].every(isFinite)) return
     const len = Math.hypot(dx, dz)
     if (len < 1e-3) return
     const book = kind === 1 ? bursts : lunges
@@ -807,7 +919,7 @@ export async function setupServer(): Promise<void> {
     noteAnvilTouch(i, from)
     anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
   })
-  room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from) { noteAnvilTouch(i, context.from); anvilsPush(context.from, i, dx, dz, x, z, run === 1) } })
+  room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from && matchLive()) { noteAnvilTouch(i, context.from); anvilsPush(context.from, i, dx, dz, x, z, run === 1) } })
   // Round stats (server/roundStats.ts): the victim's client reports an anvil launch and its own falls.
   room.onMessage('anvilLaunched', ({ i }, context) => {
     const from = context?.from
@@ -817,7 +929,7 @@ export async function setupServer(): Promise<void> {
   })
   room.onMessage('playerFell', (_m, context) => {
     const from = context?.from
-    if (!from || getTeam(from) === null) return
+    if (!from || !matchLive() || getTeam(from) === null) return
     const by = noteFell(from)
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
@@ -856,11 +968,11 @@ export async function setupServer(): Promise<void> {
     rescueStartAt.delete(who)
     room.send('rescueEnd', { who })
   })
-  room.onMessage('anvilRespawn', (_m, context) => { if (context?.from) anvilsRespawnRequest(context.from) })
+  room.onMessage('anvilRespawn', (_m, context) => { if (context?.from && matchLive()) anvilsRespawnRequest(context.from) })
 
   room.onMessage('burstHit', ({ id, target, dx, dz }, context) => {
     const from = context?.from
-    if (!from || !burstEnabledForRound(currentRoundIndex())) return
+    if (!from || !matchLive() || !burstEnabledForRound(currentRoundIndex())) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3) return
     const attackerTeam = getTeam(from)
@@ -906,7 +1018,7 @@ export async function setupServer(): Promise<void> {
   // via applyPaint) and the blast broadcast. Opponents knock themselves back.
   room.onMessage('bombDrop', ({ x, y, z }, context) => {
     const from = context?.from
-    if (!from) return
+    if (!from || !matchLive()) return
     if (!bombEnabledForRound(currentRoundIndex())) return
     const team = getTeam(from)
     if (team === null) return
@@ -1024,16 +1136,56 @@ export async function setupServer(): Promise<void> {
   let resyncClock = 0
   engine.addSystem((dt: number) => {
     resyncClock += dt
-    if (resyncClock < ROUND_CLOCK_RESYNC_S) return
+    const lobby = intermission === 'lobby'
+    if (resyncClock < (lobby ? 1 : ROUND_CLOCK_RESYNC_S)) return
     resyncClock = 0
-    if (isRoundActive()) sendRoundClock()
+    if (isRoundActive() || lobby) sendRoundClock()
   })
 
-  // Round end → summary (client) → SUMMARY_MS → roundReset / next round.
+  // Round end → summary → lobby regen → vote → arena regen.
   engine.addSystem(() => {
     const now = Date.now()
 
-    // ── Intermission: summary wait → start next round ──
+    if (intermission === 'lobby') {
+      const present = presentIds()
+      if (present.length === 0) {
+        if (countdownEnds !== 0 || wantFull) closeCountdown()
+        return
+      }
+      if (wantFull && countdownEnds === 0 && now - readyAt >= 2000) {
+        countdownEnds = now + LOBBY_VOTE_MS
+        wantFull = false
+        shortCountdown = false
+        console.log('[Lobby] cross not reported walkable in 2s → starting 15s')
+        sendRoundClock()
+      }
+      if (countdownEnds > 0) {
+        const { counts } = tallyVotes(present, now)
+        const any = counts.pvp + counts.pvb > 0
+        if (any) hadVotes = true
+        else if (hadVotes) {
+          console.log('[Lobby] votes left → idle')
+          closeCountdown()
+          return
+        }
+        const early = !shortCountdown && everyoneInZone(present, now)
+        if (early || now >= countdownEnds) {
+          if (early) console.log('[Lobby] everyone is in a live zone → closing the vote')
+          resolveVote()
+        }
+      } else if (!wantFull) {
+        const { counts } = tallyVotes(present, now)
+        if (counts.pvp + counts.pvb > 0) {
+          countdownEnds = now + LOBBY_FIRST_VOTE_MS
+          shortCountdown = true
+          hadVotes = true
+          console.log(`[Lobby] first vote → ${LOBBY_FIRST_VOTE_MS / 1000}s`)
+          sendRoundClock()
+        }
+      }
+      return
+    }
+
     if (intermission === 'summaryWait' && now >= summaryEndsAt) {
       if (presentCount() === 0) {
         intermission = 'idle'
@@ -1041,7 +1193,7 @@ export async function setupServer(): Promise<void> {
         sendRoundClock()
         return
       }
-      startNextRound()
+      openLobby(true)
       return
     }
 

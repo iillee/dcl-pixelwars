@@ -27,6 +27,8 @@ import { Team } from '../shared/team'
 import { baseSpawn } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
 import { cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
+import { isLobbyLayout } from '../maze/rebuild'
+import { lobbyStand } from './lobby'
 
 // Classic centre cross: cell (2,2), MAZE_ORIGIN=8, CELL=32 → centre (88, 88).
 const CLASSIC_SPAWN = { x: 88, y: 2, z: 88 }
@@ -41,7 +43,11 @@ function teleportHome(why: string): void {
   // movePlayerTo is async: don't treat the pre-teleport height as a new fall.
   holdFallLine()
   let pos = CLASSIC_SPAWN, look = CLASSIC_CAMERA_TARGET
-  if (IS_SKY) {
+  if (IS_SKY && (why === 'lobby' || isLobbyLayout())) {
+    const c = lobbyStand()
+    pos = c
+    look = { x: c.x, y: c.y, z: c.z + 8 }
+  } else if (IS_SKY) {
     const s = baseSpawn(myTeam === Team.Blue ? 2 : 1) // no team yet → RED base (scene.json default)
     pos = s.pos; look = s.look
   }
@@ -54,13 +60,17 @@ function teleportHome(why: string): void {
 }
 
 export function initPlayerNet(): void {
-  events.on('round:reset', () => teleportHome('round reset'))
+  events.on('round:reset', ({ layout }) => {
+    if (layout === 'lobby') return // lobby:floor teleports after the cross exists
+    teleportHome('round reset')
+  })
+  events.on('lobby:floor', () => teleportHome('lobby'))
 
   // Sky: team known → go to that team's base (once per assignment change).
   events.on('team:assigned', ({ team }) => {
     const changed = team !== myTeam
     myTeam = team
-    if (IS_SKY && changed) teleportHome('team assigned')
+    if (IS_SKY && changed && !isLobbyLayout()) teleportHome('team assigned')
   })
 
   // Initial spawn-in after ~2 s so the maze has grown in. In sky mode the

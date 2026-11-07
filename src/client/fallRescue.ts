@@ -71,7 +71,9 @@ import { getPlayer } from '@dcl/sdk/players'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { isMazeReady } from '../maze/rebuild'
-import { baseSpawn, MIN_Y } from '../maze/generator'
+import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn, MIN_Y } from '../maze/generator'
+import { isLobbyLayout } from '../maze/rebuild'
+import { lobbyFeet } from '../shared/lobby'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { fallTriggerY } from '../shared/swell'
 import { LOOK } from '../shared/waterLook'
@@ -410,6 +412,11 @@ function playLeg(index: number): void {
   playContinuous(pad, leg, index === carry.legs.length - 1)
 }
 
+function rescueHome(): Vec {
+  if (isLobbyLayout()) return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+  return baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+}
+
 function tripSeconds(): number {
   return FALL_RESCUE.GRAB_S + FALL_RESCUE.RISE_S + FALL_RESCUE.CRUISE_S + FALL_RESCUE.DESCEND_S
 }
@@ -420,7 +427,7 @@ function tripSeconds(): number {
  * played as one continuous tween, not as separate setMove calls.
  */
 function buildLegs(start: Vec): { legs: Leg[]; cruiseY: number; arriveY: number } {
-  const base = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  const base = rescueHome()
   const thick = FALL_RESCUE.PAD_THICK
   const cruiseY = SKY_TOP_Y + FALL_RESCUE.CRUISE_CLEAR - thick / 2
   const arriveY = base.y + FALL_RESCUE.ARRIVE_ABOVE - thick / 2
@@ -517,7 +524,7 @@ function spawnCarryDisguise(): void {
   clearCarryDisguise()
   const caught = playerPos()
   if (caught) hideAvatarAt(caught)
-  const home = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  const home = rescueHome()
   hideAvatarAt(home)
   if (!floater) return
   const e = engine.addEntity()
@@ -589,7 +596,7 @@ function startCameraRide(): void {
 
 /** Body goes to the base while the ride camera is already up. No cameraTarget. */
 function sendHomeUnderCamera(): void {
-  const s = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  const s = rescueHome()
   console.log(`[FallRescue] mobile teleport under camera → ${s.x.toFixed(0)},${s.y.toFixed(1)},${s.z.toFixed(0)}`)
   movePlayerTo({ newRelativePosition: s }).catch(err => {
     console.log('[FallRescue] mobile teleport failed', err)
@@ -684,7 +691,7 @@ function finish(how: FallRescueEnd, why: string): void {
 }
 
 function sendRescueStart(hold: Vec, mobile: boolean): void {
-  const home = baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  const home = rescueHome()
   try {
     room.send('rescueStart', {
       who: '',

@@ -28,6 +28,7 @@ import { getPlacedTilesInOrder } from '../maze/generator'
 import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
 import { room } from '../shared/messages'
 import { isKnockbackImmune, safePhysics } from './knockback'
+import { hitsOpen } from './phase'
 import { startKnockLock } from './lunge'
 import { playDashHitSfx } from './audio'
 
@@ -90,7 +91,7 @@ const ANVIL_LAUNCH_GRACE_S = 0.35
 const anvilHitAt = new Map<number, { t: number; slide: number }>()
 export function hitDummy(i: number, dx: number, dz: number, kind: 0 | 1, id: number): void {
   const d = dummies[i]
-  if (!d || !d.alive) return
+  if (!d || !d.alive || !hitsOpen()) return
   d.launchGraceS = ANVIL_LAUNCH_GRACE_S
   const ct = Date.now()
   console.log(`[Anvil] hit send i=${i} #${id} t=${ct}`)

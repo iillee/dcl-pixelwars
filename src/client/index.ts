@@ -45,6 +45,7 @@ import { CELL, STEP, lookupTile } from '../maze/generator'
 import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
 import { events } from '../shared/events'
 import { armSea } from './water'
+import { initLobby } from './lobby'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -132,6 +133,7 @@ export async function setupClient(): Promise<void> {
   initLunge()
   initLungeDummy()
   initPaintBurst()
+  initLobby()
   setupTouchControls()
 
   // Register the network boundary LAST so `room.onMessage` subscribers

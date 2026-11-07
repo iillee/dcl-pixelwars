@@ -3,8 +3,8 @@ import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
-import { isRoundActive } from "./shared/roundTiming"
-import { getCountdownSeconds, formatMMSS, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
+import { hudClockText, hudVoteLine } from "./client/lobby"
+import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
@@ -478,7 +478,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={isRoundActive() ? formatMMSS(secs) : '--:--'} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                  <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -504,7 +504,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
-                <Label value={isRoundActive() ? formatMMSS(secs) : '--:--'} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+                <Label value={hudClockText(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
                 {/* Star icon on the left, mirror of mute on the right (same size/top). */}
                 <UiEntity
                   uiTransform={{
@@ -537,6 +537,10 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             )}
+            {hudVoteLine() !== '' ? (
+              <Label value={hudVoteLine()} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap"
+                uiTransform={{ margin: { top: 4 }, height: 22 }} />
+            ) : null}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />

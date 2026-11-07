@@ -396,6 +396,12 @@ function balancePvb(fresh: boolean): void {
 let simClock = 0
 export function botSimTime(): number { return simClock }
 
+/** Drop every bot. The lobby does not run the match, so ghosts must leave before the next broadcast. */
+export function sleepBots(): void {
+  const counts = deps ? deps.activeHumans() : { red: 0, blue: 0 }
+  while (bots.length > 0) retireBot(bots[0], 'lobby', counts)
+}
+
 export function tickBots(dtSec: number): void {
   if (Number.isFinite(dtSec) && dtSec > 0) simClock += dtSec
   if (!graph || !deps) return

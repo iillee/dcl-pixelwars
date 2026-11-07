@@ -23,6 +23,7 @@ export {
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
 import { FORMAT_ALTERNATE, type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
+import { inLobby } from './client/phase'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -167,8 +168,9 @@ export function initRoundNet(): void {
     // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
     if (active) armFormatSplash(format, idx, false)
   })
-  events.on('round:reset', ({ seed, format }) => {
-    console.log(`[Client] roundReset seed=${seed} format=${format} (maze rebuild after summary)`)
+  events.on('round:reset', ({ seed, format, layout }) => {
+    console.log(`[Client] roundReset seed=${seed} format=${format} layout=${layout ?? 'arena'}`)
+    if (layout === 'lobby') return
     armFormatSplash(format, seed, true)
   })
 }
@@ -195,6 +197,7 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
+  if (inLobby()) return 'Vote with your feet'
   if (!FORMAT_ALTERNATE) return 'Next round: PvP'
   return currentFormat === 'pvb' ? 'Next round: PvP' : 'Next round: PvB'
 }

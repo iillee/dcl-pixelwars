@@ -1,4 +1,6 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
+import { paintOpen, setGamePhase } from './phase'
+import { setHoldMazeSeed } from '../maze/rebuild'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -105,20 +107,30 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, format }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes }) => {
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
     if (idx !== getRoundIndex() || active !== isRoundActive() || Math.abs(end - getRoundEndMs()) > 500) setRoundState(idx, end, active)
-    events.emit('round:clock', { idx, active, format: format === 'pvb' ? 'pvb' : 'pvp' })
+    const ph = phase === 'summary' || phase === 'lobby' || phase === 'idle' || phase === 'match' ? phase : (active ? 'match' : 'idle')
+    setGamePhase(ph, voteMs ?? 0, votes ?? [], winner ?? '')
+    setHoldMazeSeed(ph === 'lobby' || ph === 'idle')
+    events.emit('round:clock', {
+      idx, active, format: format === 'pvb' ? 'pvb' : 'pvp',
+      phase: ph, voteMs: voteMs ?? 0, winner: winner ?? '', votes: votes ?? [],
+    })
   })
 
   room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal }) => {
     events.emit('round:ended', { finalRed, finalBlue, finalTotal })
   })
 
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format }) => {
-    events.emit('round:reset', { seed, finalRed, finalBlue, finalTotal, format: format === 'pvb' ? 'pvb' : 'pvp' })
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {
+    events.emit('round:reset', {
+      seed, finalRed, finalBlue, finalTotal,
+      format: format === 'pvb' ? 'pvb' : 'pvp',
+      layout: layout === 'lobby' ? 'lobby' : 'arena',
+    })
   })
 
 
@@ -163,6 +175,14 @@ function wireInbound(): void {
 }
 
 /** Paint Bomb prototype: drop a bomb at our position (see client/paintBomb.ts). */
+export function sendLobbyPos(x: number, y: number, z: number): void {
+  room.send('lobbyPos', { x, y, z })
+}
+
+export function sendLobbyReady(): void {
+  room.send('lobbyReady', {})
+}
+
 export function sendBombDrop(x: number, y: number, z: number): void {
   console.log(`[Client] → bombDrop ${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`)
   room.send('bombDrop', { x, y, z })
@@ -279,7 +299,7 @@ function wireOutbound(): void {
     if (paintFlushClock < 0.1) return
     paintFlushClock = 0
     const ids = drainPaintOutbox()
-    if (ids.length === 0) return
+    if (ids.length === 0 || !paintOpen()) return
     room.send('paintTick', { ids })
   })
 }

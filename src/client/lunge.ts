@@ -53,6 +53,7 @@ import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
 import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
+import { hitsOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
@@ -393,6 +394,7 @@ function endActive(): void {
 }
 
 function checkHits(a0: V3, a1: V3): void {
+  if (!hitsOpen()) return
   const myTeam = localTeam()
   const tryHit = (id: string, t: V3) => {
     if (hitThis.has(id)) return
@@ -483,7 +485,7 @@ function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: 
 
 /** Each frame: if a remote lunger's box reaches us on our screen, knock now. */
 function trySpeculativeVictim(dt: number): void {
-  if (pendingVictim.size === 0) return
+  if (!hitsOpen() || pendingVictim.size === 0) return
   const myPos = Transform.getOrNull(engine.PlayerEntity)?.position
   for (const [key, pend] of pendingVictim) {
     pend.left -= dt
@@ -519,7 +521,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   }
   if (me && tgt === me) {
     pendingVictim.delete(`${att}#${id}`) // confirmed path; drop any watch
-    applyVictimKnock(att, id, dx, dz, 'knocked')
+    if (hitsOpen()) applyVictimKnock(att, id, dx, dz, 'knocked')
     return
   }
   const p = avatarPos(tgt)

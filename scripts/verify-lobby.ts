@@ -1,6 +1,7 @@
 /**
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
+import { readFileSync } from 'node:fs'
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, emptyCounts, everyPresentInZone,
@@ -84,4 +85,46 @@ if (!everyPresentInZone(['a', 'b'], new Set(['a', 'b'])) || everyPresentInZone([
   process.exit(1)
 }
 
-console.log('✓ lobby layout and vote rules')
+const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+for (const name of ['paintTick', 'lungeHit', 'burstHit', 'dashHit', 'anvilHit', 'anvilPush', 'bombDrop', 'playerFell']) {
+  const at = server.indexOf(`room.onMessage('${name}'`)
+  if (at < 0) {
+    console.error(`✗ missing handler ${name}`)
+    process.exit(1)
+  }
+  const body = server.slice(at, at + 700)
+  if (!body.includes('matchLive()')) {
+    console.error(`✗ ${name} does not reject when the match is closed`)
+    process.exit(1)
+  }
+}
+if (!server.includes("layout: 'lobby'") || !server.includes('rebuildBotGraph')) {
+  console.error('✗ lobby layout or the arena bot graph is missing')
+  process.exit(1)
+}
+const lobbyFn = server.slice(server.indexOf('function openLobby'), server.indexOf('function closeCountdown'))
+if (lobbyFn.includes('rebuildBotGraph') || lobbyFn.includes('anvilsMazeChanged')) {
+  console.error('✗ the lobby regen must not rebuild the bot graph or reseat anvils')
+  process.exit(1)
+}
+const rebuild = readFileSync(new URL('../src/maze/rebuild.ts', import.meta.url), 'utf8')
+if (!rebuild.includes("events.emit('lobby:floor'")) {
+  console.error('✗ the cross should signal before teardown')
+  process.exit(1)
+}
+const spawn = rebuild.slice(rebuild.indexOf('function spawnTile'))
+if (!spawn.includes("layoutKind !== 'lobby'") || !spawn.includes("layoutKind === 'arena' && isPersistentTile")) {
+  console.error('✗ lobby tiles should skip paint masks and should not latch')
+  process.exit(1)
+}
+if (!rebuild.includes('holdSeed || layoutKind === \'lobby\'')) {
+  console.error('✗ a maze seed can still replace the lobby')
+  process.exit(1)
+}
+const rescue = readFileSync(new URL('../src/client/fallRescue.ts', import.meta.url), 'utf8')
+if (!rescue.includes('isLobbyLayout()') || !rescue.includes('lobbyFeet')) {
+  console.error('✗ fall rescue should return to the cross during the lobby')
+  process.exit(1)
+}
+
+console.log('✓ lobby layout, votes, and match gates')

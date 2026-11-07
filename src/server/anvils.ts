@@ -75,9 +75,26 @@ export function anvilsRespawnRequest(from: string): void {
   dirty = true
 }
 
+let awake = true
+
+/** Lobby: stop the sim and hide the dummies. The next maze reseat turns them back on. */
+export function anvilsAwake(on: boolean): void {
+  awake = on
+  if (on) return
+  for (const a of world.anvils) {
+    a.alive = false
+    a.vel.x = 0
+    a.vel.y = 0
+    a.vel.z = 0
+  }
+  dirty = true
+  send()
+}
+
 export function initAnvils(): void {
   if (!LUNGE_TEST_DUMMY) return
   engine.addSystem((dt: number) => {
+    if (!awake) return
     const before = world.anvils.map(a => a.alive)
     world.tick(dt)
     if (world.anvils.some((a, i) => a.alive !== before[i])) dirty = true // fell / respawned

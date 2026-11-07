@@ -61,6 +61,7 @@ import {
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
+import { hitsOpen, paintOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
@@ -188,6 +189,7 @@ function safeSend(label: string, fn: () => void): boolean {
   try { fn(); return true } catch (e) { console.log(`[Burst] ${label} send failed`, e); return false }
 }
 function queuePaint(kind: 'ground' | 'land', id: number, cell: string, p: V3, fx: number, fz: number): void {
+  if (!paintOpen()) return
   const row: PaintHold = { id, kind, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_PAINT_RETRY_S }
   const i = paintHolds.findIndex(h => h.id === id)
   if (i >= 0) paintHolds[i] = row
@@ -216,6 +218,7 @@ function clearUse(id: number): void {
   if (i >= 0) useHolds.splice(i, 1)
 }
 function flushBurstNet(dt: number): void {
+  if (!paintOpen()) paintHolds.length = 0
   for (let i = useHolds.length - 1; i >= 0; i--) {
     const h = useHolds[i]
     h.left -= dt
@@ -483,6 +486,7 @@ function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
  *  A grounded press and an air-miss landing both call this. LOS, anvil dummies,
  *  and the server's team / once / window / KO credit checks are the press path. */
 function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): void {
+  if (!hitsOpen()) return
   const players: Array<V3 & { id: string }> = []
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
     if (entity === engine.PlayerEntity) continue
@@ -587,9 +591,9 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct 
   showAirTrail(p, team, fx, fz)
   queueUse(id, '', p, fx, fz)
   if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1, ct))) kickUse(id)
-  const anvils = knockAirAnvils(p, fx, fz, id)
-  const hits = airPlayerHits(p, team, fx, fz)
-  const bots = airBotHits(p, team, fx, fz)
+  const anvils = hitsOpen() ? knockAirAnvils(p, fx, fz, id) : 0
+  const hits = hitsOpen() ? airPlayerHits(p, team, fx, fz) : []
+  const bots = hitsOpen() ? airBotHits(p, team, fx, fz) : []
   if (hits.length > 0 || bots.length > 0 || anvils > 0) {
     partialStopDive(fx, fz)
     disarmLandingStamp('')
@@ -673,7 +677,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     const p = posOf(tgt)
     if (p) showAirHit(p, teamOfUser(att) === Team.None ? Team.Red : teamOfUser(att), true)
   }
-  if (!me || tgt !== me) return
+  if (!me || tgt !== me || !hitsOpen()) return
   if (air) applyAirKnock(att, id, dx, dz, 'spiked')
   else applyVictimKnock(att, id, dx, dz, 'knocked')
 }
@@ -725,7 +729,7 @@ export function initPaintBurst(): void {
     // The press is air 1 (downward cylinder). The landing rebroadcast is air 0
     // at the feet, so this is the same radial knock as a ground Burst.
     // sawStart above refreshes the gate, or a long dive would drop the impact as stale.
-    if (!VICTIM_SPECULATIVE_KNOCK) return
+    if (!VICTIM_SPECULATIVE_KNOCK || !hitsOpen()) return
     const my = localTeam()
     if (my === Team.None || team === my) return
     if (isKnockbackImmune() || !isBurstEnabledNow()) return
@@ -740,7 +744,7 @@ export function initPaintBurst(): void {
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
   events.on('burst:painted', ({ id, n }) => {
-    if (n > 0) { clearPaint(id); clearUse(id) }
+    if (n > 0 || !paintOpen()) { clearPaint(id); clearUse(id) }
   })
   events.on('paint:delta', () => {
     const now = Date.now()
