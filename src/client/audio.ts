@@ -14,7 +14,7 @@
  * `shared/events` from this module — keeping all audio config in one place.
  */
 
-import { AssetLoad, AudioSource, Entity, Transform, engine } from '@dcl/sdk/ecs'
+import { AssetLoad, AssetLoadLoadingState, AudioSource, Entity, LoadingState, Transform, engine } from '@dcl/sdk/ecs'
 import { events } from '../shared/events'
 import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_BOOM_VOL } from '../shared/pvp'
 import { OCEAN_AMBIENCE_SRC, OCEAN_AMBIENCE_VOLUME } from '../shared/waterLook'
@@ -62,8 +62,28 @@ export function initAudio(): void {
   playStartMs = Date.now()
 }
 
-/** The ocean bed is 2.28 MB. Create it after the join is on the wire so the
- *  download does not sit in front of the first round messages. */
+/** True once the burst impact and the first lunge take have finished loading.
+ *  A client that never reports AssetLoadLoadingState stays false; the sea
+ *  waiter gives up after a few seconds rather than blocking on it. */
+export function combatVfxReady(): boolean {
+  let burst = false
+  let lunge = false
+  for (const [ent] of engine.getEntitiesWith(AssetLoadLoadingState)) {
+    const set = AssetLoadLoadingState.get(ent)
+    const visit = (s: { currentState?: number; asset?: string }) => {
+      if (s.currentState !== LoadingState.FINISHED) return
+      if (s.asset === BURST_SFX_SRC) burst = true
+      if (s.asset === LUNGE_SRCS[0]) lunge = true
+    }
+    if (set && typeof (set as { forEach?: unknown }).forEach === 'function') {
+      ;(set as { forEach: (fn: (s: { currentState?: number; asset?: string }) => void) => void }).forEach(visit)
+    }
+  }
+  return burst && lunge
+}
+
+/** The ocean bed is 2.28 MB. Created only after the sea meshes, so it does not
+ *  sit in front of Burst and Lunge. */
 export function startOceanAmbience(): void {
   const oceanEnt = engine.addEntity()
   Transform.create(oceanEnt, { parent: engine.CameraEntity })

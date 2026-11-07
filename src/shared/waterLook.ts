@@ -209,8 +209,11 @@ export const SURFACE = {
  * alpha path stay here for a later try.
  */
 export const LOOK = {
-  /** Our swell, rim, and haze. Off leaves only the World's default ocean. */
+  /** Our swell, rim, and haze. Off leaves only the sky past the parcels. */
   sea: true,
+  /** Load the sea only after teamAssigned and the combat sounds are in.
+   *  Off starts the sea on the first frame, for an A/B of Burst lag. */
+  seaLast: true,
   gloss: true,
   glossRoughness: 0.3,
   glossSpecular: 0.9,

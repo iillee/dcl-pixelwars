@@ -159,8 +159,8 @@ if (scene.landscapeTerrain !== false) {
   console.error('✗ landscapeTerrain must be false — the default surround brings trees back with the sea')
   process.exit(1)
 }
-if (!LOOK.sea) {
-  console.error('✗ LOOK.sea should start on so our swell is in the scene')
+if (!LOOK.sea || !LOOK.seaLast) {
+  console.error('✗ LOOK.sea and LOOK.seaLast should start on so the sea waits for the round')
   process.exit(1)
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {

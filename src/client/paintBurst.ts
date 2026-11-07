@@ -174,6 +174,8 @@ const STAMP_ARM_S = 0.08
 /** One hitch must not burn the whole landing window. Low fps still gets later frames. */
 const STAMP_STEP_CAP_S = 0.25
 const stampWatch: Array<{ who: string; team: Team; id: number; left: number; fx: number; fz: number }> = []
+/** Press time for the local burst id, so the server ack can be timed. */
+const pressAt = new Map<number, number>()
 
 /** Shockwave already played. Resend until burstPainted, with a fresh grounded sample. */
 type PaintHold = { id: number; kind: 'ground' | 'land'; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
@@ -537,14 +539,18 @@ export function triggerBurst(): void {
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
   const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
   const cells = footprintAt(p, stance.cell)
+  const tPress = Date.now()
+  pressAt.set(id, tPress)
   console.log(`[Burst] press stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
   if (air) {
     fireAirSpike(id, team, p, f.x, f.z)
+    console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
     return
   }
   const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
   showShockwave(p, team, true, cell)
+  console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
   queuePaint('ground', id, cell, p, f.x, f.z)
   if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0))) kickPaint(id)
   if (BURST_EMOTE_ENABLED) {
@@ -733,7 +739,11 @@ export function initPaintBurst(): void {
     else applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
-  events.on('burst:painted', ({ id, n }) => { if (n > 0) { clearPaint(id); clearUse(id) } })
+  events.on('burst:painted', ({ id, n }) => {
+    const t0 = pressAt.get(id)
+    if (t0 !== undefined) console.log(`[Burst] press -> server ack ${Date.now() - t0}ms n=${n}`)
+    if (n > 0) { clearPaint(id); clearUse(id) }
+  })
 
   engine.addSystem((dt: number) => {
     sampleFall(dt)

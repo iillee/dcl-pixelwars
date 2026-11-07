@@ -21,7 +21,12 @@ import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
+import { events } from '../shared/events'
+import { combatVfxReady } from './audio'
 import { initFoam, setFoamSeconds } from './foam'
+
+/** Module load, close to scene start. Water logs are milliseconds from here. */
+const WATER_BOOT = Date.now()
 
 const swellClips: Entity[] = []
 let clipSeconds = 0
@@ -38,37 +43,45 @@ function trackSwell(dt: number): void {
   if (FOAM.rings || FOAM.whitecaps) setFoamSeconds(clipSeconds)
 }
 
-export function initWater(): void {
-  if (!LOOK.sea) {
-    console.log('[Water] LOOK.sea off — World default ocean only')
-    return
-  }
-  const rescueY = MIN_Y - FALL_RESPAWN_DROP
-  const y = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
-  const size = resolvedWaterSize(SCENE_SIZE)
-  const mid = SCENE_SIZE / 2
-  // Mean y 114 is above the fixed line at 112.5 on purpose (crests are higher).
-  // The old guard returned here and spawned nothing, so the preview showed only sky.
+let seaRoot: Entity = 0 as Entity
+let seaY = 0
+let seaSize = 0
+let seaMobile = false
+let seaDesktop: Entity[] = []
+let seaPhase = 0
+let seaRooted = false
+let seaTracking = false
 
+function seaMark(part: string): void {
+  console.log(`[Water] loaded at t=${Date.now() - WATER_BOOT}ms part=${part}`)
+}
+
+function bootSeaRoot(): void {
+  if (seaRooted) return
+  seaRooted = true
+  const rescueY = MIN_Y - FALL_RESPAWN_DROP
+  seaY = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
+  seaSize = resolvedWaterSize(SCENE_SIZE)
+  const mid = SCENE_SIZE / 2
+  seaMobile = isMobile()
   if (WATER_FOG.environment && WATER_FOG.density > 0) {
     EnvironmentFog.create(engine.RootEntity, {
       color: { keys: [{ time: 0, color: Color4.create(WATER_FOG.color.r, WATER_FOG.color.g, WATER_FOG.color.b, 1) }] },
       density: WATER_FOG.density,
     })
   }
-
-  const root = engine.addEntity()
-  const at = Vector3.create(mid, y, mid)
-  Transform.create(root, { position: at })
+  seaRoot = engine.addEntity()
+  const at = Vector3.create(mid, seaY, mid)
+  Transform.create(seaRoot, { position: at })
   if (WATER.swellM > 0) {
-    const up = Vector3.create(mid, y + WATER.swellM, mid)
+    const up = Vector3.create(mid, seaY + WATER.swellM, mid)
     const swell = Math.max(0.5, WATER.swellSeconds)
-    Tween.create(root, {
+    Tween.create(seaRoot, {
       duration: swell,
       easingFunction: EasingFunction.EF_EASESINE,
       mode: Tween.Mode.Move({ start: at, end: up }),
     })
-    TweenSequence.create(root, {
+    TweenSequence.create(seaRoot, {
       sequence: [{
         duration: swell,
         easingFunction: EasingFunction.EF_EASESINE,
@@ -77,34 +90,108 @@ export function initWater(): void {
       loop: TweenLoop.TL_RESTART,
     })
   }
-
-  const mobileNow = isMobile()
-  const desktop: Entity[] = []
-  const foamOn = (mobile: boolean) => SURFACE.foam && (!mobile || SURFACE.mobileFoam)
-  if (mobileNow) {
-    addSwell(root, swellMesh('lite'), true)
-    if (foamOn(true)) addFoam(root, swellMesh('lite'))
-    addFlat(root, WATER.flatLiteSrc)
-  } else {
-    for (const part of ['near', 'mid', 'far'] as const) {
-      desktop.push(addSwell(root, swellMesh(part), part !== 'far'))
-      if (foamOn(false)) desktop.push(addFoam(root, swellMesh(part)))
-    }
-    desktop.push(addFlat(root, WATER.flatSrc))
-    watchMobile(root, desktop)
-  }
-  if (LOOK.depth) addDepth(root)
-  if (WATER_FOG.skirt) addSkirt(y, size)
-  if (WATER_FOG.mist) addMist(root, size)
-  if (WATER_FOG.haze) addHaze(y)
-  if (FOAM.rings || FOAM.whitecaps) initFoam()
-  clipSeconds = 0
-  engine.addSystem(trackSwell)
-
+  // Every water GLB is created with both collision masks at 0. A collider
+  // baked into the file is not used. The depth sheet is a plane with no collider.
+  console.log('[Water] collision masks 0 on swell, rim, haze, and foam')
   const spec = liveSwell()
-  const weights = spec.parts.map((p) => p.weight.toFixed(2)).join('/')
-  const crest = y + spec.amplitudeM + Math.max(0, WATER.swellM)
-  console.log(`[Water] variant=${SWELL_VARIANT} root world x=${mid.toFixed(1)} y=${y.toFixed(2)} z=${mid.toFixed(1)} scale=1 parent=none mesh=${swellMesh('near')} crest≈${crest.toFixed(1)} rescue=${rescueY.toFixed(2)} period=${spec.periodS}s speed=1 trains=${weights} gloss=${LOOK.gloss} softNormal=${LOOK.softNormal} depth=${LOOK.depth} haze=on`)
+  console.log(`[Water] variant=${SWELL_VARIANT} y=${seaY.toFixed(2)} rescue=${rescueY.toFixed(2)} scene=${SCENE_SIZE}m gloss=${LOOK.gloss} seaLast=${LOOK.seaLast} trains=${spec.parts.length}`)
+}
+
+/** One ocean piece. Returns true when the meshes and the haze are in. */
+function stepSea(): boolean {
+  bootSeaRoot()
+  const foamOn = (mobile: boolean) => SURFACE.foam && (!mobile || SURFACE.mobileFoam)
+  if (seaPhase === 1) {
+    if (seaMobile) {
+      addSwell(seaRoot, swellMesh('lite'), true)
+      if (foamOn(true)) addFoam(seaRoot, swellMesh('lite'))
+    } else {
+      seaDesktop.push(addSwell(seaRoot, swellMesh('near'), true))
+      if (foamOn(false)) seaDesktop.push(addFoam(seaRoot, swellMesh('near')))
+      watchMobile(seaRoot, seaDesktop)
+    }
+    if (!seaTracking) { seaTracking = true; clipSeconds = 0; engine.addSystem(trackSwell) }
+    seaMark('near')
+    seaPhase = 2
+    return false
+  }
+  if (seaPhase === 2) {
+    if (!seaMobile) {
+      seaDesktop.push(addSwell(seaRoot, swellMesh('mid'), true))
+      if (foamOn(false)) seaDesktop.push(addFoam(seaRoot, swellMesh('mid')))
+    }
+    seaMark('mid')
+    seaPhase = 3
+    return false
+  }
+  if (seaPhase === 3) {
+    if (!seaMobile) {
+      const part = 'far' as const
+      seaDesktop.push(addSwell(seaRoot, swellMesh(part), part !== 'far'))
+    }
+    seaMark('far')
+    seaPhase = 4
+    return false
+  }
+  if (seaPhase === 4) {
+    addFlat(seaRoot, seaMobile ? WATER.flatLiteSrc : WATER.flatSrc)
+    if (LOOK.depth) addDepth(seaRoot)
+    if (WATER_FOG.skirt) addSkirt(seaY, seaSize)
+    if (WATER_FOG.mist) addMist(seaRoot, seaSize)
+    seaMark('rim')
+    seaPhase = 5
+    return false
+  }
+  if (WATER_FOG.haze) addHaze(seaY)
+  if (FOAM.rings || FOAM.whitecaps) initFoam()
+  seaMark('haze')
+  seaPhase = 6
+  return true
+}
+
+/** Spawn the whole sea on the caller’s turn. `LOOK.seaLast` uses `armSea` instead. */
+export function initWater(): void {
+  if (!LOOK.sea || seaPhase >= 6) return
+  if (seaPhase === 0) seaPhase = 1
+  while (!stepSea()) {}
+}
+
+/**
+ * With `LOOK.seaLast`, the sea waits until the player has a team and the
+ * burst/lunge clips have finished loading. Each mesh is then one frame apart
+ * so a single frame does not decode every GLB. The ocean bed is `onAudio`,
+ * after the haze.
+ */
+export function armSea(onAudio: () => void): void {
+  if (!LOOK.sea) {
+    console.log('[Water] LOOK.sea off — no swell, rim, haze, or ocean bed')
+    return
+  }
+  if (!LOOK.seaLast) {
+    initWater()
+    onAudio()
+    seaMark('audio')
+    return
+  }
+  console.log('[Water] deferred until teamAssigned; burst ripple pool is already built')
+  let team = false
+  let age = 0
+  let stepping = false
+  events.on('team:assigned', () => { team = true })
+  engine.addSystem(function seaLast(dt: number) {
+    if (!team) return
+    age += dt
+    if (!stepping) {
+      if (!combatVfxReady() && age < 4) return
+      if (!combatVfxReady()) console.log(`[Water] vfx preload not reported after ${age.toFixed(1)}s — loading sea anyway`)
+      stepping = true
+      seaPhase = 1
+    }
+    if (!stepSea()) return
+    onAudio()
+    seaMark('audio')
+    engine.removeSystem(seaLast)
+  })
 }
 
 /** Base-texture scroll. ADR-255 moves the normal map with this offset; the bump's own offset is ignored. */
