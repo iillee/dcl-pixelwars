@@ -2,8 +2,8 @@
  * Lobby layout and vote rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * 5×5 grid. The cross is the center. One straight leaves each side.
- * The end tile of each arm is the only voting cell.
+ * 5×5 grid. The cross is the center. An end tile sits on each side of it.
+ * That end tile is the only voting cell. West is PvP, east is PvB.
  */
 
 export type ModeId = 'pvp' | 'pvb' | 'garden' | 'pots'
@@ -23,12 +23,13 @@ export type ModeDef = {
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** North / west / south / east ends. Openings face back toward the cross. */
+/** Ends share an edge with the cross. Openings face back toward it.
+ *  West PvP, east PvB, north and south are visible and cannot win yet. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXEL WARS', cell: { x: 0, z: 2 }, teamRule: 'balance', live: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: { x: 4, z: 2 }, teamRule: 'humans-together', live: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
-  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 4 }, teamRule: 'balance', live: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
-  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
+  { id: 'pvp', label: 'PIXEL WARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
+  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
+  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
 export const LOBBY_VOTE_MS = 15_000

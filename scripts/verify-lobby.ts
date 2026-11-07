@@ -3,14 +3,19 @@
  */
 import { readFileSync } from 'node:fs'
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
+import { openingsAt } from '../src/maze/tiles'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, emptyCounts, everyPresentInZone,
   lobbyFeet, pickWinner, stillAfk, voteModeAt,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
-if (tiles.length !== 9) {
-  console.error(`✗ lobby should be 9 tiles, got ${tiles.length}`)
+if (tiles.length !== 5) {
+  console.error(`✗ lobby should be 5 tiles, got ${tiles.length}`)
+  process.exit(1)
+}
+if (tiles.some(t => t.type === 'straight')) {
+  console.error('✗ the lobby has no straight tiles')
   process.exit(1)
 }
 if (!validate()) {
@@ -31,6 +36,17 @@ for (const m of LOBBY_MODES) {
   const end = ends.find(t => t.x === m.cell.x && t.z === m.cell.z)
   if (!end) {
     console.error(`✗ ${m.id} has no end tile`)
+    process.exit(1)
+  }
+  const dx = LOBBY_CROSS.x - end.x
+  const dz = LOBBY_CROSS.z - end.z
+  if (Math.abs(dx) + Math.abs(dz) !== 1) {
+    console.error(`✗ ${m.id} is not next to the cross`)
+    process.exit(1)
+  }
+  const toward = dx === 1 ? 1 : dx === -1 ? 3 : dz === 1 ? 0 : 2
+  if (!openingsAt('end', end.r).has(toward as 0 | 1 | 2 | 3)) {
+    console.error(`✗ ${m.id} does not open toward the cross`)
     process.exit(1)
   }
   const midX = m.cell.x * CELL + CELL / 2 + MAZE_ORIGIN

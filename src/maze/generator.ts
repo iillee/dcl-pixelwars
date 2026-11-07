@@ -101,8 +101,8 @@ export function getPlacedTilesInOrder(): Placed[] {
 }
 
 /**
- * Fixed lobby: center cross, one straight off each side, an end tile at the
- * far cell. End openings face back toward the cross so validate() passes.
+ * Fixed lobby: center cross, and one end tile on each side of it.
+ * End openings face back toward the cross so validate() passes.
  * The cross is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {
@@ -111,14 +111,9 @@ export function placeLobbyLayout(): Placed[] {
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
   place('cross', 0, LOBBY_CROSS.x, LOBBY_CROSS.z)
-  // Straights sit between the cross and the end. Rotation matches the axis.
-  place('straight', 0, 2, 3) // north, opens N/S
-  place('straight', 0, 2, 1) // south
-  place('straight', 1, 3, 2) // east, opens E/W
-  place('straight', 1, 1, 2) // west
   for (const m of LOBBY_MODES) {
-    // West end opens east, east opens west, north opens south, south opens north.
-    const r = m.cell.x === 0 ? 1 : m.cell.x === 4 ? 3 : m.cell.z === 4 ? 2 : 0
+    // West opens east, east opens west, north opens south, south opens north.
+    const r = m.cell.x < LOBBY_CROSS.x ? 1 : m.cell.x > LOBBY_CROSS.x ? 3 : m.cell.z > LOBBY_CROSS.z ? 2 : 0
     place('end', r, m.cell.x, m.cell.z)
   }
   return getPlacedTilesInOrder()

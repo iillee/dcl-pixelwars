@@ -2,7 +2,7 @@
 
 Status: planning only. Branch `physical-lobby` is `bots-water` @ `7460a8c` (20×20, sea off) plus this note. No gameplay code yet.
 
-Replace automatic PvP/PvB alternation with a lobby that replaces the arena in place. The between-round regen builds it from the existing tiles: a center cross, a straight arm off each side, and a voting end on each arm. Standing on an end is the vote. The cross and the straights abstain. Phase A is the only thing to build first: two ends can win (PvP, PvB), a 15 s vote, idle when nobody votes, and mid-match joins unchanged. The other two ends are visible and cannot start a match until Phase B. No team-select screen and no P2E.
+Replace automatic PvP/PvB alternation with a lobby that replaces the arena in place. The between-round regen builds it from the existing tiles: a center cross with an end tile on each side. Standing on an end is the vote. The cross abstains. Phase A is the only thing to build first: two ends can win (PvP, PvB), a 15 s vote, idle when nobody votes, and mid-match joins unchanged. The other two ends are visible and cannot start a match until Phase B. No team-select screen and no P2E.
 
 ## 1. What exists today
 
@@ -59,15 +59,17 @@ The lobby is not a second place beside the arena, and it is not a pile of boxes.
 
 ### Geometry
 
-Nine existing tiles, placed by a fixed `placeLobbyLayout()` in `src/maze/generator.ts`, then drawn by the current `rebuildMaze` queue (same GLBs, colliders, stagger, teardown). No BFS, no `generateWithRetry`, no new meshes.
+Five existing tiles, placed by a fixed `placeLobbyLayout()` in `src/maze/generator.ts`, then drawn by the current `rebuildMaze` queue (same GLBs, colliders, stagger, teardown). No BFS, no `generateWithRetry`, no new meshes.
 
 On the 5×5 grid (cells 0–4, 32 m each, centered in the 320 m scene):
 
 | Cell | Tile | Role |
 |---|---|---|
-| (2,2) | `cross` | Plus-shaped center. Abstain. |
-| (2,3) (1,2) (2,1) (3,2) | `straight` | One arm off each side of the cross. Abstain. |
-| (2,4) (0,2) (2,0) (4,2) | `end` | End of that arm. The voting zone. Opening faces back toward the cross. |
+| (2,2) | `cross` | Center. Abstain. Spawn and fall rescue land here. |
+| (1,2) | `end` | West. Pixel Wars. Opens east, toward the cross. |
+| (3,2) | `end` | East. Bot Invasion. Opens west. |
+| (2,3) | `end` | North. Color Garden, labeled soon. Opens south. |
+| (2,1) | `end` | South. Pot Hunt, labeled soon. Opens north. |
 
 That is the whole play grid’s middle row and middle column. Corners stay empty, including today’s bases at (0,0) and (4,4). Phase A builds all four arms so the layout does not change later. Only two ends can win: west PvP, east PvB. North and south are in the registry as not startable, labeled, and showing a count. Phase B flips those two ids on. It does not add tiles.
 
@@ -81,7 +83,7 @@ Falling off an end: do not run the match rescue (it flies to a team base that is
 
 New client → server message `lobbyPos { x, y, z }`, sent at 2 Hz only while the phase is `lobby` or `idle`. The server rate-limits to 2 Hz and ignores it during a match. It does not call `markActive`.
 
-The server stores one sample per connected human: position, time, and the zone it computed. The zone test is server-side XZ against the four end-tile footprints from the same `placeLobbyLayout()` the client built. The cross, the straights, and anywhere else abstain. Bots never send `lobbyPos`. A sample older than 1.5 s does not count. `onLeaveScene` deletes it.
+The server stores one sample per connected human: position, time, and the zone it computed. The zone test is server-side XZ against the four end-tile footprints from the same `placeLobbyLayout()` the client built. The cross and anywhere else abstain. Bots never send `lobbyPos`. A sample older than 1.5 s does not count. `onLeaveScene` deletes it.
 
 AFK rule, so a frozen body cannot chain matches: a lobby session anchors everyone on the cross (the teleport). A sample counts only if that player has moved at least 1.5 m from their anchor during **this** session and is currently on an end tile. The next session resets the anchor to the cross. An idle player who never walks never votes again. A teleport that fails and leaves them on an end also does not count until they move.
 
@@ -112,11 +114,11 @@ Anvils: skip `world.tick` outside `match`, and send one empty `anvilState` so du
 
 ## 3. Concerns
 
-**World size.** Burst lag tracked parcel count, not the sea. `7460a8c` (20×20, 400 parcels) is the fast build; 100×100 and 300×300 were slow with the sea off. This branch must not change `WORLD_SIZE` or `scene.json`. The nine lobby tiles sit in the existing 5×5 grid.
+**World size.** Burst lag tracked parcel count, not the sea. `7460a8c` (20×20, 400 parcels) is the fast build; 100×100 and 300×300 were slow with the sea off. This branch must not change `WORLD_SIZE` or `scene.json`. The five lobby tiles sit in the existing 5×5 grid.
 
-**Two regens per cycle, and the floor gap.** Today the summary holds the arena, then one `rebuildMaze` tears it down and grows the next one. The lobby inserts a regen at that same moment and a second regen after the vote. The arena grow still happens once per match. The new work is tearing the arena down early and building nine lobby tiles, then tearing those nine down when the arena grows.
+**Two regens per cycle, and the floor gap.** Today the summary holds the arena, then one `rebuildMaze` tears it down and grows the next one. The lobby inserts a regen at that same moment and a second regen after the vote. The arena grow still happens once per match. The new work is tearing the arena down early and building five lobby tiles, then tearing those five down when the arena grows.
 
-`rebuildMaze` deletes first (25 tiles a frame, and each tile’s paint cells with it) and then grows replacements from scale 0.001 over 500 ms, staggered 0.03 s apart. A 5×5 maze is a few dozen tiles, so the outgoing arena is gone in a frame or two. Nine lobby tiles are about 0.24 s of stagger plus the 500 ms scale-up. That is the hole: colliders disappear before the new floor exists. Today nobody falls through it because sky bases are persistent and the round-reset teleport lands on them. The lobby does not include (0,0) or (4,4), so those bases must be torn down too, and the teleport target (the cross) is one of the tiles being created. Reuse the spawn and teardown functions, but for a layout change spawn the center cross at full scale and teleport onto it before the rest of the teardown. Start the 15 s when that cross is walkable (`isRebuilding()` false is not enough, because the last tile is still scaling). Do not run `generateWithRetry` for the lobby. That search tries up to 500 full sky mazes; `placeLobbyLayout()` is nine `placeTile` calls.
+`rebuildMaze` deletes first (25 tiles a frame, and each tile’s paint cells with it) and then grows replacements from scale 0.001 over 500 ms, staggered 0.03 s apart. A 5×5 maze is a few dozen tiles, so the outgoing arena is gone in a frame or two. Five lobby tiles are about 0.12 s of stagger plus the 500 ms scale-up. That is the hole: colliders disappear before the new floor exists. Today nobody falls through it because sky bases are persistent and the round-reset teleport lands on them. The lobby does not include (0,0) or (4,4), so those bases must be torn down too, and the teleport target (the cross) is one of the tiles being created. Reuse the spawn and teardown functions, but for a layout change spawn the center cross at full scale and teleport onto it before the rest of the teardown. Start the 15 s when that cross is walkable (`isRebuilding()` false is not enough, because the last tile is still scaling). Do not run `generateWithRetry` for the lobby. That search tries up to 500 full sky mazes; `placeLobbyLayout()` is nine `placeTile` calls.
 
 **Persistent tiles and the seed.** `isPersistentTile` keeps the two sky bases across every rebuild. Leaving them up during the lobby leaves two extra floors in the corners. A layout change has to clear `persistentSet` and queue those entities for teardown, then let the next arena rebuild latch them again. Lobby tiles must not latch as persistent, or the following maze would keep a cross where it wanted something else. `SeedHolder` and snapshot `seed` currently call `ensureMazeSeed`, which would grow an arena on top of the lobby if a late joiner arrived mid-vote. Ignore that seed unless `phase === 'match'`.
 
@@ -147,7 +149,7 @@ Phase A is one feature, not a rewrite. The heavy edit is the intermission in `se
 3. Server phase machine: summary → lobby regen → vote → arena regen or idle. 15 s / 5 s. Stop auto-start on ping and join. No bot graph and no anvils on the lobby regen.
 4. `roundClock` fields + `lobbyPos`. Summary line no longer promises a fixed next mode. Countdown starts when the cross is walkable.
 5. End-tile zone samples, AFK anchor, winner pick, `combatOpen()` on every combat and paint handler, empty bot and anvil flush, fall rescue aims at the cross.
-6. `scripts/verify-lobby.ts`: the nine tiles and which cells vote, the tie rule, the idle/5 s rule, and a source check that combat handlers call the gate.
+6. `scripts/verify-lobby.ts`: the five tiles and which cells vote, the tie rule, the idle/5 s rule, and a source check that combat handlers call the gate.
 
 Phase B sets `garden` and `pots` to live on the north and south ends. No new tiles, no team select, no P2E, no new match rules.
 
