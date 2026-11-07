@@ -23,8 +23,9 @@ src
 *.skp
 
 # Parked water. Still in git so a switch can be flipped, but a deployed
-# flip 404s until that line is removed. Live 48 m swells, the flat rim,
-# haze, the soft normal, the white albedo, and the ocean bed stay shipped.
+# flip 404s until that line is removed. Live 48 m near/mid swells, the
+# mobile rim, haze, the soft normal, and the white albedo stay shipped.
+# The ocean loop is the 2.28 MB file; it is not a mesh and is not played.
 assets/models/water-swell-near.glb
 assets/models/water-swell-mid.glb
 assets/models/water-swell-far.glb
@@ -37,3 +38,7 @@ assets/textures/water-normal.png
 assets/textures/water-veil.png
 assets/textures/water-skirt.png
 assets/textures/water-blue.png
+assets/sounds/ocean.mp3
+assets/models/water-swell-48-far.glb
+assets/models/water-flat.glb
+assets/models/water-flat-lite.glb

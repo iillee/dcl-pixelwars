@@ -116,8 +116,9 @@ function stepSea(): boolean {
     return false
   }
   if (seaPhase === 2) {
+    const disk = addSwell(seaRoot, swellMesh('mid'), true)
     if (!seaMobile) {
-      seaDesktop.push(addSwell(seaRoot, swellMesh('mid'), true))
+      seaDesktop.push(disk)
       if (foamOn(false)) seaDesktop.push(addFoam(seaRoot, swellMesh('mid')))
     }
     seaMark('mid')
@@ -125,20 +126,18 @@ function stepSea(): boolean {
     return false
   }
   if (seaPhase === 3) {
-    if (!seaMobile) {
-      const part = 'far' as const
-      seaDesktop.push(addSwell(seaRoot, swellMesh(part), part !== 'far'))
-    }
+    // The far square is not spawned: its corners would pass the haze circle.
+    // A spawned far mesh would skip the soft normal with `part !== 'far'`.
     seaMark('far')
     seaPhase = 4
     return false
   }
   if (seaPhase === 4) {
-    addFlat(seaRoot, seaMobile ? WATER.flatLiteSrc : WATER.flatSrc)
+    // No flat sheet under or outside the disk. LOOK.depth (the under-sheet) stays off.
     if (LOOK.depth) addDepth(seaRoot)
     if (WATER_FOG.skirt) addSkirt(seaY, seaSize)
     if (WATER_FOG.mist) addMist(seaRoot, seaSize)
-    seaMark('rim')
+    seaMark(seaMobile ? 'rim' : 'rim-skipped')
     seaPhase = 5
     return false
   }
@@ -170,7 +169,6 @@ export function armSea(onAudio: () => void): void {
   if (!LOOK.seaLast) {
     initWater()
     onAudio()
-    seaMark('audio')
     return
   }
   console.log('[Water] deferred until teamAssigned; burst ripple pool is already built')
@@ -189,7 +187,6 @@ export function armSea(onAudio: () => void): void {
     }
     if (!stepSea()) return
     onAudio()
-    seaMark('audio')
     engine.removeSystem(seaLast)
   })
 }
@@ -492,7 +489,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       swellClips.length = 0
       clipSeconds = 0
       addSwell(root, swellMesh('lite'), true)
-      addFlat(root, WATER.flatLiteSrc)
+      addSwell(root, swellMesh('mid'), true)
     }
     engine.removeSystem(tick)
   }

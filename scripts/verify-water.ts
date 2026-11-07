@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -124,13 +124,17 @@ if (WATER.swellNearM >= WATER.swellMidM || WATER.swellMidM >= WATER.swellFarM) {
   console.error('✗ swell rings should grow outward: near, mid, far')
   process.exit(1)
 }
-if (WATER.swellFarM > seaHalf || seaHalf - WATER.swellFarM > 250) {
-  console.error(`✗ the far ring (${WATER.swellFarM} m) should end just inside the sea (${seaHalf.toFixed(0)} m)`)
+if (HAZE_RING_M < 400 || HAZE_RING_M > 500) {
+  console.error(`✗ haze radius ${HAZE_RING_M} m should sit around 400–500 m`)
+  process.exit(1)
+}
+if (WATER.swellNearM * Math.SQRT2 > HAZE_RING_M + 1 || WATER.swellFarM > HAZE_RING_M) {
+  console.error('✗ the swell square or the disk sticks past the haze circle')
   process.exit(1)
 }
 const hazeR = horizonRadiusM(SCENE_SIZE)
-if (Math.abs(hazeR - (SCENE_SIZE / 2 - 8)) > 0.1) {
-  console.error('✗ the haze ring should sit 8 m inside the parcel edge')
+if (hazeR !== HAZE_RING_M) {
+  console.error(`✗ this scene should use the ${HAZE_RING_M} m haze, got ${hazeR}`)
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
@@ -179,6 +183,10 @@ if (typeof spawnY !== 'number' || Math.abs(spawnY - red.pos.y) > 0.01) {
   process.exit(1)
 }
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
+if (src.includes("swellMesh('far')") || src.includes('addFlat(seaRoot, WATER.flatSrc)')) {
+  console.error('✗ desktop should not draw the far swell or the outer rim past the haze')
+  process.exit(1)
+}
 if (/MeshCollider|TriggerArea/.test(src)) {
   console.error('✗ the sea must not collide or catch players')
   process.exit(1)

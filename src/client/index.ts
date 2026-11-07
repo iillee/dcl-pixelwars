@@ -31,7 +31,7 @@ import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
-import { initAudio, startOceanAmbience } from './audio'
+import { initAudio } from './audio'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
@@ -148,7 +148,8 @@ export async function setupClient(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
-  // Sea meshes and the ocean bed wait until the player has a team and the
-  // burst/lunge clips have loaded (LOOK.seaLast). Each mesh is one frame apart.
-  armSea(startOceanAmbience)
+  // Sea meshes wait until the player has a team and the burst/lunge clips
+  // have loaded (LOOK.seaLast). Each mesh is one frame apart. The ocean
+  // audio bed is not started.
+  armSea(() => {})
 }

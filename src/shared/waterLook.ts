@@ -100,21 +100,20 @@ export const WATER = {
   swellM: 0,
   swellSeconds: 10,
   /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
-  swellNearM: 384,
+  swellNearM: 256,
   /** 32 m is the grid the preview already drew. 8 m made a morph file it did not draw. */
   swellNearStepM: 32,
-  /** Middle ring, half-extent (m). Continues the same waves at a coarser step.
-   *  384 + 2×64. Inside the 100×100 sea (half ~794 m). */
-  swellMidM: 512,
+  /** Middle ring, half-extent (m). 256 + 64. This square is the last mesh:
+   *  its corners still sit inside the 460 m haze circle. */
+  swellMidM: 320,
   swellMidStepM: 64,
-  /** Outer ring, half-extent (m). Displacement eases to 0 at this edge.
-   *  512 + 128. The flat rim fades from here to the parcel edge. */
-  swellFarM: 640,
+  /** Analytic fade ends here, 8 m inside the haze circle. The mid mesh is the disk. */
+  swellFarM: 452,
   swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 32,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 220,
+  swellMobileFadeM: 80,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',
@@ -341,9 +340,14 @@ export function resolvedWaterY(minY: number, _fallDrop: number): number {
   return Math.min(WATER.heightY, maxMean)
 }
 
-/** Haze cylinder radius (m). Just inside the parcel edge. */
+/** Haze cylinder radius (m). Close enough that spawn height hides the sea edge,
+ *  far enough that the ring is not a wall around the arena. The square swells
+ *  stop inside this circle so no corner is drawn past it. */
+export const HAZE_RING_M = 460
+
+/** Haze cylinder radius (m). Never outside the parcel box. */
 export function horizonRadiusM(sceneM: number): number {
-  return Math.max(16, sceneM / 2 - 8)
+  return Math.min(HAZE_RING_M, Math.max(16, sceneM / 2 - 8))
 }
 
 /** Plane width that stays inside the parcel box. */
