@@ -3,7 +3,7 @@ import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
-import { hudClockText, hudVoteLine } from "./client/lobby"
+import { hudClockText, hudLobbyDebug, hudVoteLine } from "./client/lobby"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
@@ -567,6 +567,10 @@ export const uiMenu = () => (
             {hudVoteLine() !== '' ? (
               <Label value={hudVoteLine()} fontSize={isMobile() ? 13 : 15} color={SUMMARY_INK} textAlign="middle-center" textWrap="wrap"
                 uiTransform={{ width: voteW, height: isMobile() ? 48 : 28, margin: { top: 8 } }} />
+            ) : null}
+            {hudLobbyDebug() !== '' ? (
+              <Label value={hudLobbyDebug()} fontSize={11} color={SUMMARY_INK} textAlign="middle-center" textWrap="wrap"
+                uiTransform={{ width: voteW, height: isMobile() ? 64 : 44, margin: { top: 2 } }} />
             ) : null}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby. */}
             {lobby ? null : getSummaryProgress() >= 0 || standingsOpen ? (

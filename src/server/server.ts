@@ -244,6 +244,8 @@ export async function setupServer(): Promise<void> {
       voteMs,
       winner: '',
       votes: (['pvp', 'pvb', 'garden', 'pots'] as const).map(id => ({ id, n: counts[id] })),
+      present: presentIds().length,
+      feet: lobbySampleIds().length,
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }
@@ -397,7 +399,14 @@ export async function setupServer(): Promise<void> {
 
   room.onMessage('lobbyPos', ({ x, y, z }, context) => {
     const from = context?.from
-    if (!from || intermission !== 'lobby') return
+    if (!from) return
+    // A match or the summary owns the floor. Anywhere else, feet are a vote.
+    // Phase 'idle' on the wire is also used when we are NOT in the lobby, and
+    // the client treats that as the vote HUD — so a sample during that idle
+    // opens the lobby instead of being dropped.
+    if (isRoundActive() || intermission === 'summaryWait') return
+    if (intermission !== 'lobby') openLobby(false)
+    lastPingAt.set(from, Date.now())
     noteLobbyPos(from, x, y, z, Date.now())
   })
 
@@ -1265,5 +1274,8 @@ export async function setupServer(): Promise<void> {
     flushPendingJoins()
   })
 
-  console.log('[Server] ✅ Ready — joinRoster, paintTick; paintDelta 5Hz; roundEnded → summary → roundReset.')
+  // Cold start is the lobby, not a match and not a quiet idle. Joiners get
+  // the cross from sendLobbyLayout; nobody has to wait for a round to end.
+  openLobby(false)
+  console.log('[Server] ✅ Ready — lobby open; joinRoster, paintTick; paintDelta 5Hz; roundEnded → summary → roundReset.')
 }

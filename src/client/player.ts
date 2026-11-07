@@ -29,6 +29,7 @@ import { IS_SKY } from '../maze/level'
 import { cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
 import { isLobbyLayout } from '../maze/rebuild'
 import { lobbyStand } from './lobby'
+import { gamePhase } from './phase'
 
 // Classic centre cross: cell (2,2), MAZE_ORIGIN=8, CELL=32 → centre (88, 88).
 const CLASSIC_SPAWN = { x: 88, y: 2, z: 88 }
@@ -65,12 +66,20 @@ export function initPlayerNet(): void {
     teleportHome('round reset')
   })
   events.on('lobby:floor', () => teleportHome('lobby'))
+  // Entering a match from the boot lobby. Clocks repeat; only the transition moves us.
+  let leftLobby = false
+  events.on('round:clock', ({ phase }) => {
+    if (phase === 'lobby' || phase === 'idle') { leftLobby = false; return }
+    if (phase === 'match' && !leftLobby) { leftLobby = true; teleportHome('match') }
+  })
 
   // Sky: team known → go to that team's base (once per assignment change).
+  // Not while the server still has us in the lobby — that teleport raced the
+  // cross move and left the joiner on the red base.
   events.on('team:assigned', ({ team }) => {
     const changed = team !== myTeam
     myTeam = team
-    if (IS_SKY && changed && !isLobbyLayout()) teleportHome('team assigned')
+    if (IS_SKY && changed && gamePhase() === 'match' && !isLobbyLayout()) teleportHome('team assigned')
   })
 
   // Initial spawn-in after ~2 s so the maze has grown in. In sky mode the
@@ -96,6 +105,12 @@ export function initPlayerNet(): void {
       MeshCollider.setBox(e, ColliderLayer.CL_PHYSICS)
       return e
     })
+    // Hold the joiner on the cross until that tile's collider exists.
+    const cross = lobbyStand()
+    const crossPad = engine.addEntity()
+    Transform.create(crossPad, { position: Vector3.create(cross.x, cross.y - 1.1, cross.z), scale: Vector3.create(16, 0.2, 16) })
+    MeshCollider.setBox(crossPad, ColliderLayer.CL_PHYSICS)
+    pads.push(crossPad)
     const sys = () => {
       if (!isMazeReady()) return
       pads.forEach(e => engine.removeEntity(e))

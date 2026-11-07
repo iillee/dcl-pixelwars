@@ -7,6 +7,8 @@
     "start:server": "npx @dcl/hammurabi-server@next",
     "deploy": "sdk-commands deploy",
     "build": "sdk-commands build",
+    "prebuild": "npx tsx scripts/strip-scene-metadata.ts",
+    "strip-scene": "npx tsx scripts/strip-scene-metadata.ts",
     "server-logs": "sdk-commands scene-insights tail",
     "upgrade-sdk": "npm install --save-dev @dcl/sdk@auth-server",
     "upgrade-sdk:next": "npm install --save-dev @dcl/sdk@next"

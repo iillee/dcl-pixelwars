@@ -6,10 +6,15 @@ import type { LobbyPhase, ModeId } from '../shared/lobby'
 
 export type VoteRow = { id: string; n: number }
 
-let phase: LobbyPhase = 'match'
+// Boot in the lobby. A match clock is what leaves it. Starting on 'match'
+// showed a round timer and blocked feet reports until the first clock.
+let phase: LobbyPhase = 'idle'
 let voteMs = 0
 let votes: VoteRow[] = []
 let winner = ''
+let serverPresent = 0
+let serverFeet = 0
+let clocks = 0
 
 export function gamePhase(): LobbyPhase {
   return phase
@@ -45,6 +50,17 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
   voteMs = nextVoteMs
   votes = nextVotes
   winner = nextWinner
+  clocks++
+}
+
+/** present = players the server is scoring. feet = stored lobby samples. */
+export function setServerLobbyCounts(present: number, feet: number): void {
+  serverPresent = present
+  serverFeet = feet
+}
+
+export function serverLobbyCounts(): { present: number; feet: number; clocks: number } {
+  return { present: serverPresent, feet: serverFeet, clocks }
 }
 
 export function voteWinner(): string {

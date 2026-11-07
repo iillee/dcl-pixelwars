@@ -4,12 +4,22 @@
  */
 import { engine, Entity, TextShape, Transform, Billboard } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
-import { CELL, MAZE_ORIGIN, BASE_Y } from '../maze/generator'
+import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
+import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, lobbyFeet } from '../shared/lobby'
-import { inLobby, voteCount, voteRemainingMs, gamePhase } from './phase'
+import { LOBBY_MODES, cellAt, lobbyFeet, toSceneFeet, voteModeAt } from '../shared/lobby'
+import { gamePhase, inLobby, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
+
+/** On-screen lobby trace. Turn off once a playtest shows votes landing. */
+export const DEBUG_LOBBY = true
+
+const BASE_METERS = sceneOriginParcel(SKY_PARCELS) * 16
+let sent = 0
+let sendFail = 0
+let noTransform = 0
+let lastFeet = { x: NaN, y: NaN, z: NaN }
 
 const signs: Entity[] = []
 let readySent = false
@@ -66,19 +76,39 @@ export function initLobby(): void {
 
   let posClock = 0
   engine.addSystem((dt: number) => {
-    if (!isLobbyLayout() || !inLobby()) return
-    if (!readySent) {
+    // Phase alone. The layout flag used to gate this, so a joiner whose HUD
+    // already said VOTE (phase idle) but whose floor was still the arena
+    // never sent a sample. The server names the zone.
+    if (!inLobby()) return
+    if (!readySent && isLobbyLayout()) {
       readySent = true
       try { sendLobbyReady() } catch (err) { console.log('[Lobby] ready send failed', err); readySent = false }
     }
+    const t = Transform.getOrNull(engine.PlayerEntity)
+    if (!t) { noTransform++; return }
+    noTransform = 0
+    const p = t.position
+    lastFeet = { x: p.x, y: p.y, z: p.z }
     posClock += dt
     if (posClock < 0.5) return
     posClock = 0
-    const t = Transform.getOrNull(engine.PlayerEntity)
-    if (!t) return
-    const p = t.position
-    try { sendLobbyPos(p.x, p.y, p.z) } catch (err) { console.log('[Lobby] pos send failed', err) }
+    try { sendLobbyPos(p.x, p.y, p.z); sent++ } catch (err) { sendFail++; console.log('[Lobby] pos send failed', err) }
   })
+}
+
+function fmt(n: number): string {
+  return Number.isFinite(n) ? n.toFixed(0) : 'na'
+}
+
+/** Same conversion the server uses, so the HUD shows the zone that sample would score. */
+export function hudLobbyDebug(): string {
+  if (!DEBUG_LOBBY || !inLobby()) return ''
+  const scene = toSceneFeet(lastFeet.x, lastFeet.z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
+  const c = cellAt(scene.x, scene.z, MAZE_ORIGIN, CELL)
+  const named = LOBBY_MODES.find(m => c && m.cell.x === c.x && m.cell.z === c.z)
+  const zone = named ? (named.live ? named.id : `${named.id}-soon`) : (voteModeAt(scene.x, scene.z, MAZE_ORIGIN, CELL) || (c ? 'abstain' : 'out'))
+  const wire = serverLobbyCounts()
+  return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} pvp ${voteCount('pvp')} pvb ${voteCount('pvb')}`
 }
 
 export function hudClockText(matchSecs: number): string {

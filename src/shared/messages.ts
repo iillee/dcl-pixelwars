@@ -95,6 +95,9 @@ export const Messages = {
     voteMs: Schemas.Int,
     winner: Schemas.String,
     votes: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })),
+    // Who the server is scoring, and how many feet samples it has stored.
+    present: Schemas.Int,
+    feet: Schemas.Int,
   }),
 
   // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.

@@ -2,6 +2,7 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
+import { clearLobbyVotes, noteLobbyPos, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
@@ -88,6 +89,40 @@ function checkFrame(label: string, sceneM: number, origin: number, baseMeters: n
 }
 checkFrame('small', 320, 80, -10 * 16)
 checkFrame('full', 4800, 2320, -150 * 16)
+
+// The server path: a stored sample scores only for ids the tick considers present.
+const now = 1_700_000_000_000
+for (const m of LOBBY_MODES.filter(x => x.live)) {
+  const sx = m.cell.x * CELL + CELL / 2 + MAZE_ORIGIN
+  const sz = m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN
+  clearLobbyVotes()
+  if (!noteLobbyPos('player', sx, 190, sz, now)) {
+    console.error(`✗ server rejected a scene-local ${m.id} sample`)
+    process.exit(1)
+  }
+  const scored = tallyVotes(['player'], now)
+  if (scored.counts[m.id] !== 1) {
+    console.error(`✗ server tally missed scene-local ${m.id}`)
+    process.exit(1)
+  }
+  const ignored = tallyVotes([], now)
+  if (ignored.counts[m.id] !== 0) {
+    console.error(`✗ an empty present list must not score ${m.id}`)
+    process.exit(1)
+  }
+}
+clearLobbyVotes()
+
+const lobbySrc = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')
+if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
+  console.error('✗ feet reports must not wait on the lobby layout flag')
+  process.exit(1)
+}
+const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+if (!indexSrc.includes("rebuildMaze(1, 'lobby')") || !indexSrc.includes('not rolling a local arena seed')) {
+  console.error('✗ client boot should lay the lobby and not roll an arena seed over it')
+  process.exit(1)
+}
 
 const feet = lobbyFeet(CELL, MAZE_ORIGIN, 0)
 const abstain = voteModeAt(feet.x, feet.z, MAZE_ORIGIN, CELL)

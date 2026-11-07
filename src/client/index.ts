@@ -42,7 +42,7 @@ import { initPaintBurst } from './paintBurst'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
-import { ensureMazeSeed, initMazeNet } from '../maze/rebuild'
+import { ensureMazeSeed, initMazeNet, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../maze/rebuild'
 import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
@@ -81,6 +81,13 @@ engine.addSystem((dt: number) => {
   initTimer += dt
   if (initTimer < INIT_GRACE) return
   initDone = true
+  // Boot floor is the lobby cross. Rolling a local arena seed here used to
+  // grow the match maze during the 1.5s before joinRoster, so Luke loaded
+  // into the arena and only later saw the lobby.
+  if (isLobbyLayout()) {
+    console.log('[Lobby] boot floor is the cross — not rolling a local arena seed')
+    return
+  }
   if (SeedHolder.get(seedHolder).seed !== 0) return
   if (serverConfirmedAlive) {
     // A server exists and will hand us its seed via CRDT any moment.
@@ -134,6 +141,11 @@ export async function setupClient(): Promise<void> {
   initLungeDummy()
   initPaintBurst()
   initLobby()
+  // Cross exists before the first frame the player can fall. The server
+  // also starts in the lobby and sends roundReset; this is the local floor
+  // so join does not wait on that message. A match clock replaces it.
+  rebuildMaze(1, 'lobby')
+  setHoldMazeSeed(true)
   setupTouchControls()
 
   // Register the network boundary LAST so `room.onMessage` subscribers

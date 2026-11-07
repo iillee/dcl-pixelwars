@@ -1,6 +1,6 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
-import { paintOpen, setGamePhase } from './phase'
-import { setHoldMazeSeed } from '../maze/rebuild'
+import { paintOpen, setGamePhase, setServerLobbyCounts } from './phase'
+import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../maze/rebuild'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -26,7 +26,6 @@ import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { drainPaintOutbox, setLocalTeam } from '../paint'
 import { SeedHolder, seedHolder } from '../shared/components'
-import { ensureMazeSeed } from '../maze/rebuild'
 
 // Locally-tracked team for this session. Written on team:assigned; used
 // only to log the human-readable team name. paint.ts owns the "does this
@@ -107,14 +106,18 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet }) => {
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
     if (idx !== getRoundIndex() || active !== isRoundActive() || Math.abs(end - getRoundEndMs()) > 500) setRoundState(idx, end, active)
     const ph = phase === 'summary' || phase === 'lobby' || phase === 'idle' || phase === 'match' ? phase : (active ? 'match' : 'idle')
     setGamePhase(ph, voteMs ?? 0, votes ?? [], winner ?? '')
+    setServerLobbyCounts(present ?? 0, feet ?? 0)
     setHoldMazeSeed(ph === 'lobby' || ph === 'idle')
+    // A running match must replace the boot lobby. joinRoster does not send a
+    // second roundReset while the round is already active.
+    if (ph === 'match' && isLobbyLayout()) rebuildMaze(idx || 1, 'arena')
     events.emit('round:clock', {
       idx, active, format: format === 'pvb' ? 'pvb' : 'pvp',
       phase: ph, voteMs: voteMs ?? 0, winner: winner ?? '', votes: votes ?? [],
