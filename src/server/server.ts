@@ -48,7 +48,7 @@ import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
 import { LOBBY_FIRST_VOTE_MS, LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
-import { clearLobbyVotes, everyoneInZone, forgetLobbyPlayer, noteLobbyPos, tallyVotes } from './lobbyVote'
+import { clearLobbyVotes, everyoneInZone, forgetLobbyPlayer, lobbySampleIds, lobbyWho, noteLobbyPos, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 import { SKY_TOP_Y } from '../maze/level'
@@ -280,6 +280,7 @@ export async function setupServer(): Promise<void> {
   /** The 5 s countdown (first vote while idle). It does not end early. */
   let shortCountdown = false
   let hadVotes = false
+  let lobbyLogAt = 0
 
   function sendLobbyLayout(to?: string): void {
     const msg = {
@@ -1148,6 +1149,14 @@ export async function setupServer(): Promise<void> {
 
     if (intermission === 'lobby') {
       const present = presentIds()
+      if (now - lobbyLogAt >= 1000) {
+        lobbyLogAt = now
+        const who = lobbyWho(present.length ? present : lobbySampleIds(), now)
+        const fmt = (n: number) => Number.isFinite(n) ? n.toFixed(0) : 'na'
+        const bits = who.map(w => `${w.id.slice(0, 8)} raw=${fmt(w.rawX)},${fmt(w.y)},${fmt(w.rawZ)} scene=${fmt(w.x)},${fmt(w.z)} frame=${w.frame} cell=${w.cell} zone=${w.zone}`).join(' | ')
+        const { counts } = tallyVotes(present, now)
+        console.log(`[Lobby] present=${present.length} pvp=${counts.pvp} pvb=${counts.pvb} ${bits || '(no feet)'}`)
+      }
       if (present.length === 0) {
         if (countdownEnds !== 0 || wantFull) closeCountdown()
         return

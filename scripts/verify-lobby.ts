@@ -6,7 +6,7 @@ import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } 
 import { openingsAt } from '../src/maze/tiles'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, emptyCounts, everyPresentInZone,
-  lobbyFeet, pickWinner, stillAfk, voteModeAt,
+  lobbyFeet, pickWinner, stillAfk, toSceneFeet, voteModeAt,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
@@ -58,6 +58,37 @@ for (const m of LOBBY_MODES) {
     process.exit(1)
   }
 }
+function checkFrame(label: string, sceneM: number, origin: number, baseMeters: number): void {
+  for (const m of LOBBY_MODES) {
+    const sx = m.cell.x * 32 + 16 + origin
+    const sz = m.cell.z * 32 + 16 + origin
+    const scene = toSceneFeet(sx, sz, sceneM, origin, 32, baseMeters)
+    const world = toSceneFeet(sx + baseMeters, sz + baseMeters, sceneM, origin, 32, baseMeters)
+    if (scene.frame !== 'scene' || world.frame !== 'world') {
+      console.error(`✗ ${label} ${m.id} frame scene=${scene.frame} world=${world.frame}`)
+      process.exit(1)
+    }
+    const want = m.live ? m.id : ''
+    if (voteModeAt(scene.x, scene.z, origin, 32) !== want || voteModeAt(world.x, world.z, origin, 32) !== want) {
+      console.error(`✗ ${label} ${m.id} does not vote from both coordinate frames`)
+      process.exit(1)
+    }
+    // The unconverted world point is NOT the scene cell. That miss is the full-world vote bug.
+    if (m.live && voteModeAt(sx + baseMeters, sz + baseMeters, origin, 32) !== '') {
+      console.error(`✗ ${label} ${m.id} world metres already voted before the frame conversion`)
+      process.exit(1)
+    }
+  }
+  const cx = 2 * 32 + 16 + origin
+  const cross = toSceneFeet(cx + baseMeters, cx + baseMeters, sceneM, origin, 32, baseMeters)
+  if (cross.frame !== 'world' || voteModeAt(cross.x, cross.z, origin, 32) !== '') {
+    console.error(`✗ ${label} cross in world metres should abstain`)
+    process.exit(1)
+  }
+}
+checkFrame('small', 320, 80, -10 * 16)
+checkFrame('full', 4800, 2320, -150 * 16)
+
 const feet = lobbyFeet(CELL, MAZE_ORIGIN, 0)
 const abstain = voteModeAt(feet.x, feet.z, MAZE_ORIGIN, CELL)
 if (abstain !== '') {

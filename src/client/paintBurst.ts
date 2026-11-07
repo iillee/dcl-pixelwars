@@ -61,7 +61,7 @@ import {
   BURST_SFX_SRC, AIR_HIT_SRC, AIR_BOOM_SRC,
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
-import { hitsOpen, paintOpen } from './phase'
+import { hitsOpen, inLobby, paintOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
@@ -75,7 +75,8 @@ let knockForceEnt: Entity = 0 as Entity
 let diveForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
-const rgbOf = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
+const WHITE = { r: 1, g: 1, b: 1 }
+const rgbOf = (t: Team) => inLobby() ? WHITE : (TEAM_RGB[t] ?? WHITE)
 function glow(ent: Entity, rgb: { r: number; g: number; b: number }, a: number, intensity: number): void {
   Material.setPbrMaterial(ent, {
     albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, a), emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
@@ -96,7 +97,7 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
 function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   const rgb = rgbOf(team)
-  startRipple(p, team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
+  startRipple(p, inLobby() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4

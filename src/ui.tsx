@@ -568,8 +568,8 @@ export const uiMenu = () => (
               <Label value={hudVoteLine()} fontSize={isMobile() ? 13 : 15} color={SUMMARY_INK} textAlign="middle-center" textWrap="wrap"
                 uiTransform={{ width: voteW, height: isMobile() ? 48 : 28, margin: { top: 8 } }} />
             ) : null}
-            {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
-            {getSummaryProgress() >= 0 || standingsOpen ? (
+            {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby. */}
+            {lobby ? null : getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()

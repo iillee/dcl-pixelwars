@@ -59,6 +59,7 @@ import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
 
@@ -108,9 +109,10 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
   if (sound) AudioSource.create(ent, { audioClipUrl: sound.src, playing: true, loop: false, volume: sound.vol, global: false })
   fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
-const teamRgb = (t: Team) => TEAM_RGB[t] ?? { r: 1, g: 1, b: 1 }
-const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const WHITE = { r: 1, g: 1, b: 1 }
+const fxTeam = (t: Team) => inLobby() ? Team.None : t
+const teamRgb = (t: Team) => inLobby() ? WHITE : (TEAM_RGB[t] ?? WHITE)
+const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const RECOVERY_CLICK = 'assets/sounds/click.wav'
 let recoveryClickEnt: Entity = 0 as Entity
 
@@ -205,7 +207,7 @@ function tickStreaks(dt: number): void {
     const p = avatarPos(who)
     if (!p) continue
     const team = who === '' ? localTeam() : teamOfUser(who)
-    dashPop(who, p, team)
+    dashPop(who, p, fxTeam(team))
     l.accum += dt
     while (l.accum >= STREAK_INTERVAL) { l.accum -= STREAK_INTERVAL; spawnStreak(p, team) }
   }
@@ -367,11 +369,11 @@ export function triggerLunge(): void {
   })
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
   // Anticipation without input delay: team glow at the chest + lunge take.
-  spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(localTeam()),
+  spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(fxTeam(localTeam())),
     0.08, 0.08, 0.5, 1.1, 0.5, undefined, { who: '', off: { x: dir.x * 0.6, y: 1.1, z: dir.z * 0.6 } })
   lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
-  startSlash('', dir.x, dir.z, localTeam())
-  startHitbox('', dir.x, dir.z, localTeam())
+  startSlash('', dir.x, dir.z, fxTeam(localTeam()))
+  startHitbox('', dir.x, dir.z, fxTeam(localTeam()))
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)
   checkHits(startPos, startPos)
@@ -441,12 +443,12 @@ function onStarted(attacker: string, id: number, dx: number, dz: number, x: numb
   gate.sawStart(att, id, Date.now())
   if (att === myAddress()) return
   lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0 })
-  startSlash(att, dx, dz, teamOfUser(att))
-  startHitbox(att, dx, dz, teamOfUser(att))
+  startSlash(att, dx, dz, fxTeam(teamOfUser(att)))
+  startHitbox(att, dx, dz, fxTeam(teamOfUser(att)))
   const p = avatarPos(att)
   // Remote lunge: glow + the same lunge take set, positional at that avatar.
   // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
-  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(teamOfUser(att)), 0.08, 0.7, 0.5, 1.1, 0.5,
+  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(fxTeam(teamOfUser(att))), 0.08, 0.7, 0.5, 1.1, 0.5,
     { src: pickLungeSrc(), vol: 0.9 }, { who: att, off: { x: 0, y: 1.1, z: 0 } })
   // Victim anticipation: if we may be (or enter) the hit volume, knock ourselves
   // as soon as contact is visible here — don't wait for server Impact (~1 RTT).

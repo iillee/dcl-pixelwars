@@ -49,7 +49,48 @@ export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
 }
 
-/** Grid cell under a world XZ, or null if it falls outside the tile grid. */
+/**
+ * Player feet may arrive in scene metres (SW corner of the scene is 0,0) or in
+ * world metres (parcel 0,0 is 0,0). Tiles are placed in scene metres. On a scene
+ * whose base is not 0,0 those frames differ by `baseMeters` (base parcel × 16).
+ * Pick the frame that lands inside the scene and closest to the lobby cross.
+ */
+export function toSceneFeet(
+  x: number,
+  z: number,
+  sceneM: number,
+  origin: number,
+  cell: number,
+  baseMeters: number,
+): { x: number; z: number; frame: 'scene' | 'world' } {
+  const crossX = LOBBY_CROSS.x * cell + cell / 2 + origin
+  const crossZ = LOBBY_CROSS.z * cell + cell / 2 + origin
+  const options = [
+    { x, z, frame: 'scene' as const },
+    { x: x - baseMeters, z: z - baseMeters, frame: 'world' as const },
+  ]
+  const inside = (p: { x: number; z: number }) =>
+    p.x >= -cell && p.z >= -cell && p.x <= sceneM + cell && p.z <= sceneM + cell
+  let best = options[0]
+  let bestD = Infinity
+  let found = false
+  for (const p of options) {
+    if (!inside(p)) continue
+    found = true
+    const d = Math.hypot(p.x - crossX, p.z - crossZ)
+    // Equal distance keeps the scene frame (listed first).
+    if (d < bestD - 0.5) { best = p; bestD = d }
+  }
+  if (!found) {
+    for (const p of options) {
+      const d = Math.hypot(p.x - crossX, p.z - crossZ)
+      if (d < bestD - 0.5) { best = p; bestD = d }
+    }
+  }
+  return best
+}
+
+/** Grid cell under a scene-local XZ, or null if it falls outside the tile grid. */
 export function cellAt(worldX: number, worldZ: number, origin: number, cell: number): { x: number; z: number } | null {
   if (!(cell > 0)) return null
   const x = Math.floor((worldX - origin) / cell)

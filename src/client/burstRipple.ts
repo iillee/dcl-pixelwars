@@ -17,6 +17,7 @@
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
+import { inLobby } from './phase'
 import { cellMaterial } from '../paint'
 import {
   BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
@@ -133,7 +134,8 @@ function cellNear(g: WalkableGraph, x: number, y: number, z: number, r: number):
  *  centre column DASH_TILE_INNER_LAG_S later; the forward row uses DASH_TILE_AHEAD_DELAY_S so it
  *  leads. Visual only; capped at DASH_TILE_MAX live slabs. */
 export function dashPop(who: string, p: V3, team: Team): void {
-  if (!DASH_TILE_POP || pool.length === 0 || team === Team.None) return
+  // Team.None is the lobby (white slabs). Outside the lobby it still means "no trail".
+  if (!DASH_TILE_POP || pool.length === 0 || (team === Team.None && !inLobby())) return
   const g = ensureGraph()
   if (!g) return
   const centre = cellNear(g, p.x, p.y, p.z, CELL_M)
