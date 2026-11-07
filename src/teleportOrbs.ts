@@ -52,6 +52,11 @@ export function teleporterTiles(): Placed[] { return tpTiles }
 let cooldown = 0
 let clock = 0
 
+export function clearTeleportOrbs(): void {
+  teardown()
+  tpTiles = []
+}
+
 function teardown(): void {
   for (const o of orbs) {
     engine.removeEntity(o.orb); engine.removeEntity(o.snd)

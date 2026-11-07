@@ -71,13 +71,18 @@ export type Events = {
   'round:clock': { idx: number; active: boolean; format: 'pvp' | 'pvb' }
 
   // After summary wait: new seed. Subscribers: paint (clear), maze (rebuild), player (teleport).
+  // layout 'lobby' is the voting cross. Missing or 'arena' is a match maze.
   'round:reset': {
     seed: number
     finalRed: number
     finalBlue: number
     finalTotal: number
     format: 'pvp' | 'pvb'
+    layout?: 'arena' | 'lobby'
   }
+
+  // The lobby cross is in the world at full size. Teleport onto it before teardown.
+  'lobby:floor': { ready: boolean }
 
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
