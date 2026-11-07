@@ -4,6 +4,7 @@ import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage } from "./paint"
 import { hudClockText, hudVoteLine } from "./client/lobby"
+import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
@@ -446,6 +447,9 @@ export const uiMenu = () => (
     {/* ─── Top-center: countdown timer + coverage pill ───────────────── */}
     {(() => {
       const secs = getCountdownSeconds()
+      const lobby = inLobby()
+      const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
+      const voteW = Math.max(280, Math.min(canvasW - 24, 760))
       return (
         <UiEntity
           uiTransform={{
@@ -454,15 +458,15 @@ export const uiMenu = () => (
             pointerFilter: 'none',
           }}
         >
-          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center' }}>
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
             {/* Mobile: separate eye | timer | star mute buttons. Desktop: single clock panel (star + eye left, mute right) as in 36507d7. */}
             {isMobile() ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
               <UiEntity uiTransform={{ flexDirection: 'row', margin: { right: TOP_GAP } }}>
-                <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
+                {lobby ? null : <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
                   <UiEntity uiTransform={{ width: 30, height: 30, pointerFilter: 'none' }}
                     uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: SUMMARY_INK }} />
-                </TileButton>
+                </TileButton>}
                 <TileButton id="ui_top_mute" onPress={toggleMusic}>
                   <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
                     uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
@@ -478,13 +482,36 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                  <Label value={hudClockText(secs)} fontSize={lobby ? 28 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
                 <OverviewRow />
                 <OverviewEye />
               </UiEntity>
+            </UiEntity>
+            ) : lobby ? (
+            <UiEntity uiTransform={{ width: 280 + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <OverviewRow desktop besideEye />
+                <OverviewEye />
+              </UiEntity>
+              <UiEntity
+                uiTransform={{
+                  width: 280, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
+                  justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
+                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+                }}
+                uiBackground={{ color: HOTBAR_TILE_BG }}
+              >
+                <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
+                  uiBackground={{ color: SUMMARY_CARD_BG }} />
+                <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+              </UiEntity>
+              <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
+                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+              </TileButton>
             </UiEntity>
             ) : (
             <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
@@ -538,8 +565,8 @@ export const uiMenu = () => (
             </UiEntity>
             )}
             {hudVoteLine() !== '' ? (
-              <Label value={hudVoteLine()} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap"
-                uiTransform={{ margin: { top: 4 }, height: 22 }} />
+              <Label value={hudVoteLine()} fontSize={isMobile() ? 13 : 15} color={SUMMARY_INK} textAlign="middle-center" textWrap="wrap"
+                uiTransform={{ width: voteW, height: isMobile() ? 48 : 28, margin: { top: 8 } }} />
             ) : null}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. */}
             {getSummaryProgress() >= 0 || standingsOpen ? (

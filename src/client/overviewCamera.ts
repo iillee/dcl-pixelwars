@@ -31,6 +31,7 @@ import { Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 
 import { SCENE_SIZE, BASE_Y } from '../maze/generator'
+import { IS_SKY, LEVEL_Y_OFFSET } from '../maze/level'
 import { playUiClick } from './audio'
 
 // MARK: Tuning
@@ -64,9 +65,10 @@ const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
 /** 20·log2(parcels+1), and the docs cap every scene at 330 m.
- *  300×300 is about 329 m. The old 20×20 figure (173 m) sat under the raised arena. */
+ *  20×20 is about 173 m above y 0. The arena floor was lifted by LEVEL_Y_OFFSET,
+ *  so the ceiling rises with it. Otherwise zoom-out stops under the player's feet. */
 const SCENE_PARCELS = (SCENE_SIZE / 16) * (SCENE_SIZE / 16)
-const SCENE_HEIGHT_LIMIT = Math.min(330, 20 * Math.log2(SCENE_PARCELS + 1))
+const SCENE_HEIGHT_LIMIT = Math.min(330, 20 * Math.log2(SCENE_PARCELS + 1) + (IS_SKY ? LEVEL_Y_OFFSET : 0))
 const BOUNDS_INSET_M   = 2
 const CEILING_MARGIN_M = 3
 const MIN_ABOVE_FOCUS  = 3
