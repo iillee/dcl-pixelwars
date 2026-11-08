@@ -4,9 +4,10 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 300×300 world: waves through the near and mid squares, easing
- * out across the far square, then a flat rim to the parcel edge. The haze
- * cylinder sits on that edge. `landscapeTerrain` stays false.
+ * for the 100×100 world (edge 800 m from centre): waves through the near
+ * and mid squares, easing out across the far square, then a flat rim that
+ * fades to the horizon colour. The haze cylinder sits on that edge, not
+ * over the arena. `landscapeTerrain` stays false.
  * `LOOK.sea` turns the swell, the rim, and the haze on.
  *
  * Swells are a displaced mesh with a plain color. Ripple and foam maps
@@ -99,21 +100,23 @@ export const WATER = {
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
-  /** Dense centre square, half-extent (m). Desktop step is swellNearStepM. */
-  swellNearM: 512,
+  /** Dense centre square, half-extent (m). Past the 80 m arena, still open water. */
+  swellNearM: 256,
   /** 32 m is the grid the preview already drew. 8 m made a morph file it did not draw. */
   swellNearStepM: 32,
-  /** Middle ring, half-extent (m). Full-height waves continue out to here. */
-  swellMidM: 2048,
+  /** Middle ring, half-extent (m). Full-height waves continue out to here.
+   *  Must sit on the 64 m step so the ring join has a vertex. */
+  swellMidM: 512,
   swellMidStepM: 64,
   /** Far square, half-extent (m). Displacement eases to 0 at this edge.
-   *  The flat rim then fades from here to the parcel edge. */
-  swellFarM: 2304,
+   *  On the 128 m step. The flat rim then fades from here to the parcel
+   *  edge (sea half ~794 m). */
+  swellFarM: 640,
   swellFarStepM: 128,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 32,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 220,
+  swellMobileFadeM: 96,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',

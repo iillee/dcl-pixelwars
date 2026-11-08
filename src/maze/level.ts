@@ -11,12 +11,11 @@
  *     The play grid stays 5×5. The extra parcels are open water so the sea is
  *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
  *
- * World size (sky only). 'small' is 20×20 (320 m), the current deploy.
+ * World size (sky only). 'large' is 100×100 (1600 m), the current world.
  * The arena stays centred and our sea fills the box out to the haze.
  * 'small' is 20×20, 'medium' is 64×64, 'wide' is 150×150, 'full' is 300×300.
- * After changing this, run `npx tsx scripts/write-scene.ts`. The swell meshes
- * are built for 'large'; run `npx tsx scripts/build-water-swell.ts` after a
- * size change so the rings still meet the parcel edge.
+ * After changing this, run `npx tsx scripts/write-scene.ts`. Then
+ * `npx tsx scripts/build-water-swell.ts` so the rings still meet the edge.
  */
 
 export type LevelMode = 'sky' | 'classic'
@@ -47,15 +46,16 @@ export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
- * Parcels on a side. 16 m each. `full` is the World maximum (300×300 = 90,000
- * parcels, 4800 m). `large` is 100×100 (1600 m). `medium` is 64×64.
- * `small` is 20×20. The play grid stays 5×5 because the inset grows with
- * the scene. Keep scene.json in step via scripts/write-scene.ts.
+ * Parcels on a side. 16 m each. `large` is 100×100 (1600 m, base -50,-50),
+ * centred on parcel 0,0. The scene edge is 800 m from the centre.
+ * `full` is the World maximum (300×300 = 90,000 parcels, 4800 m).
+ * `medium` is 64×64. `small` is 20×20. The play grid stays 5×5 because
+ * the inset grows with the scene. Keep scene.json in step via write-scene.ts.
  */
 export const MEDIUM_PARCELS = 64
 export const LARGE_PARCELS = 100
 export const WIDE_PARCELS = 150
-export const WORLD_SIZE = 'full' as 'small' | 'medium' | 'large' | 'wide' | 'full'
+export const WORLD_SIZE = 'large' as 'small' | 'medium' | 'large' | 'wide' | 'full'
 export const SKY_PARCELS =
   WORLD_SIZE === 'full' ? 300
     : WORLD_SIZE === 'wide' ? WIDE_PARCELS

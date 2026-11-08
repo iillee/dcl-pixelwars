@@ -88,6 +88,8 @@ function checkFrame(label: string, sceneM: number, origin: number, baseMeters: n
   }
 }
 checkFrame('small', 320, 80, -10 * 16)
+checkFrame('medium', 64 * 16, (64 * 16 - 160) / 2, -32 * 16)
+checkFrame('large', 100 * 16, (100 * 16 - 160) / 2, -50 * 16)
 checkFrame('full', 4800, 2320, -150 * 16)
 
 // The server path: a stored sample scores only for ids the tick considers present.
@@ -114,14 +116,16 @@ for (const m of LOBBY_MODES.filter(x => x.live)) {
 }
 clearLobbyVotes()
 
-// Luke @15f09ef, standing on the west end. Client zone was pvp, server tally stayed 0.
+// Same stand as Luke's west-end sample: 4 m east and 2 m south of that cell's centre.
 const lukeAt = 1_700_000_000_000
-if (voteModeAt(2372, 2398, MAZE_ORIGIN, CELL) !== 'pvp') {
-  console.error('✗ 2372,2398 must be the west PvP end')
+const lukeX = 1 * CELL + CELL / 2 + MAZE_ORIGIN + 4
+const lukeZ = 2 * CELL + CELL / 2 + MAZE_ORIGIN - 2
+if (voteModeAt(lukeX, lukeZ, MAZE_ORIGIN, CELL) !== 'pvp') {
+  console.error(`✗ ${lukeX},${lukeZ} must be the west PvP end`)
   process.exit(1)
 }
-if (!noteLobbyPos('0xAbC', 2372, 190, 2398, lukeAt)) {
-  console.error('✗ server rejected Luke\'s west-end sample')
+if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, lukeAt)) {
+  console.error('✗ server rejected the west-end sample')
   process.exit(1)
 }
 const aged = lukeAt + 2_000 // past the old 1.5 s freshness window
@@ -147,7 +151,7 @@ if (step.log !== 'start-5s' || step.next.countdownEnds !== aged + 5_000) {
   process.exit(1)
 }
 // Still standing on the same tile a minute later. That is a vote, not AFK.
-if (!noteLobbyPos('0xAbC', 2372, 190, 2398, lukeAt + 61_000)) {
+if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, lukeAt + 61_000)) {
   console.error('✗ standing still on the end tile was rate-limited')
   process.exit(1)
 }

@@ -3,7 +3,7 @@
  *
  *   small   20×20, centred on parcel 0,0.
  *   medium  64×64, centred on parcel 0,0.
- *   large   100×100, centred on parcel 0,0. Deploy default.
+ *   large   100×100, base -50,-50, centred on parcel 0,0. Current world.
  *   wide    150×150, centred on parcel 0,0.
  *   full    300×300 at base -150,-150, inside the publisher box.
  *
