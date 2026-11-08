@@ -75,7 +75,7 @@ import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn, MIN_Y } from '../maze/generator'
 import { isLobbyLayout } from '../maze/rebuild'
 import { lobbyFeet } from '../shared/lobby'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
-import { fallTriggerY } from '../shared/swell'
+import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
 import { LOOK } from '../shared/waterLook'
 import { waterVisualSeconds } from './water'
 import { Team } from '../shared/team'
@@ -950,7 +950,12 @@ function tick(dt: number): void {
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
   const p = playerPos()
-  if (p && phase === 'idle' && rearm && isMazeReady() && p.y < (LOOK.sea ? fallTriggerY(p.x, p.z, waterVisualSeconds()) : fallTriggerY(p.x, p.z))) begin(p)
+  if (p && phase === 'idle' && rearm) {
+    const trigger = LOOK.sea ? fallTriggerY(p.x, p.z, waterVisualSeconds()) : fallTriggerY(p.x, p.z)
+    // Below the floor by more than a few metres: the base ground at y 0, or a
+    // fall through tiles that are not colliders yet. Do not wait for the maze.
+    if (shouldBeginRescue(p.y, isMazeReady(), trigger, MIN_Y)) begin(p)
+  }
   // Sample after the trip so the lead uses the fall, not the frame we just caught.
   if (p && phase === 'idle') remember(p)
 }

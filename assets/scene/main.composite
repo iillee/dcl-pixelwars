@@ -1115,82 +1115,82 @@
             "layout": {
               "parcels": [],
               "base": {
-                "x": 0,
-                "y": 0
+                "x": -50,
+                "y": -50
               }
             },
             "silenceVoiceChat": false,
             "disablePortableExperiences": false,
             "spawnPoints": [
               {
-                "name": "RedBase",
+                "name": "Lobby",
                 "default": true,
                 "position": {
                   "x": {
                     "$case": "range",
                     "value": [
-                      94,
-                      98
+                      798,
+                      802
                     ]
                   },
                   "y": {
                     "$case": "range",
                     "value": [
-                      90.733,
-                      90.733
+                      190.733,
+                      190.733
                     ]
                   },
                   "z": {
                     "$case": "range",
                     "value": [
-                      94,
-                      98
+                      798,
+                      802
                     ]
                   }
                 },
                 "cameraTarget": {
-                  "x": 160,
-                  "y": 90.733,
-                  "z": 160
+                  "x": 800,
+                  "y": 190.733,
+                  "z": 808
                 }
               },
               {
-                "name": "BlueBase",
+                "name": "LobbyBlue",
                 "default": false,
                 "position": {
                   "x": {
                     "$case": "range",
                     "value": [
-                      222,
-                      226
+                      798,
+                      802
                     ]
                   },
                   "y": {
                     "$case": "range",
                     "value": [
-                      90.733,
-                      90.733
+                      190.733,
+                      190.733
                     ]
                   },
                   "z": {
                     "$case": "range",
                     "value": [
-                      222,
-                      226
+                      798,
+                      802
                     ]
                   }
                 },
                 "cameraTarget": {
-                  "x": 160,
-                  "y": 90.733,
-                  "z": 160
+                  "x": 800,
+                  "y": 190.733,
+                  "z": 808
                 }
               }
             ],
             "skyboxConfig": {},
             "creator": "0x1e93e534c5e26b01ed242410b43ae23dd0faa52b",
             "disableNearbyVoiceChat": false,
-            "hideLandscapeTerrain": false
+            "hideLandscapeTerrain": true
           }
         }
       }

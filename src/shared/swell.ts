@@ -131,3 +131,16 @@ export function fallTriggerY(x: number, z: number, cycleSeconds?: number): numbe
   if (!LOOK.sea) return FLAT_FALL_Y
   return Math.max(FLAT_FALL_Y, swellSurfaceY(x, z, cycleSeconds ?? swellCycleSeconds()))
 }
+
+/** Metres under the lowest tile that still counts as standing on that floor. */
+export const FLOOR_RESCUE_MARGIN = 4
+
+/**
+ * Rescue when they have fallen through the live line and the maze can catch
+ * them, or when they are already on the base ground well under the floor.
+ * The lobby never marks the maze ready, so the ground case must not wait.
+ */
+export function shouldBeginRescue(y: number, mazeReady: boolean, triggerY: number, floorY: number): boolean {
+  if (y < floorY - FLOOR_RESCUE_MARGIN) return true
+  return mazeReady && y < triggerY
+}

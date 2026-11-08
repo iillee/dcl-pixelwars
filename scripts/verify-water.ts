@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
-import { fallTriggerY, liveSwell, swellSurfaceY } from '../src/shared/swell'
+import { fallTriggerY, liveSwell, shouldBeginRescue, swellSurfaceY } from '../src/shared/swell'
 import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { baseSpawn } from '../src/maze/generator'
 
@@ -318,5 +318,17 @@ if (SWELL_VARIANT === '48m') {
     console.error('✗ swellSurfaceY does not match the live 48 m meshes')
     process.exit(1)
   }
+}
+if (!shouldBeginRescue(2, false, rescue, MIN_Y)) {
+  console.error('✗ standing on the base ground must rescue even before the maze is ready')
+  process.exit(1)
+}
+if (shouldBeginRescue(MIN_Y + 1, false, rescue, MIN_Y)) {
+  console.error('✗ a player on the floor must not rescue while the maze is still building')
+  process.exit(1)
+}
+if (!shouldBeginRescue(rescue - 1, true, rescue, MIN_Y)) {
+  console.error('✗ a finished maze must still rescue a fall through the line')
+  process.exit(1)
 }
 console.log('✓ swells stay under the rescue line; the arena has no fog layer')
