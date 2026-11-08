@@ -70,8 +70,8 @@ export function isLobbyLayout(): boolean {
 // ─── Rebuild entry point ────────────────────────────────────────────
 export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'call'): void {
   const nextLobby = layout === 'lobby'
-  if (nextLobby && layoutKind === 'lobby' && spawnQueue.length === 0 && gridSize() === 5) {
-    console.log(`[Lobby] rebuild skipped (${why}) — cross already up`)
+  if (nextLobby && layoutKind === 'lobby' && spawnQueue.length === 0 && gridSize() === 3) {
+    console.log(`[Lobby] rebuild skipped (${why}) — 3-tile floor already up`)
     return
   }
   console.log(`[Lobby] rebuild ${layout} (${why})`)
@@ -84,7 +84,7 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   if (nextLobby) {
     layoutKind = 'lobby'
     placeLobbyLayout()
-    const cross = getPlacedTilesInOrder().find(p => p.type === 'cross')
+    const cross = getPlacedTilesInOrder().find(p => p.type !== 'end')
     if (cross) {
       // Full-size floor first, then the teleport, then the old tiles go away.
       crossEnt = spawnTile(cross, true)

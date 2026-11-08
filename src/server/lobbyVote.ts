@@ -96,6 +96,11 @@ function liveVote(id: string, now: number): ModeId | '' {
   return voteModeAt(s.x, s.z, MAZE_ORIGIN, CELL)
 }
 
+/** The mode this player is currently counted for, or '' if they are not. */
+export function countedMode(id: string, now: number): ModeId | '' {
+  return liveVote(id, now)
+}
+
 /** Present ids plus anyone who has sent feet. A case-different key used to
  *  leave feet=1 and present=1 while every lookup missed. */
 function voterIds(present: string[]): string[] {

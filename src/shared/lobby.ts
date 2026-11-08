@@ -2,8 +2,9 @@
  * Lobby layout and vote rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * 5×5 grid. The cross is the center. An end tile sits on each side of it.
- * That end tile is the only voting cell. West is PvP, east is PvB.
+ * The built floor is three tiles: a straight center opening east and west,
+ * PvP on the west end, PvB on the east end. Color Garden and Pot Hunt stay
+ * in the registry so they can be placed again later. They are not on the floor.
  */
 
 export type ModeId = 'pvp' | 'pvb' | 'garden' | 'pots'
@@ -16,20 +17,22 @@ export type ModeDef = {
   /** Arm end that counts as a vote for this mode. */
   cell: { x: number; z: number }
   teamRule: TeamRule
-  /** Phase A: only PvP and PvB can win. The other ends are still built and labeled. */
+  /** Only a live mode can win a vote. */
   live: boolean
+  /** Built as an end tile against the center. Garden and pots are not, yet. */
+  placed: boolean
   color: { r: number; g: number; b: number }
 }
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** Ends share an edge with the cross. Openings face back toward it.
- *  West PvP, east PvB, north and south are visible and cannot win yet. */
+/** West PvP and east PvB share an edge with the center. Garden and pots
+ *  keep their cells for a later layout. They are not placed and cannot win. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXEL WARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
-  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
-  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
+  { id: 'pvp', label: 'PIXEL WARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
+  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
+  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
 export const LOBBY_VOTE_MS = 15_000
@@ -50,6 +53,11 @@ export function modeById(id: string): ModeDef | null {
 
 export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
+}
+
+/** End tiles actually built. PvP west, PvB east. */
+export function placedModes(): ModeDef[] {
+  return LOBBY_MODES.filter(m => m.placed)
 }
 
 /**

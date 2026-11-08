@@ -1,5 +1,5 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
-import { paintOpen, setGamePhase, setServerLobbyCounts } from './phase'
+import { paintOpen, setGamePhase, setMyVote, setServerLobbyCounts } from './phase'
 import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../maze/rebuild'
 /**
  * clientHandler.ts — the network boundary.
@@ -106,7 +106,7 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine }) => {
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
@@ -114,6 +114,7 @@ function wireInbound(): void {
     const ph = phase === 'summary' || phase === 'lobby' || phase === 'idle' || phase === 'match' ? phase : (active ? 'match' : 'idle')
     setGamePhase(ph, voteMs ?? 0, votes ?? [], winner ?? '')
     setServerLobbyCounts(present ?? 0, feet ?? 0, srvZone || 'none', why || 'none')
+    setMyVote(mine ?? '')
     setHoldMazeSeed(ph === 'lobby' || ph === 'idle')
     // A running match must replace the boot lobby. joinRoster does not send a
     // second roundReset while the round is already active.

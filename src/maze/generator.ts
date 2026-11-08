@@ -19,7 +19,7 @@ import {
   GROWTH_PRIMARY, GROWTH_FALLBACK,
   openingsAt, highDirAt,
 } from './tiles'
-import { LOBBY_CROSS, LOBBY_MODES } from '../shared/lobby'
+import { LOBBY_CROSS, placedModes } from '../shared/lobby'
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
@@ -101,18 +101,18 @@ export function getPlacedTilesInOrder(): Placed[] {
 }
 
 /**
- * Fixed lobby: center cross, and one end tile on each side of it.
- * End openings face back toward the cross so validate() passes.
- * The cross is placed first. Not a generated maze.
+ * Three tiles. A straight center opens east and west. PvP and PvB ends sit
+ * on those edges. No north or south arm, and no straight between them.
+ * The center is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {
-  if (GRID_W !== 5 || GRID_H !== 5) throw new Error('lobby layout is the 5×5 cross')
+  if (GRID_W !== 5 || GRID_H !== 5) throw new Error('lobby layout is the 5×5 grid')
   resetGrid()
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
-  place('cross', 0, LOBBY_CROSS.x, LOBBY_CROSS.z)
-  for (const m of LOBBY_MODES) {
-    // West opens east, east opens west, north opens south, south opens north.
+  // r=1 turns the straight's N/S openings to E/W.
+  place('straight', 1, LOBBY_CROSS.x, LOBBY_CROSS.z)
+  for (const m of placedModes()) {
     const r = m.cell.x < LOBBY_CROSS.x ? 1 : m.cell.x > LOBBY_CROSS.x ? 3 : m.cell.z > LOBBY_CROSS.z ? 2 : 0
     place('end', r, m.cell.x, m.cell.z)
   }

@@ -413,6 +413,7 @@ function playLeg(index: number): void {
 }
 
 function rescueHome(): Vec {
+  // Center of the 3-tile lobby (straight between the PvP and PvB ends).
   if (isLobbyLayout()) return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
   return baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
 }

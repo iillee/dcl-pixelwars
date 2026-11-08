@@ -17,6 +17,7 @@ let serverFeet = 0
 let clocks = 0
 let serverZone = 'none'
 let serverWhy = 'no-clock'
+let mine: ModeId | '' = ''
 
 export function gamePhase(): LobbyPhase {
   return phase
@@ -52,7 +53,17 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
   voteMs = nextVoteMs
   votes = nextVotes
   winner = nextWinner
+  if (next === 'match' || next === 'summary') mine = ''
   clocks++
+}
+
+/** Mode the server is counting for us. Empty until that clock says so. */
+export function myVote(): ModeId | '' {
+  return mine
+}
+
+export function setMyVote(next: string): void {
+  mine = next === 'pvp' || next === 'pvb' ? next : ''
 }
 
 /** present = players the server is scoring. feet = stored lobby samples. */

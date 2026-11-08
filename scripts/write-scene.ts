@@ -27,7 +27,7 @@ for (let z = origin + n - 1; z >= origin; z--) {
 scene.scene.base = `${origin},${origin}`
 scene.scene.parcels = parcels
 
-// Join lands on the voting cross. A match clock teleports to the team base.
+// Join lands on the center of the 3-tile lobby. A match clock teleports to the team base.
 function lobbySpawn(name: string, isDefault: boolean) {
   const s = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
   const y = s.y

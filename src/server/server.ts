@@ -48,7 +48,7 @@ import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
 import { LOBBY_FIRST_VOTE_MS, LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
-import { clearLobbyVotes, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
+import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
 import { SKY_TOP_Y } from '../maze/level'
@@ -227,17 +227,28 @@ export async function setupServer(): Promise<void> {
   let roundFormat: 'pvp' | 'pvb' = 'pvp'
   let pvbRoundIndex = 0
 
-  /** Round-on-join state → one client (to) or everyone. `format` lets a late joiner show the splash. */
+  /** Round-on-join state → one client (to) or everyone. `format` lets a late joiner show the splash.
+   *  In the lobby each player gets their own copy so `mine` is that player's counted mode. */
   function sendRoundClock(to?: string): void {
-    const voteMs = countdownEnds > Date.now() ? Math.max(0, countdownEnds - Date.now()) : 0
+    if (!to && intermission === 'lobby') {
+      const ids = presentIds()
+      if (ids.length === 0) { deliverRoundClock(undefined); return }
+      for (const id of ids) deliverRoundClock(id)
+      return
+    }
+    deliverRoundClock(to)
+  }
+  function deliverRoundClock(to?: string): void {
+    const now = Date.now()
+    const voteMs = countdownEnds > now ? Math.max(0, countdownEnds - now) : 0
     const phase = isRoundActive() ? 'match'
       : intermission === 'summaryWait' ? 'summary'
       : intermission === 'lobby' ? (voteMs > 0 || wantFull ? 'lobby' : 'idle')
       : 'idle'
-    const verdict = lobbyVerdict(presentIds(), Date.now())
+    const verdict = lobbyVerdict(presentIds(), now)
     const msg = {
       idx: currentRoundIndex(),
-      remainingMs: Math.max(0, Math.round(getRoundEndMs() - Date.now())),
+      remainingMs: Math.max(0, Math.round(getRoundEndMs() - now)),
       active: isRoundActive(),
       format: roundFormat,
       phase,
@@ -248,6 +259,7 @@ export async function setupServer(): Promise<void> {
       feet: lobbySampleIds().length,
       srvZone: verdict.zone,
       why: verdict.why,
+      mine: to ? countedMode(to, now) : '',
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
   }

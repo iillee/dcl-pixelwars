@@ -7,34 +7,55 @@ import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } 
 import { openingsAt } from '../src/maze/tiles'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, emptyCounts, everyPresentInZone,
-  lobbyFeet, pickWinner, stillAfk, toSceneFeet, voteModeAt,
+  lobbyFeet, pickWinner, placedModes, stillAfk, toSceneFeet, voteModeAt,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
-if (tiles.length !== 5) {
-  console.error(`✗ lobby should be 5 tiles, got ${tiles.length}`)
+if (tiles.length !== 3) {
+  console.error(`✗ lobby should be 3 tiles, got ${tiles.length}`)
   process.exit(1)
 }
-if (tiles.some(t => t.type === 'straight')) {
-  console.error('✗ the lobby has no straight tiles')
+if (LOBBY_MODES.length !== 4 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots')) {
+  console.error('✗ Color Garden and Pot Hunt must stay in the registry')
+  process.exit(1)
+}
+if (placedModes().map(m => m.id).join() !== 'pvp,pvb') {
+  console.error('✗ only PvP and PvB are placed')
   process.exit(1)
 }
 if (!validate()) {
   console.error('✗ lobby openings do not connect')
   process.exit(1)
 }
-const cross = tiles.filter(t => t.type === 'cross')
-if (cross.length !== 1 || cross[0].x !== LOBBY_CROSS.x || cross[0].z !== LOBBY_CROSS.z || tiles[0].type !== 'cross') {
-  console.error('✗ the cross should be the first tile at the center')
+const center = tiles[0]
+if (center.type !== 'straight' || center.x !== LOBBY_CROSS.x || center.z !== LOBBY_CROSS.z) {
+  console.error('✗ the center should be the first tile, a straight between the ends')
+  process.exit(1)
+}
+if (!openingsAt('straight', center.r).has(1) || !openingsAt('straight', center.r).has(3)) {
+  console.error('✗ the center straight should open east and west')
   process.exit(1)
 }
 const ends = getPlacedTilesInOrder().filter(t => t.type === 'end')
-if (ends.length !== 4) {
-  console.error(`✗ expected 4 end tiles, got ${ends.length}`)
+if (ends.length !== 2) {
+  console.error(`✗ expected 2 end tiles, got ${ends.length}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {
   const end = ends.find(t => t.x === m.cell.x && t.z === m.cell.z)
+  if (!m.placed) {
+    if (end) {
+      console.error(`✗ ${m.id} should not be built`)
+      process.exit(1)
+    }
+    const midX = m.cell.x * CELL + CELL / 2 + MAZE_ORIGIN
+    const midZ = m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN
+    if (voteModeAt(midX, midZ, MAZE_ORIGIN, CELL) !== '') {
+      console.error(`✗ ${m.id} still votes`)
+      process.exit(1)
+    }
+    continue
+  }
   if (!end) {
     console.error(`✗ ${m.id} has no end tile`)
     process.exit(1)

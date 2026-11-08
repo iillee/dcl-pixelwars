@@ -101,6 +101,8 @@ export const Messages = {
     // Server's own reading of the stored sample, and why it did or didn't count.
     srvZone: Schemas.String,
     why: Schemas.String,
+    // Addressed clocks only: the mode this recipient is counted for, or ''.
+    mine: Schemas.String,
   }),
 
   // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.
