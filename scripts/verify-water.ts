@@ -6,11 +6,11 @@
  * Run: npx tsx scripts/verify-water.ts
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { GRID_W, MIN_Y, SCENE_SIZE, TILE_SCALE } from '../src/maze/generator'
+import { CELL, GRID_W, MAZE_ORIGIN, MIN_Y, ROT_OFFSET, SCENE_SIZE, TILE_SCALE, baseSpawn, generateWithRetry, getPlacedTilesInOrder, placeLobbyLayout } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, shouldBeginRescue, swellSurfaceY } from '../src/shared/swell'
 import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
-import { baseSpawn } from '../src/maze/generator'
+import { lobbyFeet } from '../src/shared/lobby'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
 const y = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
@@ -173,6 +173,14 @@ if (scene.scene.base !== expectBase) {
   console.error(`✗ scene.json base is ${scene.scene.base}, want ${expectBase} for WORLD_SIZE=${WORLD_SIZE}`)
   process.exit(1)
 }
+if (scene.worldConfiguration?.name !== 'pixelwars.dcl.eth') {
+  console.error(`✗ worldConfiguration name is ${scene.worldConfiguration?.name}, want pixelwars.dcl.eth`)
+  process.exit(1)
+}
+if (scene.landscapeTerrain !== false) {
+  console.error('✗ landscapeTerrain should stay false')
+  process.exit(1)
+}
 const spawnY = scene.spawnPoints?.[0]?.position?.y?.[0]
 if (typeof spawnY !== 'number' || Math.abs(spawnY - red.pos.y) > 0.01) {
   console.error(`✗ scene.json spawn y ${spawnY} does not match the raised base ${red.pos.y.toFixed(3)}`)
@@ -331,4 +339,40 @@ if (!shouldBeginRescue(rescue - 1, true, rescue, MIN_Y)) {
   console.error('✗ a finished maze must still rescue a fall through the line')
   process.exit(1)
 }
-console.log('✓ swells stay under the rescue line; the arena has no fog layer')
+function inside(name: string, x: number, z: number): void {
+  if (x < -0.01 || z < -0.01 || x > SCENE_SIZE + 0.01 || z > SCENE_SIZE + 0.01) {
+    console.error(`✗ ${name} at ${x.toFixed(1)},${z.toFixed(1)} is outside the ${SCENE_SIZE}m scene`)
+    process.exit(1)
+  }
+}
+function tileCorners(tiles: { type: string; r: number; x: number; z: number }[], label: string): void {
+  for (const p of tiles) {
+    const [dx, dz] = ROT_OFFSET[p.r]
+    const px = p.x * CELL + dx + MAZE_ORIGIN
+    const pz = p.z * CELL + dz + MAZE_ORIGIN
+    inside(`${label} ${p.type} pivot`, px, pz)
+    inside(`${label} ${p.type} cell`, p.x * CELL + MAZE_ORIGIN, p.z * CELL + MAZE_ORIGIN)
+    inside(`${label} ${p.type} cell`, p.x * CELL + CELL + MAZE_ORIGIN, p.z * CELL + CELL + MAZE_ORIGIN)
+  }
+}
+tileCorners(placeLobbyLayout(), 'lobby')
+const lobby = lobbyFeet(CELL, MAZE_ORIGIN, 0)
+inside('lobby spawn', lobby.x, lobby.z)
+for (const team of [1, 2]) {
+  const s = baseSpawn(team).pos
+  inside(`base spawn ${team}`, s.x, s.z)
+}
+if (generateWithRetry(1) === null) {
+  console.error('✗ could not build a maze to check bounds')
+  process.exit(1)
+}
+tileCorners(getPlacedTilesInOrder(), 'maze')
+const mid = SCENE_SIZE / 2
+inside('water inner', mid - seaHalf, mid - seaHalf)
+inside('water outer', mid + seaHalf, mid + seaHalf)
+const haze = horizonRadiusM(SCENE_SIZE)
+inside('haze inner', mid - haze, mid - haze)
+inside('haze outer', mid + haze, mid + haze)
+inside('swell far', mid - WATER.swellFarM, mid - WATER.swellFarM)
+inside('swell far', mid + WATER.swellFarM, mid + WATER.swellFarM)
+console.log('✓ swells stay under the rescue line; lobby, maze, water, and spawns stay inside the scene')
