@@ -6,8 +6,8 @@ import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } fr
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, emptyCounts, everyPresentInZone,
-  lobbyFeet, pickWinner, placedModes, stillAfk, toSceneFeet, voteModeAt,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CLEAR_M, emptyCounts, everyPresentInZone,
+  billboardAnchor, lobbyFeet, pickWinner, placedModes, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
@@ -165,11 +165,58 @@ if (split.counts.pvp !== 1 || split.why !== 'ok-id') {
   console.error(`✗ sample under a different id was dropped (pvp ${split.counts.pvp} why ${split.why})`)
   process.exit(1)
 }
-const clock = { wantFull: false, countdownEnds: 0, shortCountdown: false, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
+const clock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
 const step = stepLobby(clock, ['0xabc'], aged)
-if (step.log !== 'start-5s' || step.next.countdownEnds !== aged + 5_000) {
-  console.error(`✗ idle phase with this sample did not start the 5s countdown (${step.log})`)
+if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
+  console.error(`✗ idle phase with this sample did not start the ${LOBBY_VOTE_MS}ms countdown (${step.log} ends ${step.next.countdownEnds})`)
   process.exit(1)
+}
+if (LOBBY_VOTE_MS !== 30_000) {
+  console.error(`✗ the vote window should be 30s, got ${LOBBY_VOTE_MS}ms`)
+  process.exit(1)
+}
+const early = stepLobby(step.next, ['0xabc'], aged + 5_000)
+if (early.log !== '' || early.next.countdownEnds !== step.next.countdownEnds) {
+  console.error(`✗ the vote closed before ${LOBBY_VOTE_MS}ms (${early.log})`)
+  process.exit(1)
+}
+const done = stepLobby(step.next, ['0xabc'], aged + LOBBY_VOTE_MS)
+if (done.log !== 'resolve') {
+  console.error(`✗ the vote did not resolve at ${LOBBY_VOTE_MS}ms (${done.log})`)
+  process.exit(1)
+}
+clearLobbyVotes()
+const held = stepLobby({ wantFull: true, countdownEnds: 0, hadVotes: false, readyAt: aged - 3_000, emptySince: 0 }, ['0xabc'], aged)
+if (held.log !== '' || held.next.countdownEnds !== 0) {
+  console.error(`✗ a lobby with nobody voting started a countdown (${held.log})`)
+  process.exit(1)
+}
+const zone = voteZoneLocal(CELL)
+const pvpCell = LOBBY_MODES.find(m => m.id === 'pvp')!.cell
+const onTint = voteLocalToWorld(zone.x0 + 0.05, zone.z0 + 0.05, pvpCell, MAZE_ORIGIN, CELL)
+const offTint = voteLocalToWorld(zone.x0 - 0.25, (zone.z0 + zone.z1) / 2, pvpCell, MAZE_ORIGIN, CELL)
+if (voteModeAt(onTint.x, onTint.z, MAZE_ORIGIN, CELL) !== 'pvp') {
+  console.error('✗ the inner edge of the tint does not count as PvP')
+  process.exit(1)
+}
+if (voteModeAt(offTint.x, offTint.z, MAZE_ORIGIN, CELL) !== '') {
+  console.error('✗ a point just outside the tint still counts as a vote')
+  process.exit(1)
+}
+const expectW = CELL * (20 / 32) - 0.3
+const expectL = CELL - CELL * (6 / 32) - 0.3
+if (Math.abs(zone.width - expectW) > 0.001 || Math.abs(zone.length - expectL) > 0.001) {
+  console.error(`✗ tint is ${zone.width.toFixed(2)}×${zone.length.toFixed(2)}, want ${expectW.toFixed(2)}×${expectL.toFixed(2)}`)
+  process.exit(1)
+}
+for (const m of placedModes()) {
+  const sign = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, 0)
+  const edge = m.cell.x * CELL + (m.cell.x < LOBBY_CROSS.x ? 0 : CELL) + MAZE_ORIGIN
+  const outside = m.cell.x < LOBBY_CROSS.x ? sign.x < edge - SIGN_CLEAR_M + 0.01 : sign.x > edge + SIGN_CLEAR_M - 0.01
+  if (!outside || Math.abs(sign.z - (m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN)) > 0.01) {
+    console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
+    process.exit(1)
+  }
 }
 // Still standing on the same tile a minute later. That is a vote, not AFK.
 if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, lukeAt + 61_000)) {

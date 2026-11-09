@@ -10,6 +10,7 @@ export type VoteRow = { id: string; n: number }
 // showed a round timer and blocked feet reports until the first clock.
 let phase: LobbyPhase = 'idle'
 let voteMs = 0
+let voteEndsAt = 0
 let votes: VoteRow[] = []
 let winner = ''
 let serverPresent = 0
@@ -37,7 +38,8 @@ export function inLobby(): boolean {
 }
 
 export function voteRemainingMs(): number {
-  return voteMs
+  if (voteEndsAt <= 0) return 0
+  return Math.max(0, voteEndsAt - Date.now())
 }
 
 export function voteRows(): VoteRow[] {
@@ -51,6 +53,7 @@ export function voteCount(id: ModeId): number {
 export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: VoteRow[], nextWinner: string): void {
   phase = next
   voteMs = nextVoteMs
+  voteEndsAt = nextVoteMs > 0 ? Date.now() + nextVoteMs : 0
   votes = nextVotes
   winner = nextWinner
   if (next === 'match' || next === 'summary') mine = ''

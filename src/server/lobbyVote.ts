@@ -5,7 +5,7 @@
 import { CELL, MAZE_ORIGIN, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import {
-  LOBBY_AFK_MS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_SAMPLE_MS, cellAt, emptyCounts, everyPresentInZone,
+  LOBBY_AFK_MS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_SAMPLE_MS, LOBBY_VOTE_MS, cellAt, emptyCounts, everyPresentInZone,
   toSceneFeet, type ModeId, type VoteCounts, voteModeAt,
 } from '../shared/lobby'
 
@@ -150,21 +150,20 @@ export function lobbyVerdict(present: string[], now: number): { counts: VoteCoun
 export type LobbyClock = {
   wantFull: boolean
   countdownEnds: number
-  shortCountdown: boolean
   hadVotes: boolean
   readyAt: number
   /** When the live tally last dropped to 0 during a countdown. */
   emptySince: number
 }
 
-/** One scoring tick. `start-5s` is the cold-lobby countdown. */
-export function stepLobby(s: LobbyClock, present: string[], now: number): { next: LobbyClock; log: '' | 'close' | 'start-15s' | 'start-5s' | 'resolve' | 'resolve-early' } {
+/** One scoring tick. The countdown is LOBBY_VOTE_MS, started by the first live vote.
+ *  Everyone being in a zone does not close it early. No votes leaves it idle. */
+export function stepLobby(s: LobbyClock, present: string[], now: number): { next: LobbyClock; log: '' | 'close' | 'start' | 'resolve' } {
   const next: LobbyClock = { ...s }
   const voters = voterIds(present)
   if (voters.length === 0) {
     if (next.countdownEnds !== 0 || next.wantFull) {
       next.countdownEnds = 0
-      next.shortCountdown = false
       next.hadVotes = false
       next.wantFull = false
       next.emptySince = 0
@@ -172,37 +171,30 @@ export function stepLobby(s: LobbyClock, present: string[], now: number): { next
     }
     return { next, log: '' }
   }
-  if (next.wantFull && next.countdownEnds === 0 && now - next.readyAt >= 2000) {
-    next.countdownEnds = now + 15_000
-    next.wantFull = false
-    next.shortCountdown = false
-    return { next, log: 'start-15s' }
-  }
-  const any = tallyVotes(voters, now).counts.pvp + tallyVotes(voters, now).counts.pvb > 0
+  const counts = tallyVotes(voters, now).counts
+  const any = counts.pvp + counts.pvb > 0
   if (next.countdownEnds > 0) {
     if (any) { next.hadVotes = true; next.emptySince = 0 }
     else if (next.hadVotes) {
       if (next.emptySince === 0) next.emptySince = now
-      // One stale frame used to cancel the 5 s countdown immediately.
+      // One stale frame used to cancel the countdown immediately.
       if (now - next.emptySince >= 2000) {
         next.countdownEnds = 0
-        next.shortCountdown = false
         next.hadVotes = false
         next.wantFull = false
         next.emptySince = 0
         return { next, log: 'close' }
       }
     }
-    const early = !next.shortCountdown && everyoneInZone(voters, now)
-    if (early || now >= next.countdownEnds) return { next, log: early ? 'resolve-early' : 'resolve' }
+    if (now >= next.countdownEnds) return { next, log: 'resolve' }
     return { next, log: '' }
   }
-  if (!next.wantFull && any) {
-    next.countdownEnds = now + 5_000
-    next.shortCountdown = true
+  if (any) {
+    next.countdownEnds = now + LOBBY_VOTE_MS
     next.hadVotes = true
     next.emptySince = 0
-    return { next, log: 'start-5s' }
+    next.wantFull = false
+    return { next, log: 'start' }
   }
   return { next, log: '' }
 }

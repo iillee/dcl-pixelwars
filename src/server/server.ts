@@ -47,7 +47,7 @@ import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwav
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
-import { LOBBY_FIRST_VOTE_MS, LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
+import { LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
 import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
@@ -243,7 +243,7 @@ export async function setupServer(): Promise<void> {
     const voteMs = countdownEnds > now ? Math.max(0, countdownEnds - now) : 0
     const phase = isRoundActive() ? 'match'
       : intermission === 'summaryWait' ? 'summary'
-      : intermission === 'lobby' ? (voteMs > 0 || wantFull ? 'lobby' : 'idle')
+      : intermission === 'lobby' ? (voteMs > 0 ? 'lobby' : 'idle')
       : 'idle'
     const verdict = lobbyVerdict(presentIds(), now)
     const msg = {
@@ -289,12 +289,10 @@ export async function setupServer(): Promise<void> {
   let pendingFinal = { red: 0, blue: 0, total: 0 }
   let pendingNextIdx = 0
   let lobbyOpen = false
-  /** After a summary, wait until the cross is walkable, then run the 15 s vote. */
+  /** Set after a summary. The vote still waits for the first live sample. */
   let wantFull = false
   let readyAt = 0
   let countdownEnds = 0
-  /** The 5 s countdown (first vote while idle). It does not end early. */
-  let shortCountdown = false
   let hadVotes = false
   let emptySince = 0
   let lobbyLogAt = 0
@@ -316,7 +314,6 @@ export async function setupServer(): Promise<void> {
     wantFull = fromSummary
     readyAt = Date.now()
     countdownEnds = 0
-    shortCountdown = false
     hadVotes = false
     emptySince = 0
     setRoundState(currentRoundIndex(), Date.now(), false)
@@ -326,7 +323,7 @@ export async function setupServer(): Promise<void> {
       lobbyOpen = true
       clearLobbyVotes()
       sendLobbyLayout()
-      console.log(`[Lobby] open ${fromSummary ? '15s after the cross is walkable' : 'idle until a vote'}`)
+      console.log(`[Lobby] open ${fromSummary ? 'after summary, idle until a vote' : 'idle until a vote'}`)
     }
     sendRoundClock()
   }
@@ -337,7 +334,6 @@ export async function setupServer(): Promise<void> {
 
   function closeCountdown(): void {
     countdownEnds = 0
-    shortCountdown = false
     hadVotes = false
     wantFull = false
     emptySince = 0
@@ -349,7 +345,6 @@ export async function setupServer(): Promise<void> {
     const { counts } = tallyVotes(presentIds(), now)
     const winner = pickWinner(counts, roundFormat)
     countdownEnds = 0
-    shortCountdown = false
     hadVotes = false
     wantFull = false
     emptySince = 0
@@ -429,14 +424,9 @@ export async function setupServer(): Promise<void> {
   })
 
   room.onMessage('lobbyReady', (_d, context) => {
-    const from = context?.from
-    if (!from || intermission !== 'lobby' || !wantFull || countdownEnds !== 0) return
-    countdownEnds = Date.now() + LOBBY_VOTE_MS
-    shortCountdown = false
-    wantFull = false
-    emptySince = 0
-    console.log(`[Lobby] cross walkable (${from.slice(0, 8)}) → ${LOBBY_VOTE_MS / 1000}s`)
-    sendRoundClock()
+    // The floor being walkable does not start the vote. stepLobby starts
+    // LOBBY_VOTE_MS when the first live sample is counted.
+    if (!context?.from) return
   })
 
 
@@ -1186,24 +1176,19 @@ export async function setupServer(): Promise<void> {
         const verdict = lobbyVerdict(present, now)
         console.log(`[Lobby] present=${present.length} pvp=${verdict.counts.pvp} pvb=${verdict.counts.pvb} srvZone=${verdict.zone} why=${verdict.why} ${bits || '(no feet)'}`)
       }
-      const step = stepLobby({ wantFull, countdownEnds, shortCountdown, hadVotes, readyAt, emptySince }, present, now)
+      const step = stepLobby({ wantFull, countdownEnds, hadVotes, readyAt, emptySince }, present, now)
       wantFull = step.next.wantFull
       countdownEnds = step.next.countdownEnds
-      shortCountdown = step.next.shortCountdown
       hadVotes = step.next.hadVotes
       readyAt = step.next.readyAt
       emptySince = step.next.emptySince
-      if (step.log === 'start-5s') {
-        console.log('[Lobby] first vote → 5s')
-        sendRoundClock()
-      } else if (step.log === 'start-15s') {
-        console.log('[Lobby] cross not reported walkable in 2s → starting 15s')
+      if (step.log === 'start') {
+        console.log(`[Lobby] first vote → ${LOBBY_VOTE_MS / 1000}s`)
         sendRoundClock()
       } else if (step.log === 'close') {
         console.log('[Lobby] votes left → idle')
         sendRoundClock()
-      } else if (step.log === 'resolve' || step.log === 'resolve-early') {
-        if (step.log === 'resolve-early') console.log('[Lobby] everyone is in a live zone → closing the vote')
+      } else if (step.log === 'resolve') {
         resolveVote()
       }
       return
