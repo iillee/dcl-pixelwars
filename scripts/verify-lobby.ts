@@ -111,6 +111,7 @@ function checkFrame(label: string, sceneM: number, origin: number, baseMeters: n
 checkFrame('small', 320, 80, -10 * 16)
 checkFrame('fifty', 50 * 16, (50 * 16 - 160) / 2, -25 * 16)
 checkFrame('medium', 64 * 16, (64 * 16 - 160) / 2, -32 * 16)
+checkFrame('eighty', 80 * 16, (80 * 16 - 160) / 2, -40 * 16)
 checkFrame('large', 100 * 16, (100 * 16 - 160) / 2, -50 * 16)
 checkFrame('full', 4800, 2320, -150 * 16)
 

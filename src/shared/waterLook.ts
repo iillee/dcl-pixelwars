@@ -4,7 +4,7 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 100×100 world (edge 800 m from centre): waves through the near
+ * for the 80×80 world (edge 640 m from centre): waves through the near
  * and mid squares, easing out across the far square, then a flat rim that
  * fades to the horizon colour before the parcel edge. The haze cylinder
  * sits just inside that edge. `landscapeTerrain` stays false.
@@ -110,8 +110,8 @@ export const WATER = {
   swellMidM: 512,
   swellMidStepM: 32,
   /** Far square, half-extent (m). Displacement eases to 0 here, inside the
-   *  100×100 sea (half ~794 m). The flat rim fades from here to the edge. */
-  swellFarM: 768,
+   *  80×80 sea (half 634 m). The flat rim fades from here to the edge. */
+  swellFarM: 576,
   swellFarStepM: 64,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 16,

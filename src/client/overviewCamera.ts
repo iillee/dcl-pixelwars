@@ -43,10 +43,10 @@ export const OV_FOV_DEG   = 24
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
  * Four steps on each platform. Pitch is OV_PITCH_DEG at every step.
  * Desktop close is 7 (~19 m). Nameplates keep the name until 20 m.
- * On 100×100 the parcel formula wants ~266 m above y 0, plus the 100 m level
+ * On 80×80 the parcel formula wants ~253 m above y 0, plus the 100 m level
  * offset, but the hard cap stops the camera at 330 m. From L0 that leaves
  * ~239 m of throw. 7, 29, and 60 all fit at 24°. 90 wants ~244 m, so on L0
- * and L+1 it stops a little short and the lens opens to ~25–27°.
+ * it opens to ~25° and on L+1 to ~27°. L-1 still fits 90 at 24°.
  * A VirtualCamera.fov write does not change the
  * lens while that camera stays active, so a step past the clamp switches to a
  * second camera (wideEntity) whose fov is written before it goes live.
@@ -66,7 +66,7 @@ const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
 /** 20·log2(parcels+1), and the docs cap every scene at 330 m.
- *  100×100 is about 266 m above y 0, then clipped to the 330 m cap. The arena floor was lifted by LEVEL_Y_OFFSET,
+ *  80×80 is about 253 m above y 0, then clipped to the 330 m cap. The arena floor was lifted by LEVEL_Y_OFFSET,
  *  so the ceiling rises with it. Otherwise zoom-out stops under the player's feet. */
 const SCENE_PARCELS = (SCENE_SIZE / 16) * (SCENE_SIZE / 16)
 const SCENE_HEIGHT_LIMIT = Math.min(330, 20 * Math.log2(SCENE_PARCELS + 1) + (IS_SKY ? LEVEL_Y_OFFSET : 0))

@@ -4,7 +4,8 @@
  *   small   20×20, base -10,-10, centred on parcel 0,0.
  *   fifty   50×50, base -25,-25, centred on parcel 0,0.
  *   medium  64×64, centred on parcel 0,0.
- *   large   100×100, base -50,-50, centred on parcel 0,0. Current world.
+ *   eighty  80×80, base -40,-40, centred on parcel 0,0. Current world.
+ *   large   100×100, base -50,-50, centred on parcel 0,0.
  *   wide    150×150, centred on parcel 0,0.
  *   full    300×300 at base -150,-150, inside the publisher box.
  *
