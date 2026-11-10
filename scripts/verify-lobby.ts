@@ -6,8 +6,8 @@ import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } fr
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_PLATE_DEPTH_M, emptyCounts, everyPresentInZone,
-  billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
+  billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
@@ -171,8 +171,8 @@ if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
   console.error(`✗ idle phase with this sample did not start the ${LOBBY_VOTE_MS}ms countdown (${step.log} ends ${step.next.countdownEnds})`)
   process.exit(1)
 }
-if (LOBBY_VOTE_MS !== 30_000) {
-  console.error(`✗ the vote window should be 30s, got ${LOBBY_VOTE_MS}ms`)
+if (LOBBY_VOTE_MS !== 15_000) {
+  console.error(`✗ the vote window should be 15s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
 const early = stepLobby(step.next, ['0xabc'], aged + 5_000)
@@ -242,8 +242,25 @@ if (!lobbySrc.includes('roughness: 1') || !lobbySrc.includes('specularIntensity:
   console.error('✗ sign plates should be matte')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 50') || !lobbySrc.includes('signFaceZ()') || lobbySrc.includes('Vector3.create(1.55')) {
-  console.error('✗ titles should be 5 m tall, on the camera face, with no stretched scale')
+if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('outlineWidth: 0') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
+  console.error('✗ titles should be one 4.5 m line, unoutlined, and scale with the overview zoom')
+  process.exit(1)
+}
+if (SIGN_W_M < 40 || SIGN_H_M > 12) {
+  console.error(`✗ plate should be a wide single-line pill, got ${SIGN_W_M}×${SIGN_H_M}`)
+  process.exit(1)
+}
+if (Math.abs(signZoomScale(SIGN_ZOOM_REF) - 1) > 1e-6) {
+  console.error('✗ default overview zoom should leave the sign at 1×')
+  process.exit(1)
+}
+const zoomIn = signZoomScale(7)
+if (!(zoomIn < 1 && zoomIn >= SIGN_ZOOM_MIN)) {
+  console.error(`✗ zooming in should shrink the sign, got ${zoomIn}`)
+  process.exit(1)
+}
+if (signZoomScale(5) < SIGN_ZOOM_MIN - 1e-6 || signZoomScale(90) > SIGN_ZOOM_MAX + 1e-6) {
+  console.error('✗ overview sign scale left its clamp')
   process.exit(1)
 }
 const face = signFaceZ()
@@ -255,7 +272,7 @@ if (inFront < 0.1) {
   console.error(`✗ sign text Z ${face.toFixed(2)} is not on the camera side of the plate (gap ${inFront.toFixed(2)} m)`)
   process.exit(1)
 }
-if (modeTitle('pvb') !== 'BOT FIGHT' || modeTitle('pvp') !== 'TEAM FIGHT' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Players') {
+if (modeTitle('pvb') !== 'BOT FIGHT' || modeTitle('pvp') !== 'TEAM FIGHT' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Humans') {
   console.error('✗ lobby choices should read BOT FIGHT and TEAM FIGHT')
   process.exit(1)
 }

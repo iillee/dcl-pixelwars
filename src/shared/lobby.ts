@@ -37,7 +37,7 @@ export const LOBBY_MODES: ModeDef[] = [
 
 /** Full vote window, in one place. Starts when the first live vote is counted.
  *  Standing in a zone does not end it early, and an empty lobby does not start it. */
-export const LOBBY_VOTE_MS = 30_000
+export const LOBBY_VOTE_MS = 15_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
  *  The vote tint and the trigger both use this rectangle, pulled in by VOTE_TINT_INSET_M. */
 export const VOTE_FLOOR_WIDTH = 20 / 32
@@ -45,9 +45,13 @@ export const VOTE_FLOOR_CLOSED = 6 / 32
 export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side. */
 export const SIGN_CLEAR_M = 2
-/** Wide enough for a 5 m "FIGHT" / "TEAM" line, tall enough for two stacked lines plus the subtitle. */
-export const SIGN_W_M = 28
-export const SIGN_H_M = 15
+/** One 4.5 m line of "TEAM FIGHT", with side margins inside the pill, plus the subtitle. */
+export const SIGN_W_M = 48
+export const SIGN_H_M = 8.6
+/** Overview `viewScale` at the desktop default framing. Sign scale is viewScale / this. */
+export const SIGN_ZOOM_REF = 29
+export const SIGN_ZOOM_MIN = 0.22
+export const SIGN_ZOOM_MAX = 1.8
 /**
  * SDK7 Billboard, in scene metres, points local −Z at the camera.
  * The explorer aims its own +Z at the target, and scene Z is flipped on the way in,
@@ -68,15 +72,15 @@ export function modeTitle(id: string): string {
 
 export function modeSubtitle(id: string): string {
   if (id === 'pvb') return 'vs Bots'
-  if (id === 'pvp') return 'vs Players'
+  if (id === 'pvp') return 'vs Humans'
   return ''
 }
 
-/** Two stacked words so each line can be ~5 m tall and still fit the plate. */
-export function modeTitleLines(id: string): string {
-  if (id === 'pvb') return 'BOT\nFIGHT'
-  if (id === 'pvp') return 'TEAM\nFIGHT'
-  return ''
+/** World scale that holds a sign's on-screen size as the overview dolly changes.
+ *  `viewScale` is the eased zoom (desktop default 29). Zooming in lowers it, so the sign shrinks. */
+export function signZoomScale(viewScale: number): number {
+  const raw = viewScale / SIGN_ZOOM_REF
+  return Math.min(SIGN_ZOOM_MAX, Math.max(SIGN_ZOOM_MIN, raw))
 }
 
 /** Local Z of sign text: past the camera-facing slab by 0.2 m. */

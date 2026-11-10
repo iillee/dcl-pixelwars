@@ -7,11 +7,11 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, lobbyFeet, modeSubtitle, modeTitle, modeTitleLines, placedModes, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, lobbyFeet, modeSubtitle, modeTitle, placedModes, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
-import { isOverviewActive, overviewSignRotation } from './overviewCamera'
+import { isOverviewActive, overviewSignRotation, overviewSignScale } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -26,7 +26,7 @@ const spawned: Entity[] = []
 const signRoots: Entity[] = []
 const boards: { count: Entity; secs: Entity }[] = []
 /** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities. */
-const TITLE_FONT = 50
+const TITLE_FONT = 45
 const SUB_FONT = 14
 const COUNT_FONT = 22
 const SECS_FONT = 16
@@ -119,28 +119,26 @@ function laySigns(): void {
     )
     MeshRenderer.setBox(tail)
     Material.setPbrMaterial(tail, slab)
-    const title = add(root, Vector3.create(0, 1.5, face), Vector3.One())
+    const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
-      text: modeTitleLines(m.id),
+      text: modeTitle(m.id),
       fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.45,
-      outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
+      outlineWidth: 0,
       textWrapping: false,
-      width: 26,
-      height: 12,
+      width: 46,
+      height: 5.2,
     })
-    const sub = add(root, Vector3.create(0, -5.6, face), Vector3.One())
+    const sub = add(root, Vector3.create(0, -2.45, face), Vector3.One())
     TextShape.create(sub, {
       text: modeSubtitle(m.id),
       fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.2,
-      outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
+      outlineWidth: 0,
       textWrapping: false,
-      width: 24,
+      width: 40,
       height: 2,
     })
     const badgeY = -SIGN_H_M / 2 - 2.1
@@ -151,8 +149,7 @@ function laySigns(): void {
       fontSize: COUNT_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(0.1, 0.06, 0.07, 1),
-      outlineWidth: 0.16,
-      outlineColor: Color3.create(copy.plate.r, copy.plate.g, copy.plate.b),
+      outlineWidth: 0,
       textWrapping: false,
       width: 6,
       height: 3,
@@ -163,8 +160,7 @@ function laySigns(): void {
       fontSize: SECS_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.22,
-      outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
+      outlineWidth: 0,
       textWrapping: false,
       width: 8,
       height: 2.2,
@@ -194,12 +190,15 @@ function applySignPose(root: Entity): void {
     if (bill && bill.billboardMode !== BillboardMode.BM_NONE) bill.billboardMode = BillboardMode.BM_NONE
     const cam = overviewSignRotation()
     tr.rotation = Quaternion.fromEulerDegrees(cam.pitch, cam.yaw, 0)
+    const s = overviewSignScale()
+    tr.scale = Vector3.create(s, s, s)
     return
   }
   if (bill && bill.billboardMode !== BillboardMode.BM_Y) {
     bill.billboardMode = BillboardMode.BM_Y
     tr.rotation = Quaternion.Identity()
   }
+  tr.scale = Vector3.One()
 }
 
 function syncSignFacing(): void {

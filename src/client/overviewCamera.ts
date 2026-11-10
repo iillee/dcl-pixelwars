@@ -31,6 +31,7 @@ import { Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 
 import { SCENE_SIZE, BASE_Y } from '../maze/generator'
+import { signZoomScale } from '../shared/lobby'
 import { IS_SKY, LEVEL_Y_OFFSET } from '../maze/level'
 import { playUiClick } from './audio'
 
@@ -305,6 +306,11 @@ export function isOverviewActive(): boolean { return active }
  *  Signs copy this so they stay parallel to the screen instead of aiming at the camera. */
 export function overviewSignRotation(): { pitch: number; yaw: number } {
   return { pitch: OV_PITCH_DEG, yaw: yawDeg }
+}
+
+/** 1 at the desktop default zoom. Shrinks as viewScale drops (zoom in), grows as it rises. */
+export function overviewSignScale(): number {
+  return signZoomScale(viewScale)
 }
 
 /** Turn the view by steps × 90° (blended). */

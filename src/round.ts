@@ -214,5 +214,5 @@ export function getFormatSplash(): { format: RoundFormat; title: string; sub: st
   }
   return armedFormat === 'pvb'
     ? { format: 'pvb', title: 'BOT FIGHT', sub: 'vs Bots' }
-    : { format: 'pvp', title: 'TEAM FIGHT', sub: 'vs Players' }
+    : { format: 'pvp', title: 'TEAM FIGHT', sub: 'vs Humans' }
 }
