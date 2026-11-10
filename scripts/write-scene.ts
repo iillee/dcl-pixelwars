@@ -1,7 +1,8 @@
 /**
  * Rewrite scene.json's parcel list and spawns from WORLD_SIZE in src/maze/level.ts.
  *
- *   small   20×20, base -10,-10, centred on parcel 0,0. Current world.
+ *   small   20×20, base -10,-10, centred on parcel 0,0.
+ *   fifty   50×50, base -25,-25, centred on parcel 0,0. Current world.
  *   medium  64×64, centred on parcel 0,0.
  *   large   100×100, base -50,-50, centred on parcel 0,0.
  *   wide    150×150, centred on parcel 0,0.

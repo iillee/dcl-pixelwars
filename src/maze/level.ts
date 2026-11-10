@@ -11,9 +11,9 @@
  *     The play grid stays 5×5. The extra parcels are open water so the sea is
  *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
  *
- * World size (sky only). 'small' is 20×20 (320 m, base -10,-10), the current world.
- * The arena stays centred and the sea is sized to stay inside that box.
- * 'medium' is 64×64, 'large' is 100×100, 'wide' is 150×150, 'full' is 300×300.
+ * World size (sky only). 'fifty' is 50×50 (800 m, base -25,-25), the current world.
+ * The arena stays centred on parcel 0,0 and the sea is sized to that box.
+ * 'small' is 20×20, 'medium' is 64×64, 'large' is 100×100, 'wide' is 150×150, 'full' is 300×300.
  * After changing this, run `npx tsx scripts/write-scene.ts`. Then
  * `npx tsx scripts/build-water-swell.ts` so the rings still meet the edge.
  */
@@ -46,22 +46,24 @@ export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
- * Parcels on a side. 16 m each. `small` is 20×20 (320 m, base -10,-10),
- * centred on parcel 0,0. The scene edge is 160 m from the centre.
- * `large` is 100×100. `full` is 300×300. `medium` is 64×64.
+ * Parcels on a side. 16 m each. `fifty` is 50×50 (800 m, base -25,-25),
+ * centred on parcel 0,0. The scene edge is 400 m from the centre.
+ * `small` is 20×20. `medium` is 64×64. `large` is 100×100. `full` is 300×300.
  * The play grid stays 5×5 because the inset grows with the scene.
  * Keep scene.json in step via write-scene.ts.
  */
+export const FIFTY_PARCELS = 50
 export const MEDIUM_PARCELS = 64
 export const LARGE_PARCELS = 100
 export const WIDE_PARCELS = 150
-export const WORLD_SIZE = 'small' as 'small' | 'medium' | 'large' | 'wide' | 'full'
+export const WORLD_SIZE = 'fifty' as 'small' | 'fifty' | 'medium' | 'large' | 'wide' | 'full'
 export const SKY_PARCELS =
   WORLD_SIZE === 'full' ? 300
     : WORLD_SIZE === 'wide' ? WIDE_PARCELS
       : WORLD_SIZE === 'large' ? LARGE_PARCELS
         : WORLD_SIZE === 'medium' ? MEDIUM_PARCELS
-          : 20
+          : WORLD_SIZE === 'fifty' ? FIFTY_PARCELS
+            : 20
 
 /** Southwest parcel. The 300×300 block must start at -150. Smaller blocks are
  *  centred on parcel 0,0 and stay inside the publisher range (-150..149). */

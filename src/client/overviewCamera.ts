@@ -43,11 +43,11 @@ export const OV_FOV_DEG   = 24
  * Zoom "view scale": frames like a 60°-FOV camera at this many metres.
  * Four steps on each platform. Pitch is OV_PITCH_DEG at every step.
  * Desktop close is 7 (~19 m). Nameplates keep the name until 20 m.
- * The ceiling stops the throw near scale 51 at L0 (~140 m), 45 at L+1, 58 at L-1.
- * Middle is 29 (~79 m): halfway from 7 to that L0 clamp, and under every floor's
- * ceiling, so it is a real dolly. Far is 60, which the clamp shortens to the
- * ceiling on every floor. Farthest is 90: the throw is already at the ceiling,
- * so it widens the lens instead. A VirtualCamera.fov write does not change the
+ * On 50×50 the parcel ceiling is about 226 m above y 0, plus the 100 m level
+ * offset, so the camera cap is ~326 m (the 330 m hard cap is just above that).
+ * From L0 that leaves ~231 m of throw. 7, 29, and 60 all fit at 24°. 90 wants
+ * ~244 m, so on L0 and L+1 it stops a little short and the lens opens to ~25–27°.
+ * A VirtualCamera.fov write does not change the
  * lens while that camera stays active, so a step past the clamp switches to a
  * second camera (wideEntity) whose fov is written before it goes live.
  *
@@ -66,7 +66,7 @@ const FOV_MAX = 80
 const DEG = Math.PI / 180
 const DIST_PER_SCALE = Math.tan(60 * DEG / 2) / Math.tan(OV_FOV_DEG * DEG / 2) // ≈ 2.72
 /** 20·log2(parcels+1), and the docs cap every scene at 330 m.
- *  20×20 is about 173 m above y 0. The arena floor was lifted by LEVEL_Y_OFFSET,
+ *  50×50 is about 226 m above y 0. The arena floor was lifted by LEVEL_Y_OFFSET,
  *  so the ceiling rises with it. Otherwise zoom-out stops under the player's feet. */
 const SCENE_PARCELS = (SCENE_SIZE / 16) * (SCENE_SIZE / 16)
 const SCENE_HEIGHT_LIMIT = Math.min(330, 20 * Math.log2(SCENE_PARCELS + 1) + (IS_SKY ? LEVEL_Y_OFFSET : 0))

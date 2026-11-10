@@ -4,7 +4,7 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 20×20 world (edge 160 m from centre): waves through the near
+ * for the 50×50 world (edge 400 m from centre): waves through the near
  * and mid squares, easing out across the far square, then a flat rim that
  * fades to the horizon colour before the parcel edge. The haze cylinder
  * sits inside that edge. `landscapeTerrain` stays false.
@@ -100,21 +100,21 @@ export const WATER = {
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
-  /** Dense centre square, half-extent (m). The 5×5 floor reaches 80 m; this is the near sea. */
-  swellNearM: 64,
-  /** Step doubles each ring so the joins share vertices. 8 → 16 → 32. */
-  swellNearStepM: 8,
+  /** Dense centre square, half-extent (m). The 5×5 floor reaches 80 m; waves continue past it. */
+  swellNearM: 128,
+  /** Step doubles each ring so the joins share vertices. 16 → 32 → 64. */
+  swellNearStepM: 16,
   /** Middle ring, half-extent (m). Full-height waves continue out to here. */
-  swellMidM: 96,
-  swellMidStepM: 16,
+  swellMidM: 256,
+  swellMidStepM: 32,
   /** Far square, half-extent (m). Displacement eases to 0 here, inside the
-   *  20×20 sea (half ~154 m). The flat rim fades from here to the edge. */
-  swellFarM: 128,
-  swellFarStepM: 32,
+   *  50×50 sea (half ~394 m). The flat rim fades from here to the edge. */
+  swellFarM: 384,
+  swellFarStepM: 64,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
-  swellMobileStepM: 8,
+  swellMobileStepM: 16,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 24,
+  swellMobileFadeM: 48,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',
