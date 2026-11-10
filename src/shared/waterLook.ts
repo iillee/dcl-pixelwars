@@ -310,17 +310,17 @@ export const WATER_FOG = {
   horizonSrc: 'assets/textures/water-horizon.png',
   horizonGlowSrc: 'assets/textures/water-horizon-glow.png',
   /**
-   * One closed ring. It sits inside the near swell, not on the parcel edge.
-   * The wall is solid up to the overview camera ceiling; only the cap above
-   * that fades. Colour is `HAZE_COLOR`. The alpha curve in `hazeMask` is baked.
+   * One closed ring inside the near swell. A low soft band: clear at the
+   * waterline, a pale sky tint, then gone so the sky stays open. The alpha
+   * curve in `hazeMask` is baked.
    */
   haze: true,
   hazeColor: HAZE_COLOR,
-  /** Metres under the water root. Covers the swell troughs at the ring. */
+  /** Metres under the water root. The fade starts clear down here. */
   hazeBelowM: 24,
-  /** Metres above the water root. The camera cap is 330 m and the
-   *  water sits near 114, so this clears every overview zoom. */
-  hazeAboveM: 230,
+  /** Metres above the water root. Stays under lobby eye height (~76 m up)
+   *  so the ring cannot fill the sky. */
+  hazeAboveM: 48,
   hazeSrc: 'assets/models/water-haze.glb',
   hazeMask: 'assets/textures/water-haze.png',
 }

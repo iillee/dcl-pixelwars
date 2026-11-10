@@ -624,9 +624,10 @@ function writeTextures() {
   const veil = Buffer.alloc(vw * vh * 4)
   for (let y = 0; y < vh; y++) {
     const v = y / (vh - 1)
-    // Solid through the heights a lobby eye or an overview camera can see.
-    // The fade is only the cap above the camera ceiling.
-    const k = v < 0.96 ? 1 : 1 - smooth((v - 0.96) / 0.04)
+    // Clear at the waterline, a soft sky-coloured band, gone by mid-height.
+    const rise = smooth(Math.min(1, v / 0.14))
+    const fall = 1 - smooth(Math.max(0, (v - 0.16) / 0.34))
+    const k = rise * fall * 0.45
     for (let x = 0; x < vw; x++) {
       const o = (y * vw + x) * 4
       veil[o] = veil[o + 1] = veil[o + 2] = byte(k)
