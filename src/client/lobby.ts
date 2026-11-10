@@ -2,7 +2,7 @@
  * Lobby signs and the feet report. The tiles themselves come from rebuildMaze.
  * Counts are whatever the server last broadcast. This file does not decide a winner.
  */
-import { engine, Entity, TextShape, Transform, Material, MaterialTransparencyMode, MeshRenderer, AudioSource } from '@dcl/sdk/ecs'
+import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, AudioSource } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
@@ -11,6 +11,7 @@ import { LOBBY_MODES, SIGN_H_M, SIGN_W_M, type ModeId, billboardAnchor, cellAt, 
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
+import { isOverviewActive } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -22,7 +23,13 @@ let noTransform = 0
 let lastFeet = { x: NaN, y: NaN, z: NaN }
 
 const spawned: Entity[] = []
+const signRoots: Entity[] = []
 const boards: { count: Entity; secs: Entity }[] = []
+/** SDK TextShape: fontSize 10 is 1 m tall. */
+const TITLE_FONT = 48
+const SUB_FONT = 14
+const COUNT_FONT = 20
+const SECS_FONT = 14
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
@@ -41,6 +48,7 @@ const SIGN_COPY: Record<'pvp' | 'pvb', { title: string; sub: string; plate: Rgb;
 function clearSigns(): void {
   for (const e of spawned) engine.removeEntity(e)
   spawned.length = 0
+  signRoots.length = 0
   boards.length = 0
   tints.length = 0
   tintSize.length = 0
@@ -87,12 +95,14 @@ function laySigns(): void {
     const copy = SIGN_COPY[m.id as 'pvp' | 'pvb']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
-    // Yaw faces the cross. A small pitch and roll give the sign the bait-board tilt.
-    Transform.create(root, {
-      position: Vector3.create(pose.x, pose.y, pose.z),
-      rotation: Quaternion.fromEulerDegrees(-11, pose.yawDeg, m.cell.x < 2 ? 7 : -7),
-    })
+    // Billboard owns this rotation. +Z is the face it points at the camera, which
+    // is also the side TextShape draws on, so the letters are not mirrored.
+    // BM_Y stays upright in play. Overview is a 35° isometric camera that turns
+    // in 90° steps, so BM_ALL squares the plate to that view in every slot.
+    Transform.create(root, { position: Vector3.create(pose.x, pose.y, pose.z) })
+    Billboard.create(root, { billboardMode: signFacing() })
     spawned.push(root)
+    signRoots.push(root)
     const slab = plateMat(copy.plate, 0.55)
     const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 }, 0.2)
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, 0.55, Vector3.create(0, 0, -0.18), lip)
@@ -105,51 +115,52 @@ function laySigns(): void {
     )
     MeshRenderer.setBox(tail)
     Material.setPbrMaterial(tail, slab)
-    const title = add(root, Vector3.create(0, 1.15, 0.55), Vector3.One())
+    // Title is 4.8 m tall (font 10 = 1 m) and stretched so three letters span the plate.
+    const title = add(root, Vector3.create(0, 1.2, 0.9), Vector3.create(1.55, 1, 1))
     TextShape.create(title, {
       text: copy.title,
-      fontSize: 4.6,
+      fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.38,
+      outlineWidth: 0.22,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
-      width: 16,
-      height: 5.2,
+      width: 20,
+      height: 6,
     })
-    const sub = add(root, Vector3.create(0, -1.55, 0.55), Vector3.One())
+    const sub = add(root, Vector3.create(0, -2.55, 0.9), Vector3.One())
     TextShape.create(sub, {
       text: copy.sub,
-      fontSize: 1.28,
+      fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
-      textColor: Color4.create(1, 1, 1, 0.95),
-      outlineWidth: 0.14,
+      textColor: Color4.create(1, 1, 1, 1),
+      outlineWidth: 0.16,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
-      width: 18,
-      height: 1.8,
+      width: 20,
+      height: 2,
     })
-    const badgeY = -SIGN_H_M / 2 - 1.7
-    pill(root, 4.8, 2.5, 0.45, Vector3.create(0, badgeY, 0.08), plateMat({ r: 0.98, g: 0.97, b: 0.94 }, 0.25))
-    const count = add(root, Vector3.create(0, badgeY, 0.5), Vector3.One())
+    const badgeY = -SIGN_H_M / 2 - 1.9
+    pill(root, 6.2, 3.2, 0.5, Vector3.create(0, badgeY, 0.15), plateMat({ r: 0.98, g: 0.97, b: 0.94 }, 0.25))
+    const count = add(root, Vector3.create(0, badgeY, 0.85), Vector3.One())
     TextShape.create(count, {
       text: '0',
-      fontSize: 1.85,
+      fontSize: COUNT_FONT,
       fontSrc: 'Lilita One',
-      textColor: Color4.create(copy.plate.r, copy.plate.g, copy.plate.b, 1),
-      outlineWidth: 0.08,
-      outlineColor: Color3.create(1, 1, 1),
-      width: 4,
-      height: 2.2,
+      textColor: Color4.create(0.12, 0.07, 0.08, 1),
+      outlineWidth: 0.12,
+      outlineColor: Color3.create(copy.plate.r, copy.plate.g, copy.plate.b),
+      width: 5.5,
+      height: 2.6,
     })
-    const secs = add(root, Vector3.create(0, badgeY - 2.2, 0.5), Vector3.One())
+    const secs = add(root, Vector3.create(0, badgeY - 2.5, 0.85), Vector3.One())
     TextShape.create(secs, {
       text: '',
-      fontSize: 1.45,
+      fontSize: SECS_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
       outlineWidth: 0.16,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
       width: 8,
-      height: 1.8,
+      height: 2,
     })
     boards.push({ count, secs })
 
@@ -165,6 +176,18 @@ function laySigns(): void {
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
+  }
+}
+
+function signFacing(): BillboardMode {
+  return isOverviewActive() ? BillboardMode.BM_ALL : BillboardMode.BM_Y
+}
+
+function syncSignFacing(): void {
+  const mode = signFacing()
+  for (const root of signRoots) {
+    const bill = Billboard.getMutableOrNull(root)
+    if (bill && bill.billboardMode !== mode) bill.billboardMode = mode
   }
 }
 
@@ -247,6 +270,7 @@ export function initLobby(): void {
     // already said VOTE (phase idle) but whose floor was still the arena
     // never sent a sample. The server names the zone.
     if (!inLobby()) { if (tints.length) clearSigns(); return }
+    syncSignFacing()
     if (!readySent && isLobbyLayout()) {
       readySent = true
       try { sendLobbyReady() } catch (err) { console.log('[Lobby] ready send failed', err); readySent = false }

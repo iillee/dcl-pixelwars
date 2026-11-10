@@ -234,6 +234,14 @@ if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
   console.error('✗ feet reports must not wait on the lobby layout flag')
   process.exit(1)
 }
+if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_ALL') || !lobbySrc.includes('isOverviewActive()')) {
+  console.error('✗ mode signs should yaw to the camera, and fully face it while overview is on')
+  process.exit(1)
+}
+if (!lobbySrc.includes('TITLE_FONT = 48') || !lobbySrc.includes('SUB_FONT = 14') || !lobbySrc.includes('COUNT_FONT = 20')) {
+  console.error('✗ sign text should be metre-scale (fontSize 10 = 1 m)')
+  process.exit(1)
+}
 const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
 if (!indexSrc.includes("rebuildMaze(1, 'lobby', 'boot')") || !indexSrc.includes('not rolling a local arena seed')) {
   console.error('✗ client boot should lay the lobby and not roll an arena seed over it')
