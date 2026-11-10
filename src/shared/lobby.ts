@@ -43,15 +43,18 @@ export const LOBBY_VOTE_MS = 15_000
 export const VOTE_FLOOR_WIDTH = 20 / 32
 export const VOTE_FLOOR_CLOSED = 6 / 32
 export const VOTE_TINT_INSET_M = 0.15
-/** How far past the cell edge the mode sign sits, on the outer side. */
-export const SIGN_CLEAR_M = 2
+/** How far past the cell edge the mode sign sits, on the outer side.
+ *  Far enough that a sign at the default overview scale stays off the three lobby tiles. */
+export const SIGN_CLEAR_M = 10
 /** One 4.5 m line of "TEAM FIGHT", with side margins inside the pill, plus the subtitle. */
 export const SIGN_W_M = 48
 export const SIGN_H_M = 8.6
-/** Overview `viewScale` at the desktop default framing. Sign scale is viewScale / this. */
+/** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
-export const SIGN_ZOOM_MIN = 0.22
-export const SIGN_ZOOM_MAX = 1.8
+/** World scale at that default framing. A 48 m plate is then ~24% of a 16:9 overview. */
+export const SIGN_ORTHO_AT_REF = 0.3
+export const SIGN_ZOOM_MIN = 0.05
+export const SIGN_ZOOM_MAX = 1
 /**
  * SDK7 Billboard, in scene metres, points local −Z at the camera.
  * The explorer aims its own +Z at the target, and scene Z is flipped on the way in,
@@ -76,10 +79,11 @@ export function modeSubtitle(id: string): string {
   return ''
 }
 
-/** World scale that holds a sign's on-screen size as the overview dolly changes.
- *  `viewScale` is the eased zoom (desktop default 29). Zooming in lowers it, so the sign shrinks. */
+/** World scale so a sign keeps about the same slice of the overview.
+ *  `viewScale` is the eased framing distance, not a half-height. The framed world
+ *  grows with it, so the sign must too. 0.3 at the default 29 is ~24% of screen width. */
 export function signZoomScale(viewScale: number): number {
-  const raw = viewScale / SIGN_ZOOM_REF
+  const raw = SIGN_ORTHO_AT_REF * (viewScale / SIGN_ZOOM_REF)
   return Math.min(SIGN_ZOOM_MAX, Math.max(SIGN_ZOOM_MIN, raw))
 }
 
@@ -215,7 +219,7 @@ export function billboardAnchor(
   const out = cell / 2 + SIGN_CLEAR_M
   return {
     x: modeCell.x * cell + cell / 2 + origin + dx * out,
-    y: baseY + 16,
+    y: baseY + 22,
     z: modeCell.z * cell + cell / 2 + origin + dz * out,
     yawDeg: endYawQuarter(modeCell) * 90,
   }

@@ -6,7 +6,7 @@ import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } fr
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
   billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
 } from '../src/shared/lobby'
 
@@ -250,17 +250,22 @@ if (SIGN_W_M < 40 || SIGN_H_M > 12) {
   console.error(`✗ plate should be a wide single-line pill, got ${SIGN_W_M}×${SIGN_H_M}`)
   process.exit(1)
 }
-if (Math.abs(signZoomScale(SIGN_ZOOM_REF) - 1) > 1e-6) {
-  console.error('✗ default overview zoom should leave the sign at 1×')
+const atRef = signZoomScale(SIGN_ZOOM_REF)
+if (Math.abs(atRef - SIGN_ORTHO_AT_REF) > 1e-6 || atRef > 0.4 || atRef < 0.25) {
+  console.error(`✗ default overview zoom should shrink the sign to ~0.3×, got ${atRef}`)
   process.exit(1)
 }
 const zoomIn = signZoomScale(7)
-if (!(zoomIn < 1 && zoomIn >= SIGN_ZOOM_MIN)) {
-  console.error(`✗ zooming in should shrink the sign, got ${zoomIn}`)
+if (Math.abs(zoomIn - SIGN_ORTHO_AT_REF * (7 / SIGN_ZOOM_REF)) > 1e-6 || !(zoomIn < atRef)) {
+  console.error(`✗ zooming in should scale linearly below the default, got ${zoomIn}`)
   process.exit(1)
 }
-if (signZoomScale(5) < SIGN_ZOOM_MIN - 1e-6 || signZoomScale(90) > SIGN_ZOOM_MAX + 1e-6) {
-  console.error('✗ overview sign scale left its clamp')
+if (signZoomScale(1) < SIGN_ZOOM_MIN - 1e-6 || signZoomScale(1) > SIGN_ZOOM_MIN + 1e-6) {
+  console.error('✗ a very close overview should sit on the scale floor')
+  process.exit(1)
+}
+if (signZoomScale(500) > SIGN_ZOOM_MAX + 1e-6 || signZoomScale(500) < SIGN_ZOOM_MAX - 1e-6) {
+  console.error('✗ a very far overview should sit on the scale ceiling')
   process.exit(1)
 }
 const face = signFaceZ()

@@ -11,7 +11,7 @@ import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type Mod
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
-import { isOverviewActive, overviewSignRotation, overviewSignScale } from './overviewCamera'
+import { isOverviewActive, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -201,8 +201,15 @@ function applySignPose(root: Entity): void {
   tr.scale = Vector3.One()
 }
 
+let loggedSignScale = Number.NaN
+
 function syncSignFacing(): void {
   for (const root of signRoots) applySignPose(root)
+  const shown = isOverviewActive() ? Math.round(overviewSignScale() * 100) / 100 : 1
+  if (shown === loggedSignScale) return
+  loggedSignScale = shown
+  const where = isOverviewActive() ? `viewScale ${overviewViewScale().toFixed(1)}` : 'play'
+  console.log(`[Lobby] sign scale ${shown.toFixed(2)} (${where})`)
 }
 
 function refreshSigns(): void {

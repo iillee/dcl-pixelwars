@@ -308,7 +308,12 @@ export function overviewSignRotation(): { pitch: number; yaw: number } {
   return { pitch: OV_PITCH_DEG, yaw: yawDeg }
 }
 
-/** 1 at the desktop default zoom. Shrinks as viewScale drops (zoom in), grows as it rises. */
+/** Eased overview framing distance. Desktop opens at 29; zoom-in lowers it. */
+export function overviewViewScale(): number {
+  return viewScale
+}
+
+/** 0.3 at the desktop default zoom, linear in viewScale, clamped to 0.05–1. */
 export function overviewSignScale(): number {
   return signZoomScale(viewScale)
 }
