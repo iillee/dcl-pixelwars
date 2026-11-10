@@ -382,7 +382,7 @@ function addFlat(root: Entity, src: string): Entity {
   return sea
 }
 
-/** Soft ring inside the near swell. Scale carries the radius and the height; the mesh is the unit circle. */
+/** One inward ring just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle. */
 function addHaze(waterY: number): void {
   const mid = SCENE_SIZE / 2
   const radius = horizonRadiusM(SCENE_SIZE)
@@ -408,10 +408,10 @@ function addHaze(waterY: number): void {
           $case: 'pbr',
           pbr: {
             texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            albedoColor: Color4.create(c.r, c.g, c.b, 0.55),
+            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
             emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
             emissiveColor: Color3.create(c.r, c.g, c.b),
-            emissiveIntensity: 0.35,
+            emissiveIntensity: 0.65,
             roughness: 1,
             metallic: 0,
             specularIntensity: 0,

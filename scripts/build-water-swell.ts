@@ -624,10 +624,9 @@ function writeTextures() {
   const veil = Buffer.alloc(vw * vh * 4)
   for (let y = 0; y < vh; y++) {
     const v = y / (vh - 1)
-    // Clear at the waterline, a soft sky-coloured band, gone by mid-height.
-    const rise = smooth(Math.min(1, v / 0.14))
-    const fall = 1 - smooth(Math.max(0, (v - 0.16) / 0.34))
-    const k = rise * fall * 0.45
+    const rise = smooth(Math.min(1, v / 0.07))
+    const fall = 1 - smooth(Math.max(0, (v - 0.28) / 0.5))
+    const k = rise * fall
     for (let x = 0; x < vw; x++) {
       const o = (y * vw + x) * 4
       veil[o] = veil[o + 1] = veil[o + 2] = byte(k)
