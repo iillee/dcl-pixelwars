@@ -4,7 +4,7 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 50×50 world (edge 400 m from centre): the near square runs past
+ * for the 100×100 world (edge 800 m from centre): the near square runs past
  * the haze, then the mid and far rings and the flat rim continue to the
  * parcel edge. The haze cylinder sits inside the near square's closest
  * side, so that edge and every seam beyond it stay behind the fog.
@@ -108,12 +108,12 @@ export const WATER = {
   /** Step doubles each ring so the joins share vertices. 16 → 32 → 64. */
   swellNearStepM: 16,
   /** Middle ring, half-extent (m). Full-height waves continue out to here, behind the haze. */
-  swellMidM: 320,
+  swellMidM: 512,
   swellMidStepM: 32,
   /** Far square, half-extent (m). Displacement eases to 0 here, inside the
-   *  50×50 sea (half ~394 m). The flat rim fades from here to the edge.
+   *  100×100 sea (half ~794 m). The flat rim fades from here to the edge.
    *  Both sit outside the haze. */
-  swellFarM: 384,
+  swellFarM: 768,
   swellFarStepM: 64,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 16,
@@ -318,7 +318,7 @@ export const WATER_FOG = {
   hazeColor: HAZE_COLOR,
   /** Metres under the water root. Covers the swell troughs at the ring. */
   hazeBelowM: 24,
-  /** Metres above the water root. The 50×50 camera cap is ~326 m and the
+  /** Metres above the water root. The camera cap is 330 m and the
    *  water sits near 114, so this clears every overview zoom. */
   hazeAboveM: 230,
   hazeSrc: 'assets/models/water-haze.glb',

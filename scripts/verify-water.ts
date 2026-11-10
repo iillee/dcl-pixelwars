@@ -196,6 +196,28 @@ if (typeof spawnY !== 'number' || Math.abs(spawnY - red.pos.y) > 0.01) {
   console.error(`✗ scene.json spawn y ${spawnY} does not match the raised base ${red.pos.y.toFixed(3)}`)
   process.exit(1)
 }
+const composite = JSON.parse(readFileSync(new URL('../assets/scene/main.composite', import.meta.url), 'utf8'))
+let compositeSpawnY = NaN
+let compositeParcels = -1
+let compositeBaseX = NaN
+for (const comp of composite.components ?? []) {
+  if (comp.name !== 'inspector::SceneMetadata-v5') continue
+  for (const entry of Object.values(comp.data ?? {}) as Array<{ json?: { layout?: { parcels?: unknown[]; base?: { x?: number } }; spawnPoints?: Array<{ position?: { y?: { value?: number[] } } }> } }>) {
+    const meta = entry?.json
+    if (!meta) continue
+    compositeParcels = meta.layout?.parcels?.length ?? -1
+    compositeBaseX = meta.layout?.base?.x ?? NaN
+    compositeSpawnY = meta.spawnPoints?.[0]?.position?.y?.value?.[0] ?? NaN
+  }
+}
+if (compositeParcels !== 0) {
+  console.error(`✗ composite still lists ${compositeParcels} parcels; that bloat is what clients load`)
+  process.exit(1)
+}
+if (compositeBaseX !== origin || Math.abs(compositeSpawnY - red.pos.y) > 0.05) {
+  console.error(`✗ composite spawn is stale (base ${compositeBaseX}, y ${compositeSpawnY}); want base ${origin} and y ${red.pos.y.toFixed(3)}`)
+  process.exit(1)
+}
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
 if (!src.includes("part !== 'far'") || !src.includes('addFlat(seaRoot')) {
   console.error('✗ desktop should draw the far swell and the flat rim')
