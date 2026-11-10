@@ -209,8 +209,8 @@ if (compositeBaseX !== origin || Math.abs(compositeSpawnY - red.pos.y) > 0.05) {
   process.exit(1)
 }
 const src = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
-if (!src.includes("part !== 'far'") || !src.includes('addFlat(seaRoot')) {
-  console.error('✗ desktop should draw the far swell and the flat rim')
+if (!src.includes("swellMesh('far')") || !src.includes('addFlat(seaRoot') || src.includes("part !== 'far'")) {
+  console.error('✗ desktop should draw the far swell with the same shade as the inner rings, plus the flat rim')
   process.exit(1)
 }
 const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
@@ -299,8 +299,8 @@ if (SURFACE.ripple || SURFACE.foam) {
   console.error('✗ the ripple normal and the foam veil should stay off')
   process.exit(1)
 }
-if (!src.includes("part !== 'far'")) {
-  console.error('✗ the soft normal and the clear layer must stop before the far ring')
+if (!src.includes("swellMesh('far'), true")) {
+  console.error('✗ the far swell should share the inner gloss and soft normal')
   process.exit(1)
 }
 if (SURFACE.foamAlpha < 0.2 || SURFACE.foamAlpha > 0.35) {

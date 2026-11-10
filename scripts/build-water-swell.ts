@@ -7,6 +7,11 @@
  * loop closes. Rings share the same function, so crests cross the joins.
  * Displacement is in metres (swellAmplitudeM).
  *
+ * The desktop swell is one mesh: a round disk through the mid radius, then a
+ * skirt out to the far square so the rim's corners stay covered. It is cut
+ * into near, mid, and far files after the normals are computed, so the shared
+ * circles match on both sides. A square edge or a coarser ring cannot draw a line.
+ *
  * Run: npx tsx scripts/build-water-swell.ts
  * Numbers live in src/shared/waterLook.ts.
  */
@@ -768,23 +773,173 @@ function edgeDelta(mesh: Built, x: number, z: number, phaseIndex: number): numbe
   return null
 }
 
-const one = () => 1
+/** Angular slices. The same count on every ring keeps the shared circle welded. */
+const SWELL_SEGS = 96
+
+function radialEnvelope(x: number, z: number, inner: number, outer: number): number {
+  if (!(outer > inner)) return 1
+  const d = Math.hypot(x, z)
+  if (d <= inner) return 1
+  if (d >= outer) return 0
+  return 1 - smooth((d - inner) / (outer - inner))
+}
+
+function linkRings(m: MeshBuilder, inner: number[], outer: number[]) {
+  const n = inner.length
+  for (let s = 0; s < n; s++) {
+    const s2 = (s + 1) % n
+    m.tri(inner[s], outer[s], outer[s2])
+    m.tri(inner[s], outer[s2], inner[s2])
+  }
+}
+
+/**
+ * Round disk out to `diskOuter`, then a skirt to the square of half `squareHalf`
+ * so the corners between the circle and the flat rim stay covered. Skirt rays
+ * share the disk's outer ring, and the whole thing is one mesh so those
+ * normals are computed from both sides.
+ */
+function swellSurface(diskOuter: number, squareHalf: number, step: number, segs: number): MeshBuilder {
+  const m = new MeshBuilder()
+  const nRings = Math.round(diskOuter / step)
+  const radii: number[] = []
+  for (let i = 0; i <= nRings; i++) radii.push(i * step)
+  if (Math.abs(radii[radii.length - 1] - diskOuter) > 0.01) radii.push(diskOuter)
+  const rings: number[][] = []
+  for (const r of radii) {
+    if (r === 0) {
+      const [u, v] = seaUv(0, 0)
+      rings.push([m.add(0, 0, u, v)])
+      continue
+    }
+    const ring: number[] = []
+    for (let s = 0; s < segs; s++) {
+      const a = (s / segs) * Math.PI * 2
+      const x = r * Math.cos(a)
+      const z = r * Math.sin(a)
+      const [u, v] = seaUv(x, z)
+      ring.push(m.add(x, z, u, v))
+    }
+    rings.push(ring)
+  }
+  const center = rings[0][0]
+  const first = rings[1]
+  for (let s = 0; s < segs; s++) m.tri(center, first[s], first[(s + 1) % segs])
+  for (let ri = 1; ri < rings.length - 1; ri++) linkRings(m, rings[ri], rings[ri + 1])
+  if (squareHalf > diskOuter + 0.5) {
+    const gap = squareHalf * Math.SQRT2 - diskOuter
+    const nSteps = Math.max(1, Math.ceil(gap / step))
+    let prev = rings[rings.length - 1]
+    for (let i = 1; i <= nSteps; i++) {
+      const t = i / nSteps
+      const ring: number[] = []
+      for (let s = 0; s < segs; s++) {
+        const a = (s / segs) * Math.PI * 2
+        const c = Math.cos(a)
+        const sn = Math.sin(a)
+        const reach = squareHalf / Math.max(Math.abs(c), Math.abs(sn))
+        const r = diskOuter + (reach - diskOuter) * t
+        const [u, v] = seaUv(c * r, sn * r)
+        ring.push(m.add(c * r, sn * r, u, v))
+      }
+      linkRings(m, prev, ring)
+      prev = ring
+    }
+  }
+  return m
+}
+
+function takeTriangles(full: Built, corners: number[], name: string): Built {
+  const map = new Map<number, number>()
+  const pos: number[] = []
+  const nrm: number[] = []
+  const uv: number[] = []
+  const idx: number[] = []
+  const morphPos = full.morphPos.map(() => [] as number[])
+  const morphNrm = full.morphNrm.map(() => [] as number[])
+  const use = (old: number): number => {
+    const hit = map.get(old)
+    if (hit !== undefined) return hit
+    const n = pos.length / 3
+    map.set(old, n)
+    for (let k = 0; k < 3; k++) {
+      pos.push(full.pos[old * 3 + k])
+      nrm.push(full.nrm[old * 3 + k])
+    }
+    uv.push(full.uv[old * 2], full.uv[old * 2 + 1])
+    for (let t = 0; t < full.morphPos.length; t++) {
+      for (let k = 0; k < 3; k++) {
+        morphPos[t].push(full.morphPos[t][old * 3 + k])
+        morphNrm[t].push(full.morphNrm[t][old * 3 + k])
+      }
+    }
+    return n
+  }
+  for (const old of corners) idx.push(use(old))
+  return { name, pos, nrm, uv, idx, morphPos, morphNrm, tris: idx.length / 3 }
+}
+
+/** Split one finished disk so each file keeps the full-mesh normals on the shared circle. */
+function splitDisk(full: Built, nearR: number, midR: number): { near: Built; mid: Built; far: Built } {
+  const count = full.pos.length / 3
+  const rad: number[] = []
+  for (let i = 0; i < count; i++) rad.push(Math.hypot(full.pos[i * 3], full.pos[i * 3 + 2]))
+  const buckets = { near: [] as number[], mid: [] as number[], far: [] as number[] }
+  for (let t = 0; t < full.idx.length; t += 3) {
+    const a = full.idx[t], b = full.idx[t + 1], c = full.idx[t + 2]
+    const rm = Math.max(rad[a], rad[b], rad[c])
+    const key = rm <= nearR + 0.05 ? 'near' : rm <= midR + 0.05 ? 'mid' : 'far'
+    buckets[key].push(a, b, c)
+  }
+  return {
+    near: takeTriangles(full, buckets.near, 'SwellNear'),
+    mid: takeTriangles(full, buckets.mid, 'SwellMid'),
+    far: takeTriangles(full, buckets.far, 'SwellFar'),
+  }
+}
+
+function vertIndex(mesh: Built, x: number, z: number): number {
+  for (let i = 0; i < mesh.pos.length; i += 3) {
+    if (Math.abs(mesh.pos[i] - x) < 0.01 && Math.abs(mesh.pos[i + 2] - z) < 0.01) return i
+  }
+  return -1
+}
+
+function coversXZ(mesh: Built, x: number, z: number): boolean {
+  const p = mesh.pos
+  for (let t = 0; t < mesh.idx.length; t += 3) {
+    const a = mesh.idx[t], b = mesh.idx[t + 1], c = mesh.idx[t + 2]
+    const ax = p[a * 3], az = p[a * 3 + 2]
+    const bx = p[b * 3] - ax, bz = p[b * 3 + 2] - az
+    const cx = p[c * 3] - ax, cz = p[c * 3 + 2] - az
+    const px = x - ax, pz = z - az
+    const d00 = bx * bx + bz * bz
+    const d01 = bx * cx + bz * cz
+    const d11 = cx * cx + cz * cz
+    const d20 = px * bx + pz * bz
+    const d21 = px * cx + pz * cz
+    const denom = d00 * d11 - d01 * d01
+    if (Math.abs(denom) < 1e-8) continue
+    const v = (d11 * d20 - d01 * d21) / denom
+    const w = (d00 * d21 - d01 * d20) / denom
+    const u = 1 - v - w
+    if (u >= -0.001 && v >= -0.001 && w >= -0.001) return true
+  }
+  return false
+}
+
 function makeSwells() {
   TARGETS = TRAINS.length * 2
-  const near = squareGrid(WATER.swellNearM, WATER.swellNearStepM, one, 'SwellNear')
-  const mid = frameGrid(WATER.swellNearM, WATER.swellMidM, WATER.swellNearStepM, WATER.swellMidStepM, one, 'SwellMid')
-  const far = frameGrid(
-    WATER.swellMidM,
-    WATER.swellFarM,
-    WATER.swellMidStepM,
-    WATER.swellFarStepM,
-    (x, z) => envelope(x, z, WATER.swellMidM, WATER.swellFarM),
-    'SwellFar',
+  const step = WATER.swellNearStepM
+  const disk = finish(
+    swellSurface(WATER.swellMidM, WATER.swellFarM, step, SWELL_SEGS),
+    (x, z) => radialEnvelope(x, z, WATER.swellNearM, WATER.swellFarM),
+    'Swell',
   )
-  const lite = squareGrid(
-    WATER.swellNearM,
-    WATER.swellMobileStepM,
-    (x, z) => envelope(x, z, WATER.swellNearM - WATER.swellMobileFadeM, WATER.swellNearM),
+  const { near, mid, far } = splitDisk(disk, WATER.swellNearM, WATER.swellMidM)
+  const lite = finish(
+    swellSurface(WATER.swellNearM, WATER.swellNearM, WATER.swellMobileStepM, SWELL_SEGS),
+    (x, z) => radialEnvelope(x, z, WATER.swellNearM - WATER.swellMobileFadeM, WATER.swellNearM),
     'SwellLite',
   )
   const join = edgeDelta(near, WATER.swellNearM, 0, 0)
@@ -801,6 +956,23 @@ function makeSwells() {
   if (farOuter === null || Math.abs(farOuter) > 1e-4) {
     throw new Error(`far edge is still displaced (${farOuter})`)
   }
+  const weld = (a: Built, b: Built, x: number, z: number, label: string) => {
+    const ia = vertIndex(a, x, z)
+    const ib = vertIndex(b, x, z)
+    if (ia < 0 || ib < 0) throw new Error(`${label} weld vertex missing`)
+    for (let t = 0; t < a.morphNrm.length; t++) {
+      for (let k = 0; k < 3; k++) {
+        if (Math.abs(a.morphNrm[t][ia + k] - b.morphNrm[t][ib + k]) > 1e-4) {
+          throw new Error(`${label} normals differ`)
+        }
+      }
+    }
+  }
+  weld(near, mid, WATER.swellNearM, 0, 'near/mid')
+  weld(mid, far, WATER.swellMidM, 0, 'mid/far')
+  const corner = WATER.swellFarM * 0.78
+  if (!coversXZ(far, corner, corner)) throw new Error('far skirt misses the square corner')
+  if (!coversXZ(near, 40, 40)) throw new Error('near disk misses the centre')
   return { near, mid, far, lite }
 }
 writeTextures()

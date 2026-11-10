@@ -127,8 +127,9 @@ function stepSea(): boolean {
   }
   if (seaPhase === 3) {
     if (!seaMobile) {
-      const part = 'far' as const
-      seaDesktop.push(addSwell(seaRoot, swellMesh(part), part !== 'far'))
+      // Same gloss and soft normal as the inner disks. A plainer far ring
+      // drew a shading line where the mid waves meet it.
+      seaDesktop.push(addSwell(seaRoot, swellMesh('far'), true))
     }
     seaMark('far')
     seaPhase = 4

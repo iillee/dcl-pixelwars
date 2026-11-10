@@ -4,8 +4,8 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 80×80 world (edge 640 m from centre): waves through the near
- * and mid squares, easing out across the far square, then a flat rim that
+ * for the 80×80 world (edge 640 m from centre): one round swell, split into
+ * near, mid, and far pieces that share a boundary, then a flat rim that
  * fades to the horizon colour before the parcel edge. The haze cylinder
  * sits just inside that edge. `landscapeTerrain` stays false.
  * `LOOK.sea` turns the swell, the rim, and the haze on.
@@ -100,20 +100,22 @@ export const WATER = {
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
-  /** Dense centre square, half-extent (m). The flat side is the closest
-   *  edge (inscribed radius). The 5×5 floor ends at 80 m; this square runs
-   *  past the haze so the fog never reveals that edge. */
+  /** Centre disk radius (m). Round, so the edge is not a square side or a
+   *  diagonal. The 5×5 floor ends at 80 m; this disk runs well past it. */
   swellNearM: 288,
-  /** Step doubles each ring so the joins share vertices. 16 → 32 → 64. */
+  /** Radial step (m) for the whole swell. Every ring uses it, so the join
+   *  does not drop to a coarser mesh. */
   swellNearStepM: 16,
-  /** Middle ring, half-extent (m). Full-height waves continue out to here, behind the haze. */
+  /** Middle ring radius (m). The round join sits here. Wave height is already
+   *  easing from the near circle toward the far edge, with no step in the mesh. */
   swellMidM: 512,
-  swellMidStepM: 32,
-  /** Far square, half-extent (m). Displacement eases to 0 here, inside the
-   *  80×80 sea (half 634 m). The flat rim fades from here to the edge. */
+  swellMidStepM: 16,
+  /** Far extent (m). Waves ease from the mid circle to this radius, and the
+   *  mesh continues to the square of this half-extent so it meets the flat rim.
+   *  Inside the 80×80 sea (half 634 m). */
   swellFarM: 576,
-  swellFarStepM: 64,
-  /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
+  swellFarStepM: 16,
+  /** Mobile centre step (m). One round mesh, same radius as the near disk, faded at its edge. */
   swellMobileStepM: 16,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
   swellMobileFadeM: 64,
@@ -204,8 +206,8 @@ export const SURFACE = {
 /**
  * Wet-look switches. Each one is independent.
  * `gloss` is the swell only; the rim keeps `WATER.roughness`.
- * `softNormal` is near, mid, and the mobile lite mesh. The far ring and the
- * flat rim stay un-bumped so the horizon does not grow a lighting seam.
+ * `softNormal` is every swell, including the far disk and the mobile lite mesh.
+ * The flat rim stays un-bumped: it is the horizon colour fade, not a wave.
  * `depth` is off. Near/mid at alpha 0.85 ended on the opaque far ring and the
  * pale rim, and that handoff read as flat light patches. The sheet and the
  * alpha path stay here for a later try.
