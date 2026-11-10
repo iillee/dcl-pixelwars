@@ -198,8 +198,8 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
   if (inLobby()) return 'Vote with your feet'
-  if (!FORMAT_ALTERNATE) return 'Next round: PvP'
-  return currentFormat === 'pvb' ? 'Next round: PvP' : 'Next round: PvB'
+  if (!FORMAT_ALTERNATE) return 'Next round: TEAM FIGHT'
+  return currentFormat === 'pvb' ? 'Next round: TEAM FIGHT' : 'Next round: BOT FIGHT'
 }
 
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
@@ -213,6 +213,6 @@ export function getFormatSplash(): { format: RoundFormat; title: string; sub: st
     return null
   }
   return armedFormat === 'pvb'
-    ? { format: 'pvb', title: 'PVB — BOT INVASION', sub: 'Humans vs Bots' }
-    : { format: 'pvp', title: 'PVP — TEAM BATTLE', sub: 'Red vs Blue' }
+    ? { format: 'pvb', title: 'BOT FIGHT', sub: 'vs Bots' }
+    : { format: 'pvp', title: 'TEAM FIGHT', sub: 'vs Players' }
 }

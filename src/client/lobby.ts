@@ -7,11 +7,11 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_W_M, type ModeId, billboardAnchor, cellAt, lobbyFeet, placedModes, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, lobbyFeet, modeSubtitle, modeTitle, modeTitleLines, placedModes, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
-import { isOverviewActive } from './overviewCamera'
+import { isOverviewActive, overviewSignRotation } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -25,11 +25,11 @@ let lastFeet = { x: NaN, y: NaN, z: NaN }
 const spawned: Entity[] = []
 const signRoots: Entity[] = []
 const boards: { count: Entity; secs: Entity }[] = []
-/** SDK TextShape: fontSize 10 is 1 m tall. */
-const TITLE_FONT = 48
+/** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities. */
+const TITLE_FONT = 50
 const SUB_FONT = 14
-const COUNT_FONT = 20
-const SECS_FONT = 14
+const COUNT_FONT = 22
+const SECS_FONT = 16
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
@@ -40,9 +40,9 @@ const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-const SIGN_COPY: Record<'pvp' | 'pvb', { title: string; sub: string; plate: Rgb; ink: Rgb }> = {
-  pvp: { title: 'PvP', sub: 'Player vs Player', plate: { r: 0.96, g: 0.24, b: 0.16 }, ink: { r: 0.45, g: 0.08, b: 0.05 } },
-  pvb: { title: 'PvB', sub: 'Player vs Bots', plate: { r: 0.08, g: 0.62, b: 0.78 }, ink: { r: 0.02, g: 0.2, b: 0.32 } },
+const SIGN_COPY: Record<'pvp' | 'pvb', { plate: Rgb; ink: Rgb }> = {
+  pvp: { plate: { r: 0.96, g: 0.24, b: 0.16 }, ink: { r: 0.45, g: 0.08, b: 0.05 } },
+  pvb: { plate: { r: 0.08, g: 0.62, b: 0.78 }, ink: { r: 0.02, g: 0.2, b: 0.32 } },
 }
 
 function clearSigns(): void {
@@ -63,13 +63,15 @@ function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Iden
   return e
 }
 
-function plateMat(c: Rgb, glow = 0.4) {
+function plateMat(c: Rgb) {
   return {
     albedoColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveColor: Color4.create(c.r * 0.7, c.g * 0.7, c.b * 0.7, 1),
-    emissiveIntensity: glow,
-    roughness: 0.42,
+    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
+    emissiveIntensity: 0.55,
+    roughness: 1,
     metallic: 0,
+    specularIntensity: 0,
+    reflectivityColor: Color3.create(0, 0, 0),
     castShadows: false,
   }
 }
@@ -95,72 +97,77 @@ function laySigns(): void {
     const copy = SIGN_COPY[m.id as 'pvp' | 'pvb']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
-    // Billboard owns this rotation. +Z is the face it points at the camera, which
-    // is also the side TextShape draws on, so the letters are not mirrored.
-    // BM_Y stays upright in play. Overview is a 35° isometric camera that turns
-    // in 90° steps, so BM_ALL squares the plate to that view in every slot.
+    // Letters sit on local −Z, the side a yaw billboard turns toward the camera.
+    // In play, BM_Y yaws each sign on its own. In overview that perspective
+    // splits them, so the billboard is switched off and both signs copy the
+    // camera rotation (parallel to the screen) including during a 90° turn.
     Transform.create(root, { position: Vector3.create(pose.x, pose.y, pose.z) })
-    Billboard.create(root, { billboardMode: signFacing() })
+    Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
     spawned.push(root)
     signRoots.push(root)
-    const slab = plateMat(copy.plate, 0.55)
-    const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 }, 0.2)
-    pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, 0.55, Vector3.create(0, 0, -0.18), lip)
+    applySignPose(root)
+    const face = signFaceZ()
+    const slab = plateMat(copy.plate)
+    const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
+    pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const tail = add(
       root,
-      Vector3.create(-SIGN_W_M * 0.22, -SIGN_H_M * 0.46, 0.05),
-      Vector3.create(2.6, 1.25, 0.55),
+      Vector3.create(-SIGN_W_M * 0.22, -SIGN_H_M * 0.42, face * 0.3),
+      Vector3.create(2.8, 1.4, 0.5),
       Quaternion.fromEulerDegrees(0, 0, 42),
     )
     MeshRenderer.setBox(tail)
     Material.setPbrMaterial(tail, slab)
-    // Title is 4.8 m tall (font 10 = 1 m) and stretched so three letters span the plate.
-    const title = add(root, Vector3.create(0, 1.2, 0.9), Vector3.create(1.55, 1, 1))
+    const title = add(root, Vector3.create(0, 1.5, face), Vector3.One())
     TextShape.create(title, {
-      text: copy.title,
+      text: modeTitleLines(m.id),
       fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.22,
+      outlineWidth: 0.45,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
-      width: 20,
-      height: 6,
+      textWrapping: false,
+      width: 26,
+      height: 12,
     })
-    const sub = add(root, Vector3.create(0, -2.55, 0.9), Vector3.One())
+    const sub = add(root, Vector3.create(0, -5.6, face), Vector3.One())
     TextShape.create(sub, {
-      text: copy.sub,
+      text: modeSubtitle(m.id),
       fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.16,
+      outlineWidth: 0.2,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
-      width: 20,
+      textWrapping: false,
+      width: 24,
       height: 2,
     })
-    const badgeY = -SIGN_H_M / 2 - 1.9
-    pill(root, 6.2, 3.2, 0.5, Vector3.create(0, badgeY, 0.15), plateMat({ r: 0.98, g: 0.97, b: 0.94 }, 0.25))
-    const count = add(root, Vector3.create(0, badgeY, 0.85), Vector3.One())
+    const badgeY = -SIGN_H_M / 2 - 2.1
+    pill(root, 6.4, 3.4, 0.45, Vector3.create(0, badgeY, face + 0.35), plateMat({ r: 0.98, g: 0.97, b: 0.94 }))
+    const count = add(root, Vector3.create(0, badgeY, face), Vector3.One())
     TextShape.create(count, {
       text: '0',
       fontSize: COUNT_FONT,
       fontSrc: 'Lilita One',
-      textColor: Color4.create(0.12, 0.07, 0.08, 1),
-      outlineWidth: 0.12,
+      textColor: Color4.create(0.1, 0.06, 0.07, 1),
+      outlineWidth: 0.16,
       outlineColor: Color3.create(copy.plate.r, copy.plate.g, copy.plate.b),
-      width: 5.5,
-      height: 2.6,
+      textWrapping: false,
+      width: 6,
+      height: 3,
     })
-    const secs = add(root, Vector3.create(0, badgeY - 2.5, 0.85), Vector3.One())
+    const secs = add(root, Vector3.create(0, badgeY - 2.7, face), Vector3.One())
     TextShape.create(secs, {
       text: '',
       fontSize: SECS_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0.16,
+      outlineWidth: 0.22,
       outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
+      textWrapping: false,
       width: 8,
-      height: 2,
+      height: 2.2,
     })
     boards.push({ count, secs })
 
@@ -179,16 +186,24 @@ function laySigns(): void {
   }
 }
 
-function signFacing(): BillboardMode {
-  return isOverviewActive() ? BillboardMode.BM_ALL : BillboardMode.BM_Y
+function applySignPose(root: Entity): void {
+  const bill = Billboard.getMutableOrNull(root)
+  const tr = Transform.getMutableOrNull(root)
+  if (!tr) return
+  if (isOverviewActive()) {
+    if (bill && bill.billboardMode !== BillboardMode.BM_NONE) bill.billboardMode = BillboardMode.BM_NONE
+    const cam = overviewSignRotation()
+    tr.rotation = Quaternion.fromEulerDegrees(cam.pitch, cam.yaw, 0)
+    return
+  }
+  if (bill && bill.billboardMode !== BillboardMode.BM_Y) {
+    bill.billboardMode = BillboardMode.BM_Y
+    tr.rotation = Quaternion.Identity()
+  }
 }
 
 function syncSignFacing(): void {
-  const mode = signFacing()
-  for (const root of signRoots) {
-    const bill = Billboard.getMutableOrNull(root)
-    if (bill && bill.billboardMode !== mode) bill.billboardMode = mode
-  }
+  for (const root of signRoots) applySignPose(root)
 }
 
 function refreshSigns(): void {
@@ -306,8 +321,7 @@ export function hudLobbyDebug(): string {
 }
 
 function voteTag(): string {
-  const mine = myVote()
-  return mine === 'pvp' ? 'PvP' : mine === 'pvb' ? 'PvB' : ''
+  return modeTitle(myVote())
 }
 
 export function hudClockText(matchSecs: number): string {

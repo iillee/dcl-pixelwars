@@ -301,6 +301,12 @@ export function exitOverview(): void {
 
 export function isOverviewActive(): boolean { return active }
 
+/** Pitch and yaw of the overview view, including the in-progress 90° turn.
+ *  Signs copy this so they stay parallel to the screen instead of aiming at the camera. */
+export function overviewSignRotation(): { pitch: number; yaw: number } {
+  return { pitch: OV_PITCH_DEG, yaw: yawDeg }
+}
+
 /** Turn the view by steps × 90° (blended). */
 export function rotateOverview(steps: number): void {
   yawSlot = (((yawSlot + steps) % 4) + 4) % 4

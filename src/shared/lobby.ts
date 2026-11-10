@@ -29,8 +29,8 @@ export const LOBBY_CROSS = { x: 2, z: 2 }
 /** West PvP and east PvB share an edge with the center. Garden and pots
  *  keep their cells for a later layout. They are not placed and cannot win. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXEL WARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
+  { id: 'pvp', label: 'TEAM FIGHT', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
+  { id: 'pvb', label: 'BOT FIGHT', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
@@ -45,8 +45,47 @@ export const VOTE_FLOOR_CLOSED = 6 / 32
 export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side. */
 export const SIGN_CLEAR_M = 2
-export const SIGN_W_M = 22
-export const SIGN_H_M = 7.6
+/** Wide enough for a 5 m "FIGHT" / "TEAM" line, tall enough for two stacked lines plus the subtitle. */
+export const SIGN_W_M = 28
+export const SIGN_H_M = 15
+/**
+ * SDK7 Billboard, in scene metres, points local −Z at the camera.
+ * The explorer aims its own +Z at the target, and scene Z is flipped on the way in,
+ * so the face a player sees is the entity's −Z face. Text on +Z sits behind the plate.
+ */
+export const SIGN_CAMERA_AXIS = -1
+export const SIGN_PLATE_DEPTH_M = 0.7
+/** Darker lip, shifted toward the camera so it reads as a rim. */
+export const SIGN_LIP_Z = -0.18
+export const SIGN_LIP_DEPTH_M = 0.55
+
+/** Player-facing name. Internal ids stay `pvp` / `pvb`. */
+export function modeTitle(id: string): string {
+  if (id === 'pvb') return 'BOT FIGHT'
+  if (id === 'pvp') return 'TEAM FIGHT'
+  return ''
+}
+
+export function modeSubtitle(id: string): string {
+  if (id === 'pvb') return 'vs Bots'
+  if (id === 'pvp') return 'vs Players'
+  return ''
+}
+
+/** Two stacked words so each line can be ~5 m tall and still fit the plate. */
+export function modeTitleLines(id: string): string {
+  if (id === 'pvb') return 'BOT\nFIGHT'
+  if (id === 'pvp') return 'TEAM\nFIGHT'
+  return ''
+}
+
+/** Local Z of sign text: past the camera-facing slab by 0.2 m. */
+export function signFaceZ(): number {
+  const plateNear = SIGN_CAMERA_AXIS * (SIGN_PLATE_DEPTH_M / 2)
+  const lipNear = SIGN_LIP_Z + SIGN_CAMERA_AXIS * (SIGN_LIP_DEPTH_M / 2)
+  const near = SIGN_CAMERA_AXIS < 0 ? Math.min(plateNear, lipNear) : Math.max(plateNear, lipNear)
+  return near + SIGN_CAMERA_AXIS * 0.2
+}
 /** Standing still this long drops the vote. */
 export const LOBBY_AFK_MS = 60_000
 /** A position sample older than this is not a vote.
@@ -172,7 +211,7 @@ export function billboardAnchor(
   const out = cell / 2 + SIGN_CLEAR_M
   return {
     x: modeCell.x * cell + cell / 2 + origin + dx * out,
-    y: baseY + 11,
+    y: baseY + 16,
     z: modeCell.z * cell + cell / 2 + origin + dz * out,
     yawDeg: endYawQuarter(modeCell) * 90,
   }

@@ -6,8 +6,8 @@ import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } fr
 import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CLEAR_M, emptyCounts, everyPresentInZone,
-  billboardAnchor, lobbyFeet, pickWinner, placedModes, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_PLATE_DEPTH_M, emptyCounts, everyPresentInZone,
+  billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
@@ -234,12 +234,29 @@ if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
   console.error('✗ feet reports must not wait on the lobby layout flag')
   process.exit(1)
 }
-if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_ALL') || !lobbySrc.includes('isOverviewActive()')) {
-  console.error('✗ mode signs should yaw to the camera, and fully face it while overview is on')
+if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_NONE') || !lobbySrc.includes('overviewSignRotation')) {
+  console.error('✗ signs should yaw in play, and copy the overview camera rotation so they stay parallel')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 48') || !lobbySrc.includes('SUB_FONT = 14') || !lobbySrc.includes('COUNT_FONT = 20')) {
-  console.error('✗ sign text should be metre-scale (fontSize 10 = 1 m)')
+if (!lobbySrc.includes('roughness: 1') || !lobbySrc.includes('specularIntensity: 0') || !lobbySrc.includes('metallic: 0')) {
+  console.error('✗ sign plates should be matte')
+  process.exit(1)
+}
+if (!lobbySrc.includes('TITLE_FONT = 50') || !lobbySrc.includes('signFaceZ()') || lobbySrc.includes('Vector3.create(1.55')) {
+  console.error('✗ titles should be 5 m tall, on the camera face, with no stretched scale')
+  process.exit(1)
+}
+const face = signFaceZ()
+const plateNear = SIGN_CAMERA_AXIS * (SIGN_PLATE_DEPTH_M / 2)
+const lipNear = SIGN_LIP_Z + SIGN_CAMERA_AXIS * (SIGN_LIP_DEPTH_M / 2)
+const slabNear = SIGN_CAMERA_AXIS < 0 ? Math.min(plateNear, lipNear) : Math.max(plateNear, lipNear)
+const inFront = (face - slabNear) * SIGN_CAMERA_AXIS
+if (inFront < 0.1) {
+  console.error(`✗ sign text Z ${face.toFixed(2)} is not on the camera side of the plate (gap ${inFront.toFixed(2)} m)`)
+  process.exit(1)
+}
+if (modeTitle('pvb') !== 'BOT FIGHT' || modeTitle('pvp') !== 'TEAM FIGHT' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Players') {
+  console.error('✗ lobby choices should read BOT FIGHT and TEAM FIGHT')
   process.exit(1)
 }
 const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
