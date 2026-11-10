@@ -155,7 +155,8 @@ export function initRoundNet(): void {
     if (banner.visible && banner.owners.length === 0) banner.owners = owners
   })
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
-  // Scores arrive on round:ended (summary). round:reset rebuilds the maze after the summary wait.
+  // Scores arrive on round:ended. The banner keeps its own timer. The lobby
+  // roundReset that follows swaps the floor and does not dismiss this screen.
   events.on('round:ended', ({ finalRed, finalBlue, finalTotal }) => {
     const localTotal = coverage().total
     console.log(

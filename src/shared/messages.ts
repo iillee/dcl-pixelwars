@@ -105,7 +105,8 @@ export const Messages = {
     mine: Schemas.String,
   }),
 
-  // Server → Clients: round just ended (scores for summary). Maze rebuild waits for roundReset after SUMMARY_MS.
+  // Server → Clients: round just ended (scores for the win screen). The lobby
+  // roundReset follows in the same breath; the screen stays up on its own timer.
   roundEnded: Schemas.Map({
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,

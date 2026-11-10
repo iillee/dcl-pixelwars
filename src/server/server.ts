@@ -242,7 +242,6 @@ export async function setupServer(): Promise<void> {
     const now = Date.now()
     const voteMs = countdownEnds > now ? Math.max(0, countdownEnds - now) : 0
     const phase = isRoundActive() ? 'match'
-      : intermission === 'summaryWait' ? 'summary'
       : intermission === 'lobby' ? (voteMs > 0 ? 'lobby' : 'idle')
       : 'idle'
     const verdict = lobbyVerdict(presentIds(), now)
@@ -280,11 +279,10 @@ export async function setupServer(): Promise<void> {
   }
 
   // ─── Intermission ───────────────────────────────────────────────────
-  // summaryWait holds the arena for the result. lobby is the voting cross.
-  // A match starts only when a vote picks a mode.
-  type IntermissionPhase = 'idle' | 'summaryWait' | 'lobby'
+  // The win screen is client-only. The floor becomes the lobby the moment
+  // the round ends. A match starts only when a vote picks a mode.
+  type IntermissionPhase = 'idle' | 'lobby'
   let intermission: IntermissionPhase = 'idle'
-  let summaryEndsAt = 0
   // Scores held from round end until the arena regen (after the vote).
   let pendingFinal = { red: 0, blue: 0, total: 0 }
   let pendingNextIdx = 0
@@ -413,11 +411,9 @@ export async function setupServer(): Promise<void> {
   room.onMessage('lobbyPos', ({ x, y, z }, context) => {
     const from = context?.from
     if (!from) return
-    // A match or the summary owns the floor. Anywhere else, feet are a vote.
-    // Phase 'idle' on the wire is also used when we are NOT in the lobby, and
-    // the client treats that as the vote HUD — so a sample during that idle
-    // opens the lobby instead of being dropped.
-    if (isRoundActive() || intermission === 'summaryWait') return
+    // A match owns the floor. The win screen does not: the lobby is already
+    // up, and a sample on an end tile counts even while that screen is showing.
+    if (isRoundActive()) return
     if (intermission !== 'lobby') openLobby(false)
     lastPingAt.set(from, Date.now())
     noteLobbyPos(from, x, y, z, Date.now())
@@ -483,7 +479,7 @@ export async function setupServer(): Promise<void> {
     }
     markActive(from) // count them as present immediately; paint activity will refresh it
     lastPingAt.set(from, Date.now())
-    if (isRoundActive() || intermission === 'summaryWait') {
+    if (isRoundActive()) {
       sendRoundClock(from)
     } else if (lobbyOpen) {
       // A joinRoster retry must not rebuild the cross. The first join sends it.
@@ -1162,7 +1158,7 @@ export async function setupServer(): Promise<void> {
     if (isRoundActive() || lobby) sendRoundClock()
   })
 
-  // Round end → summary → lobby regen → vote → arena regen.
+  // Round end → lobby floor immediately, win screen stays on the client, vote, arena.
   engine.addSystem(() => {
     const now = Date.now()
 
@@ -1194,17 +1190,6 @@ export async function setupServer(): Promise<void> {
       return
     }
 
-    if (intermission === 'summaryWait' && now >= summaryEndsAt) {
-      if (presentCount() === 0) {
-        intermission = 'idle'
-        console.log('[Server] summary done, nobody present → idle')
-        sendRoundClock()
-        return
-      }
-      openLobby(true)
-      return
-    }
-
     if (!isRoundActive() || now < getRoundEndMs()) return
     if (intermission !== 'idle') return // already ending
 
@@ -1233,25 +1218,17 @@ export async function setupServer(): Promise<void> {
     room.send('roundOwners', { owners })
     console.log(`[Server] roundOwners: ${owners.length} painter(s)`)
 
-    // Freeze the round clock (inactive) while summary runs. Maze/paint stay until SUMMARY_MS elapses.
+    // Freeze the round clock. The win screen is the client's banner (SUMMARY_MS).
+    // The floor swaps now: lobby tiles, no paint, no anvils, no bots.
     setRoundState(lastRoundIndex, now, false)
     pendingNextIdx = idx
     pendingFinal = { red: c.red, blue: c.blue, total: c.total }
     room.send('roundEnded', { finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
-    sendRoundClock()
-
-    if (!present) {
-      intermission = 'idle'
-      console.log(`[Server] round ${lastRoundIndex} ended with nobody present (connected set ${connectedCount()}) → idle until a join`)
-      clearPaintState()
-      void saveLeaderboard()
-      publishLeaderboard()
-      return
-    }
-
-    intermission = 'summaryWait'
-    summaryEndsAt = now + SUMMARY_MS
-    console.log(`[Server] summary wait ${SUMMARY_MS / 1000}s → then next Pixelwars round`)
+    clearPaintState()
+    void saveLeaderboard()
+    publishLeaderboard()
+    openLobby(false)
+    console.log(`[Server] round ${lastRoundIndex} ended → lobby now; win screen stays ${SUMMARY_MS / 1000}s on clients`)
   })
 
   // Discord flush tick — low frequency; the delay is 5s so 1Hz polling
@@ -1267,5 +1244,5 @@ export async function setupServer(): Promise<void> {
   // Cold start is the lobby, not a match and not a quiet idle. Joiners get
   // the cross from sendLobbyLayout; nobody has to wait for a round to end.
   openLobby(false)
-  console.log('[Server] ✅ Ready — lobby open; joinRoster, paintTick; paintDelta 5Hz; roundEnded → summary → roundReset.')
+  console.log('[Server] ✅ Ready — lobby open; joinRoster, paintTick; paintDelta 5Hz; roundEnded → lobby floor, win screen stays up.')
 }

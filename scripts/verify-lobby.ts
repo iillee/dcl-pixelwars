@@ -348,6 +348,14 @@ if (!server.includes("layout: 'lobby'") || !server.includes('rebuildBotGraph')) 
   console.error('✗ lobby layout or the arena bot graph is missing')
   process.exit(1)
 }
+if (server.includes('summaryWait')) {
+  console.error('✗ the win screen must not hold the arena; the lobby floor swaps when the round ends')
+  process.exit(1)
+}
+if (!server.includes("room.send('roundEnded'") || !server.includes('openLobby(false)')) {
+  console.error('✗ round end should announce the win and open the lobby in the same step')
+  process.exit(1)
+}
 const lobbyFn = server.slice(server.indexOf('function openLobby'), server.indexOf('function closeCountdown'))
 if (lobbyFn.includes('rebuildBotGraph') || lobbyFn.includes('anvilsMazeChanged')) {
   console.error('✗ the lobby regen must not rebuild the bot graph or reseat anvils')
