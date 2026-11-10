@@ -128,9 +128,19 @@ if (WATER.swellFarM > seaHalf || seaHalf - WATER.swellFarM > 250) {
   console.error(`✗ the far ring (${WATER.swellFarM} m) should end just inside the sea (${seaHalf.toFixed(0)} m)`)
   process.exit(1)
 }
-const horizon = Math.max(16, SCENE_SIZE / 2 - 8)
-if (HAZE_RING_M !== horizon || horizonRadiusM(SCENE_SIZE) !== horizon) {
-  console.error(`✗ haze should sit on the parcel horizon (${horizon} m), got ${HAZE_RING_M}`)
+const hazeR = horizonRadiusM(SCENE_SIZE)
+const nearSide = WATER.swellNearM
+const hazeMargin = nearSide - hazeR
+if (HAZE_RING_M !== hazeR) {
+  console.error(`✗ HAZE_RING_M ${HAZE_RING_M} does not match horizonRadiusM ${hazeR}`)
+  process.exit(1)
+}
+if (hazeR >= nearSide || hazeMargin < 16) {
+  console.error(`✗ haze (${hazeR} m) must sit inside the near swell side (${nearSide} m) by at least one amplitude`)
+  process.exit(1)
+}
+if (hazeR <= 5 * 16) {
+  console.error(`✗ haze (${hazeR} m) should stay outside the 80 m arena`)
   process.exit(1)
 }
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)

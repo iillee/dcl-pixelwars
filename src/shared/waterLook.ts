@@ -4,10 +4,11 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 50×50 world (edge 400 m from centre): waves through the near
- * and mid squares, easing out across the far square, then a flat rim that
- * fades to the horizon colour before the parcel edge. The haze cylinder
- * sits inside that edge. `landscapeTerrain` stays false.
+ * for the 50×50 world (edge 400 m from centre): the near square runs past
+ * the haze, then the mid and far rings and the flat rim continue to the
+ * parcel edge. The haze cylinder sits inside the near square's closest
+ * side, so that edge and every seam beyond it stay behind the fog.
+ * `landscapeTerrain` stays false.
  * `LOOK.sea` turns the swell, the rim, and the haze on.
  *
  * Swells are a displaced mesh with a plain color. Ripple and foam maps
@@ -100,21 +101,24 @@ export const WATER = {
   /** No extra heave. The mesh itself is the swell, so peaks stay put. */
   swellM: 0,
   swellSeconds: 10,
-  /** Dense centre square, half-extent (m). The 5×5 floor reaches 80 m; waves continue past it. */
-  swellNearM: 128,
+  /** Dense centre square, half-extent (m). The flat side is the closest
+   *  edge (inscribed radius). The 5×5 floor ends at 80 m; this square runs
+   *  past the haze so the fog never reveals that edge. */
+  swellNearM: 288,
   /** Step doubles each ring so the joins share vertices. 16 → 32 → 64. */
   swellNearStepM: 16,
-  /** Middle ring, half-extent (m). Full-height waves continue out to here. */
-  swellMidM: 256,
+  /** Middle ring, half-extent (m). Full-height waves continue out to here, behind the haze. */
+  swellMidM: 320,
   swellMidStepM: 32,
   /** Far square, half-extent (m). Displacement eases to 0 here, inside the
-   *  50×50 sea (half ~394 m). The flat rim fades from here to the edge. */
+   *  50×50 sea (half ~394 m). The flat rim fades from here to the edge.
+   *  Both sit outside the haze. */
   swellFarM: 384,
   swellFarStepM: 64,
   /** Mobile centre step (m). One mesh, same footprint as the near square, faded at its edge. */
   swellMobileStepM: 16,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 48,
+  swellMobileFadeM: 64,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',
@@ -306,21 +310,17 @@ export const WATER_FOG = {
   horizonSrc: 'assets/textures/water-horizon.png',
   horizonGlowSrc: 'assets/textures/water-horizon-glow.png',
   /**
-   * One closed ring, shared vertices, no overlapping cards. Sits just inside
-   * the parcel edge, from below the waterline to above eye height (~190).
-   * Colour and opacity are `HAZE_COLOR` at runtime. The alpha curve in
-   * `hazeMask` is baked.
+   * One closed ring. It sits inside the near swell, not on the parcel edge.
+   * The wall is solid up to the overview camera ceiling; only the cap above
+   * that fades. Colour is `HAZE_COLOR`. The alpha curve in `hazeMask` is baked.
    */
-  /** One ring at the horizon. The pale sea was not the missing-swell bug.
-   *  Radius is the scene edge at runtime (`horizonRadiusM`). The ring runs
-   *  from just under the mean surface to above eye height so the fade
-   *  crosses the horizon seen from the arena. */
   haze: true,
   hazeColor: HAZE_COLOR,
-  /** Metres under the water root. Covers the calm outer rim. */
+  /** Metres under the water root. Covers the swell troughs at the ring. */
   hazeBelowM: 24,
-  /** Metres above the water root. Spawn eyes are about 78 m up; this clears them. */
-  hazeAboveM: 130,
+  /** Metres above the water root. The 50×50 camera cap is ~326 m and the
+   *  water sits near 114, so this clears every overview zoom. */
+  hazeAboveM: 230,
   hazeSrc: 'assets/models/water-haze.glb',
   hazeMask: 'assets/textures/water-haze.png',
 }
@@ -341,13 +341,26 @@ export function resolvedWaterY(minY: number, _fallDrop: number): number {
   return Math.min(WATER.heightY, maxMean)
 }
 
-/** Haze cylinder radius (m) for the current scene: the parcel horizon. */
-export const HAZE_RING_M = Math.max(16, SKY_SCENE_M / 2 - 8)
-
-/** Haze cylinder radius (m). Just inside the parcel edge. */
-export function horizonRadiusM(sceneM: number): number {
-  return Math.max(16, sceneM / 2 - 8)
+/** Closest distance from the sea centre to the near square's boundary.
+ *  The corners are further out; the flat side is what a high camera sees first. */
+export function nearSwellMinRadiusM(): number {
+  return WATER.swellNearM
 }
+
+/** How far inside that side the haze stands. One live amplitude: the swell
+ *  only moves up and down, and this keeps a crest from reading past the fog. */
+export function swellEdgeMarginM(): number {
+  return SWELL_VARIANT === '48m' ? SWELL_48_AMPLITUDE_M : WATER.swellAmplitudeM
+}
+
+/** Haze cylinder radius (m). Inside the near swell for whatever `WORLD_SIZE`
+ *  the rings were built for. The scene edge is not an input. */
+export function horizonRadiusM(_sceneM: number): number {
+  return Math.max(32, nearSwellMinRadiusM() - swellEdgeMarginM())
+}
+
+/** Same radius, for callers that do not pass the scene size. */
+export const HAZE_RING_M = horizonRadiusM(SKY_SCENE_M)
 
 /** Plane width that stays inside the parcel box. */
 export function resolvedWaterSize(sceneM: number): number {

@@ -408,10 +408,10 @@ function addHaze(waterY: number): void {
           $case: 'pbr',
           pbr: {
             texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+            albedoColor: Color4.create(c.r, c.g, c.b, 1),
             emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
             emissiveColor: Color3.create(c.r, c.g, c.b),
-            emissiveIntensity: 0.65,
+            emissiveIntensity: 1,
             roughness: 1,
             metallic: 0,
             specularIntensity: 0,
