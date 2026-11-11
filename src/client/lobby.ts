@@ -24,6 +24,11 @@ let lastFeet = { x: NaN, y: NaN, z: NaN }
 
 const spawned: Entity[] = []
 const signRoots: Entity[] = []
+/** Resting height of each sign root; the bob rides on top of it. */
+const signBaseY: number[] = []
+/** Gentle idle bob: metres up/down at full size, and seconds per cycle. */
+const SIGN_BOB_M = 0.35
+const SIGN_BOB_PERIOD_S = 3.2
 const boards: { count: Entity }[] = []
 /** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities. */
 const TITLE_FONT = 45
@@ -48,6 +53,7 @@ function clearSigns(): void {
   for (const e of spawned) engine.removeEntity(e)
   spawned.length = 0
   signRoots.length = 0
+  signBaseY.length = 0
   boards.length = 0
   tints.length = 0
   tintSize.length = 0
@@ -103,6 +109,7 @@ function laySigns(): void {
     Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
     spawned.push(root)
     signRoots.push(root)
+    signBaseY.push(pose.y)
     const face = signFaceZ()
     const slab = plateMat(copy.plate)
     const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
@@ -192,7 +199,17 @@ function applySignPose(root: Entity): void {
 let loggedSignScale = Number.NaN
 
 function syncSignFacing(): void {
-  for (const root of signRoots) applySignPose(root)
+  const t = Date.now() / 1000
+  const scale = isOverviewActive() ? overviewSignScale() : 1
+  for (let i = 0; i < signRoots.length; i++) {
+    const root = signRoots[i]
+    applySignPose(root)
+    const tr = Transform.getMutableOrNull(root)
+    if (!tr) continue
+    // Each sign is offset in phase so the three do not move in lockstep.
+    const bob = Math.sin((t / SIGN_BOB_PERIOD_S) * Math.PI * 2 + i * 2.1) * SIGN_BOB_M * scale
+    tr.position = Vector3.create(tr.position.x, signBaseY[i] + bob, tr.position.z)
+  }
   const shown = isOverviewActive() ? Math.round(overviewSignScale() * 100) / 100 : 1
   if (shown === loggedSignScale) return
   loggedSignScale = shown
