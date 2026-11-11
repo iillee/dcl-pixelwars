@@ -109,11 +109,11 @@ export type Events = {
   'dash:impact': { attacker: string; target: string; dx: number; dz: number }
 
   // Broadcast: a lunge started / an accepted lunge hit. Subscriber: client/lunge.
-  'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number }
+  'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number; dry: number }
   'lunge:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
 
   // Paint Burst. Subscriber: client/paintBurst.
-  'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number; air: number; lx: number; ly: number; lz: number }
+  'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number; air: number; lx: number; ly: number; lz: number; dry: number }
   'burst:impact': { attacker: string; id: number; target: string; dx: number; dz: number; air: number }
   // Attacker only: the server applied this burst's footprint. Subscriber: client/paintBurst.
   'burst:painted': { id: number; n: number }

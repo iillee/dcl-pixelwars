@@ -148,12 +148,12 @@ export async function setupServer(): Promise<void> {
     },
     abilities: () => ({ lunge: lungeEnabledForRound(currentRoundIndex()), burst: burstEnabledForRound(currentRoundIndex()) }),
     onLunge: (id, lungeId, dx, dz, at) => {
-      room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z })
+      room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z, dry: paintDry(`bot:${id}`) })
     },
     onBurst: (id, burstId, team, at, air = 0, _fx = 0, _fz = 1) => {
       const by = `bot:${id}`
       const now = Date.now()
-      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air, lx: 0, ly: 0, lz: 0 })
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air, lx: 0, ly: 0, lz: 0, dry: paintDry(by) })
       if (air) {
         // The victim's client knocks itself from this broadcast. Stats only, here.
         for (const e of rosterEntries()) {
@@ -179,7 +179,7 @@ export async function setupServer(): Promise<void> {
       const by = `bot:${id}`
       const list = economyOn() ? orderNearest(fp, centre) : fp
       for (const cid of list) applyBotPaint(cid, team, by)
-      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(by) })
       const now = Date.now()
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
@@ -233,6 +233,7 @@ export async function setupServer(): Promise<void> {
   // counts PvB rounds only, so the human colour goes Red, Blue, Red…
   let roundFormat: 'pvp' | 'pvb' | 'prototype' = 'pvp'
   const economyOn = () => modeById(roundFormat)?.economy === true
+  const paintDry = (who: string) => (economyOn() && walletOf(who) <= 0 ? 1 : 0)
   const wouldFlip = (id: string, team: number) => {
     if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
     return teamOfCell(id) !== team
@@ -732,7 +733,7 @@ export async function setupServer(): Promise<void> {
       return
     }
     if (matchLive()) markActive(from)
-    room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z })
+    room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z, dry: paintDry(from) })
   })
 
   room.onMessage('lungeHit', ({ id, target, dx, dz, x, y, z }, context) => {
@@ -835,7 +836,7 @@ export async function setupServer(): Promise<void> {
         const airborne = air !== 0
         bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
         bursts.place(from, id, { x, y, z })
-        room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
       }
       sendPainted(from, id, 0, ct || 0, sin)
       return
@@ -862,7 +863,7 @@ export async function setupServer(): Promise<void> {
     const origin = { x, y, z }
     bursts.place(from, id, origin)
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
-    room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0 })
+    room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
     // Paint the circle whenever a walkable cell resolves under the feet, even if
     // the client tagged the press air. burstCentre's window is BURST_PAINT_MAX_DY+1
     // (2.5 m). A real jump above that waits for burstLand. commitPaint runs once.
@@ -912,7 +913,7 @@ export async function setupServer(): Promise<void> {
     if (!matchLive()) {
       if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
         bursts.place(from, id, { x, y, z })
-        room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0 })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
       }
       sendPainted(from, id, 0, ct || 0, sin)
       return
@@ -934,7 +935,7 @@ export async function setupServer(): Promise<void> {
     if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
       const face = bursts.facing(from, id)
       bursts.place(from, id, origin)
-      room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0 })
+      room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, cell, origin) : null
       const preview = graph && centre ? burstFootprint(graph, centre) : []

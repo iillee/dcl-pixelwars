@@ -152,14 +152,14 @@ function wireInbound(): void {
   })
 
   room.onMessage('lungeStarted', (m) => {
-    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z })
+    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z, dry: m.dry ? 1 : 0 })
   })
   room.onMessage('lungeImpact', ({ attacker, id, target, dx, dz }) => {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
 
-  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz }) => {
-    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz })
+  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz, dry }) => {
+    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz, dry: dry ? 1 : 0 })
   })
   room.onMessage('burstImpact', ({ attacker, id, target, dx, dz, air }) => {
     events.emit('burst:impact', { attacker, id, target, dx, dz, air })

@@ -213,7 +213,7 @@ export const Messages = {
   // Server checks cooldown and rebroadcasts lungeStarted so every client
   // can show the lunge on that avatar.
   lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: lunge `id` touched `target` (player address, or
   // "bot:<id>"); (dx, dz) = knockback direction, (x, y, z) = attacker pos.
   lungeHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
@@ -238,7 +238,7 @@ export const Messages = {
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   // air 1 is the airborne press. A second burstFired with air 0, same id, is that
   // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
-  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
+  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.

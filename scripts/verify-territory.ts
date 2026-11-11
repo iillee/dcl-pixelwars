@@ -84,7 +84,18 @@ if (walletOf('p1') !== PAINT_CAPACITY) {
   process.exit(1)
 }
 
+const msgs = readFileSync(new URL('../src/shared/messages.ts', import.meta.url), 'utf8')
 const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+if (!msgs.includes('dry: Schemas.Int')) {
+  console.error('✗ lunge and burst broadcasts should carry an empty-tank flag')
+  process.exit(1)
+}
+const lungeSrc = readFileSync(new URL('../src/client/lunge.ts', import.meta.url), 'utf8')
+const burstSrc = readFileSync(new URL('../src/client/paintBurst.ts', import.meta.url), 'utf8')
+if (!lungeSrc.includes('localDry') || !burstSrc.includes('vfxTeam') || !server.includes('paintDry')) {
+  console.error('✗ an empty tank should turn Dash and Burst effects white')
+  process.exit(1)
+}
 if (!server.includes('economyOn()') || !server.includes('refillWallet(')) {
   console.error('✗ the server should spend only while the economy is on, and refill on respawn')
   process.exit(1)

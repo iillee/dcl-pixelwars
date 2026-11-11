@@ -49,6 +49,7 @@ import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } fro
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
+import { paintEconomyOn, paintTank } from '../paint'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
@@ -76,7 +77,9 @@ let diveForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
 const WHITE = { r: 1, g: 1, b: 1 }
-const rgbOf = (t: Team) => inLobby() ? WHITE : (TEAM_RGB[t] ?? WHITE)
+const localDry = () => paintEconomyOn() && paintTank() <= 0
+const vfxTeam = (t: Team, dry: boolean) => (inLobby() || dry ? Team.None : t)
+const rgbOf = (t: Team) => TEAM_RGB[t] ?? WHITE
 function glow(ent: Entity, rgb: { r: number; g: number; b: number }, a: number, intensity: number): void {
   Material.setPbrMaterial(ent, {
     albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, a), emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
@@ -554,7 +557,7 @@ export function triggerBurst(): void {
   }
   const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
-  showShockwave(p, team, true, cell)
+  showShockwave(p, vfxTeam(team, localDry()), true, cell)
   console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
   queuePaint('ground', id, cell, p, f.x, f.z)
   if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress))) kickPaint(id)
@@ -589,7 +592,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct 
   // single sound as a ground Burst. Playing air_spike_dive here as well made
   // the local player hear the burst twice. A connect has no landing; its sound
   // is the hit clip only.
-  showAirTrail(p, team, fx, fz)
+  showAirTrail(p, vfxTeam(team, localDry()), fx, fz)
   queueUse(id, '', p, fx, fz)
   if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1, ct))) kickUse(id)
   const anvils = hitsOpen() ? knockAirAnvils(p, fx, fz, id) : 0
@@ -613,7 +616,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct 
   }
   // Full dive, including the sustained downward force. Nothing cancels this.
   commitAirDive(fx, fz)
-  armLandingStamp('', team, id, fx, fz)
+  armLandingStamp('', vfxTeam(team, localDry()), id, fx, fz)
   console.log(`[Burst] #${id} air spike miss pos=${p.y.toFixed(2)}`)
 }
 
@@ -700,9 +703,10 @@ export function initPaintBurst(): void {
     emoteLeft = 0
     void stopEmote({}).catch(() => {})
   })
-  events.on('burst:fired', ({ attacker, id, team, x, y, z, air }) => {
+  events.on('burst:fired', ({ attacker, id, team, x, y, z, air, dry }) => {
     const att = attacker.toLowerCase()
     const selfAddr = myAddress()
+    const look = vfxTeam(team, dry === 1)
     if (selfAddr !== '' && att === selfAddr) clearUse(id)
     gate.sawStart(att, id, Date.now())
     let faceX = 0, faceZ = 1
@@ -716,13 +720,11 @@ export function initPaintBurst(): void {
     }
     if (att !== myAddress()) {
       if (air) {
-        showAirTrail({ x, y, z }, team, faceX, faceZ)
-        // Landing plays burst_impact once. The press dive clip is not played
-        // here either, or a remote would hear the burst twice.
-        armLandingStamp(att, team, id)
+        showAirTrail({ x, y, z }, look, faceX, faceZ)
+        armLandingStamp(att, look, id)
       } else if (!sawShock(`${att}#${id}`, Date.now())) {
         // Ground press, or the landing rebroadcast. The stamp may have played it already.
-        showShockwave({ x, y, z }, team, false)
+        showShockwave({ x, y, z }, look, false)
       }
     }
     // Victim anticipation: if we're already in the volume, knock now
