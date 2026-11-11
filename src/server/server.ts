@@ -17,6 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation, sleepBots } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
@@ -47,11 +48,12 @@ import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwav
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
-import { LOBBY_VOTE_MS, pickWinner, type ModeId } from '../shared/lobby'
+import { LOBBY_MODES, LOBBY_VOTE_MS, modeById, pickWinner, type ModeId } from '../shared/lobby'
 import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
-import { SCENE_SIZE, getPlacedTilesInOrder } from '../maze/generator'
-import { SKY_TOP_Y } from '../maze/level'
+import { SCENE_SIZE, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
+import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
+import { applyTank, orderNearest } from '../shared/territory'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -99,12 +101,12 @@ export async function setupServer(): Promise<void> {
   const botTeams = new Map<string, number>()
   // Bot paint: live/round scoreboard only. Never leaderboardIncrement (that map is persisted).
   const applyBotPaint = (cellId: string, team: number, painter: string): boolean => {
-    const gained = applyPaint(cellId, team, painter)
-    if (gained) {
-      roundCells.set(painter, (roundCells.get(painter) ?? 0) + 1)
+    const gained = paintCells(painter, team, [cellId], cellId, false)
+    if (gained > 0) {
+      roundCells.set(painter, (roundCells.get(painter) ?? 0) + gained)
       botTeams.set(painter, team)
     }
-    return gained
+    return gained > 0
   }
 
   // Bots fill the active-human gap on the short team only. Paint is credited
@@ -129,7 +131,10 @@ export async function setupServer(): Promise<void> {
       room.send('rescueStart', { who, x: at.x, y: at.y, z: at.z, bx: base.x, by: base.y, bz: base.z, mobile: 1, ...RESCUE_TIMES })
       console.log(`[Server] ghost ${id} fell${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
     },
-    onRescueEnd: id => room.send('rescueEnd', { who: `bot:${id}` }),
+    onRescueEnd: id => {
+      if (economyOn()) refillWallet(`bot:${id}`)
+      room.send('rescueEnd', { who: `bot:${id}` })
+    },
     // Combat: bots attack with players' broadcasts; each victim's client judges
     // the hit on its own screen and knocks itself, as against a player.
     humans: () => {
@@ -160,7 +165,8 @@ export async function setupServer(): Promise<void> {
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
-      for (const cid of fp) applyBotPaint(cid, team, by)
+      const list = economyOn() ? orderNearest(fp, centre) : fp
+      for (const cid of list) applyBotPaint(cid, team, by)
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
         if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
@@ -171,7 +177,8 @@ export async function setupServer(): Promise<void> {
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
       const by = `bot:${id}`
-      for (const cid of fp) applyBotPaint(cid, team, by)
+      const list = economyOn() ? orderNearest(fp, centre) : fp
+      for (const cid of list) applyBotPaint(cid, team, by)
       room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0 })
       const now = Date.now()
       for (const e of rosterEntries()) {
@@ -224,7 +231,32 @@ export async function setupServer(): Promise<void> {
   // Playtest format. Cold start / idle start stays 'pvp'. A round that continues
   // from the summary flips when FORMAT_ALTERNATE (nextRoundFormat). pvbRoundIndex
   // counts PvB rounds only, so the human colour goes Red, Blue, Red…
-  let roundFormat: 'pvp' | 'pvb' = 'pvp'
+  let roundFormat: 'pvp' | 'pvb' | 'prototype' = 'pvp'
+  const economyOn = () => modeById(roundFormat)?.economy === true
+  const wouldFlip = (id: string, team: number) => {
+    if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
+    return teamOfCell(id) !== team
+  }
+  const sendWallet = (to: string, tank: number, denied: string[]) => {
+    if (to.startsWith('bot:')) return
+    room.send('paintWallet', { tank, denied }, { to: [to] })
+  }
+  /** Nearest flips first. Returns how many cells changed team. `notify` echoes the tank to a human. */
+  const paintCells = (painter: string, team: number, ids: string[], origin: string | null, notify: boolean): number => {
+    if (!economyOn()) {
+      let gained = 0
+      for (const id of ids) if (applyPaint(id, team, painter)) gained++
+      return gained
+    }
+    const before = walletOf(painter)
+    const ordered = orderNearest(ids, origin)
+    const plan = applyTank(ordered.map(id => ({ id, flip: wouldFlip(id, team) })), before)
+    let gained = 0
+    for (const id of plan.taken) if (applyPaint(id, team, painter)) gained++
+    setWallet(painter, plan.tank)
+    if (notify && (plan.denied.length > 0 || plan.tank !== before)) sendWallet(painter, plan.tank, plan.denied)
+    return gained
+  }
   let pvbRoundIndex = 0
 
   /** Round-on-join state → one client (to) or everyone. `format` lets a late joiner show the splash.
@@ -253,7 +285,7 @@ export async function setupServer(): Promise<void> {
       phase,
       voteMs,
       winner: '',
-      votes: (['pvp', 'pvb', 'garden', 'pots'] as const).map(id => ({ id, n: verdict.counts[id] })),
+      votes: LOBBY_MODES.map(m => ({ id: m.id, n: verdict.counts[m.id] ?? 0 })),
       present: presentIds().length,
       feet: lobbySampleIds().length,
       srvZone: verdict.zone,
@@ -357,7 +389,7 @@ export async function setupServer(): Promise<void> {
 
   /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
   function startNextRound(mode: ModeId): void {
-    roundFormat = mode === 'pvb' ? 'pvb' : 'pvp'
+    roundFormat = mode === 'pvb' ? 'pvb' : mode === 'prototype' ? 'prototype' : 'pvp'
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
     const c = pendingFinal
     const pruned = pruneForNewRound()
@@ -387,6 +419,7 @@ export async function setupServer(): Promise<void> {
     anvilsAwake(true)
     room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena' })
     clearPaintState()
+    resetWallets()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
     anvilsMazeChanged()
@@ -468,12 +501,12 @@ export async function setupServer(): Promise<void> {
     }
     const isRepeat = getTeam(from) !== null && rosterEntries().some(e => e.userId === from)
     let team = assignTeam(from)
-    // PvP only. Rejoiner kept the same colour as the only other active human: flip
+    // PvP and Prototype. Rejoiner kept the same colour as the only other active human: flip
     // them so the sides even out and the fill bots retire on the next tick. New
     // joiners already take the side with fewer active humans (humans only, not bots).
     // PvB skips this — assignTeam already put them on the human colour.
-    // Mid-match PvP only. A lobby join keeps the team they already have until the vote starts a round.
-    if (isRoundActive() && roundFormat === 'pvp') {
+    // Mid-match only. A lobby join keeps the team they already have until the vote starts a round.
+    if (isRoundActive() && roundFormat !== 'pvb') {
       const other = activeSoloHumanTeam(from)
       if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
     }
@@ -512,7 +545,7 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] ${type} from ${from.slice(0, 10)} dropped: ${why}`)
   }
 
-  room.onMessage('paintTick', ({ ids }, context) => {
+  room.onMessage('paintTick', ({ ids, at }, context) => {
     const from = context?.from
     if (!from) return
     if (!matchLive()) { logDrop(from, 'paintTick', 'round inactive (intermission/idle)'); return }
@@ -526,8 +559,10 @@ export async function setupServer(): Promise<void> {
     // still on their own paint re-sends the same 9 cellIds every 100ms;
     // crediting all of them would inflate the leaderboard by ~90/sec.
     let gained = 0
-    for (const id of ids) {
-      if (applyPaint(id, team, from)) gained++
+    if (economyOn()) {
+      gained = paintCells(from, team, ids, at || null, true)
+    } else {
+      for (const id of ids) if (applyPaint(id, team, from)) gained++
     }
     // Even if nothing changed team (walking on own paint), the paintTick
     // itself is proof the player is real — mark them active so scraper
@@ -765,8 +800,7 @@ export async function setupServer(): Promise<void> {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
     const fp = graph && centre ? burstFootprint(graph, centre) : []
-    let gained = 0
-    for (const cid of fp) if (applyPaint(cid, team, from)) gained++
+    const gained = paintCells(from, team, fp, centre, true)
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
@@ -982,6 +1016,10 @@ export async function setupServer(): Promise<void> {
     const who = from.toLowerCase()
     rescueRiders.delete(who)
     rescueStartAt.delete(who)
+    if (economyOn() && matchLive()) {
+      refillWallet(who)
+      sendWallet(who, walletOf(who), [])
+    }
     room.send('rescueEnd', { who })
   })
   room.onMessage('anvilRespawn', (_m, context) => { if (context?.from && matchLive()) anvilsRespawnRequest(context.from) })
@@ -1062,10 +1100,8 @@ export async function setupServer(): Promise<void> {
       const b = pendingBombs[i]
       if (now < b.at) continue
       pendingBombs.splice(i, 1)
-      let gained = 0
-      for (const id of bombCells(b.x, b.y, b.z)) {
-        if (applyPaint(id, b.team, b.from)) gained++
-      }
+      const cells = bombCells(b.x, b.y, b.z)
+      const gained = paintCells(b.from, b.team, cells, null, true)
       if (gained > 0) {
         leaderboardIncrement(b.from, gained)
         roundCells.set(b.from, (roundCells.get(b.from) ?? 0) + gained)

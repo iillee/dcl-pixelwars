@@ -26,15 +26,17 @@ export const PVB_RATIO = 1.0
 /** Hard cap on PvB bots (playtest: up to 15). */
 export const PVB_BOT_MAX = 15
 
-export type RoundFormat = 'pvp' | 'pvb'
+export type RoundFormat = 'pvp' | 'pvb' | 'prototype'
 
 export function pvbBotCount(activeHumans: number): number {
   if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
   return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
 }
 
-/** Next round's format. `continuing` is false for a cold start and an idle start. */
+/** Next round's format. `continuing` is false for a cold start and an idle start.
+ *  Prototype is a voted mode, not part of the pvp/pvb flip. */
 export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (current === 'prototype') return 'prototype'
   if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
   return current === 'pvb' ? 'pvp' : 'pvb'
 }

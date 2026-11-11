@@ -4,13 +4,13 @@ Plan only. Bot Fight and Team Fight stay as they are. The paint tank, depots, te
 
 Base is `main` @ `67db80a`.
 
+Step 1 is the lobby arm, the vote, and the paint tank (capacity 80) with a vertical bar on the right. Depots, territory respawn, and elimination are later. Until those exist, a respawn refills the tank so a round stays playable. The bar is client-predicted and corrected by a per-player `{ tank, denied }` echo.
+
 ## Recommendation
 
-Prototype is **vs bots**, the same shape as Bot Fight: every human on one team, bots on the other, count from `pvbBotCount`. Subtitle `vs Bots`.
+Prototype uses **Team Fight's population**. Humans are shuffled across both teams. Bots only fill the short side, same rule as `pvp` today (`setPopulation({ kind: 'pvp' })`, the 1v1 rejoin flip included). It is not humans-together, and it does not use the Bot Fight bot count. Subtitle `Paint Economy`.
 
-Not vs humans. Team Fight already is that match, and this loop needs an opponent that paints, captures, and refills or a solo test has nobody on the other side. Not mixed. That would be a third population rule. Two people who want to fight each other still vote Team Fight, unchanged.
-
-Bots learn depots only inside this mode. A filler bot in Team Fight, and every bot in Bot Fight, keep today's brain.
+Depot awareness, when it is built, still runs only while this mode's `economy` flag is on. Bot Fight bots and Team Fight filler bots stay on today's brain. A balancer bot inside a Prototype round is on the economy, because that round's flag is on.
 
 ## Where the rules live today
 
@@ -39,7 +39,7 @@ The paintable arena is the 5×5 maze, not the 80×80 parcel box. Twelve seeds: 2
 Add `prototype` to `ModeId` and `LOBBY_MODES`:
 
 - cell `{ x: 2, z: 3 }` (north of the cross)
-- `teamRule: 'humans-together'`
+- `teamRule: 'balance'`
 - `live: true`, `placed: true`
 - `economy: true`
 - label `PROTOTYPE`
@@ -50,9 +50,9 @@ Add `prototype` to `ModeId` and `LOBBY_MODES`:
 
 `rebuildMaze` skips when `gridSize() === 4`. The full-size first tile is the fork (`type !== 'end'`), then `lobby:floor`, then the queue is **only** `type === 'end'`. Leaving the old `type !== 'cross'` filter would spawn the fork twice.
 
-Signs: one more root from the same `laySigns` loop. Title `PROTOTYPE`, subtitle `vs Bots`, same plate, lip, tail, matte material, `fontSize` 45, outline 0, text on −Z. `billboardAnchor` already steps north by `SIGN_CLEAR_M` (10 m) at `baseY + 22`. Overview scale stays `signZoomScale`. Add a plate color that is not team red or team blue. `hudYourVote` already prints `modeTitle`, so the pill reads `Your vote: PROTOTYPE` once `setMyVote` accepts the id.
+Signs: one more root from the same `laySigns` loop. Title `PROTOTYPE`, subtitle `Paint Economy`, same plate, lip, tail, matte material, `fontSize` 45, outline 0, text on −Z. `billboardAnchor` already steps north by `SIGN_CLEAR_M` (10 m) at `baseY + 22`. Overview scale stays `signZoomScale`. Add a plate color that is not team red or team blue. `hudYourVote` already prints `modeTitle`, so the pill reads `Your vote: PROTOTYPE` once `setMyVote` accepts the id.
 
-`startNextRound` must not collapse this id to `pvp`. Format string is `'prototype'`. Population is a new kind `{ kind: 'prototype', humanTeam }` that calls the existing PvB balancer (`balancePvb` / `pvbBotCount` / humans stacked). Do not set `kind: 'pvb'` or Bot Fight and Prototype share a switch. Splash copy comes from `modeTitle` / `modeSubtitle`, not the pvp/pvb ternary in `getFormatSplash` and `nextRoundBlurb`.
+`startNextRound` must not collapse this id to `pvp` on the wire. Format string is `'prototype'`. Population is the Team Fight branch: `setForcedTeam(null)`, `shuffleTeams`, `setPopulation({ kind: 'pvp' })`, bots fill the short side. Do not set `kind: 'pvb'`. Splash copy comes from `modeTitle` / `modeSubtitle`, not the pvp/pvb ternary in `getFormatSplash` and `nextRoundBlurb`.
 
 Stop coercing the wire format. These sites turn every non-`pvb` string into Team Fight:
 
@@ -110,7 +110,7 @@ All of these are economy-only. The round lifecycle stays the one from `8f39b33`:
 
 **Both teams eliminated together.** One flip cannot zero both teams, because the painter gains the cell. It can happen if the last living players of both teams are already in the cloud and the map has no paint. `endRound` with equal coverage. No winner. Lobby opens the same way.
 
-**Late joiner, team owns nothing.** `teamAssigned` still assigns them (`humans-together`, so they join the human team). Do not `teleportHome` onto `baseSpawn`. Hold them on the cloud until the picker has a cell, then deliver them with a full tank. If the round ends first, they get the lobby and the win screen like any other joiner, and they do not get a missed banner from before they connected (`round:ended` is not replayed). A late joiner whose team still owns a safe cell is delivered there, not to the base.
+**Late joiner, team owns nothing.** `teamAssigned` still assigns them with Team Fight's balancer (short side, including the 1v1 flip). Do not `teleportHome` onto `baseSpawn`. Hold them on the cloud until the picker has a cell, then deliver them with a full tank. If the round ends first, they get the lobby and the win screen like any other joiner, and they do not get a missed banner from before they connected (`round:ended` is not replayed). A late joiner whose team still owns a safe cell is delivered there, not to the base.
 
 **Joiner during the win screen.** The floor is already the lobby (`openLobby(false)`). They vote. They do not enter a Prototype match until the vote resolves.
 
@@ -136,7 +136,7 @@ Elimination on the 80×80 parcel box is the wrong picture. The paintable set is 
 - Spawn point `lobbyFeet` lands on a walkable fork cell, and `voteModeAt` there is `''`.
 - Prototype’s tint centre votes `prototype`. A point on that end outside the inset rectangle does not. Team Fight and Bot Fight tints still vote only themselves.
 - Garden and pots are still in the registry, not placed, and their cells do not vote. Garden is no longer (2,3).
-- `modeTitle` / `modeSubtitle`: `BOT FIGHT` / `vs Bots`, `TEAM FIGHT` / `vs Humans`, `PROTOTYPE` / `vs Bots`. `economy` is true only on `prototype`.
+- `modeTitle` / `modeSubtitle`: `BOT FIGHT` / `vs Bots`, `TEAM FIGHT` / `vs Humans`, `PROTOTYPE` / `Paint Economy`. `economy` is true only on `prototype`.
 - `signZoomScale(29)` is still 0.3. Prototype’s anchor is 10 m past the north edge at `baseY + 22`.
 - `pickWinner`: a prototype lead returns `prototype`. A tie with `pvp` still prefers the previous mode, otherwise `pvp`. A garden count cannot win. `emptyCounts` includes `prototype: 0`.
 - The rebuild source skips on `gridSize() === 4` and queues `type === 'end'` only.

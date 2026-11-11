@@ -50,6 +50,9 @@ export type Events = {
     total: number
   }
 
+  // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
+  'paint:wallet': { tank: number; denied: string[] }
+
   // One-shot response to requestSnapshot: full paint map at time of send.
   // Same shape family as paint:delta, but semantically "authoritative
   // full state" rather than "changes since last tick".
@@ -71,7 +74,7 @@ export type Events = {
   'round:clock': {
     idx: number
     active: boolean
-    format: 'pvp' | 'pvb'
+    format: 'pvp' | 'pvb' | 'prototype'
     phase: 'match' | 'summary' | 'lobby' | 'idle'
     voteMs: number
     winner: string
@@ -85,7 +88,7 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
-    format: 'pvp' | 'pvb'
+    format: 'pvp' | 'pvb' | 'prototype'
     layout?: 'arena' | 'lobby'
   }
 

@@ -41,6 +41,7 @@ import {
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { orderNearest } from '../../shared/territory'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -495,12 +496,14 @@ export function tickBots(dtSec: number): void {
       const [colStr, rowStr] = stepId.slice(colonIdx + 1).split(',')
       const col = parseInt(colStr, 10)
       const row = parseInt(rowStr, 10)
+      const stamp: string[] = []
       for (let dc = -1; dc <= 1; dc++) {
         for (let dr = -1; dr <= 1; dr++) {
           const nid = `${prefix}${col + dc},${row + dr}`
-          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
+          if (graph.nodes.has(nid)) stamp.push(nid)
         }
       }
+      for (const nid of orderNearest(stamp, stepId)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
   }
 }

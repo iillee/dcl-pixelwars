@@ -24,7 +24,7 @@ import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
-import { drainPaintOutbox, setLocalTeam } from '../paint'
+import { drainPaintOutbox, getCurrentCellId, setLocalTeam } from '../paint'
 import { SeedHolder, seedHolder } from '../shared/components'
 
 // Locally-tracked team for this session. Written on team:assigned; used
@@ -66,6 +66,11 @@ export function initClientHandler(): void {
 // Handlers do the minimum needed to translate wire types to event payloads.
 // `team as Team` casts are safe: server enforces wire values 0/1/2 (see
 // shared/team.ts and server/roster.ts).
+function wireFormat(format: string): 'pvp' | 'pvb' | 'prototype' {
+  if (format === 'pvb' || format === 'prototype') return format
+  return 'pvp'
+}
+
 function wireInbound(): void {
   room.onMessage('teamAssigned', ({ team }) => {
     events.emit('team:assigned', { team: team as Team })
@@ -76,6 +81,10 @@ function wireInbound(): void {
       changes: changes.map(c => ({ id: c.id, team: c.team as Team })),
       red, blue, total,
     })
+  })
+
+  room.onMessage('paintWallet', ({ tank, denied }) => {
+    events.emit('paint:wallet', { tank, denied: denied ?? [] })
   })
 
   room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
@@ -120,7 +129,7 @@ function wireInbound(): void {
     // second roundReset while the round is already active.
     if (ph === 'match' && isLobbyLayout()) rebuildMaze(idx || 1, 'arena', 'match-clock')
     events.emit('round:clock', {
-      idx, active, format: format === 'pvb' ? 'pvb' : 'pvp',
+      idx, active, format: wireFormat(format),
       phase: ph, voteMs: voteMs ?? 0, winner: winner ?? '', votes: votes ?? [],
     })
   })
@@ -132,7 +141,7 @@ function wireInbound(): void {
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {
     events.emit('round:reset', {
       seed, finalRed, finalBlue, finalTotal,
-      format: format === 'pvb' ? 'pvb' : 'pvp',
+      format: wireFormat(format),
       layout: layout === 'lobby' ? 'lobby' : 'arena',
     })
   })
@@ -304,7 +313,7 @@ function wireOutbound(): void {
     paintFlushClock = 0
     const ids = drainPaintOutbox()
     if (ids.length === 0 || !paintOpen()) return
-    room.send('paintTick', { ids })
+    room.send('paintTick', { ids, at: getCurrentCellId() ?? '' })
   })
 }
 

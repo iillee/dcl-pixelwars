@@ -26,6 +26,7 @@ function lockedTeam(id: string): Team {
 export { Team } from './shared/team'
 import { Team } from './shared/team'
 import { events } from './shared/events'
+import { PAINT_CAPACITY } from './shared/territory'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -35,33 +36,33 @@ import { events } from './shared/events'
  * from setupClient() after paint state is initialized.
  */
 export function initPaintNet(): void {
-  // Server broadcasts every 200ms with all changes since the last tick
-  // + current coverage. This is the ONLY path that colors cells now —
-  // both our own paint (echoed back) and other players' paint arrive
-  // through here uniformly.
   events.on('paint:delta', ({ changes, red, blue, total }) => {
     for (const { id, team } of changes) applyRemotePaint(id, team)
     setServerCoverage({ red, blue, total })
   })
 
-  // Snapshot arrives once per teamAssigned (or on manual requestSnapshot).
-  // Same processing path as paint:delta — material updates and cellTeam
-  // bookkeeping stay consistent whether the client's tile entities have
-  // finished spawning yet or not (spawnOne adopts pre-existing paint).
   events.on('paint:snapshot', ({ entries, red, blue, total }) => {
     for (const { id, team } of entries) applyRemotePaint(id, team)
     setServerCoverage({ red, blue, total })
   })
 
-  // Round boundary: clear the paint map BEFORE the seed watcher sees
-  // the new seed and rebuilds. Two reasons:
-  // 1) rebuildMaze does NOT clear (so mid-round snapshots survive reload).
-  //    Real round transitions still need a clean slate here to avoid
-  //    ghost paint from cellId collisions between old/new mazes.
-  // 2) Zero the coverage HUD immediately — next paintDelta will refill it.
-  events.on('round:reset', () => {
+  events.on('paint:wallet', ({ tank, denied }) => {
+    if (!paintEconomy) return
+    paintLeft = tank
+    for (const id of denied) forceCell(id, paintUndo.get(id) ?? Team.None)
+    paintUndo.clear()
+  })
+
+  events.on('round:reset', ({ format, layout }) => {
     clearAllPaintState()
     setServerCoverage({ red: 0, blue: 0, total: 0 })
+    setPaintEconomy(layout !== 'lobby' && format === 'prototype')
+    paintLeft = PAINT_CAPACITY
+    paintUndo.clear()
+  })
+
+  events.on('round:clock', ({ format, active }) => {
+    setPaintEconomy(active && format === 'prototype')
   })
 }
 
@@ -343,6 +344,34 @@ export function resetPaintForTile(tileEntity: Entity) {
 // how OUR paint eventually becomes visible on our own screen too.
 // (We do NOT paint locally anymore — pure server-authoritative.)
 const paintOutbox = new Set<string>()
+let paintEconomy = false
+let paintLeft = PAINT_CAPACITY
+const paintUndo = new Map<string, Team>()
+
+export function paintEconomyOn(): boolean { return paintEconomy }
+export function paintTank(): number { return paintLeft }
+
+function setPaintEconomy(on: boolean): void {
+  if (on === paintEconomy) return
+  paintEconomy = on
+  paintLeft = PAINT_CAPACITY
+  paintUndo.clear()
+}
+
+/** Cloud landed. The server refills too; this updates the bar before that echo. */
+export function refillPredictedTank(): void {
+  if (!paintEconomy) return
+  paintLeft = PAINT_CAPACITY
+  paintUndo.clear()
+}
+
+function forceCell(id: string, team: Team): void {
+  if (team === Team.None) cellTeam.delete(id)
+  else cellTeam.set(id, team)
+  const e = cellEntity.get(id)
+  if (e !== undefined) Material.setPbrMaterial(e, cellMaterial(team))
+}
+
 export function drainPaintOutbox(): string[] {
   if (paintOutbox.size === 0) return []
   const out: string[] = []
@@ -367,11 +396,17 @@ export function drainPaintOutbox(): string[] {
  * and just enqueue — server will drop it anyway (pre-roster), no harm.
  */
 export function noteLocalPaintCandidate(id: string): void {
-  if (lockedTeam(id) !== Team.None) return // locked base: never painted
+  if (lockedTeam(id) !== Team.None) return
+  if (paintEconomy && localTeam !== Team.None) {
+    const prev = cellTeam.get(id) ?? Team.None
+    if (prev !== localTeam) {
+      if (paintLeft <= 0) return
+      paintLeft -= 1
+      paintUndo.set(id, prev)
+    }
+  }
   paintOutbox.add(id)
   if (localTeam !== Team.None) {
-    // Detect a real new claim (cell not already ours) BEFORE applying,
-    // so the SFX only fires when the tile actually flips to our team.
     const wasOurs = cellTeam.get(id) === localTeam
     applyRemotePaint(id, localTeam)
     if (!wasOurs) playClaimSfx()

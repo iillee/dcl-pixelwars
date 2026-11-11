@@ -80,6 +80,7 @@ import { LOOK } from '../shared/waterLook'
 import { waterVisualSeconds } from './water'
 import { Team } from '../shared/team'
 import { playFallRescueSfx } from './audio'
+import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
@@ -705,6 +706,7 @@ function sendRescueStart(hold: Vec, mobile: boolean): void {
 }
 
 function sendRescueEnd(): void {
+  refillPredictedTank()
   try { room.send('rescueEnd', { who: '' }) } catch (err) { console.log('[FallRescue] rescueEnd send failed', err) }
 }
 

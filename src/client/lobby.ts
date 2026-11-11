@@ -40,9 +40,10 @@ const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-const SIGN_COPY: Record<'pvp' | 'pvb', { plate: Rgb; ink: Rgb }> = {
+const SIGN_COPY: Record<'pvp' | 'pvb' | 'prototype', { plate: Rgb; ink: Rgb }> = {
   pvp: { plate: { r: 0.96, g: 0.24, b: 0.16 }, ink: { r: 0.45, g: 0.08, b: 0.05 } },
   pvb: { plate: { r: 0.08, g: 0.62, b: 0.78 }, ink: { r: 0.02, g: 0.2, b: 0.32 } },
+  prototype: { plate: { r: 0.96, g: 0.72, b: 0.18 }, ink: { r: 0.35, g: 0.22, b: 0.04 } },
 }
 
 function clearSigns(): void {
@@ -94,7 +95,7 @@ function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, 
 function laySigns(): void {
   clearSigns()
   for (const m of placedModes()) {
-    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb']
+    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
     // Letters sit on local −Z, the side a yaw billboard turns toward the camera.

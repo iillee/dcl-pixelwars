@@ -40,7 +40,7 @@ export const Messages = {
   // Anti-cheat (position validation) is deferred to Phase 5 per the plan.
   // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
   // is 90 max; anything larger is dropped as suspicious).
-  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String) }),
+  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String), at: Schemas.String }),
 
   // Server → Client: broadcast of paint state changes accumulated since
   // the last server tick (5Hz). Every delta carries the current coverage
@@ -52,6 +52,13 @@ export const Messages = {
     red: Schemas.Int,
     blue: Schemas.Int,
     total: Schemas.Int,
+  }),
+
+  // Server → the painter only. Prototype tank after a spend or a respawn.
+  // denied cells were requested and not applied because the tank was empty.
+  paintWallet: Schemas.Map({
+    tank: Schemas.Int,
+    denied: Schemas.Array(Schemas.String),
   }),
 
   // Client → Server: request the current authoritative paint state.

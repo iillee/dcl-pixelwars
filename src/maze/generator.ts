@@ -101,8 +101,8 @@ export function getPlacedTilesInOrder(): Placed[] {
 }
 
 /**
- * Three tiles. A straight center opens east and west. PvP and PvB ends sit
- * on those edges. No north or south arm, and no straight between them.
+ * Four tiles. A fork at the center opens north, east, and west. Team Fight,
+ * Bot Fight, and Prototype ends sit on those edges. No south arm.
  * The center is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {
@@ -110,8 +110,8 @@ export function placeLobbyLayout(): Placed[] {
   resetGrid()
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
-  // r=1 turns the straight's N/S openings to E/W.
-  place('straight', 1, LOBBY_CROSS.x, LOBBY_CROSS.z)
+  // r=1 turns the fork's N/S/W openings to N/E/W.
+  place('fork', 1, LOBBY_CROSS.x, LOBBY_CROSS.z)
   for (const m of placedModes()) {
     const r = m.cell.x < LOBBY_CROSS.x ? 1 : m.cell.x > LOBBY_CROSS.x ? 3 : m.cell.z > LOBBY_CROSS.z ? 2 : 0
     place('end', r, m.cell.x, m.cell.z)

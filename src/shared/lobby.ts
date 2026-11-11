@@ -2,12 +2,13 @@
  * Lobby layout and vote rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * The built floor is three tiles: a straight center opening east and west,
- * PvP on the west end, PvB on the east end. Color Garden and Pot Hunt stay
- * in the registry so they can be placed again later. They are not on the floor.
+ * The built floor is four tiles: a fork center opening north, east, and west,
+ * Team Fight on the west end, Bot Fight on the east end, Prototype on the north end.
+ * Color Garden and Pot Hunt stay in the registry so they can be placed again later.
+ * They are not on the floor.
  */
 
-export type ModeId = 'pvp' | 'pvb' | 'garden' | 'pots'
+export type ModeId = 'pvp' | 'pvb' | 'prototype' | 'garden' | 'pots'
 export type TeamRule = 'balance' | 'humans-together'
 export type LobbyPhase = 'match' | 'summary' | 'lobby' | 'idle'
 
@@ -21,18 +22,21 @@ export type ModeDef = {
   live: boolean
   /** Built as an end tile against the center. Garden and pots are not, yet. */
   placed: boolean
+  /** Paint tank, and later depots / territory respawn. Prototype only. */
+  economy: boolean
   color: { r: number; g: number; b: number }
 }
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** West PvP and east PvB share an edge with the center. Garden and pots
- *  keep their cells for a later layout. They are not placed and cannot win. */
+/** West Team Fight, east Bot Fight, and north Prototype share an edge with the center.
+ *  Garden and pots keep cells that are not built. They cannot win a vote. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'TEAM FIGHT', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT FIGHT', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
-  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
-  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
+  { id: 'pvp', label: 'TEAM FIGHT', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.95, g: 0.28, b: 0.27 } },
+  { id: 'pvb', label: 'BOT FIGHT', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.29, g: 0.48, b: 0.95 } },
+  { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 0.98, g: 0.78, b: 0.22 } },
+  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
+  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
 /** Full vote window, in one place. Starts when the first live vote is counted.
@@ -70,12 +74,14 @@ export const SIGN_LIP_DEPTH_M = 0.55
 export function modeTitle(id: string): string {
   if (id === 'pvb') return 'BOT FIGHT'
   if (id === 'pvp') return 'TEAM FIGHT'
+  if (id === 'prototype') return 'PROTOTYPE'
   return ''
 }
 
 export function modeSubtitle(id: string): string {
   if (id === 'pvb') return 'vs Bots'
   if (id === 'pvp') return 'vs Humans'
+  if (id === 'prototype') return 'Paint Economy'
   return ''
 }
 
@@ -112,7 +118,7 @@ export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
 }
 
-/** End tiles actually built. PvP west, PvB east. */
+/** End tiles actually built. Team Fight west, Bot Fight east, Prototype north. */
 export function placedModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.placed)
 }
@@ -256,7 +262,7 @@ export function lobbyFeet(cell: number, origin: number, baseY: number): { x: num
 export type VoteCounts = Record<ModeId, number>
 
 export function emptyCounts(): VoteCounts {
-  return { pvp: 0, pvb: 0, garden: 0, pots: 0 }
+  return { pvp: 0, pvb: 0, prototype: 0, garden: 0, pots: 0 }
 }
 
 /**

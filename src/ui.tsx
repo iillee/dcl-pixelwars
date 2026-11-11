@@ -2,7 +2,8 @@ import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
-import { coverage } from "./paint"
+import { coverage, paintEconomyOn, paintTank } from "./paint"
+import { PAINT_CAPACITY } from "./shared/territory"
 import { hudClockText, hudYourVote } from "./client/lobby"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
@@ -435,11 +436,46 @@ function bannerHeadline(): string {
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
 }
 
+/** Prototype only. Vertical tank on the right: caption, number, fill from the bottom. */
+function PaintTankBar() {
+  if (!paintEconomyOn() || inLobby()) return null
+  const mob = isMobile()
+  const cv = canvasSize()
+  const trackH = mob ? 168 : 240
+  const trackW = mob ? 28 : 36
+  const n = Math.max(0, Math.min(PAINT_CAPACITY, paintTank()))
+  const fillH = Math.max(0, Math.round(trackH * (n / PAINT_CAPACITY)))
+  const top = Math.max(16, Math.round((cv.h - trackH - 48) / 2))
+  return (
+    <UiEntity
+      uiTransform={{
+        positionType: 'absolute',
+        position: { top, right: mob ? 10 : 22 },
+        width: 72,
+        height: trackH + 48,
+        flexDirection: 'column',
+        alignItems: 'center',
+        pointerFilter: 'none',
+      }}
+    >
+      <Label value="PAINT" fontSize={mob ? 13 : 15} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
+      <UiEntity
+        uiTransform={{ width: trackW, height: trackH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
+        uiBackground={{ color: Color4.create(0, 0, 0, 0.5) }}
+      >
+        <UiEntity uiTransform={{ width: trackW, height: fillH }} uiBackground={{ color: Color4.create(0.98, 0.78, 0.22, 1) }} />
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 // Full-screen UI root. Everything is a child of this so absolute-positioned
 // overlays (like the round-end banner) can size themselves as 100%×100% of
 // the viewport, not of the tiny HUD strip.
 export const uiMenu = () => (
   <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 } }}>
+    <PaintTankBar />
 
     {/* ─── Top-left: mute button ─────────────────────────────────────── */}
     {/* Mute button lives inside the timer panel below, pinned to its right edge. */}
