@@ -11,8 +11,8 @@ import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId }
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { refillWallet, resetWallets, setWallet, walletOf } from '../src/server/paintWallet'
 
-if (PAINT_CAPACITY !== 80) {
-  console.error(`✗ paint capacity should be 80, got ${PAINT_CAPACITY}`)
+if (PAINT_CAPACITY !== 280) {
+  console.error(`✗ paint capacity should be 280, got ${PAINT_CAPACITY}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {

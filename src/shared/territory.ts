@@ -10,7 +10,7 @@
 import { baseTeamOfCellId } from '../maze/generator'
 import type { WalkableGraph } from './mazeGraph'
 
-export const PAINT_CAPACITY = 80
+export const PAINT_CAPACITY = 280
 
 /** Tile-column plane of a cell id, so two cells on neighbouring tiles still sort. */
 export function cellPlane(id: string): { x: number; z: number } | null {
@@ -66,7 +66,7 @@ export function applyTank(ops: readonly TankOp[], tank: number): { taken: string
   return { taken, denied, tank: left }
 }
 
-export const PAINT_REFILL_PER_SEC = 16
+export const PAINT_REFILL_PER_SEC = 56
 /** Neutral depots in addition to the two team bases. 2, or 3–4. */
 export const DEPOT_NEUTRAL_COUNT = 2
 /** Metres between depot anchors. Relaxed once if the maze is too tight. */

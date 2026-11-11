@@ -4,7 +4,7 @@ Plan only. Bot Fight and Team Fight stay as they are. The paint tank, depots, te
 
 Base is `main` @ `67db80a`.
 
-Step 1 is the lobby arm, the vote, and the paint tank (capacity 80) with a vertical bar on the right. Depots, territory respawn, and elimination are later. Until those exist, a respawn refills the tank so a round stays playable. The bar is client-predicted and corrected by a per-player `{ tank, denied }` echo.
+Step 1 is the lobby arm, the vote, and the paint tank with a vertical bar on the right. Depots refill it. Territory respawn and elimination are later. A cloud respawn still refills to full. The bar is client-predicted and corrected by a per-player `{ tank, denied }` echo. Capacity is 280 and a friendly depot refills at 56 per second.
 
 ## Recommendation
 
@@ -124,7 +124,7 @@ In Prototype only, before the usual think in `src/server/bots/manager.ts`: if th
 
 Do not start at 15–20. One burst into fresh paint spends the cells that actually flip. The median footprint is 68 and a cramped one is still 26, so 15–20 is gone on the first F even when the corridor clips the circle. Walking spends about 12 per second, so that same tank is also about one second of autopaint.
 
-Start at **capacity 80** and **refill 16 per second** (full in 5 s of standing on a friendly depot). 80 is one open burst (81) with a couple of cells spare, or about six seconds of jogging on fresh paint, or several lunges. F still knocks back at 0. The tank is what stops the paint, not the fight.
+Start at **capacity 280** and **refill 56 per second** (full in 5 s of standing on a friendly depot). 280 is about three and a half open bursts, or about twenty seconds of jogging on fresh paint. F still knocks back at 0. The tank is what stops the paint, not the fight.
 
 Elimination on the 80×80 parcel box is the wrong picture. The paintable set is about 3900 cells. One player jogging for the whole 3 minutes covers about 2160 new cells if they never turn around and never repaint. Two living teams painting each other will not hit zero often. After a wipe, the survivors only have to repaint the dead team’s cells. At a median burst of 68 every 8 s plus walking, a few hundred leftover cells are a short job. Keep elimination. Expect the timer to end most Prototype rounds, and elimination to matter once a team is stuck in the cloud.
 
