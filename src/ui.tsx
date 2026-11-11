@@ -4,7 +4,7 @@ import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
 import { PAINT_CAPACITY } from "./shared/territory"
-import { hudClockText, hudYourVote } from "./client/lobby"
+import { hudClockText, hudVoteCountdown, hudYourVote } from "./client/lobby"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
@@ -486,6 +486,8 @@ export const uiMenu = () => (
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
+      const voteSecs = hudVoteCountdown()
+      const lobbyPillW = 520
       return (
         <UiEntity
           uiTransform={{
@@ -510,7 +512,7 @@ export const uiMenu = () => (
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+                  width: lobby ? Math.min(lobbyPillW, Math.max(MOBILE_TIMER_W, canvasW - 120)) : MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
                   // Key-tile frame: light rim, dark ring (padding), light inner panel filling the rest.
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
                 }}
@@ -518,8 +520,8 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={lobby && hudYourVote() ? 18 : lobby ? 28 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby && hudYourVote() ? 22 : '100%' }} />
-                  {lobby && hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={13} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 16 }} /> : null}
+                  <Label value={hudClockText(secs)} fontSize={lobby ? 15 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby && hudYourVote() ? 20 : lobby ? 28 : '100%' }} />
+                  {lobby && hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={12} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 16 }} /> : null}
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -528,14 +530,14 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             ) : lobby ? (
-            <UiEntity uiTransform={{ width: 340 + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ width: lobbyPillW + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
                 <OverviewRow desktop besideEye />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: 340, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
+                  width: lobbyPillW, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
                   justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
                 }}
@@ -544,7 +546,7 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-                  <Label value={hudClockText(secs)} fontSize={hudYourVote() ? 22 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: hudYourVote() ? 28 : '100%' }} />
+                  <Label value={hudClockText(secs)} fontSize={22} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: hudYourVote() ? 28 : 36 }} />
                   {hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 20 }} /> : null}
                 </UiEntity>
               </UiEntity>
@@ -604,6 +606,7 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             )}
+            {voteSecs !== '' ? <Label value={voteSecs} fontSize={78} color={Color4.create(0.08, 0.09, 0.12, 1)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 200, height: 86, margin: { top: 2 } }} /> : null}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby. */}
             {lobby ? null : getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />

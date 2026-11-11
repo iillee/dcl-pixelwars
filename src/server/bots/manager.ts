@@ -8,9 +8,9 @@
  *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
  *      Wrong-side and excess bots retire immediately.
  *      PvB (setPopulation): every bot on the colour opposite the human
- *      team. Count = pvbBotCount(active humans). At a round boundary the
- *      pool is trimmed to that count. Mid-round it may grow when humans
- *      join, and it retires only when no humans are left.
+ *      team. Count = pvbBotCount(active humans), which is 3× the humans
+ *      and never above PVB_BOT_MAX. The pool adds and removes bots whenever
+ *      the human count changes, including mid-match.
  *   2. Tick every bot; apply resulting paint via the injected callback.
  *
  * Spawning: each bot starts on its own team's base, spread across the
@@ -111,15 +111,12 @@ let botIdCounter = 0
 /** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
 export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
 let population: BotPopulation = { kind: 'pvp' }
-let populationGen = 0
-let appliedGen = -1
 /** Base cells per team, deep cells first, refreshed with the graph. */
 const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
 
 export function initBots(d: ManagerDeps): void {
   deps = d
   population = { kind: 'pvp' }
-  populationGen++
   console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
 }
 
@@ -128,7 +125,6 @@ export function setPopulation(mode: BotPopulation): void {
   population = mode.kind === 'pvb' && (mode.humanTeam === 1 || mode.humanTeam === 2)
     ? { kind: 'pvb', humanTeam: mode.humanTeam }
     : { kind: 'pvp' }
-  populationGen++
 }
 
 /**
@@ -339,10 +335,8 @@ function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: numb
 /** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
 function balanceBots(): void {
   if (!graph || !deps) return
-  const fresh = appliedGen !== populationGen
-  appliedGen = populationGen
   if (population.kind === 'pvb') {
-    balancePvb(fresh)
+    balancePvb()
     return
   }
   const counts = deps.activeHumans()
@@ -364,12 +358,11 @@ function balanceBots(): void {
 }
 
 /**
- * PvB pool. Wrong-team leftovers (the previous format) retire. On the tick
- * that applies a new population, trim down to the round-start count. After
- * that, only add bots — a human leaving does not retire anyone, unless the
- * human count hits zero.
+ * PvB pool. Wrong-team leftovers retire. The count is 3× the humans, capped,
+ * and it is applied every tick: humans joining add bots, humans leaving
+ * remove the farthest ones.
  */
-function balancePvb(fresh: boolean): void {
+function balancePvb(): void {
   if (!deps) return
   const counts = deps.activeHumans()
   const humans = counts.red + counts.blue
@@ -382,9 +375,7 @@ function balancePvb(fresh: boolean): void {
     while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  if (fresh) {
-    while (bots.length > wantN) retireBot(pickFarthest(bots), 'round start, fit PvB count', counts)
-  }
+  while (bots.length > wantN) retireBot(pickFarthest(bots), 'fit 3x human count', counts)
   while (bots.length < wantN) {
     const before = bots.length
     spawnBot(team, 'PvB fill', counts)

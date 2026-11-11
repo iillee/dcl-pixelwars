@@ -19,7 +19,7 @@ import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, hazeBand, hazeOuterBand, horizonOuterRadiusM, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
 import { events } from '../shared/events'
 import { combatVfxReady } from './audio'
@@ -383,12 +383,17 @@ function addFlat(root: Entity, src: string): Entity {
   return sea
 }
 
-/** One inward ring just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle. */
+/** Inward rings just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle.
+ *  The farther ring is created first so it stays behind the original one. */
 function addHaze(waterY: number): void {
   const mid = SCENE_SIZE / 2
-  const radius = horizonRadiusM(SCENE_SIZE)
-  const bottom = waterY - WATER_FOG.hazeBelowM
-  const height = WATER_FOG.hazeBelowM + WATER_FOG.hazeAboveM
+  const inner = hazeBand()
+  const outer = hazeOuterBand()
+  placeHazeRing(mid, waterY - outer.below, horizonOuterRadiusM(SCENE_SIZE), outer.height)
+  placeHazeRing(mid, waterY - inner.below, horizonRadiusM(SCENE_SIZE), inner.height)
+}
+
+function placeHazeRing(mid: number, bottom: number, radius: number, height: number): void {
   const ring = engine.addEntity()
   Transform.create(ring, {
     position: Vector3.create(mid, bottom, mid),

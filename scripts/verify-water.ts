@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { CELL, GRID_W, MAZE_ORIGIN, MIN_Y, ROT_OFFSET, SCENE_SIZE, TILE_SCALE, baseSpawn, generateWithRetry, getPlacedTilesInOrder, placeLobbyLayout } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, shouldBeginRescue, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, hazeBand, hazeOuterBand, horizonOuterRadiusM, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { lobbyFeet } from '../src/shared/lobby'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -133,6 +133,27 @@ if (HAZE_RING_M !== horizon || horizonRadiusM(SCENE_SIZE) !== horizon) {
   console.error(`✗ haze should sit just inside the parcel edge (${horizon} m), got ${HAZE_RING_M}`)
   process.exit(1)
 }
+const innerHaze = hazeBand()
+const outerHaze = hazeOuterBand()
+const outerHorizon = horizonOuterRadiusM(SCENE_SIZE)
+if (innerHaze.below !== WATER_FOG.hazeBelowM || innerHaze.above !== WATER_FOG.hazeAboveM) {
+  console.error('✗ the original haze band should stay 24 m below and 130 m above the water')
+  process.exit(1)
+}
+if (!(outerHorizon > horizon && outerHorizon < SCENE_SIZE / 2)) {
+  console.error(`✗ outer haze ${outerHorizon} m should sit past ${horizon} m and inside the parcel edge`)
+  process.exit(1)
+}
+if (outerHaze.height !== innerHaze.height * 2) {
+  console.error(`✗ outer haze should be twice as tall (${innerHaze.height} → ${outerHaze.height})`)
+  process.exit(1)
+}
+const innerMid = -innerHaze.below + innerHaze.height / 2
+const outerMid = -outerHaze.below + outerHaze.height / 2
+if (Math.abs(innerMid - outerMid) > 0.01) {
+  console.error('✗ the two haze rings should share a vertical centre so they do not cross')
+  process.exit(1)
+}
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
 if (gap < 0.25) {
   console.error('✗ near water is so close to the horizon colour that the swells will not read')
@@ -240,8 +261,8 @@ if (src.includes('horizonSrcVeil') || src.includes('1.08')) {
   console.error('✗ the overlapping horizon curtain is still in the client')
   process.exit(1)
 }
-if (!src.includes('hazeSrc')) {
-  console.error('✗ the seamless haze ring is not spawned')
+if (!src.includes('hazeSrc') || !src.includes('horizonOuterRadiusM') || !src.includes('hazeOuterBand')) {
+  console.error('✗ both haze rings should spawn from the same mesh')
   process.exit(1)
 }
 const pillarDrop = 99.75 * TILE_SCALE
@@ -393,8 +414,11 @@ const mid = SCENE_SIZE / 2
 inside('water inner', mid - seaHalf, mid - seaHalf)
 inside('water outer', mid + seaHalf, mid + seaHalf)
 const haze = horizonRadiusM(SCENE_SIZE)
+const hazeFar = horizonOuterRadiusM(SCENE_SIZE)
 inside('haze inner', mid - haze, mid - haze)
 inside('haze outer', mid + haze, mid + haze)
+inside('far haze inner', mid - hazeFar, mid - hazeFar)
+inside('far haze outer', mid + hazeFar, mid + hazeFar)
 inside('swell far', mid - WATER.swellFarM, mid - WATER.swellFarM)
 inside('swell far', mid + WATER.swellFarM, mid + WATER.swellFarM)
 console.log('✓ swells stay under the rescue line; lobby, maze, water, and spawns stay inside the scene')

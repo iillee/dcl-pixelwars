@@ -302,6 +302,17 @@ export function exitOverview(): void {
 
 export function isOverviewActive(): boolean { return active }
 
+/** Live overview pose. Signs use this to sit beside their tiles at the current zoom and yaw. */
+export function overviewFrame(): { yaw: number; pitch: number; fov: number; dist: number; focus: { x: number; y: number; z: number } } {
+  return {
+    yaw: yawDeg,
+    pitch: OV_PITCH_DEG,
+    fov,
+    dist: camDist,
+    focus: { x: focus.x, y: focus.y, z: focus.z },
+  }
+}
+
 /** Pitch and yaw of the overview view, including the in-progress 90° turn.
  *  Signs copy this so they stay parallel to the screen instead of aiming at the camera. */
 export function overviewSignRotation(): { pitch: number; yaw: number } {

@@ -222,11 +222,10 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     console.error('✗ PvB human colour should be Red, Blue, Red'); process.exit(1)
   }
   if (pvbBotCount(0) !== 0 || pvbBotCount(-3) !== 0) { console.error('✗ zero humans → 0 bots'); process.exit(1) }
-  if (pvbBotCount(1) < 1 || pvbBotCount(1000) !== PVB_BOT_MAX) { console.error('✗ PvB count out of range'); process.exit(1) }
-  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
-  if (PVB_RATIO === 1 && (pvbBotCount(10) !== 10 || pvbBotCount(15) !== 15 || pvbBotCount(16) !== 15)) {
-    console.error(`✗ ratio 1 counts: 10→${pvbBotCount(10)} 15→${pvbBotCount(15)} 16→${pvbBotCount(16)}`); process.exit(1)
+  if (pvbBotCount(1) !== 3 || pvbBotCount(2) !== 6 || pvbBotCount(5) !== PVB_BOT_MAX || pvbBotCount(1000) !== PVB_BOT_MAX) {
+    console.error(`✗ PvB 3× counts: 1→${pvbBotCount(1)} 2→${pvbBotCount(2)} 5→${pvbBotCount(5)}`); process.exit(1)
   }
+  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
   console.log(`✓ format alternation (${seq.join(' → ')}) and PvB count cap ${PVB_BOT_MAX}`)
 }
 
@@ -259,24 +258,24 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     return minD
   }
 
-  counts = { red: 10, blue: 0 }
+  counts = { red: 1, blue: 0 }
   setPopulation({ kind: 'pvb', humanTeam: 1 })
   tickBots(0)
   const kept = new Set(getBotPositions().map(b => b.id))
-  const spread10 = assertSpread(10, 2, '10 humans → 10 blue bots')
+  const spread10 = assertSpread(3, 2, '1 human → 3 blue bots')
 
-  counts = { red: 12, blue: 0 }
+  counts = { red: 2, blue: 0 }
   tickBots(0) // mid-round: add, keep the ones already in
-  assertSpread(12, 2, 'humans 10→12 adds bots')
+  assertSpread(6, 2, 'humans 1→2 adds bots to 6')
   for (const id of kept) {
     if (!getBotPositions().some(b => b.id === id)) { console.error(`✗ added bots retired #${id}`); process.exit(1) }
   }
 
-  counts = { red: 3, blue: 0 }
-  tickBots(0) // mid-round: do not retire while humans remain
-  if (getBotPositions().length !== 12) { console.error(`✗ mid-round retire: ${getBotPositions().length} bots, want 12`); process.exit(1) }
+  counts = { red: 1, blue: 0 }
+  tickBots(0) // mid-round: drop back to 3×
+  if (getBotPositions().length !== 3) { console.error(`✗ mid-round trim: ${getBotPositions().length} bots, want 3`); process.exit(1) }
 
-  counts = { red: 20, blue: 0 }
+  counts = { red: 8, blue: 0 }
   tickBots(0)
   const spread15 = assertSpread(PVB_BOT_MAX, 2, 'cap')
 
@@ -284,14 +283,14 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   tickBots(0)
   if (getBotPositions().length !== 0) { console.error('✗ zero humans should retire PvB bots'); process.exit(1) }
 
-  counts = { red: 0, blue: 4 }
+  counts = { red: 0, blue: 2 }
   setPopulation({ kind: 'pvb', humanTeam: 2 }) // next PvB boundary: humans on blue
   tickBots(0)
-  assertSpread(4, 1, 'human team flipped to blue')
+  assertSpread(6, 1, 'human team flipped to blue')
 
-  counts = { red: 4, blue: 0 }
-  tickBots(0) // humans moved but population not reset: still the blue-human round, count may grow, no retire
-  if (getBotPositions().length !== 4) { console.error(`✗ team counts changed under the same PvB round: ${getBotPositions().length}`); process.exit(1) }
+  counts = { red: 2, blue: 0 }
+  tickBots(0) // same headcount, still 3× on the bot team
+  if (getBotPositions().length !== 6) { console.error(`✗ team counts changed under the same PvB round: ${getBotPositions().length}`); process.exit(1) }
 
   counts = { red: 3, blue: 1 }
   setPopulation({ kind: 'pvp' })

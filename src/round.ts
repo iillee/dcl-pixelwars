@@ -24,6 +24,7 @@ import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from 
 import { FORMAT_ALTERNATE, type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
 import { inLobby } from './client/phase'
+import { modeSubtitle, modeTitle } from './shared/lobby'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -199,8 +200,8 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
   if (inLobby() || currentFormat === 'prototype') return 'Vote with your feet'
-  if (!FORMAT_ALTERNATE) return 'Next round: TEAM FIGHT'
-  return currentFormat === 'pvb' ? 'Next round: TEAM FIGHT' : 'Next round: BOT FIGHT'
+  if (!FORMAT_ALTERNATE) return `Next round: ${modeTitle('pvp')}`
+  return `Next round: ${modeTitle(currentFormat === 'pvb' ? 'pvp' : 'pvb')}`
 }
 
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
@@ -213,7 +214,7 @@ export function getFormatSplash(): { format: RoundFormat; title: string; sub: st
     armedFormat = null
     return null
   }
-  if (armedFormat === 'pvb') return { format: 'pvb', title: 'BOT FIGHT', sub: 'vs Bots' }
-  if (armedFormat === 'prototype') return { format: 'prototype', title: 'PROTOTYPE', sub: 'Paint Economy' }
-  return { format: 'pvp', title: 'TEAM FIGHT', sub: 'vs Humans' }
+  if (armedFormat === 'pvb') return { format: 'pvb', title: modeTitle('pvb'), sub: modeSubtitle('pvb') }
+  if (armedFormat === 'prototype') return { format: 'prototype', title: modeTitle('prototype'), sub: modeSubtitle('prototype') }
+  return { format: 'pvp', title: modeTitle('pvp'), sub: modeSubtitle('pvp') }
 }

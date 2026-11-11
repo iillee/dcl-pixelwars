@@ -32,8 +32,8 @@ export const LOBBY_CROSS = { x: 2, z: 2 }
 /** West Team Fight, east Bot Fight, and north Prototype share an edge with the center.
  *  Garden and pots keep cells that are not built. They cannot win a vote. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'TEAM FIGHT', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT FIGHT', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.29, g: 0.48, b: 0.95 } },
+  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.95, g: 0.28, b: 0.27 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.29, g: 0.48, b: 0.95 } },
   { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 0.98, g: 0.78, b: 0.22 } },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
@@ -41,7 +41,7 @@ export const LOBBY_MODES: ModeDef[] = [
 
 /** Full vote window, in one place. Starts when the first live vote is counted.
  *  Standing in a zone does not end it early, and an empty lobby does not start it. */
-export const LOBBY_VOTE_MS = 15_000
+export const LOBBY_VOTE_MS = 10_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
  *  The vote tint and the trigger both use this rectangle, pulled in by VOTE_TINT_INSET_M. */
 export const VOTE_FLOOR_WIDTH = 20 / 32
@@ -50,13 +50,17 @@ export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side.
  *  Far enough that a sign at the default overview scale stays off the three lobby tiles. */
 export const SIGN_CLEAR_M = 10
-/** One 4.5 m line of "TEAM FIGHT", with side margins inside the pill, plus the subtitle. */
-export const SIGN_W_M = 48
+/** One line of "BOT INVASION", the longest title, with side margins inside the pill. */
+export const SIGN_W_M = 58
 export const SIGN_H_M = 8.6
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
-/** World scale at that default framing. A 48 m plate is then ~24% of a 16:9 overview. */
-export const SIGN_ORTHO_AT_REF = 0.3
+/** World scale at that default framing. The wider pill stays about a quarter of the overview. */
+export const SIGN_ORTHO_AT_REF = 0.25
+/** Caret width as a fraction of the pill. A chunky pointer, 10–15% of the pill. */
+export const SIGN_CARET_FRAC = 0.12
+/** Gap past a tile's outer silhouette, as a fraction of the pill width, before overview scale. */
+export const SIGN_ORTHO_GAP_FRAC = 0.16
 export const SIGN_ZOOM_MIN = 0.05
 export const SIGN_ZOOM_MAX = 1
 /**
@@ -72,8 +76,8 @@ export const SIGN_LIP_DEPTH_M = 0.55
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb`. */
 export function modeTitle(id: string): string {
-  if (id === 'pvb') return 'BOT FIGHT'
-  if (id === 'pvp') return 'TEAM FIGHT'
+  if (id === 'pvb') return 'BOT INVASION'
+  if (id === 'pvp') return 'PIXELWARS'
   if (id === 'prototype') return 'PROTOTYPE'
   return ''
 }
@@ -214,6 +218,183 @@ export function voteTintPose(
   const zone = voteZoneLocal(cell)
   const c = voteLocalToWorld((zone.x0 + zone.x1) / 2, (zone.z0 + zone.z1) / 2, modeCell, origin, cell)
   return { x: c.x, z: c.z, yawDeg: endYawQuarter(modeCell) * 90, width: zone.width, length: zone.length }
+}
+
+/** Downward caret under the pill. Width is 12% of the pill; height is a short triangle. */
+export function signCaretSize(): { w: number; h: number } {
+  const w = SIGN_W_M * SIGN_CARET_FRAC
+  return { w, h: w * 0.7 }
+}
+
+/** Local Y of the caret centre. The base sits just under the pill; the tip points down. */
+export function signCaretCenterY(): number {
+  const caret = signCaretSize()
+  const base = -SIGN_H_M / 2 - 0.45
+  return base - caret.h / 2
+}
+
+/** Local Y of the vote-count chip, below the caret tip so the two do not meet. */
+export function signBadgeY(): number {
+  const caret = signCaretSize()
+  const tip = signCaretCenterY() - caret.h / 2
+  const chipH = 3.4
+  return tip - 0.55 - chipH / 2
+}
+
+/** Local bounds of the sign graphic (pill, caret, count chip) around the pill centre. */
+export function signContentBounds(): { xHalf: number; yTop: number; yBot: number } {
+  const chipH = 3.4
+  return { xHalf: SIGN_W_M / 2, yTop: SIGN_H_M / 2, yBot: signBadgeY() - chipH / 2 }
+}
+
+/** Top HUD line. Seconds live in the big number under the pill, not in this text. */
+export function hudVoteHeadline(hasVote: boolean): string {
+  return hasVote ? 'STARTING SOON' : 'STAND ON A TILE TO VOTE'
+}
+
+type Vec3 = { x: number; y: number; z: number }
+const vadd = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z })
+const vsub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z })
+const vmul = (a: Vec3, s: number): Vec3 => ({ x: a.x * s, y: a.y * s, z: a.z * s })
+const vdot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z
+const vcross = (a: Vec3, b: Vec3): Vec3 => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x,
+})
+const vnorm = (a: Vec3): Vec3 => {
+  const l = Math.hypot(a.x, a.y, a.z) || 1
+  return vmul(a, 1 / l)
+}
+
+/** Overview axes. +forward looks at the focus, +right and +up are the screen. */
+export function overviewBasis(yawDeg: number, pitchDeg: number): { forward: Vec3; right: Vec3; up: Vec3 } {
+  const yaw = yawDeg * Math.PI / 180
+  const pitch = pitchDeg * Math.PI / 180
+  const forward = vnorm({
+    x: Math.sin(yaw) * Math.cos(pitch),
+    y: -Math.sin(pitch),
+    z: Math.cos(yaw) * Math.cos(pitch),
+  })
+  const right = vnorm(vcross({ x: 0, y: 1, z: 0 }, forward))
+  const up = vnorm(vcross(forward, right))
+  return { forward, right, up }
+}
+
+export function overviewCameraAt(focus: Vec3, yawDeg: number, pitchDeg: number, dist: number): Vec3 {
+  const { forward } = overviewBasis(yawDeg, pitchDeg)
+  return vsub(focus, vmul(forward, dist))
+}
+
+export type OrthoSignPose = { x: number; y: number; z: number; scale: number }
+
+/**
+ * One overview pose per cell, in the same order. Each sign sits just outside
+ * its own tile along the screen direction that leaves the lobby, at the same
+ * gap, and is scaled with its depth so every title keeps the same apparent size.
+ * Play-mode anchors stay on `billboardAnchor`.
+ */
+export function orthoSignPoses(
+  cells: Array<{ x: number; z: number }>,
+  origin: number,
+  cell: number,
+  baseY: number,
+  focus: Vec3,
+  yawDeg: number,
+  pitchDeg: number,
+  dist: number,
+  fovDeg: number,
+  baseScale: number,
+): OrthoSignPose[] {
+  const basis = overviewBasis(yawDeg, pitchDeg)
+  const cam = overviewCameraAt(focus, yawDeg, pitchDeg, dist)
+  const bounds = signContentBounds()
+  const gap = SIGN_W_M * SIGN_ORTHO_GAP_FRAC
+  const slab = baseY + 0.5
+  const tanHalf = Math.tan(fovDeg * Math.PI / 360)
+  const lobby = [{ x: LOBBY_CROSS.x, z: LOBBY_CROSS.z }, ...cells]
+  const lobbyRects = lobby.map(c => ndcRect(cellCorners(c, origin, cell, slab), cam, basis, tanHalf))
+
+  const built = cells.map(modeCell => {
+    const dx = Math.sign(modeCell.x - LOBBY_CROSS.x)
+    const dz = Math.sign(modeCell.z - LOBBY_CROSS.z)
+    const outward: Vec3 = { x: dx, y: 0, z: dz }
+    const mid: Vec3 = {
+      x: modeCell.x * cell + cell / 2 + origin,
+      y: slab,
+      z: modeCell.z * cell + cell / 2 + origin,
+    }
+    const along = vdot(outward, basis.forward)
+    let screen = vsub(outward, vmul(basis.forward, along))
+    screen = Math.hypot(screen.x, screen.y, screen.z) < 1e-4 ? basis.up : vnorm(screen)
+    const sx = vdot(screen, basis.right)
+    const sy = vdot(screen, basis.up)
+    const extent = bounds.xHalf * Math.abs(sx) + (sy >= 0 ? -bounds.yBot : bounds.yTop) * Math.abs(sy)
+    let tileMax = -Infinity
+    for (const c of cellCorners(modeCell, origin, cell, slab)) tileMax = Math.max(tileMax, vdot(c, screen))
+    const depth = Math.max(4, vdot(vsub(mid, cam), basis.forward))
+    const focusDepth = Math.max(4, dist)
+    const scale = baseScale * (depth / focusDepth)
+    let t = tileMax - vdot(mid, screen) + (extent + gap) * scale
+    return { mid, screen, extent, scale, t }
+  })
+
+  const poseAt = (i: number): Vec3 => vadd(built[i].mid, vmul(built[i].screen, built[i].t))
+  const signRect = (i: number) => ndcRect(signCorners(poseAt(i), built[i].scale, basis, bounds), cam, basis, tanHalf)
+  const hitsLobby = (i: number) => lobbyRects.some(r => ndcOverlap(signRect(i), r))
+  const hitsSign = (i: number) => built.some((_, j) => j !== i && ndcOverlap(signRect(i), signRect(j)))
+  for (let step = 0; step < 8; step++) {
+    let moved = false
+    for (let i = 0; i < built.length; i++) {
+      if (!hitsLobby(i) && !hitsSign(i)) continue
+      built[i].t += SIGN_W_M * built[i].scale * 0.12
+      moved = true
+    }
+    if (!moved) break
+  }
+
+  return built.map((b, i) => {
+    const p = poseAt(i)
+    return { x: p.x, y: p.y, z: p.z, scale: b.scale }
+  })
+}
+
+function cellCorners(modeCell: { x: number; z: number }, origin: number, cell: number, y: number): Vec3[] {
+  const x0 = modeCell.x * cell + origin
+  const z0 = modeCell.z * cell + origin
+  return [
+    { x: x0, y, z: z0 },
+    { x: x0 + cell, y, z: z0 },
+    { x: x0, y, z: z0 + cell },
+    { x: x0 + cell, y, z: z0 + cell },
+  ]
+}
+
+function signCorners(p: Vec3, scale: number, basis: { right: Vec3; up: Vec3 }, bounds: { xHalf: number; yTop: number; yBot: number }): Vec3[] {
+  const out: Vec3[] = []
+  for (const lx of [-bounds.xHalf, bounds.xHalf]) {
+    for (const ly of [bounds.yBot, bounds.yTop]) {
+      out.push(vadd(p, vadd(vmul(basis.right, lx * scale), vmul(basis.up, ly * scale))))
+    }
+  }
+  return out
+}
+
+function ndcRect(pts: Vec3[], cam: Vec3, basis: { forward: Vec3; right: Vec3; up: Vec3 }, tanHalf: number): { minX: number; maxX: number; minY: number; maxY: number } {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of pts) {
+    const d = vsub(p, cam)
+    const z = Math.max(0.5, vdot(d, basis.forward))
+    const x = vdot(d, basis.right) / (z * tanHalf)
+    const y = vdot(d, basis.up) / (z * tanHalf)
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+  }
+  return { minX, maxX, minY, maxY }
+}
+
+function ndcOverlap(a: { minX: number; maxX: number; minY: number; maxY: number }, b: { minX: number; maxX: number; minY: number; maxY: number }): boolean {
+  return a.minX < b.maxX - 1e-3 && a.maxX > b.minX + 1e-3 && a.minY < b.maxY - 1e-3 && a.maxY > b.minY + 1e-3
 }
 
 /** Sign root, on the outer side of the end, facing back toward the cross. */

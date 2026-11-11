@@ -317,13 +317,18 @@ export const WATER_FOG = {
    */
   /** One ring at the horizon. Radius is the scene edge (`horizonRadiusM`).
    *  The ring runs from just under the mean surface to above eye height so
-   *  the fade crosses the horizon seen from the arena. */
+   *  the fade crosses the horizon seen from the arena. A second ring sits
+   *  a few metres farther out, twice as tall, on the same centre line. */
   haze: true,
   hazeColor: HAZE_COLOR,
   /** Metres under the water root. Covers the calm outer rim. */
   hazeBelowM: 24,
   /** Metres above the water root. Spawn eyes are about 78 m up; this clears them. */
   hazeAboveM: 130,
+  /** How many metres farther out the second ring sits, before the parcel-edge clamp. */
+  hazeOuterGapM: 4,
+  /** Second ring stays at least this far inside the parcel edge. */
+  hazeOuterInsetM: 2,
   hazeSrc: 'assets/models/water-haze.glb',
   hazeMask: 'assets/textures/water-haze.png',
 }
@@ -347,9 +352,33 @@ export function resolvedWaterY(minY: number, _fallDrop: number): number {
 /** Haze cylinder radius (m) for the current scene: the parcel horizon. */
 export const HAZE_RING_M = Math.max(16, SKY_SCENE_M / 2 - 8)
 
-/** Haze cylinder radius (m). Just inside the parcel edge. */
+/** Haze cylinder radius (m). Just inside the parcel edge. The original ring. */
 export function horizonRadiusM(sceneM: number): number {
   return Math.max(16, sceneM / 2 - 8)
+}
+
+/** Second haze ring, a little farther out than `horizonRadiusM`, still inside the parcels. */
+export function horizonOuterRadiusM(sceneM: number): number {
+  const inner = horizonRadiusM(sceneM)
+  const edge = sceneM / 2
+  const want = inner + WATER_FOG.hazeOuterGapM
+  const limit = edge - WATER_FOG.hazeOuterInsetM
+  return Math.max(inner + 1, Math.min(want, limit))
+}
+
+/** Inner ring: metres below the water root, above it, and the full height. */
+export function hazeBand(): { below: number; above: number; height: number } {
+  const below = WATER_FOG.hazeBelowM
+  const above = WATER_FOG.hazeAboveM
+  return { below, above, height: below + above }
+}
+
+/** Outer ring: twice the inner height, same vertical centre, so the two walls do not cross. */
+export function hazeOuterBand(): { below: number; above: number; height: number } {
+  const inner = hazeBand()
+  const height = inner.height * 2
+  const center = -inner.below + inner.height / 2
+  return { below: height / 2 - center, above: height / 2 + center, height }
 }
 
 /** Plane width that stays inside the parcel box. */
