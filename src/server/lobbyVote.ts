@@ -172,7 +172,7 @@ export function stepLobby(s: LobbyClock, present: string[], now: number): { next
     return { next, log: '' }
   }
   const counts = tallyVotes(voters, now).counts
-  const any = counts.pvp + counts.pvb > 0
+  const any = LOBBY_MODES.some(m => m.live && (counts[m.id] ?? 0) > 0)
   if (next.countdownEnds > 0) {
     if (any) { next.hadVotes = true; next.emptySince = 0 }
     else if (next.hadVotes) {

@@ -1206,7 +1206,7 @@ export async function setupServer(): Promise<void> {
         const fmt = (n: number) => Number.isFinite(n) ? n.toFixed(0) : 'na'
         const bits = who.map(w => `${w.id.slice(0, 8)} raw=${fmt(w.rawX)},${fmt(w.y)},${fmt(w.rawZ)} scene=${fmt(w.x)},${fmt(w.z)} frame=${w.frame} cell=${w.cell} zone=${w.zone}`).join(' | ')
         const verdict = lobbyVerdict(present, now)
-        console.log(`[Lobby] present=${present.length} pvp=${verdict.counts.pvp} pvb=${verdict.counts.pvb} srvZone=${verdict.zone} why=${verdict.why} ${bits || '(no feet)'}`)
+        console.log(`[Lobby] present=${present.length} pvp=${verdict.counts.pvp} pvb=${verdict.counts.pvb} prototype=${verdict.counts.prototype} srvZone=${verdict.zone} why=${verdict.why} ${bits || '(no feet)'}`)
       }
       const step = stepLobby({ wantFull, countdownEnds, hadVotes, readyAt, emptySince }, present, now)
       wantFull = step.next.wantFull

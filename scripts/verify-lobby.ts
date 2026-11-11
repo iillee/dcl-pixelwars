@@ -2,7 +2,7 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
+import { clearLobbyVotes, countedMode, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, BASE_Y, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
@@ -199,6 +199,38 @@ if (held.log !== '' || held.next.countdownEnds !== 0) {
   console.error(`✗ a lobby with nobody voting started a countdown (${held.log})`)
   process.exit(1)
 }
+clearLobbyVotes()
+const protoX = 2 * CELL + CELL / 2 + MAZE_ORIGIN
+const protoZ = 3 * CELL + CELL / 2 + MAZE_ORIGIN
+if (voteModeAt(protoX, protoZ, MAZE_ORIGIN, CELL) !== 'prototype') {
+  console.error(`✗ ${protoX},${protoZ} must be the north Prototype end`)
+  process.exit(1)
+}
+if (!noteLobbyPos('proto', protoX, 190, protoZ, aged)) {
+  console.error('✗ server rejected the Prototype sample')
+  process.exit(1)
+}
+if (countedMode('proto', aged) !== 'prototype') {
+  console.error('✗ standing on Prototype was not counted as that vote')
+  process.exit(1)
+}
+const protoClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
+const protoStep = stepLobby(protoClock, ['proto'], aged)
+if (protoStep.log !== 'start' || protoStep.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
+  console.error(`✗ a Prototype vote did not start the ${LOBBY_VOTE_MS}ms countdown (${protoStep.log})`)
+  process.exit(1)
+}
+const protoTallied = tallyVotes(['proto'], aged)
+if (protoTallied.counts.prototype !== 1 || protoTallied.counts.pvp !== 0 || protoTallied.counts.pvb !== 0) {
+  console.error(`✗ Prototype tally leaked into the other modes (${protoTallied.counts.pvp}/${protoTallied.counts.pvb}/${protoTallied.counts.prototype})`)
+  process.exit(1)
+}
+const protoDone = stepLobby(protoStep.next, ['proto'], aged + LOBBY_VOTE_MS)
+if (protoDone.log !== 'resolve' || pickWinner(protoTallied.counts, 'pvp') !== 'prototype') {
+  console.error(`✗ a Prototype vote did not launch a Prototype round (${protoDone.log})`)
+  process.exit(1)
+}
+clearLobbyVotes()
 const zone = voteZoneLocal(CELL)
 const pvpCell = LOBBY_MODES.find(m => m.id === 'pvp')!.cell
 const onTint = voteLocalToWorld(zone.x0 + 0.05, zone.z0 + 0.05, pvpCell, MAZE_ORIGIN, CELL)
