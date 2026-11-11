@@ -24,7 +24,7 @@ import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
-import { drainPaintOutbox, getCurrentCellId, setLocalTeam } from '../paint'
+import { drainPaintOutbox, getCurrentCellId, paintEconomyOn, setLocalTeam } from '../paint'
 import { SeedHolder, seedHolder } from '../shared/components'
 
 // Locally-tracked team for this session. Written on team:assigned; used
@@ -312,8 +312,10 @@ function wireOutbound(): void {
     if (paintFlushClock < 0.1) return
     paintFlushClock = 0
     const ids = drainPaintOutbox()
-    if (ids.length === 0 || !paintOpen()) return
-    room.send('paintTick', { ids, at: getCurrentCellId() ?? '' })
+    const at = getCurrentCellId() ?? ''
+    if (!paintOpen()) return
+    if (ids.length === 0 && !(paintEconomyOn() && at)) return
+    room.send('paintTick', { ids, at })
   })
 }
 

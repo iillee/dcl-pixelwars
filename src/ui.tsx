@@ -2,7 +2,7 @@ import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
-import { coverage, paintEconomyOn, paintTank } from "./paint"
+import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
 import { PAINT_CAPACITY } from "./shared/territory"
 import { hudClockText, hudYourVote } from "./client/lobby"
 import { inLobby } from "./client/phase"
@@ -458,7 +458,7 @@ function PaintTankBar() {
         pointerFilter: 'none',
       }}
     >
-      <Label value="PAINT" fontSize={mob ? 13 : 15} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={paintRefilling() ? 'REFILL' : 'PAINT'} fontSize={mob ? 13 : 15} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
       <Label value={`${n}`} fontSize={mob ? 22 : 28} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
       <UiEntity
         uiTransform={{ width: trackW, height: trackH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}

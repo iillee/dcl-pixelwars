@@ -42,6 +42,7 @@ import {
 } from '../../shared/pvp'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
 import { orderNearest } from '../../shared/territory'
+import { BOT_REFILL_FRAC, PAINT_CAPACITY } from '../../shared/territory'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -94,6 +95,10 @@ export interface ManagerDeps {
   onBotHit?: (id: number, human: string) => void
   /** A bot just entered the round (live scoreboard row). */
   onSpawn?: (id: number, team: number) => void
+  /** Prototype only. Absent in Team Fight and Bot Fight. */
+  economyOn?: () => boolean
+  economyTank?: (painter: string) => number
+  friendlyDepot?: (team: number, fromCell: string) => string | null
 }
 
 let deps: ManagerDeps | null = null
@@ -606,6 +611,13 @@ function fight(b: LiveBot, dt: number): void {
     return
   }
   if (!b.body.canWalk()) { trySpike(b, humans); return }
+  if (deps?.economyOn?.() && deps.economyTank && deps.friendlyDepot) {
+    const tank = deps.economyTank(`bot:${b.botId}`)
+    if (tank < PAINT_CAPACITY * BOT_REFILL_FRAC) {
+      const cell = deps.friendlyDepot(b.team, b.currentCell)
+      if (cell) { b.stay(cell); return }
+    }
+  }
   if (c.think > 0 || !graph) return
   c.think = BOT_THINK_S
   const p = b.body.pos
@@ -719,6 +731,15 @@ export function getBotProfiles(): Array<{
     goal: b.goalOf(),
     chaseHuman: b.combat.chaseHuman,
   }))
+}
+
+export function botDepotFeet(): Array<{ id: string; team: number; cell: string }> {
+  const out: Array<{ id: string; team: number; cell: string }> = []
+  for (const b of bots) {
+    if (!b.body.canWalk()) continue
+    out.push({ id: `bot:${b.botId}`, team: b.team, cell: b.currentCell })
+  }
+  return out
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {

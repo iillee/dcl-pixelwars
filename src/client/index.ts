@@ -39,6 +39,7 @@ import { initSpeedBonus } from './speed'
 // Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
 import { initPaintBurst } from './paintBurst'
+import { initDepots } from './depots'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
@@ -140,6 +141,7 @@ export async function setupClient(): Promise<void> {
   initLunge()
   initLungeDummy()
   initPaintBurst()
+  initDepots()
   initLobby()
   // Cross exists before the first frame the player can fall. The server
   // also starts in the lobby and sends roundReset; this is the local floor

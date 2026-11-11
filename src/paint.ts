@@ -26,7 +26,7 @@ function lockedTeam(id: string): Team {
 export { Team } from './shared/team'
 import { Team } from './shared/team'
 import { events } from './shared/events'
-import { PAINT_CAPACITY } from './shared/territory'
+import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC } from './shared/territory'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -49,6 +49,7 @@ export function initPaintNet(): void {
   events.on('paint:wallet', ({ tank, denied }) => {
     if (!paintEconomy) return
     paintLeft = tank
+    paintFrac = 0
     for (const id of denied) forceCell(id, paintUndo.get(id) ?? Team.None)
     paintUndo.clear()
   })
@@ -58,6 +59,7 @@ export function initPaintNet(): void {
     setServerCoverage({ red: 0, blue: 0, total: 0 })
     setPaintEconomy(layout !== 'lobby' && format === 'prototype')
     paintLeft = PAINT_CAPACITY
+    paintFrac = 0
     paintUndo.clear()
   })
 
@@ -256,6 +258,9 @@ export function cellId(tx: number, tz: number, ty: number, col: number, row: num
 // ─── Public: paint a cell (idempotent for same team) ─────────────────
 // Matte PBR material spec for a team. Roughness=1 + metallic=0 + no specular
 // kills the shine so paint reads as flat pigment, not plastic.
+export function paintTeamOf(id: string): Team {
+  return cellTeam.get(id) ?? Team.None
+}
 export function cellMaterial(team: Team) {
   return {
     albedoColor: TEAM_COLORS[team],
@@ -346,15 +351,20 @@ export function resetPaintForTile(tileEntity: Entity) {
 const paintOutbox = new Set<string>()
 let paintEconomy = false
 let paintLeft = PAINT_CAPACITY
+let paintFrac = 0
+let paintRefill = false
 const paintUndo = new Map<string, Team>()
 
 export function paintEconomyOn(): boolean { return paintEconomy }
 export function paintTank(): number { return paintLeft }
+export function paintRefilling(): boolean { return paintRefill }
 
 function setPaintEconomy(on: boolean): void {
   if (on === paintEconomy) return
   paintEconomy = on
   paintLeft = PAINT_CAPACITY
+  paintFrac = 0
+  paintRefill = false
   paintUndo.clear()
 }
 
@@ -362,7 +372,19 @@ function setPaintEconomy(on: boolean): void {
 export function refillPredictedTank(): void {
   if (!paintEconomy) return
   paintLeft = PAINT_CAPACITY
+  paintFrac = 0
   paintUndo.clear()
+}
+
+/** Local bar climbs while the server's refill echo is in flight. */
+export function predictDepotRefill(dt: number, friendly: boolean): void {
+  paintRefill = paintEconomy && friendly && paintLeft < PAINT_CAPACITY
+  if (!paintRefill) return
+  paintFrac += PAINT_REFILL_PER_SEC * dt
+  const whole = Math.floor(paintFrac)
+  if (whole <= 0) return
+  paintFrac -= whole
+  paintLeft = Math.min(PAINT_CAPACITY, paintLeft + whole)
 }
 
 function forceCell(id: string, team: Team): void {
@@ -436,6 +458,9 @@ export function resetOwnPaint(): void {
 let localTeam: Team = Team.None
 export function setLocalTeam(team: Team): void {
   localTeam = team
+}
+export function painterTeam(): Team {
+  return localTeam
 }
 
 /**

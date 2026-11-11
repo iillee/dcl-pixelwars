@@ -6,7 +6,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { LOBBY_MODES } from '../src/shared/lobby'
-import { PAINT_CAPACITY, applyTank, orderNearest } from '../src/shared/territory'
+import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC, DEPOT_NEUTRAL_COUNT, applyTank, nearestNode, onDepot, orderNearest, placeDepots } from '../src/shared/territory'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../src/maze/generator'
+import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { refillWallet, resetWallets, setWallet, walletOf } from '../src/server/paintWallet'
 
 if (PAINT_CAPACITY !== 80) {
@@ -111,4 +113,48 @@ if (!ui.includes('function PaintTankBar') || !ui.includes('paintEconomyOn()') ||
   process.exit(1)
 }
 
-console.log('✓ paint tank spend, nearest-first, and Prototype-only economy')
+if (Math.abs(PAINT_REFILL_PER_SEC * 5 - PAINT_CAPACITY) > 1) {
+  console.error(`✗ a full refill should take about 5s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
+  process.exit(1)
+}
+generateWithRetry(1, 40)
+const maze = buildWalkableGraph(getPlacedTilesInOrder())
+const redAt = baseSpawn(1).pos
+const blueAt = baseSpawn(2).pos
+const red = nearestNode(maze, redAt.x, redAt.y, redAt.z)
+const blue = nearestNode(maze, blueAt.x, blueAt.y, blueAt.z)
+if (!red || !blue) {
+  console.error('✗ could not anchor depots on the team bases')
+  process.exit(1)
+}
+const depots = placeDepots(maze, red, blue)
+if (depots.length !== 2 + DEPOT_NEUTRAL_COUNT) {
+  console.error(`✗ expected ${2 + DEPOT_NEUTRAL_COUNT} depots, got ${depots.length}`)
+  process.exit(1)
+}
+if (depots[0].owner !== 1 || depots[1].owner !== 2 || depots[0].id !== red || depots[1].id !== blue) {
+  console.error('✗ the first two depots should be the red and blue bases')
+  process.exit(1)
+}
+for (const d of depots.slice(2)) {
+  if (d.owner !== 0 || baseTeamOfCellId(d.id) !== 0) {
+    console.error(`✗ neutral depot ${d.id} is on a base or pre-owned`)
+    process.exit(1)
+  }
+  if (!onDepot(maze, d.id, d.id)) {
+    console.error('✗ standing on a depot anchor should count')
+    process.exit(1)
+  }
+}
+const placedAgain = placeDepots(maze, red, blue).map(d => `${d.owner}:${d.id}`).join()
+if (placedAgain !== depots.map(d => `${d.owner}:${d.id}`).join()) {
+  console.error('✗ depot placement is not stable')
+  process.exit(1)
+}
+const botSrc = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
+if (!botSrc.includes('b.stay(cell)') || !botSrc.includes('economyOn?.()')) {
+  console.error('✗ Prototype bots should walk to a friendly depot when their tank is low')
+  process.exit(1)
+}
+
+console.log('✓ paint tank, depots, and empty-tank effects')

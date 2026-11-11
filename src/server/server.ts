@@ -18,7 +18,7 @@ import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanC
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
-import { initBots, rebuildBotGraph, tickBots, botCount, getBotPositions, getBotHitPoints, getBotBroadcast, botSimTime, hitBot, getWalkableGraph, setPopulation, sleepBots } from './bots/manager'
+import { botCount, botDepotFeet, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -53,6 +53,7 @@ import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyV
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
+import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
 import { applyTank, orderNearest } from '../shared/territory'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
@@ -189,6 +190,9 @@ export async function setupServer(): Promise<void> {
     },
     onBotHit: (id, human) => noteHit(`bot:${id}`, human),
     onSpawn: (id, team) => { botTeams.set(`bot:${id}`, team) },
+    economyOn: () => economyOn(),
+    economyTank: (painter) => walletOf(painter),
+    friendlyDepot: (team, from) => friendlyDepotCell(team, from),
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()
@@ -349,6 +353,7 @@ export async function setupServer(): Promise<void> {
     emptySince = 0
     setRoundState(currentRoundIndex(), Date.now(), false)
     sleepBots()
+    clearDepots()
     anvilsAwake(false)
     if (!lobbyOpen) {
       lobbyOpen = true
@@ -423,6 +428,7 @@ export async function setupServer(): Promise<void> {
     resetWallets()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
+    seedDepots(economyOn())
     anvilsMazeChanged()
     void saveLeaderboard()
     publishLeaderboard()
@@ -569,6 +575,7 @@ export async function setupServer(): Promise<void> {
     // itself is proof the player is real — mark them active so scraper
     // bots that never send paintTick are filtered out.
     markActive(from)
+    if (typeof at === 'string' && at) noteDepotFeet(from, at)
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
@@ -610,7 +617,14 @@ export async function setupServer(): Promise<void> {
   let tickLogAt = Date.now()
   engine.addSystem((dt: number) => {
     const t0 = Date.now()
-    if (isRoundActive()) tickBots(dt) // bots idle while no round runs
+    if (isRoundActive()) tickBots(dt)
+    if (economyOn()) {
+      tickDepotRefill(dt, botDepotFeet(), (id) => getTeam(id), (id, team, cell) => {
+        paintCells(id, team, [cell], cell, !id.startsWith('bot:'))
+      }, (id, tank) => {
+        if (!id.startsWith('bot:')) sendWallet(id, tank, [])
+      })
+    }
     const ms = Date.now() - t0
     if (ms > botMax) botMax = ms
     const frame = dt * 1000
