@@ -4,7 +4,7 @@
  * The surface stays below the Lakitu line. Nothing here has a collider.
  *
  * Explorers clip meshes outside the parcel box. The rings below are built
- * for the 80×80 world (edge 640 m from centre): one round swell, split into
+ * for the 20×20 world (edge 160 m from centre): one round swell, split into
  * near, mid, and far pieces that share a boundary, then a flat rim that
  * fades to the horizon colour before the parcel edge. The haze cylinder
  * sits just inside that edge. `landscapeTerrain` stays false.
@@ -101,24 +101,24 @@ export const WATER = {
   swellM: 0,
   swellSeconds: 10,
   /** Centre disk radius (m). Round, so the edge is not a square side or a
-   *  diagonal. The 5×5 floor ends at 80 m; this disk runs well past it. */
-  swellNearM: 288,
+   *  diagonal. The 5×5 floor ends at 80 m; this disk is the near sea. */
+  swellNearM: 64,
   /** Radial step (m) for the whole swell. Every ring uses it, so the join
-   *  does not drop to a coarser mesh. */
-  swellNearStepM: 16,
+   *  does not drop to a coarser mesh. 64 and 96 both land on this step. */
+  swellNearStepM: 8,
   /** Middle ring radius (m). The round join sits here. Wave height is already
    *  easing from the near circle toward the far edge, with no step in the mesh. */
-  swellMidM: 512,
-  swellMidStepM: 16,
-  /** Far extent (m). Waves ease from the mid circle to this radius, and the
+  swellMidM: 96,
+  swellMidStepM: 8,
+  /** Far extent (m). Waves ease from the near circle to this radius, and the
    *  mesh continues to the square of this half-extent so it meets the flat rim.
-   *  Inside the 80×80 sea (half 634 m). */
-  swellFarM: 576,
-  swellFarStepM: 16,
+   *  Inside the 20×20 sea (half 154 m). */
+  swellFarM: 128,
+  swellFarStepM: 8,
   /** Mobile centre step (m). One round mesh, same radius as the near disk, faded at its edge. */
-  swellMobileStepM: 16,
+  swellMobileStepM: 8,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
-  swellMobileFadeM: 64,
+  swellMobileFadeM: 24,
   swellNearSrc: 'assets/models/water-swell-near.glb',
   swellMidSrc: 'assets/models/water-swell-mid.glb',
   swellFarSrc: 'assets/models/water-swell-far.glb',

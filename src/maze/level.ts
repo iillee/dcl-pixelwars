@@ -11,9 +11,9 @@
  *     The play grid stays 5×5. The extra parcels are open water so the sea is
  *     inside the scene bounds (explorers clip anything outside). See waterLook.ts.
  *
- * World size (sky only). 'eighty' is 80×80 (1280 m, base -40,-40), the current world.
+ * World size (sky only). 'small' is 20×20 (320 m, base -10,-10), the current world.
  * The arena stays centred on parcel 0,0 and the sea is sized to that box.
- * 'small' is 20×20, 'fifty' is 50×50, 'medium' is 64×64, 'large' is 100×100,
+ * 'fifty' is 50×50, 'medium' is 64×64, 'eighty' is 80×80, 'large' is 100×100,
  * 'wide' is 150×150, 'full' is 300×300.
  * After changing this, run `npx tsx scripts/write-scene.ts`. Then
  * `npx tsx scripts/build-water-swell.ts` so the rings still meet the edge.
@@ -47,9 +47,9 @@ export const SKY_BASE_LINE = true
 /** Base is SKY_BASE_SIZE × SKY_BASE_SIZE tiles (1 = a single team-locked turn tile). */
 export const SKY_BASE_SIZE = 1 // bases-only: one team-locked corner tile each
 /**
- * Parcels on a side. 16 m each. `eighty` is 80×80 (1280 m, base -40,-40),
- * centred on parcel 0,0. The scene edge is 640 m from the centre.
- * `small` is 20×20. `fifty` is 50×50. `medium` is 64×64. `large` is 100×100.
+ * Parcels on a side. 16 m each. `small` is 20×20 (320 m, base -10,-10),
+ * centred on parcel 0,0. The scene edge is 160 m from the centre.
+ * `fifty` is 50×50. `medium` is 64×64. `eighty` is 80×80. `large` is 100×100.
  * `full` is 300×300. The play grid stays 5×5 because the inset grows with the scene.
  * Keep scene.json in step via write-scene.ts.
  */
@@ -58,7 +58,7 @@ export const MEDIUM_PARCELS = 64
 export const EIGHTY_PARCELS = 80
 export const LARGE_PARCELS = 100
 export const WIDE_PARCELS = 150
-export const WORLD_SIZE = 'eighty' as 'small' | 'fifty' | 'medium' | 'eighty' | 'large' | 'wide' | 'full'
+export const WORLD_SIZE = 'small' as 'small' | 'fifty' | 'medium' | 'eighty' | 'large' | 'wide' | 'full'
 export const SKY_PARCELS =
   WORLD_SIZE === 'full' ? 300
     : WORLD_SIZE === 'wide' ? WIDE_PARCELS
