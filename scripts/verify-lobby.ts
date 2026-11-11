@@ -341,6 +341,14 @@ if (!uiSrc.includes('hudVoteCountdown()')) {
   console.error('✗ the countdown seconds should sit under the vote pill')
   process.exit(1)
 }
+if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
+  console.error('✗ the vote pill should not name the player\'s vote')
+  process.exit(1)
+}
+if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.test(lobbySrc)) {
+  console.error('✗ the vote tint should stay matte')
+  process.exit(1)
+}
 if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_NONE') || !lobbySrc.includes('overviewSignRotation')) {
   console.error('✗ signs should yaw in play, and copy the overview camera rotation so they stay parallel')
   process.exit(1)

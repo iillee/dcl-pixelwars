@@ -4,7 +4,7 @@ import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
 import { PAINT_CAPACITY } from "./shared/territory"
-import { hudClockText, hudVoteCountdown, hudYourVote } from "./client/lobby"
+import { hudClockText, hudVoteCountdown } from "./client/lobby"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
@@ -520,8 +520,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={lobby ? 15 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby && hudYourVote() ? 20 : lobby ? 28 : '100%' }} />
-                  {lobby && hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={12} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 16 }} /> : null}
+                  <Label value={hudClockText(secs)} fontSize={lobby ? 16 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby ? 32 : '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -546,8 +545,7 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-                  <Label value={hudClockText(secs)} fontSize={22} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: hudYourVote() ? 28 : 36 }} />
-                  {hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 20 }} /> : null}
+                  <Label value={hudClockText(secs)} fontSize={22} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 36 }} />
                 </UiEntity>
               </UiEntity>
               <TileButton id="ui_lobby_mute" onPress={toggleMusic}>

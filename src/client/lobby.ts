@@ -35,7 +35,6 @@ const tintSize: Vector3[] = []
 let readySent = false
 let confirmEnt: Entity = 0 as Entity
 let pulsed: ModeId | '' = ''
-let pulse = 0
 const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
@@ -55,7 +54,6 @@ function clearSigns(): void {
   tints.length = 0
   tintSize.length = 0
   pulsed = ''
-  pulse = 0
 }
 
 function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Identity()): Entity {
@@ -167,7 +165,7 @@ function laySigns(): void {
       scale: Vector3.Zero(),
     })
     MeshRenderer.setBox(pad)
-    Material.setPbrMaterial(pad, tintMat(m.color, 0.4, 1))
+    Material.setPbrMaterial(pad, tintMat(m.color, 0.22))
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
@@ -226,13 +224,14 @@ function refreshSigns(): void {
   }
 }
 
-function tintMat(c: { r: number; g: number; b: number }, alpha: number, glow: number) {
+function tintMat(c: { r: number; g: number; b: number }, alpha: number) {
   return {
     albedoColor: Color4.create(c.r, c.g, c.b, alpha),
-    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: glow,
-    roughness: 0.45,
+    emissiveColor: Color4.create(0, 0, 0, 1),
+    emissiveIntensity: 0,
+    roughness: 1,
     metallic: 0,
+    specularIntensity: 0,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
     castShadows: false,
   }
@@ -248,14 +247,13 @@ function playConfirm(): void {
   })
 }
 
-/** Local tint while standing on an end. Brighter and steady once the server counts it. */
-function tickTints(dt: number, local: ModeId | ''): void {
+/** Local tint while standing on an end. A little more opaque once it counts. No glow. */
+function tickTints(_dt: number, local: ModeId | ''): void {
   const mine = myVote()
   const modes = placedModes()
   if (tints.length !== modes.length) return
-  if (mine && mine === local && mine !== pulsed) { pulsed = mine; pulse = 0.55; playConfirm() }
+  if (mine && mine === local && mine !== pulsed) { pulsed = mine; playConfirm() }
   if (!mine) pulsed = ''
-  if (pulse > 0) pulse = Math.max(0, pulse - dt)
   for (let i = 0; i < modes.length; i++) {
     const m = modes[i]
     const tr = Transform.getMutableOrNull(tints[i])
@@ -266,9 +264,8 @@ function tickTints(dt: number, local: ModeId | ''): void {
     const show = here || others
     if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    const glow = confirmed ? 2.4 + pulse * 8 : here ? 1.3 : 0.35
-    const alpha = confirmed ? 0.78 : here ? 0.42 : 0.16
-    Material.setPbrMaterial(tints[i], tintMat(m.color, alpha, glow))
+    const alpha = confirmed ? 0.55 : here ? 0.4 : 0.22
+    Material.setPbrMaterial(tints[i], tintMat(m.color, alpha))
   }
 }
 
@@ -327,10 +324,6 @@ export function hudLobbyDebug(): string {
   return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} pvp ${voteCount('pvp')} pvb ${voteCount('pvb')} srvZone ${wire.zone} why=${wire.why}`
 }
 
-function voteTag(): string {
-  return modeTitle(myVote())
-}
-
 export function hudClockText(matchSecs: number): string {
   const phase = gamePhase()
   if (phase === 'match') {
@@ -350,9 +343,3 @@ export function hudVoteCountdown(): string {
   return left > 0 ? String(left) : ''
 }
 
-/** Shown inside the vote pill once the server has counted this player. */
-export function hudYourVote(): string {
-  if (!inLobby()) return ''
-  const tag = voteTag()
-  return tag ? `Your vote: ${tag}` : ''
-}
