@@ -25,6 +25,7 @@ import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, paintEconomyOn, setLocalTeam } from '../paint'
+import { feetDue } from '../shared/territory'
 import { SeedHolder, seedHolder } from '../shared/components'
 
 // Locally-tracked team for this session. Written on team:assigned; used
@@ -302,11 +303,11 @@ function wireOutbound(): void {
     room.send('joinRoster', { userId: uid })
   })
 
-  // Paint outbox flusher: 10 Hz. Drain locally-painted cell ids and send
-  // to the server; the server attributes to sender's team, applies to its
-  // authoritative map, and broadcasts back via paintDelta so all clients
-  // (including us) converge on the same picture.
+  // Paint outbox flusher: 10 Hz while cells are actually queued. An empty
+  // Prototype stand reports the cell underfoot on change, or at 2 Hz.
   let paintFlushClock = 0
+  let lastFeetCell = ''
+  let lastFeetAt = 0
   engine.addSystem((dt: number) => {
     paintFlushClock += dt
     if (paintFlushClock < 0.1) return
@@ -314,8 +315,12 @@ function wireOutbound(): void {
     const ids = drainPaintOutbox()
     const at = getCurrentCellId() ?? ''
     if (!paintOpen()) return
-    if (ids.length === 0 && !(paintEconomyOn() && at)) return
+    const now = Date.now()
+    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || !paintEconomyOn())) return
+    if (ids.length === 0 && !paintEconomyOn()) return
     room.send('paintTick', { ids, at })
+    lastFeetCell = at
+    lastFeetAt = now
   })
 }
 

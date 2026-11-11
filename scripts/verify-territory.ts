@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { LOBBY_MODES } from '../src/shared/lobby'
-import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC, DEPOT_NEUTRAL_COUNT, applyTank, nearestNode, onDepot, orderNearest, placeDepots } from '../src/shared/territory'
+import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC, DEPOT_NEUTRAL_COUNT, WALLET_MIN_MS, FEET_IDLE_MS, WalletGate, applyTank, feetDue, nearestNode, onDepot, orderNearest, placeDepots } from '../src/shared/territory'
 import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { refillWallet, resetWallets, setWallet, walletOf } from '../src/server/paintWallet'
@@ -157,4 +157,53 @@ if (!botSrc.includes('b.stay(cell)') || !botSrc.includes('economyOn?.()')) {
   process.exit(1)
 }
 
-console.log('✓ paint tank, depots, and empty-tank effects')
+const gate = new WalletGate()
+let walletSends = 0
+for (let i = 1; i <= PAINT_REFILL_PER_SEC; i++) {
+  const t = Math.round((i / PAINT_REFILL_PER_SEC) * 1000)
+  if (gate.offer('p', i, [], t, PAINT_CAPACITY)) walletSends++
+}
+for (const msg of gate.due(1000, PAINT_CAPACITY)) if (msg) walletSends++
+if (walletSends > 1000 / WALLET_MIN_MS + 1) {
+  console.error(`✗ refill wallet echo ran at ${walletSends}/s; cap is ${1000 / WALLET_MIN_MS}/s`)
+  process.exit(1)
+}
+const deniedNow = gate.offer('p', 3, ['cell'], 1001, PAINT_CAPACITY)
+if (!deniedNow || deniedNow.denied.length !== 1) {
+  console.error('✗ a refused cell should echo immediately')
+  process.exit(1)
+}
+const emptyNow = gate.offer('p', 0, [], 1002, PAINT_CAPACITY)
+if (!emptyNow || emptyNow.tank !== 0) {
+  console.error('✗ an empty tank should echo immediately')
+  process.exit(1)
+}
+if (gate.offer('p', 0, [], 1003, PAINT_CAPACITY)) {
+  console.error('✗ a repeated empty tank should not echo again')
+  process.exit(1)
+}
+let feetSends = 0
+let lastCell = ''
+let lastMs = 0
+for (let i = 0; i < 100; i++) {
+  const now = i * 100
+  if (!feetDue('2,2,0:8,8', lastCell, lastMs, now, false)) continue
+  feetSends++
+  lastCell = '2,2,0:8,8'
+  lastMs = now
+}
+if (feetSends > 1000 / FEET_IDLE_MS * 10 + 2) {
+  console.error(`✗ standing still sent feet ${feetSends} times in 10s`)
+  process.exit(1)
+}
+if (!feetDue('2,2,0:9,8', lastCell, lastMs, lastMs + 10, false)) {
+  console.error('✗ stepping onto a new cell should report immediately')
+  process.exit(1)
+}
+const depotSrc = readFileSync(new URL('../src/client/depots.ts', import.meta.url), 'utf8')
+if (depotSrc.includes('getMutable') || !depotSrc.includes('shown !== post.team') || !depotSrc.includes('Tween.createOrReplace')) {
+  console.error('✗ depot posts should write material only when ownership changes')
+  process.exit(1)
+}
+
+console.log(`✓ paint tank, depots, empty-tank effects; wallet ${walletSends}/s refill, feet ${feetSends}/10s idle`)
