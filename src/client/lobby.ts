@@ -7,11 +7,11 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, orthoSignPoses, placedModes, signBadgeY, signCaretCenterY, signCaretSize, signFaceZ, toSceneFeet, voteModeAt, voteTintPose, type OrthoSignPose } from '../shared/lobby'
+import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signCaretSize, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
-import { isOverviewActive, overviewFrame, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
+import { isOverviewActive, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -24,7 +24,6 @@ let lastFeet = { x: NaN, y: NaN, z: NaN }
 
 const spawned: Entity[] = []
 const signRoots: Entity[] = []
-const signMeta: { cell: { x: number; z: number }; x: number; y: number; z: number }[] = []
 const boards: { count: Entity }[] = []
 /** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities. */
 const TITLE_FONT = 45
@@ -49,7 +48,6 @@ function clearSigns(): void {
   for (const e of spawned) engine.removeEntity(e)
   spawned.length = 0
   signRoots.length = 0
-  signMeta.length = 0
   boards.length = 0
   tints.length = 0
   tintSize.length = 0
@@ -105,20 +103,19 @@ function laySigns(): void {
     Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
     spawned.push(root)
     signRoots.push(root)
-    signMeta.push({ cell: m.cell, x: pose.x, y: pose.y, z: pose.z })
     const face = signFaceZ()
     const slab = plateMat(copy.plate)
     const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const caret = signCaretSize()
+    // Same box and the same material as the pill, hung off one side like a speech-bubble tail.
     const tail = add(
       root,
-      Vector3.create(0, signCaretCenterY(), face),
-      Vector3.create(caret.w, caret.h, 0.45),
-      Quaternion.fromEulerDegrees(180, 0, 0),
+      Vector3.create(-SIGN_W_M * 0.22, -SIGN_H_M * 0.42, 0),
+      Vector3.create(caret.w, caret.h, 0.7),
     )
-    MeshRenderer.setCylinder(tail, 0.5, 0)
+    MeshRenderer.setBox(tail)
     Material.setPbrMaterial(tail, slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
@@ -165,7 +162,7 @@ function laySigns(): void {
       scale: Vector3.Zero(),
     })
     MeshRenderer.setBox(pad)
-    Material.setPbrMaterial(pad, tintMat(m.color, 0.22))
+    Material.setPbrMaterial(pad, zoneMat(copy.plate, false))
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
@@ -173,41 +170,29 @@ function laySigns(): void {
   syncSignFacing()
 }
 
-function applySignPose(root: Entity, i: number, overview: OrthoSignPose | null): void {
+function applySignPose(root: Entity): void {
   const bill = Billboard.getMutableOrNull(root)
   const tr = Transform.getMutableOrNull(root)
-  const home = signMeta[i]
-  if (!tr || !home) return
-  if (overview) {
+  if (!tr) return
+  if (isOverviewActive()) {
     if (bill && bill.billboardMode !== BillboardMode.BM_NONE) bill.billboardMode = BillboardMode.BM_NONE
     const cam = overviewSignRotation()
     tr.rotation = Quaternion.fromEulerDegrees(cam.pitch, cam.yaw, 0)
-    tr.position = Vector3.create(overview.x, overview.y, overview.z)
-    tr.scale = Vector3.create(overview.scale, overview.scale, overview.scale)
+    const s = overviewSignScale()
+    tr.scale = Vector3.create(s, s, s)
     return
   }
   if (bill && bill.billboardMode !== BillboardMode.BM_Y) {
     bill.billboardMode = BillboardMode.BM_Y
     tr.rotation = Quaternion.Identity()
   }
-  tr.position = Vector3.create(home.x, home.y, home.z)
   tr.scale = Vector3.One()
 }
 
 let loggedSignScale = Number.NaN
 
 function syncSignFacing(): void {
-  let poses: OrthoSignPose[] | null = null
-  if (isOverviewActive() && signMeta.length) {
-    const frame = overviewFrame()
-    if (frame.dist > 1) {
-      poses = orthoSignPoses(
-        signMeta.map(s => s.cell), MAZE_ORIGIN, CELL, BASE_Y,
-        frame.focus, frame.yaw, frame.pitch, frame.dist, frame.fov, overviewSignScale(),
-      )
-    }
-  }
-  for (let i = 0; i < signRoots.length; i++) applySignPose(signRoots[i], i, poses ? poses[i] : null)
+  for (const root of signRoots) applySignPose(root)
   const shown = isOverviewActive() ? Math.round(overviewSignScale() * 100) / 100 : 1
   if (shown === loggedSignScale) return
   loggedSignScale = shown
@@ -224,15 +209,18 @@ function refreshSigns(): void {
   }
 }
 
-function tintMat(c: { r: number; g: number; b: number }, alpha: number) {
+/** Opaque matte slab in the pill colour. Alpha blend over the white floor was washing it out. */
+function zoneMat(c: Rgb, occupied: boolean) {
+  const lift = occupied ? 0 : 0.38
+  const mix = (v: number) => v + (1 - v) * lift
   return {
-    albedoColor: Color4.create(c.r, c.g, c.b, alpha),
+    albedoColor: Color4.create(mix(c.r), mix(c.g), mix(c.b), 1),
     emissiveColor: Color4.create(0, 0, 0, 1),
     emissiveIntensity: 0,
     roughness: 1,
     metallic: 0,
     specularIntensity: 0,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
     castShadows: false,
   }
 }
@@ -264,8 +252,8 @@ function tickTints(_dt: number, local: ModeId | ''): void {
     const show = here || others
     if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    const alpha = confirmed ? 0.55 : here ? 0.4 : 0.22
-    Material.setPbrMaterial(tints[i], tintMat(m.color, alpha))
+    const plate = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype'].plate
+    Material.setPbrMaterial(tints[i], zoneMat(plate, here || confirmed))
   }
 }
 

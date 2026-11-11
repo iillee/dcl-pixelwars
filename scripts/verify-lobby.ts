@@ -8,7 +8,7 @@ import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, orthoSignPoses, overviewBasis, padContains, pickWinner, placedModes, signBadgeY, signCaretCenterY, signCaretSize, signContentBounds, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signCaretCenterY, signCaretSize, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -345,8 +345,12 @@ if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
   console.error('✗ the vote pill should not name the player\'s vote')
   process.exit(1)
 }
-if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.test(lobbySrc)) {
-  console.error('✗ the vote tint should stay matte')
+if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.test(lobbySrc) || !lobbySrc.includes('MTM_OPAQUE')) {
+  console.error('✗ the vote tint should stay matte and opaque so the white floor does not wash it out')
+  process.exit(1)
+}
+if (!lobbySrc.includes('-SIGN_W_M * 0.22') || !lobbySrc.includes('setBox(tail)') || lobbySrc.includes('orthoSignPoses')) {
+  console.error('✗ the caret should hang off the side of the pill, and overview signs should stay on their anchors')
   process.exit(1)
 }
 if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_NONE') || !lobbySrc.includes('overviewSignRotation')) {
@@ -401,64 +405,11 @@ if (caret.w / SIGN_W_M < 0.1 || caret.w / SIGN_W_M > 0.15 || !(signCaretCenterY(
   console.error('✗ the caret should be a chunky pointer under the pill')
   process.exit(1)
 }
-if (!(signBadgeY() < signCaretCenterY() - caret.h / 2)) {
+const tailBottom = -SIGN_H_M * 0.42 - caret.h / 2
+const chipTop = signBadgeY() + 3.4 / 2
+if (!(chipTop < tailBottom - 0.2)) {
   console.error('✗ the vote count chip overlaps the caret')
   process.exit(1)
-}
-{
-  const axes = overviewBasis(45, 35.26)
-  const rightDot = axes.right.x * 0.7071 + axes.right.z * -0.7071
-  if (rightDot < 0.99 || axes.up.y < 0.8) {
-    console.error('✗ overview axes do not match the sign rotation')
-    process.exit(1)
-  }
-  const focus = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
-  const distPer = Math.tan(60 * Math.PI / 360) / Math.tan(24 * Math.PI / 360)
-  const cells = placedModes().map(m => m.cell)
-  const bounds = signContentBounds()
-  for (const yaw of [0, 45, 90, 135]) {
-    for (const view of [7, 29, 90]) {
-      const poses = orthoSignPoses(cells, MAZE_ORIGIN, CELL, BASE_Y, focus, yaw, 35.26, view * distPer, 24, signZoomScale(view))
-      if (poses.length !== 3) {
-        console.error('✗ overview should place one sign per end tile')
-        process.exit(1)
-      }
-      const basis = overviewBasis(yaw, 35.26)
-      const cam = {
-        x: focus.x - basis.forward.x * view * distPer,
-        y: focus.y - basis.forward.y * view * distPer,
-        z: focus.z - basis.forward.z * view * distPer,
-      }
-      const tanHalf = Math.tan(24 * Math.PI / 360)
-      const project = (p: { x: number; y: number; z: number }) => {
-        const dx = p.x - cam.x, dy = p.y - cam.y, dz = p.z - cam.z
-        const z = Math.max(0.5, dx * basis.forward.x + dy * basis.forward.y + dz * basis.forward.z)
-        const x = (dx * basis.right.x + dy * basis.right.y + dz * basis.right.z) / (z * tanHalf)
-        const y = (dx * basis.up.x + dy * basis.up.y + dz * basis.up.z) / (z * tanHalf)
-        return { x, y }
-      }
-      const rects = poses.map(p => {
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-        for (const lx of [-bounds.xHalf, bounds.xHalf]) for (const ly of [bounds.yBot, bounds.yTop]) {
-          const q = project({
-            x: p.x + (basis.right.x * lx + basis.up.x * ly) * p.scale,
-            y: p.y + (basis.right.y * lx + basis.up.y * ly) * p.scale,
-            z: p.z + (basis.right.z * lx + basis.up.z * ly) * p.scale,
-          })
-          minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x)
-          minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y)
-        }
-        return { minX, maxX, minY, maxY }
-      })
-      for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
-        const a = rects[i], b = rects[j]
-        if (a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY) {
-          console.error(`✗ overview signs overlap at yaw ${yaw} zoom ${view}`)
-          process.exit(1)
-        }
-      }
-    }
-  }
 }
 if (modeTitle('prototype') !== 'PROTOTYPE' || modeSubtitle('prototype') !== 'Paint Economy') {
   console.error('✗ Prototype should read PROTOTYPE / Paint Economy')
