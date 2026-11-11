@@ -259,6 +259,49 @@ export function lobbyFeet(cell: number, origin: number, baseY: number): { x: num
   }
 }
 
+/** Thin physics box. `feetY` is the stand height; the top of the box is the slab, 1 m below. */
+export type SpawnPad = { x: number; y: number; z: number; sx: number; sy: number; sz: number; yaw: number }
+
+export function spawnPadAt(x: number, feetY: number, z: number, sx = 16, sz = 16, yaw = 0): SpawnPad {
+  return { x, y: feetY - 1.1, z, sx, sy: 0.2, sz, yaw }
+}
+
+/**
+ * Invisible floors under the places a joiner is put down before the tile mesh
+ * can hold them. Team bases and the fork center match the original pads.
+ * Prototype also covers its north vote floor, including the doorway off the fork.
+ * Bot Fight and Team Fight vote tiles are not given an extra pad.
+ */
+export function earlySpawnPads(
+  origin: number,
+  cell: number,
+  baseY: number,
+  bases: Array<{ x: number; z: number }>,
+): SpawnPad[] {
+  const feetY = baseY + 1.5
+  const pads = bases.map(b => spawnPadAt(b.x, feetY, b.z))
+  const cross = lobbyFeet(cell, origin, baseY)
+  pads.push(spawnPadAt(cross.x, cross.y, cross.z))
+  const proto = LOBBY_MODES.find(m => m.id === 'prototype' && m.placed)
+  if (proto) {
+    const pose = voteTintPose(proto.cell, origin, cell)
+    pads.push(spawnPadAt(pose.x, feetY, pose.z, pose.width, pose.length, pose.yawDeg))
+  }
+  return pads
+}
+
+/** True when a point lies on the pad's horizontal footprint. Yaw matches the entity. */
+export function padContains(pad: SpawnPad, x: number, z: number): boolean {
+  const dx = x - pad.x
+  const dz = z - pad.z
+  const rad = pad.yaw * Math.PI / 180
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  const lx = dx * c - dz * s
+  const lz = dx * s + dz * c
+  return Math.abs(lx) <= pad.sx / 2 + 1e-4 && Math.abs(lz) <= pad.sz / 2 + 1e-4
+}
+
 export type VoteCounts = Record<ModeId, number>
 
 export function emptyCounts(): VoteCounts {

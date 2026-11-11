@@ -3,12 +3,12 @@
  */
 import { readFileSync } from 'node:fs'
 import { clearLobbyVotes, countedMode, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
-import { CELL, BASE_Y, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
+import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
-  billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 
 const tiles = placeLobbyLayout()
@@ -85,6 +85,44 @@ for (const m of LOBBY_MODES) {
     console.error(`✗ ${m.id} center votes as '${got}', want '${want}'`)
     process.exit(1)
   }
+}
+const hold = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [baseSpawn(1).pos, baseSpawn(2).pos])
+if (hold.length !== 4) {
+  console.error(`✗ expected base, base, fork, and prototype pads, got ${hold.length}`)
+  process.exit(1)
+}
+const slab = BASE_Y + 0.5
+for (const p of hold) {
+  if (Math.abs(p.y + p.sy / 2 - slab) > 0.001) {
+    console.error('✗ a spawn pad top is not the walkable slab')
+    process.exit(1)
+  }
+}
+const forkFeet = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+if (!padContains(hold[2], forkFeet.x, forkFeet.z) || hold[2].sx !== 16) {
+  console.error('✗ the fork pad does not cover the lobby spawn')
+  process.exit(1)
+}
+for (const team of [1, 2]) {
+  const s = baseSpawn(team).pos
+  if (!padContains(hold[team - 1], s.x, s.z) || hold[team - 1].sx !== 16) {
+    console.error(`✗ team ${team} base pad moved`)
+    process.exit(1)
+  }
+}
+const protoMode = LOBBY_MODES.find(m => m.id === 'prototype')!
+const protoZone = voteZoneLocal(CELL)
+const protoDoor = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z1, protoMode.cell, MAZE_ORIGIN, CELL)
+const protoCap = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z0, protoMode.cell, MAZE_ORIGIN, CELL)
+const protoStand = voteTintPose(protoMode.cell, MAZE_ORIGIN, CELL)
+if (!padContains(hold[3], protoStand.x, protoStand.z) || !padContains(hold[3], protoDoor.x, protoDoor.z) || !padContains(hold[3], protoCap.x, protoCap.z)) {
+  console.error('✗ the prototype pad does not cover the north vote floor')
+  process.exit(1)
+}
+const teamFight = voteTintPose(LOBBY_MODES.find(m => m.id === 'pvp')!.cell, MAZE_ORIGIN, CELL)
+if (padContains(hold[3], teamFight.x, teamFight.z) || padContains(hold[2], teamFight.x, teamFight.z)) {
+  console.error('✗ a prototype or fork pad reaches the Team Fight tile')
+  process.exit(1)
 }
 function checkFrame(label: string, sceneM: number, origin: number, baseMeters: number): void {
   for (const m of LOBBY_MODES) {

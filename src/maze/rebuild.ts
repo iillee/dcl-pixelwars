@@ -31,6 +31,7 @@ import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { clearTeleportOrbs, spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
+import { LOBBY_MODES } from '../shared/lobby'
 import { SeedHolder, seedHolder } from '../shared/components'
 
 // ─── Pipeline state ─────────────────────────────────────────────────
@@ -80,16 +81,17 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   const dropLatched = nextLobby || layoutKind === 'lobby'
   const previous = spawnedEntities.slice()
 
-  let crossEnt: Entity | null = null
+  const early: Entity[] = []
   if (nextLobby) {
     layoutKind = 'lobby'
     placeLobbyLayout()
-    const cross = getPlacedTilesInOrder().find(p => p.type !== 'end')
-    if (cross) {
-      // Full-size floor first, then the teleport, then the old tiles go away.
-      crossEnt = spawnTile(cross, true)
-      events.emit('lobby:floor', { ready: true })
-    }
+    const proto = LOBBY_MODES.find(m => m.id === 'prototype' && m.placed)
+    // Fork and the Prototype north end are full size before anyone is moved
+    // onto them. Team Fight and Bot Fight ends still grow in.
+    const solid = getPlacedTilesInOrder().filter(p =>
+      p.type !== 'end' || (!!proto && p.x === proto.cell.x && p.z === proto.cell.z))
+    for (const p of solid) early.push(spawnTile(p, true))
+    if (early.length) events.emit('lobby:floor', { ready: true })
   }
 
   for (const e of previous) {
@@ -101,14 +103,16 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     persistentSet.clear()
   }
   spawnedEntities.length = 0
-  if (crossEnt) spawnedEntities.push(crossEnt)
+  for (const e of early) spawnedEntities.push(e)
   if (!dropLatched) for (const e of persistentSet) spawnedEntities.push(e)
   spawnQueue = []
   spawnClock = 0
 
   if (nextLobby) {
     currentSeed = seed
-    const arms = getPlacedTilesInOrder().filter(p => p.type === 'end')
+    const proto = LOBBY_MODES.find(m => m.id === 'prototype' && m.placed)
+    const arms = getPlacedTilesInOrder().filter(p =>
+      p.type === 'end' && !(proto && p.x === proto.cell.x && p.z === proto.cell.z))
     spawnQueue = arms.map((p, i) => ({ p, delay: i * STAGGER }))
     clearTeleportOrbs()
     console.log(`Lobby laid, ${gridSize()} tiles`)
