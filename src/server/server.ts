@@ -54,7 +54,7 @@ import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
 import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
-import { applyTank, orderNearest } from '../shared/territory'
+import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, WalletGate } from '../shared/territory'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -242,9 +242,16 @@ export async function setupServer(): Promise<void> {
     if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
     return teamOfCell(id) !== team
   }
+  const walletGate = new WalletGate()
   const sendWallet = (to: string, tank: number, denied: string[]) => {
     if (to.startsWith('bot:')) return
-    room.send('paintWallet', { tank, denied }, { to: [to] })
+    const msg = walletGate.offer(to, tank, denied, Date.now(), PAINT_CAPACITY)
+    if (msg) room.send('paintWallet', msg, { to: [to] })
+  }
+  const flushWallets = () => {
+    for (const msg of walletGate.due(Date.now(), PAINT_CAPACITY)) {
+      room.send('paintWallet', { tank: msg.tank, denied: msg.denied }, { to: [msg.id] })
+    }
   }
   /** Nearest flips first. Returns how many cells changed team. `notify` echoes the tank to a human. */
   const paintCells = (painter: string, team: number, ids: string[], origin: string | null, notify: boolean): number => {
@@ -426,6 +433,7 @@ export async function setupServer(): Promise<void> {
     room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena' })
     clearPaintState()
     resetWallets()
+    walletGate.reset()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
     seedDepots(economyOn())
@@ -625,6 +633,7 @@ export async function setupServer(): Promise<void> {
         if (!id.startsWith('bot:')) sendWallet(id, tank, [])
       })
     }
+    flushWallets()
     const ms = Date.now() - t0
     if (ms > botMax) botMax = ms
     const frame = dt * 1000

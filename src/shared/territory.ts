@@ -66,6 +66,68 @@ export function applyTank(ops: readonly TankOp[], tank: number): { taken: string
   return { taken, denied, tank: left }
 }
 
+/** Wallet echoes stay under this gap unless the tank hits empty, full, or a cell was refused. */
+export const WALLET_MIN_MS = 200
+/** Standing still reports the cell underfoot at this gap. A cell change sends at once. */
+export const FEET_IDLE_MS = 500
+
+export type WalletMsg = { tank: number; denied: string[] }
+
+/**
+ * One player's paintWallet traffic. `offer` remembers the latest tank.
+ * A send goes out immediately for a denial or for 0 / full, otherwise at
+ * most once per WALLET_MIN_MS, and never when the tank has not changed.
+ */
+export class WalletGate {
+  private last = new Map<string, { tank: number; at: number }>()
+  private pending = new Map<string, WalletMsg>()
+
+  offer(id: string, tank: number, denied: readonly string[], now: number, capacity: number): WalletMsg | null {
+    const prev = this.pending.get(id)
+    this.pending.set(id, { tank, denied: [...(prev?.denied ?? []), ...denied] })
+    return this.take(id, now, capacity)
+  }
+
+  /** Pending echoes whose quiet window has elapsed. */
+  due(now: number, capacity: number): Array<{ id: string } & WalletMsg> {
+    const out: Array<{ id: string } & WalletMsg> = []
+    for (const id of [...this.pending.keys()]) {
+      const msg = this.take(id, now, capacity)
+      if (msg) out.push({ id, ...msg })
+    }
+    return out
+  }
+
+  reset(): void {
+    this.last.clear()
+    this.pending.clear()
+  }
+
+  private take(id: string, now: number, capacity: number): WalletMsg | null {
+    const msg = this.pending.get(id)
+    if (!msg) return null
+    const sent = this.last.get(id)
+    const urgent = msg.denied.length > 0 || msg.tank <= 0 || msg.tank >= capacity
+    const changed = !sent || sent.tank !== msg.tank || msg.denied.length > 0
+    if (!changed) {
+      this.pending.delete(id)
+      return null
+    }
+    if (!urgent && sent && now - sent.at < WALLET_MIN_MS) return null
+    this.pending.delete(id)
+    this.last.set(id, { tank: msg.tank, at: now })
+    return msg
+  }
+}
+
+/** True when an idle feet sample should go out. Real paint ids always send. */
+export function feetDue(cell: string, lastCell: string, lastMs: number, now: number, hasIds: boolean): boolean {
+  if (hasIds) return true
+  if (!cell) return false
+  if (cell !== lastCell) return true
+  return now - lastMs >= FEET_IDLE_MS
+}
+
 export const PAINT_REFILL_PER_SEC = 56
 /** Neutral depots in addition to the two team bases. 2, or 3–4. */
 export const DEPOT_NEUTRAL_COUNT = 2

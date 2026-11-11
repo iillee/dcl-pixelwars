@@ -3,7 +3,7 @@
  * sit on the anchors. Colour follows the anchor cell. A friendly post
  * fills the local tank while you stand on it; the server is the authority.
  */
-import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
+import { engine, Entity, Material, MeshRenderer, Transform, Tween, EasingFunction } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { baseSpawn, getPlacedTilesInOrder } from '../maze/generator'
 import { isRebuilding } from '../maze/rebuild'
@@ -14,7 +14,7 @@ import { getCurrentCellId, paintEconomyOn, paintTeamOf, painterTeam, predictDepo
 import { inLobby } from './phase'
 
 const NEUTRAL = { r: 0.93, g: 0.93, b: 0.9 }
-type Post = { ent: Entity; id: string; pulse: number; team: Team }
+type Post = { ent: Entity; id: string; team: Team }
 
 let posts: Post[] = []
 let builtFor = ''
@@ -71,8 +71,23 @@ function ensurePosts(): void {
     })
     MeshRenderer.setCylinder(ent)
     Material.setPbrMaterial(ent, tint(team, team === Team.None ? 0.4 : 1.4))
-    posts.push({ ent, id: d.id, pulse: 0, team })
+    posts.push({ ent, id: d.id, team })
   }
+}
+
+function paintPost(post: Post): void {
+  Material.setPbrMaterial(post.ent, tint(post.team, post.team === Team.None ? 0.35 : 1.2))
+}
+
+function pulsePost(post: Post): void {
+  Tween.createOrReplace(post.ent, {
+    mode: Tween.Mode.Scale({
+      start: Vector3.create(0.98, 3.2, 0.98),
+      end: Vector3.create(0.7, 3.2, 0.7),
+    }),
+    duration: 400,
+    easingFunction: EasingFunction.EF_EASEOUTQUAD,
+  })
 }
 
 function recolor(dt: number): void {
@@ -84,16 +99,10 @@ function recolor(dt: number): void {
     const owned = paintTeamOf(post.id)
     const shown = owned !== Team.None ? owned : post.team
     if (shown !== post.team) {
-      post.pulse = 0.4
       post.team = shown
+      paintPost(post)
+      pulsePost(post)
     }
-    if (post.pulse > 0) post.pulse = Math.max(0, post.pulse - dt)
-    const tr = Transform.getMutableOrNull(post.ent)
-    if (tr) {
-      const s = 1 + post.pulse
-      tr.scale = Vector3.create(0.7 * s, 3.2, 0.7 * s)
-    }
-    Material.setPbrMaterial(post.ent, tint(post.team, post.team === Team.None ? 0.35 : 1.2 + post.pulse * 4))
     if (here && mine !== Team.None && post.team === mine && onDepot(graph, here, post.id)) friendly = true
   }
   predictDepotRefill(dt, friendly)
