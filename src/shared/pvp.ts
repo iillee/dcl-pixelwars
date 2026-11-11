@@ -19,11 +19,11 @@
 // PvB: every human on one colour (Red, then Blue, … across PvB rounds);
 // bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)).
 // Taken at round start and again whenever humans join or leave, so the pool
-// stays at 3× the humans. PVB_BOT_MAX is the hard cap.
+// stays at 2× the humans. PVB_BOT_MAX is the hard cap.
 export const FORMAT_ALTERNATE = true
 /** Bots per active human in a Bot Invasion round. */
-export const PVB_RATIO = 3
-/** Hard cap on Bot Invasion bots. 6 humans would be 18; the pool stops at 15. */
+export const PVB_RATIO = 2
+/** Hard cap on Bot Invasion bots. 8 humans would be 16; the pool stops at 15. */
 export const PVB_BOT_MAX = 15
 
 export type RoundFormat = 'pvp' | 'pvb' | 'prototype'

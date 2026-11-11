@@ -226,8 +226,8 @@ if (hudVoteHeadline(false) !== 'STAND ON A TILE TO VOTE' || hudVoteHeadline(true
   console.error(`✗ vote pill copy should instruct, without repeating the seconds (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)})`)
   process.exit(1)
 }
-if (PVB_RATIO !== 3 || pvbBotCount(1) !== 3 || pvbBotCount(2) !== 6 || pvbBotCount(5) !== PVB_BOT_MAX || pvbBotCount(6) !== PVB_BOT_MAX || pvbBotCount(0) !== 0) {
-  console.error(`✗ Bot Invasion should be 3× humans, capped at ${PVB_BOT_MAX}: 1→${pvbBotCount(1)} 2→${pvbBotCount(2)} 5→${pvbBotCount(5)} 6→${pvbBotCount(6)}`)
+if (PVB_RATIO !== 2 || pvbBotCount(1) !== 2 || pvbBotCount(2) !== 4 || pvbBotCount(7) !== 14 || pvbBotCount(8) !== PVB_BOT_MAX || pvbBotCount(0) !== 0) {
+  console.error(`✗ Bot Invasion should be 2× humans, capped at ${PVB_BOT_MAX}: 1→${pvbBotCount(1)} 2→${pvbBotCount(2)} 7→${pvbBotCount(7)} 8→${pvbBotCount(8)}`)
   process.exit(1)
 }
 const early = stepLobby(step.next, ['0xabc'], aged + 5_000)

@@ -8,7 +8,7 @@
  *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
  *      Wrong-side and excess bots retire immediately.
  *      PvB (setPopulation): every bot on the colour opposite the human
- *      team. Count = pvbBotCount(active humans), which is 3× the humans
+ *      team. Count = pvbBotCount(active humans), which is 2× the humans
  *      and never above PVB_BOT_MAX. The pool adds and removes bots whenever
  *      the human count changes, including mid-match.
  *   2. Tick every bot; apply resulting paint via the injected callback.
@@ -358,7 +358,7 @@ function balanceBots(): void {
 }
 
 /**
- * PvB pool. Wrong-team leftovers retire. The count is 3× the humans, capped,
+ * PvB pool. Wrong-team leftovers retire. The count is 2× the humans, capped,
  * and it is applied every tick: humans joining add bots, humans leaving
  * remove the farthest ones.
  */
@@ -375,7 +375,7 @@ function balancePvb(): void {
     while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  while (bots.length > wantN) retireBot(pickFarthest(bots), 'fit 3x human count', counts)
+  while (bots.length > wantN) retireBot(pickFarthest(bots), 'fit 2x human count', counts)
   while (bots.length < wantN) {
     const before = bots.length
     spawnBot(team, 'PvB fill', counts)
