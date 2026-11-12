@@ -11,11 +11,16 @@ export const BALLOON_START = 3
 
 /**
  * How the balloons follow the avatar. Flip this to compare styles.
- *  'attached' - parented with AvatarAttach (upper spine / back), zero lag, local jiggle.
+ *  'attached' - follows the avatar root (no walk-cycle bob), smoothed yaw, floaty jiggle.
  *  'trail'    - the original world-space spring follow, with lag.
  */
 export type BalloonStyle = 'attached' | 'trail'
 export const BALLOON_STYLE: BalloonStyle = 'attached'
+
+/** Visible balloon rigs exist only during a live Balloon Battle match, not in summary or the lobby. */
+export function balloonsLive(phase: string, format: string): boolean {
+  return format === 'balloon' && phase === 'match'
+}
 
 export type BalloonCounts = Record<string, number>
 

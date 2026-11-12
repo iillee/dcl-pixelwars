@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import {
   BALLOON_START, balloonOf, balloonTimeout, dropParticipant, lastStanding,
-  livingIds, paintAllowed, popBalloon, startingBalloons,
+  balloonsLive, livingIds, paintAllowed, popBalloon, startingBalloons,
 } from '../src/shared/balloon'
 
 function fail(msg: string): never {
@@ -96,6 +96,29 @@ if (!server.includes('popBalloon') && !server.includes('lastStanding') && !serve
 const paintSrc = readFileSync(new URL('../src/paint.ts', import.meta.url), 'utf8')
 if (!paintSrc.includes('paintAllowed') && !paintSrc.includes("format === 'balloon'")) {
   fail('the client must not apply or send paint during Balloon Battle')
+}
+
+
+if (balloonsLive('match', 'balloon') !== true) fail('balloons should be up during a Balloon Battle match')
+if (balloonsLive('summary', 'balloon') !== false) fail('balloons must come down when the match goes to summary')
+if (balloonsLive('lobby', 'balloon') !== false) fail('balloons must come down in the lobby')
+if (balloonsLive('idle', 'balloon') !== false) fail('balloons must come down while the lobby is idle')
+if (balloonsLive('match', 'pvp') !== false || balloonsLive('match', 'pvb') !== false || balloonsLive('match', 'prototype') !== false) {
+  fail('other modes must not spawn Balloon Battle rigs')
+}
+
+const client = readFileSync(new URL('../src/client/balloons.ts', import.meta.url), 'utf8')
+if (!client.includes('balloonsLive') || !client.includes('teardownBalloons')) {
+  fail('the client must use balloonsLive and teardownBalloons to drop rigs when the match ends')
+}
+if (!client.includes("events.on('round:ended'") || !client.includes("events.on('round:reset'")) {
+  fail('the client must tear down balloon rigs on round end and reset')
+}
+if (!client.includes("events.on('team:roster'") || !client.includes('dropLeavers')) {
+  fail('the client must remove a balloon rig when a player leaves')
+}
+if (client.includes('AAPT_SPINE') || client.includes('ANCHOR_SPINE')) {
+  fail('attached balloons must not follow an animated spine bone')
 }
 
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')
