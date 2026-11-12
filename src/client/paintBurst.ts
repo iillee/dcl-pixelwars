@@ -50,6 +50,7 @@ import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
 import { paintEconomyOn, paintTank } from '../paint'
+import { isBalloonRound } from '../round'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
@@ -78,7 +79,7 @@ const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
 const WHITE = { r: 1, g: 1, b: 1 }
 const localDry = () => paintEconomyOn() && paintTank() <= 0
-const vfxTeam = (t: Team, dry: boolean) => (inLobby() || dry ? Team.None : t)
+const vfxTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
 const rgbOf = (t: Team) => TEAM_RGB[t] ?? WHITE
 function glow(ent: Entity, rgb: { r: number; g: number; b: number }, a: number, intensity: number): void {
   Material.setPbrMaterial(ent, {
@@ -100,7 +101,7 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
 function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   const rgb = rgbOf(team)
-  startRipple(p, inLobby() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
+  startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4

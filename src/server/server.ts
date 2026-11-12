@@ -18,7 +18,7 @@ import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanC
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
-import { botCount, botDepotFeet, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
+import { balloonBotIds, benchBot, botCount, botDepotFeet, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -49,6 +49,7 @@ import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
 import { LOBBY_MODES, LOBBY_VOTE_MS, modeById, pickWinner, type ModeId } from '../shared/lobby'
+import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
 import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
@@ -129,6 +130,7 @@ export async function setupServer(): Promise<void> {
     onFell: (id, at, base) => {
       const who = `bot:${id}`
       const by = noteFell(who)
+      onBalloonFall(who)
       room.send('rescueStart', { who, x: at.x, y: at.y, z: at.z, bx: base.x, by: base.y, bz: base.z, mobile: 1, ...RESCUE_TIMES })
       console.log(`[Server] ghost ${id} fell${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
     },
@@ -255,6 +257,7 @@ export async function setupServer(): Promise<void> {
   }
   /** Nearest flips first. Returns how many cells changed team. `notify` echoes the tank to a human. */
   const paintCells = (painter: string, team: number, ids: string[], origin: string | null, notify: boolean): number => {
+    if (!paintAllowed(roundFormat)) return 0
     if (!economyOn()) {
       let gained = 0
       for (const id of ids) if (applyPaint(id, team, painter)) gained++
@@ -305,6 +308,7 @@ export async function setupServer(): Promise<void> {
       mine: to ? countedMode(to, now) : '',
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
+    if (balloonOn() && isRoundActive()) sendBalloonState(to)
   }
 
   // Presence for round-on-join: last presencePing per player (clients ping every 5 s). More reliable than
@@ -359,6 +363,7 @@ export async function setupServer(): Promise<void> {
     hadVotes = false
     emptySince = 0
     setRoundState(currentRoundIndex(), Date.now(), false)
+    freezeBots(false)
     sleepBots()
     clearDepots()
     anvilsAwake(false)
@@ -400,6 +405,71 @@ export async function setupServer(): Promise<void> {
     startNextRound(winner)
   }
 
+  let balloons: BalloonCounts = {}
+  let balloonStarted = 0
+  let balloonVictor = ''
+  let balloonVictorName = ''
+  let balloonResolved = false
+  const balloonOn = () => roundFormat === 'balloon'
+  const balloonName = (id: string) => {
+    if (id.startsWith('bot:')) return `BOT ${id.slice(4)}`
+    return leaderboardGetName(id) ?? (id.length > 10 ? `${id.slice(0, 6)}.${id.slice(-4)}` : id)
+  }
+  const sendBalloonState = (to?: string) => {
+    if (!balloonOn()) return
+    const entries = Object.keys(balloons).map(id => ({ id, n: balloons[id] ?? 0 }))
+    if (to) room.send('balloonState', { entries }, { to: [to] })
+    else room.send('balloonState', { entries })
+  }
+  const seedBalloons = () => {
+    balloons = {}
+    balloonStarted = 0
+    balloonVictor = ''
+    balloonVictorName = ''
+    balloonResolved = false
+    if (!balloonOn()) { freezeBots(false); return }
+    const ids: string[] = rosterEntries().map(e => e.userId)
+    for (const id of balloonBotIds()) ids.push(`bot:${id}`)
+    balloons = startingBalloons(ids)
+    balloonStarted = Object.keys(balloons).length
+    freezeBots(true)
+    sendBalloonState()
+  }
+  const pickBalloonEnd = (verdict: ReturnType<typeof lastStanding>, why: string): boolean => {
+    if (!balloonOn() || balloonResolved || verdict.kind === 'continue') return false
+    balloonResolved = true
+    if (verdict.kind === 'winner') {
+      balloonVictor = verdict.id
+      balloonVictorName = balloonName(verdict.id)
+    } else {
+      balloonVictor = ''
+      balloonVictorName = ''
+    }
+    console.log(`[Balloon] ${why} -> ${verdict.kind} ${balloonVictorName || 'tie'}`)
+    return true
+  }
+  const forceBalloonEnd = (verdict: ReturnType<typeof lastStanding>, why: string) => {
+    if (pickBalloonEnd(verdict, why)) setRoundState(currentRoundIndex(), Date.now(), true)
+  }
+  const onBalloonFall = (id: string) => {
+    if (!balloonOn() || !isRoundActive() || balloonResolved) return
+    const result = popBalloon(balloons, id)
+    if (!result.popped) return
+    balloons = result.counts
+    const key = id.toLowerCase()
+    room.send('balloonPop', { id: key, n: result.after })
+    if (result.eliminated && key.startsWith('bot:')) benchBot(Number(key.slice(4)))
+    forceBalloonEnd(lastStanding(balloons, balloonStarted), 'pop')
+  }
+  const onBalloonLeave = (id: string) => {
+    if (!balloonOn() || !isRoundActive() || balloonResolved) return
+    const next = dropParticipant(balloons, id)
+    if (next === balloons) return
+    balloons = next
+    sendBalloonState()
+    forceBalloonEnd(lastStanding(balloons, balloonStarted), 'leave')
+  }
+
   /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
   function startNextRound(mode: ModeId): void {
     roundFormat = mode === 'pvb' ? 'pvb' : mode === 'prototype' ? 'prototype' : mode === 'balloon' ? 'balloon' : 'pvp'
@@ -436,6 +506,8 @@ export async function setupServer(): Promise<void> {
     walletGate.reset()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
+    if (balloonOn()) { freezeBots(false); tickBots(0) }
+    seedBalloons()
     seedDepots(economyOn())
     anvilsMazeChanged()
     void saveLeaderboard()
@@ -494,6 +566,7 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] rescueEnd ${left.slice(0, 10)} (left)`)
     }
     broadcastRoster('leave')
+    onBalloonLeave(userId)
     console.log(`[Server] onLeaveScene ${userId} → marked inactive (active now ${activeHumanCount()})`)
   })
 
@@ -527,6 +600,14 @@ export async function setupServer(): Promise<void> {
     }
     markActive(from) // count them as present immediately; paint activity will refresh it
     lastPingAt.set(from, Date.now())
+    if (isRoundActive() && balloonOn()) {
+      const id = from.toLowerCase()
+      if (balloons[id] === undefined) {
+        balloons = { ...balloons, [id]: BALLOON_START }
+        balloonStarted = Math.max(balloonStarted, Object.keys(balloons).length)
+        sendBalloonState()
+      } else sendBalloonState(from)
+    }
     if (isRoundActive()) {
       sendRoundClock(from)
     } else if (lobbyOpen) {
@@ -1005,6 +1086,7 @@ export async function setupServer(): Promise<void> {
     const from = context?.from
     if (!from || !matchLive() || getTeam(from) === null) return
     const by = noteFell(from)
+    onBalloonFall(from)
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
   // Relay the rider's cloud so every other client can show it. who is the
@@ -1283,7 +1365,15 @@ export async function setupServer(): Promise<void> {
     setRoundState(lastRoundIndex, now, false)
     pendingNextIdx = idx
     pendingFinal = { red: c.red, blue: c.blue, total: c.total }
-    room.send('roundEnded', { finalRed: c.red, finalBlue: c.blue, finalTotal: c.total })
+    if (balloonOn() && !balloonResolved) pickBalloonEnd(balloonTimeout(balloons), 'clock')
+    room.send('roundEnded', {
+      finalRed: balloonOn() ? 0 : c.red,
+      finalBlue: balloonOn() ? 0 : c.blue,
+      finalTotal: balloonOn() ? 0 : c.total,
+      kind: balloonOn() ? 'balloon' : 'paint',
+      victor: balloonOn() ? balloonVictor : '',
+      victorName: balloonOn() ? balloonVictorName : '',
+    })
     clearPaintState()
     void saveLeaderboard()
     publishLeaderboard()

@@ -135,8 +135,15 @@ function wireInbound(): void {
     })
   })
 
-  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal }) => {
-    events.emit('round:ended', { finalRed, finalBlue, finalTotal })
+  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal, kind, victor, victorName }) => {
+    events.emit('round:ended', { finalRed, finalBlue, finalTotal, kind: kind === 'balloon' ? 'balloon' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
+  })
+
+  room.onMessage('balloonState', ({ entries }) => {
+    events.emit('balloon:state', { entries: entries ?? [] })
+  })
+  room.onMessage('balloonPop', ({ id, n }) => {
+    events.emit('balloon:pop', { id, n })
   })
 
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {

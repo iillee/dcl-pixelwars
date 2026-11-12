@@ -68,6 +68,9 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
+    kind: 'paint' | 'balloon'
+    victor: string
+    victorName: string
   }
 
   // Round clock (join + periodic resync). format is the live round; inactive clocks do not open the splash.
@@ -94,6 +97,9 @@ export type Events = {
 
   // The lobby cross is in the world at full size. Teleport onto it before teardown.
   'lobby:floor': { ready: boolean }
+
+  'balloon:state': { entries: Array<{ id: string; n: number }> }
+  'balloon:pop': { id: string; n: number }
 
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).

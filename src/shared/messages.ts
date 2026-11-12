@@ -118,6 +118,9 @@ export const Messages = {
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
     finalTotal: Schemas.Int,
+    kind: Schemas.String,
+    victor: Schemas.String,
+    victorName: Schemas.String,
   }),
 
   // format: 'pvp' | 'pvb' for the round that is starting (the splash banner).
@@ -253,6 +256,9 @@ export const Messages = {
   // Client → Server (round stats): anvil i launched me / I fell off and respawned.
   anvilLaunched: Schemas.Map({ i: Schemas.Int }),
   playerFell: Schemas.Map({}),
+  // Server -> Clients: Balloon Battle counts (full book) and one pop.
+  balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),
+  balloonPop: Schemas.Map({ id: Schemas.String, n: Schemas.Int }),
   // Fall rescue cloud for everyone else. The rider sends rescueStart at the
   // catch (who is ignored; the server stamps the authenticated id). mobile 1
   // means observers fly the cloud along catch → base; 0 means they follow the

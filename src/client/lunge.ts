@@ -37,6 +37,7 @@ import {
 } from '@dcl/sdk/ecs'
 import { triggerEmote } from '~system/RestrictedActions'
 import { isPlayerGrounded, paintEconomyOn, paintTank } from '../paint'
+import { isBalloonRound } from '../round'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -110,7 +111,7 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
   fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const WHITE = { r: 1, g: 1, b: 1 }
-const shownTeam = (t: Team, dry: boolean) => (inLobby() || dry ? Team.None : t)
+const shownTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? WHITE
 const localDry = () => paintEconomyOn() && paintTank() <= 0
 const GREY = { r: 0.55, g: 0.55, b: 0.55 }

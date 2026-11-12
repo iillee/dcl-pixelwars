@@ -153,6 +153,10 @@ type MobileRide = { legs: Leg[]; index: number; legAt: number; beganAt: number; 
 export type FallRescueEnd = 'snap' | 'carry'
 
 /** True while a mobile ride owns the ending. Read from the arrival callback, before it is cleared. */
+export function isFallRescueActive(): boolean {
+  return phase !== 'idle'
+}
+
 export function fallRescueCameraRide(): boolean {
   return cameraRide
 }

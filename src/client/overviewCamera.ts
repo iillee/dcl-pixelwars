@@ -252,6 +252,12 @@ function useZoomTable(mobile: boolean, snapDefault: boolean): void {
 
 // MARK: API
 /** Flip between overview and the normal player camera. */
+export function enterOverview(): void {
+  if (camEntity === null || active) return
+  setActive(true)
+  mobileWant = true
+}
+
 export function toggleOverview(): void {
   if (camEntity === null) return
   setActive(!active)

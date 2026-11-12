@@ -74,7 +74,9 @@ interface BannerState {
   visible: boolean
   redPct: number
   bluePct: number
-  winner: 'RED' | 'BLUE' | 'TIE'
+  winner: 'RED' | 'BLUE' | 'TIE' | 'PLAYER'
+  victorName: string
+  kind: 'paint' | 'balloon'
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
@@ -90,6 +92,8 @@ const banner: BannerState = {
   redPct: 0,
   bluePct: 0,
   winner: 'TIE',
+  victorName: '',
+  kind: 'paint',
   shownAtMs: 0,
   personal: '',
   total: 0,
@@ -122,6 +126,8 @@ export function showRoundEndBanner(red: number, blue: number, total: number): vo
   banner.redPct = redPct
   banner.bluePct = bluePct
   banner.winner = redPct > bluePct ? 'RED' : bluePct > redPct ? 'BLUE' : 'TIE'
+  banner.victorName = ''
+  banner.kind = 'paint'
   banner.shownAtMs = Date.now()
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
@@ -158,13 +164,14 @@ export function initRoundNet(): void {
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
   // Scores arrive on round:ended. The banner keeps its own timer. The lobby
   // roundReset that follows swaps the floor and does not dismiss this screen.
-  events.on('round:ended', ({ finalRed, finalBlue, finalTotal }) => {
+  events.on('round:ended', ({ finalRed, finalBlue, finalTotal, kind, victorName }) => {
     const localTotal = coverage().total
     console.log(
       `[Client] roundEnded final red=${finalRed} blue=${finalBlue} ` +
       `serverTotal=${finalTotal} localTotal=${localTotal}`
     )
-    showRoundEndBanner(finalRed, finalBlue, localTotal)
+    if (kind === 'balloon') showBalloonBanner(victorName || 'SOMEONE')
+    else showRoundEndBanner(finalRed, finalBlue, localTotal)
   })
   events.on('round:clock', ({ idx, active, format }) => {
     // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
@@ -202,6 +209,24 @@ export function nextRoundBlurb(): string {
   if (inLobby() || currentFormat === 'prototype' || currentFormat === 'balloon') return 'Vote with your feet'
   if (!FORMAT_ALTERNATE) return `Next round: ${modeTitle('pvp')}`
   return `Next round: ${modeTitle(currentFormat === 'pvb' ? 'pvp' : 'pvb')}`
+}
+
+export function showBalloonBanner(name: string): void {
+  banner.visible = true
+  banner.redPct = 0
+  banner.bluePct = 0
+  banner.winner = name ? 'PLAYER' : 'TIE'
+  banner.victorName = name
+  banner.kind = 'balloon'
+  banner.shownAtMs = Date.now()
+  banner.personal = ''
+  banner.myCells = 0
+  banner.total = 0
+  banner.owners = []
+}
+
+export function isBalloonRound(): boolean {
+  return currentFormat === 'balloon' && !inLobby()
 }
 
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {

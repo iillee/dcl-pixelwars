@@ -11,6 +11,7 @@ import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
 import { isMoveLocked } from './client/moveLock'
 import { BURST_STANCE_SLACK } from './shared/pvp'
+import { paintAllowed } from './shared/balloon'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
 import { BASE_PAINT_LOCK } from './maze/level'
 
@@ -58,6 +59,7 @@ export function initPaintNet(): void {
     clearAllPaintState()
     setServerCoverage({ red: 0, blue: 0, total: 0 })
     setPaintEconomy(layout !== 'lobby' && format === 'prototype')
+    setPaintWorld(layout !== 'lobby' && paintAllowed(format))
     paintLeft = PAINT_CAPACITY
     paintFrac = 0
     paintUndo.clear()
@@ -65,6 +67,7 @@ export function initPaintNet(): void {
 
   events.on('round:clock', ({ format, active }) => {
     setPaintEconomy(active && format === 'prototype')
+    setPaintWorld(active && paintAllowed(format))
   })
 }
 
@@ -356,6 +359,9 @@ let paintRefill = false
 const paintUndo = new Map<string, Team>()
 
 export function paintEconomyOn(): boolean { return paintEconomy }
+let paintWorld = true
+function setPaintWorld(on: boolean): void { paintWorld = on }
+export function paintWorldOn(): boolean { return paintWorld }
 export function paintTank(): number { return paintLeft }
 export function paintRefilling(): boolean { return paintRefill }
 
@@ -418,6 +424,7 @@ export function drainPaintOutbox(): string[] {
  * and just enqueue — server will drop it anyway (pre-roster), no harm.
  */
 export function noteLocalPaintCandidate(id: string): void {
+  if (!paintWorld) return
   if (lockedTeam(id) !== Team.None) return
   if (paintEconomy && localTeam !== Team.None) {
     const prev = cellTeam.get(id) ?? Team.None
@@ -469,6 +476,7 @@ export function painterTeam(): Team {
  * visible material. Does NOT add to the outbox — would infinite-loop.
  */
 export function applyRemotePaint(id: string, team: Team): void {
+  if (!paintWorld && team !== Team.None) return
   if (lockedTeam(id) !== Team.None) return
   if (cellTeam.get(id) === team) return
   cellTeam.set(id, team)

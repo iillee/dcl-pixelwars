@@ -64,7 +64,7 @@ type Combat = {
   dive: { id: number; hit: boolean; fx: number; fz: number } | null
 }
 type Gait = { heading: number; walking: boolean; sepX: number; sepZ: number; aim: string | null }
-type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait }
+type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait; out: boolean }
 const newGait = (): Gait => ({ heading: 0, walking: false, sepX: 0, sepZ: 0, aim: null })
 const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null, chaseHuman: null,
@@ -317,6 +317,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   bot.body = new BotBody(spot.pos, mulberry32(botId * 0xc2b2ae35))
   bot.combat = newCombat()
   bot.gait = newGait()
+  bot.out = false
   bots.push(bot)
   deps.onSpawn?.(bot.botId, team)
   const w = personality.weights
@@ -394,6 +395,14 @@ let simClock = 0
 export function botSimTime(): number { return simClock }
 
 /** Drop every bot. The lobby does not run the match, so ghosts must leave before the next broadcast. */
+let populationFrozen = false
+export function freezeBots(on: boolean): void { populationFrozen = on }
+export function benchBot(id: number): void {
+  const b = bots.find(x => x.botId === id)
+  if (b) b.out = true
+}
+export function balloonBotIds(): number[] { return bots.map(b => b.botId) }
+
 export function sleepBots(): void {
   const counts = deps ? deps.activeHumans() : { red: 0, blue: 0 }
   while (bots.length > 0) retireBot(bots[0], 'lobby', counts)
@@ -407,7 +416,7 @@ export function tickBots(dtSec: number): void {
   // Immediate: a human joining or waking drops the excess this tick, not at
   // the round boundary. Bot.team is fixed per instance (target is bound to it),
   // so a side flip retires the old bots and spawns on the new base.
-  balanceBots()
+  if (!populationFrozen) balanceBots()
 
   // Walking ghost whose cell no longer exists (e.g. the tile under it went
   // away): back to its own base.
@@ -453,6 +462,7 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} home`)
       }
     }
+    if (b.out) { b.gait.walking = false; continue }
     fillSense(b)
     fight(b, dtSec)
     if (!b.body.canWalk()) { b.gait.walking = false; continue }
