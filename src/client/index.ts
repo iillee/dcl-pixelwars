@@ -39,6 +39,7 @@ import { initSpeedBonus } from './speed'
 // Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
 import { initPaintBurst } from './paintBurst'
+import { initDepots } from './depots'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
@@ -46,6 +47,7 @@ import { ensureMazeSeed, initMazeNet, isLobbyLayout, rebuildMaze, setHoldMazeSee
 import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
+import { initBalloons } from './balloons'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -140,7 +142,9 @@ export async function setupClient(): Promise<void> {
   initLunge()
   initLungeDummy()
   initPaintBurst()
+  initDepots()
   initLobby()
+  initBalloons()
   // Cross exists before the first frame the player can fall. The server
   // also starts in the lobby and sends roundReset; this is the local floor
   // so join does not wait on that message. A match clock replaces it.

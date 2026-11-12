@@ -31,6 +31,7 @@ import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { clearTeleportOrbs, spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
+import { LOBBY_MODES } from '../shared/lobby'
 import { SeedHolder, seedHolder } from '../shared/components'
 
 // ─── Pipeline state ─────────────────────────────────────────────────
@@ -70,8 +71,8 @@ export function isLobbyLayout(): boolean {
 // ─── Rebuild entry point ────────────────────────────────────────────
 export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'call'): void {
   const nextLobby = layout === 'lobby'
-  if (nextLobby && layoutKind === 'lobby' && spawnQueue.length === 0 && gridSize() === 3) {
-    console.log(`[Lobby] rebuild skipped (${why}) — 3-tile floor already up`)
+  if (nextLobby && layoutKind === 'lobby' && spawnQueue.length === 0 && gridSize() === 5) {
+    console.log(`[Lobby] rebuild skipped (${why}) — 5-tile floor already up`)
     return
   }
   console.log(`[Lobby] rebuild ${layout} (${why})`)
@@ -80,16 +81,18 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   const dropLatched = nextLobby || layoutKind === 'lobby'
   const previous = spawnedEntities.slice()
 
-  let crossEnt: Entity | null = null
+  const early: Entity[] = []
   if (nextLobby) {
     layoutKind = 'lobby'
     placeLobbyLayout()
-    const cross = getPlacedTilesInOrder().find(p => p.type !== 'end')
-    if (cross) {
-      // Full-size floor first, then the teleport, then the old tiles go away.
-      crossEnt = spawnTile(cross, true)
-      events.emit('lobby:floor', { ready: true })
-    }
+    const earlyEnd = (x: number, z: number) => LOBBY_MODES.some(m =>
+      m.placed && (m.id === 'prototype' || m.id === 'balloon') && m.cell.x === x && m.cell.z === z)
+    // Cross, Prototype north, and Balloon Battle south are full size before
+    // anyone is moved onto them. Team Fight and Bot Fight ends still grow in.
+    const solid = getPlacedTilesInOrder().filter(p =>
+      p.type !== 'end' || earlyEnd(p.x, p.z))
+    for (const p of solid) early.push(spawnTile(p, true))
+    if (early.length) events.emit('lobby:floor', { ready: true })
   }
 
   for (const e of previous) {
@@ -101,14 +104,17 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     persistentSet.clear()
   }
   spawnedEntities.length = 0
-  if (crossEnt) spawnedEntities.push(crossEnt)
+  for (const e of early) spawnedEntities.push(e)
   if (!dropLatched) for (const e of persistentSet) spawnedEntities.push(e)
   spawnQueue = []
   spawnClock = 0
 
   if (nextLobby) {
     currentSeed = seed
-    const arms = getPlacedTilesInOrder().filter(p => p.type !== 'cross')
+    const earlyEnd = (x: number, z: number) => LOBBY_MODES.some(m =>
+      m.placed && (m.id === 'prototype' || m.id === 'balloon') && m.cell.x === x && m.cell.z === z)
+    const arms = getPlacedTilesInOrder().filter(p =>
+      p.type === 'end' && !earlyEnd(p.x, p.z))
     spawnQueue = arms.map((p, i) => ({ p, delay: i * STAGGER }))
     clearTeleportOrbs()
     console.log(`Lobby laid, ${gridSize()} tiles`)

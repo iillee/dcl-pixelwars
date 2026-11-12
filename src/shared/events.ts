@@ -50,6 +50,9 @@ export type Events = {
     total: number
   }
 
+  // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
+  'paint:wallet': { tank: number; denied: string[] }
+
   // One-shot response to requestSnapshot: full paint map at time of send.
   // Same shape family as paint:delta, but semantically "authoritative
   // full state" rather than "changes since last tick".
@@ -65,13 +68,16 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
+    kind: 'paint' | 'balloon'
+    victor: string
+    victorName: string
   }
 
   // Round clock (join + periodic resync). format is the live round; inactive clocks do not open the splash.
   'round:clock': {
     idx: number
     active: boolean
-    format: 'pvp' | 'pvb'
+    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
     phase: 'match' | 'summary' | 'lobby' | 'idle'
     voteMs: number
     winner: string
@@ -85,12 +91,15 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
-    format: 'pvp' | 'pvb'
+    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
     layout?: 'arena' | 'lobby'
   }
 
   // The lobby cross is in the world at full size. Teleport onto it before teardown.
   'lobby:floor': { ready: boolean }
+
+  'balloon:state': { entries: Array<{ id: string; n: number }> }
+  'balloon:pop': { id: string; n: number }
 
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
@@ -106,11 +115,11 @@ export type Events = {
   'dash:impact': { attacker: string; target: string; dx: number; dz: number }
 
   // Broadcast: a lunge started / an accepted lunge hit. Subscriber: client/lunge.
-  'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number }
+  'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number; dry: number }
   'lunge:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
 
   // Paint Burst. Subscriber: client/paintBurst.
-  'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number; air: number; lx: number; ly: number; lz: number }
+  'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number; air: number; lx: number; ly: number; lz: number; dry: number }
   'burst:impact': { attacker: string; id: number; target: string; dx: number; dz: number; air: number }
   // Attacker only: the server applied this burst's footprint. Subscriber: client/paintBurst.
   'burst:painted': { id: number; n: number }

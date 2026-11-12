@@ -8,9 +8,9 @@
  *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
  *      Wrong-side and excess bots retire immediately.
  *      PvB (setPopulation): every bot on the colour opposite the human
- *      team. Count = pvbBotCount(active humans). At a round boundary the
- *      pool is trimmed to that count. Mid-round it may grow when humans
- *      join, and it retires only when no humans are left.
+ *      team. Count = pvbBotCount(active humans), which is 2× the humans
+ *      and never above PVB_BOT_MAX. The pool adds and removes bots whenever
+ *      the human count changes, including mid-match.
  *   2. Tick every bot; apply resulting paint via the injected callback.
  *
  * Spawning: each bot starts on its own team's base, spread across the
@@ -41,6 +41,8 @@ import {
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { orderNearest } from '../../shared/territory'
+import { BOT_REFILL_FRAC, PAINT_CAPACITY } from '../../shared/territory'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -62,7 +64,7 @@ type Combat = {
   dive: { id: number; hit: boolean; fx: number; fz: number } | null
 }
 type Gait = { heading: number; walking: boolean; sepX: number; sepZ: number; aim: string | null }
-type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait }
+type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait; out: boolean }
 const newGait = (): Gait => ({ heading: 0, walking: false, sepX: 0, sepZ: 0, aim: null })
 const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null, chaseHuman: null,
@@ -93,6 +95,10 @@ export interface ManagerDeps {
   onBotHit?: (id: number, human: string) => void
   /** A bot just entered the round (live scoreboard row). */
   onSpawn?: (id: number, team: number) => void
+  /** Prototype only. Absent in Team Fight and Bot Fight. */
+  economyOn?: () => boolean
+  economyTank?: (painter: string) => number
+  friendlyDepot?: (team: number, fromCell: string) => string | null
 }
 
 let deps: ManagerDeps | null = null
@@ -105,15 +111,12 @@ let botIdCounter = 0
 /** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
 export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
 let population: BotPopulation = { kind: 'pvp' }
-let populationGen = 0
-let appliedGen = -1
 /** Base cells per team, deep cells first, refreshed with the graph. */
 const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
 
 export function initBots(d: ManagerDeps): void {
   deps = d
   population = { kind: 'pvp' }
-  populationGen++
   console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
 }
 
@@ -122,7 +125,6 @@ export function setPopulation(mode: BotPopulation): void {
   population = mode.kind === 'pvb' && (mode.humanTeam === 1 || mode.humanTeam === 2)
     ? { kind: 'pvb', humanTeam: mode.humanTeam }
     : { kind: 'pvp' }
-  populationGen++
 }
 
 /**
@@ -315,6 +317,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   bot.body = new BotBody(spot.pos, mulberry32(botId * 0xc2b2ae35))
   bot.combat = newCombat()
   bot.gait = newGait()
+  bot.out = false
   bots.push(bot)
   deps.onSpawn?.(bot.botId, team)
   const w = personality.weights
@@ -333,10 +336,8 @@ function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: numb
 /** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
 function balanceBots(): void {
   if (!graph || !deps) return
-  const fresh = appliedGen !== populationGen
-  appliedGen = populationGen
   if (population.kind === 'pvb') {
-    balancePvb(fresh)
+    balancePvb()
     return
   }
   const counts = deps.activeHumans()
@@ -358,12 +359,11 @@ function balanceBots(): void {
 }
 
 /**
- * PvB pool. Wrong-team leftovers (the previous format) retire. On the tick
- * that applies a new population, trim down to the round-start count. After
- * that, only add bots — a human leaving does not retire anyone, unless the
- * human count hits zero.
+ * PvB pool. Wrong-team leftovers retire. The count is 2× the humans, capped,
+ * and it is applied every tick: humans joining add bots, humans leaving
+ * remove the farthest ones.
  */
-function balancePvb(fresh: boolean): void {
+function balancePvb(): void {
   if (!deps) return
   const counts = deps.activeHumans()
   const humans = counts.red + counts.blue
@@ -376,9 +376,7 @@ function balancePvb(fresh: boolean): void {
     while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  if (fresh) {
-    while (bots.length > wantN) retireBot(pickFarthest(bots), 'round start, fit PvB count', counts)
-  }
+  while (bots.length > wantN) retireBot(pickFarthest(bots), 'fit 2x human count', counts)
   while (bots.length < wantN) {
     const before = bots.length
     spawnBot(team, 'PvB fill', counts)
@@ -397,6 +395,14 @@ let simClock = 0
 export function botSimTime(): number { return simClock }
 
 /** Drop every bot. The lobby does not run the match, so ghosts must leave before the next broadcast. */
+let populationFrozen = false
+export function freezeBots(on: boolean): void { populationFrozen = on }
+export function benchBot(id: number): void {
+  const b = bots.find(x => x.botId === id)
+  if (b) b.out = true
+}
+export function balloonBotIds(): number[] { return bots.map(b => b.botId) }
+
 export function sleepBots(): void {
   const counts = deps ? deps.activeHumans() : { red: 0, blue: 0 }
   while (bots.length > 0) retireBot(bots[0], 'lobby', counts)
@@ -410,7 +416,7 @@ export function tickBots(dtSec: number): void {
   // Immediate: a human joining or waking drops the excess this tick, not at
   // the round boundary. Bot.team is fixed per instance (target is bound to it),
   // so a side flip retires the old bots and spawns on the new base.
-  balanceBots()
+  if (!populationFrozen) balanceBots()
 
   // Walking ghost whose cell no longer exists (e.g. the tile under it went
   // away): back to its own base.
@@ -456,6 +462,7 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} home`)
       }
     }
+    if (b.out) { b.gait.walking = false; continue }
     fillSense(b)
     fight(b, dtSec)
     if (!b.body.canWalk()) { b.gait.walking = false; continue }
@@ -495,12 +502,14 @@ export function tickBots(dtSec: number): void {
       const [colStr, rowStr] = stepId.slice(colonIdx + 1).split(',')
       const col = parseInt(colStr, 10)
       const row = parseInt(rowStr, 10)
+      const stamp: string[] = []
       for (let dc = -1; dc <= 1; dc++) {
         for (let dr = -1; dr <= 1; dr++) {
           const nid = `${prefix}${col + dc},${row + dr}`
-          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
+          if (graph.nodes.has(nid)) stamp.push(nid)
         }
       }
+      for (const nid of orderNearest(stamp, stepId)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
   }
 }
@@ -603,6 +612,13 @@ function fight(b: LiveBot, dt: number): void {
     return
   }
   if (!b.body.canWalk()) { trySpike(b, humans); return }
+  if (deps?.economyOn?.() && deps.economyTank && deps.friendlyDepot) {
+    const tank = deps.economyTank(`bot:${b.botId}`)
+    if (tank < PAINT_CAPACITY * BOT_REFILL_FRAC) {
+      const cell = deps.friendlyDepot(b.team, b.currentCell)
+      if (cell) { b.stay(cell); return }
+    }
+  }
   if (c.think > 0 || !graph) return
   c.think = BOT_THINK_S
   const p = b.body.pos
@@ -716,6 +732,15 @@ export function getBotProfiles(): Array<{
     goal: b.goalOf(),
     chaseHuman: b.combat.chaseHuman,
   }))
+}
+
+export function botDepotFeet(): Array<{ id: string; team: number; cell: string }> {
+  const out: Array<{ id: string; team: number; cell: string }> = []
+  for (const b of bots) {
+    if (!b.body.canWalk()) continue
+    out.push({ id: `bot:${b.botId}`, team: b.team, cell: b.currentCell })
+  }
+  return out
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {

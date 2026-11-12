@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, lobbyFeet, modeSubtitle, modeTitle, placedModes, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -24,36 +24,41 @@ let lastFeet = { x: NaN, y: NaN, z: NaN }
 
 const spawned: Entity[] = []
 const signRoots: Entity[] = []
-const boards: { count: Entity; secs: Entity }[] = []
+/** Resting height of each sign root; the bob rides on top of it. */
+const signBaseY: number[] = []
+/** Gentle idle bob: metres up/down at full size, and seconds per cycle. */
+const SIGN_BOB_M = 0.35
+const SIGN_BOB_PERIOD_S = 3.2
+const boards: { count: Entity }[] = []
 /** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities. */
 const TITLE_FONT = 45
 const SUB_FONT = 14
 const COUNT_FONT = 22
-const SECS_FONT = 16
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
 let confirmEnt: Entity = 0 as Entity
 let pulsed: ModeId | '' = ''
-let pulse = 0
 const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-const SIGN_COPY: Record<'pvp' | 'pvb', { plate: Rgb; ink: Rgb }> = {
-  pvp: { plate: { r: 0.96, g: 0.24, b: 0.16 }, ink: { r: 0.45, g: 0.08, b: 0.05 } },
-  pvb: { plate: { r: 0.08, g: 0.62, b: 0.78 }, ink: { r: 0.02, g: 0.2, b: 0.32 } },
+const SIGN_COPY: Record<'pvp' | 'pvb' | 'prototype' | 'balloon', { plate: Rgb; ink: Rgb }> = {
+  pvp: { plate: { r: 1, g: 0.459, b: 0.467 }, ink: { r: 0.45, g: 0.12, b: 0.13 } },
+  pvb: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
+  prototype: { plate: { r: 1, g: 0.796, b: 0.42 }, ink: { r: 0.42, g: 0.27, b: 0.06 } },
+  balloon: { plate: { r: 0.435, g: 0.816, b: 0.549 }, ink: { r: 0.08, g: 0.32, b: 0.16 } },
 }
 
 function clearSigns(): void {
   for (const e of spawned) engine.removeEntity(e)
   spawned.length = 0
   signRoots.length = 0
+  signBaseY.length = 0
   boards.length = 0
   tints.length = 0
   tintSize.length = 0
   pulsed = ''
-  pulse = 0
 }
 
 function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Identity()): Entity {
@@ -94,7 +99,7 @@ function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, 
 function laySigns(): void {
   clearSigns()
   for (const m of placedModes()) {
-    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb']
+    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype' | 'balloon']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
     // Letters sit on local −Z, the side a yaw billboard turns toward the camera.
@@ -105,20 +110,12 @@ function laySigns(): void {
     Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
     spawned.push(root)
     signRoots.push(root)
-    applySignPose(root)
+    signBaseY.push(pose.y)
     const face = signFaceZ()
     const slab = plateMat(copy.plate)
     const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
-    const tail = add(
-      root,
-      Vector3.create(-SIGN_W_M * 0.22, -SIGN_H_M * 0.42, face * 0.3),
-      Vector3.create(2.8, 1.4, 0.5),
-      Quaternion.fromEulerDegrees(0, 0, 42),
-    )
-    MeshRenderer.setBox(tail)
-    Material.setPbrMaterial(tail, slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
       text: modeTitle(m.id),
@@ -127,7 +124,7 @@ function laySigns(): void {
       textColor: Color4.create(1, 1, 1, 1),
       outlineWidth: 0,
       textWrapping: false,
-      width: 46,
+      width: SIGN_W_M - 4,
       height: 5.2,
     })
     const sub = add(root, Vector3.create(0, -2.45, face), Vector3.One())
@@ -141,7 +138,7 @@ function laySigns(): void {
       width: 40,
       height: 2,
     })
-    const badgeY = -SIGN_H_M / 2 - 2.1
+    const badgeY = signBadgeY()
     pill(root, 6.4, 3.4, 0.45, Vector3.create(0, badgeY, face + 0.35), plateMat({ r: 0.98, g: 0.97, b: 0.94 }))
     const count = add(root, Vector3.create(0, badgeY, face), Vector3.One())
     TextShape.create(count, {
@@ -154,18 +151,7 @@ function laySigns(): void {
       width: 6,
       height: 3,
     })
-    const secs = add(root, Vector3.create(0, badgeY - 2.7, face), Vector3.One())
-    TextShape.create(secs, {
-      text: '',
-      fontSize: SECS_FONT,
-      fontSrc: 'Lilita One',
-      textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0,
-      textWrapping: false,
-      width: 8,
-      height: 2.2,
-    })
-    boards.push({ count, secs })
+    boards.push({ count })
 
     const tint = voteTintPose(m.cell, MAZE_ORIGIN, CELL)
     const pad = engine.addEntity()
@@ -175,11 +161,12 @@ function laySigns(): void {
       scale: Vector3.Zero(),
     })
     MeshRenderer.setBox(pad)
-    Material.setPbrMaterial(pad, tintMat(m.color, 0.4, 1))
+    Material.setPbrMaterial(pad, zoneMat(copy.plate, false))
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
   }
+  syncSignFacing()
 }
 
 function applySignPose(root: Entity): void {
@@ -204,7 +191,17 @@ function applySignPose(root: Entity): void {
 let loggedSignScale = Number.NaN
 
 function syncSignFacing(): void {
-  for (const root of signRoots) applySignPose(root)
+  const t = Date.now() / 1000
+  const scale = isOverviewActive() ? overviewSignScale() : 1
+  for (let i = 0; i < signRoots.length; i++) {
+    const root = signRoots[i]
+    applySignPose(root)
+    const tr = Transform.getMutableOrNull(root)
+    if (!tr) continue
+    // Each sign is offset in phase so the three do not move in lockstep.
+    const bob = Math.sin((t / SIGN_BOB_PERIOD_S) * Math.PI * 2 + i * 2.1) * SIGN_BOB_M * scale
+    tr.position = Vector3.create(tr.position.x, signBaseY[i] + bob, tr.position.z)
+  }
   const shown = isOverviewActive() ? Math.round(overviewSignScale() * 100) / 100 : 1
   if (shown === loggedSignScale) return
   loggedSignScale = shown
@@ -215,24 +212,24 @@ function syncSignFacing(): void {
 function refreshSigns(): void {
   const modes = placedModes()
   if (boards.length !== modes.length) return
-  const left = Math.max(0, Math.ceil(voteRemainingMs() / 1000))
-  const showTime = gamePhase() === 'lobby' && left > 0
   for (let i = 0; i < modes.length; i++) {
     const count = TextShape.getMutableOrNull(boards[i].count)
     if (count) count.text = String(voteCount(modes[i].id))
-    const secs = TextShape.getMutableOrNull(boards[i].secs)
-    if (secs) secs.text = showTime ? `${left}s` : ''
   }
 }
 
-function tintMat(c: { r: number; g: number; b: number }, alpha: number, glow: number) {
+/** Opaque matte slab in the pill colour. Alpha blend over the white floor was washing it out. */
+function zoneMat(c: Rgb, occupied: boolean) {
+  const lift = occupied ? 0 : 0.38
+  const mix = (v: number) => v + (1 - v) * lift
   return {
-    albedoColor: Color4.create(c.r, c.g, c.b, alpha),
-    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: glow,
-    roughness: 0.45,
+    albedoColor: Color4.create(mix(c.r), mix(c.g), mix(c.b), 1),
+    emissiveColor: Color4.create(0, 0, 0, 1),
+    emissiveIntensity: 0,
+    roughness: 1,
     metallic: 0,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
     castShadows: false,
   }
 }
@@ -247,14 +244,13 @@ function playConfirm(): void {
   })
 }
 
-/** Local tint while standing on an end. Brighter and steady once the server counts it. */
-function tickTints(dt: number, local: ModeId | ''): void {
+/** Local tint while standing on an end. A little more opaque once it counts. No glow. */
+function tickTints(_dt: number, local: ModeId | ''): void {
   const mine = myVote()
   const modes = placedModes()
   if (tints.length !== modes.length) return
-  if (mine && mine === local && mine !== pulsed) { pulsed = mine; pulse = 0.55; playConfirm() }
+  if (mine && mine === local && mine !== pulsed) { pulsed = mine; playConfirm() }
   if (!mine) pulsed = ''
-  if (pulse > 0) pulse = Math.max(0, pulse - dt)
   for (let i = 0; i < modes.length; i++) {
     const m = modes[i]
     const tr = Transform.getMutableOrNull(tints[i])
@@ -265,9 +261,8 @@ function tickTints(dt: number, local: ModeId | ''): void {
     const show = here || others
     if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    const glow = confirmed ? 2.4 + pulse * 8 : here ? 1.3 : 0.35
-    const alpha = confirmed ? 0.78 : here ? 0.42 : 0.16
-    Material.setPbrMaterial(tints[i], tintMat(m.color, alpha, glow))
+    const plate = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype' | 'balloon'].plate
+    Material.setPbrMaterial(tints[i], zoneMat(plate, here || confirmed))
   }
 }
 
@@ -326,10 +321,6 @@ export function hudLobbyDebug(): string {
   return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} pvp ${voteCount('pvp')} pvb ${voteCount('pvb')} srvZone ${wire.zone} why=${wire.why}`
 }
 
-function voteTag(): string {
-  return modeTitle(myVote())
-}
-
 export function hudClockText(matchSecs: number): string {
   const phase = gamePhase()
   if (phase === 'match') {
@@ -338,14 +329,14 @@ export function hudClockText(matchSecs: number): string {
     return `${m}:${String(s).padStart(2, '0')}`
   }
   if (phase === 'summary') return 'END'
-  const left = Math.max(0, Math.ceil(voteRemainingMs() / 1000))
-  if (phase === 'lobby' && left > 0) return `VOTE ${left}s`
+  if (phase === 'lobby' || phase === 'idle') return hudVoteHeadline(myVote() !== '')
   return 'VOTE'
 }
 
-/** Shown inside the VOTE pill once the server has counted this player. */
-export function hudYourVote(): string {
-  if (!inLobby()) return ''
-  const tag = voteTag()
-  return tag ? `Your vote: ${tag}` : ''
+/** Big seconds under the vote pill. Empty unless a vote countdown is running. */
+export function hudVoteCountdown(): string {
+  if (gamePhase() !== 'lobby') return ''
+  const left = Math.max(0, Math.ceil(voteRemainingMs() / 1000))
+  return left > 0 ? String(left) : ''
 }
+

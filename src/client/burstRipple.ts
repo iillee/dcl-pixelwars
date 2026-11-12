@@ -15,6 +15,7 @@
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
+import { isBalloonRound } from '../round'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import { inLobby } from './phase'
@@ -135,7 +136,7 @@ function cellNear(g: WalkableGraph, x: number, y: number, z: number, r: number):
  *  leads. Visual only; capped at DASH_TILE_MAX live slabs. */
 export function dashPop(who: string, p: V3, team: Team): void {
   // Team.None is the lobby (white slabs). Outside the lobby it still means "no trail".
-  if (!DASH_TILE_POP || pool.length === 0 || (team === Team.None && !inLobby())) return
+  if (!DASH_TILE_POP || pool.length === 0 || (team === Team.None && !inLobby() && !isBalloonRound())) return
   const g = ensureGraph()
   if (!g) return
   const centre = cellNear(g, p.x, p.y, p.z, CELL_M)

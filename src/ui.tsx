@@ -2,10 +2,11 @@ import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
-import { coverage } from "./paint"
-import { hudClockText, hudYourVote } from "./client/lobby"
+import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
+import { PAINT_CAPACITY } from "./shared/territory"
+import { hudClockText, hudVoteCountdown } from "./client/lobby"
 import { inLobby } from "./client/phase"
-import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb } from "./round"
+import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
@@ -333,13 +334,13 @@ function RoundSummary(p: number) {
   const rows = (b.owners as SummaryRow[]).slice().sort((x, y) => y.cells - x.cells)
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
-  const teamWord = b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
+  const teamWord = b.kind === 'balloon' ? (b.winner === 'PLAYER' ? (b.victorName || 'SOMEONE') : '') : b.winner === 'RED' ? 'RED TEAM' : b.winner === 'BLUE' ? 'BLUE TEAM' : ''
   const show = a > 0
   const titleWords = teamWord !== '' ? [teamWord, 'WINS!'] : ["IT'S A TIE"]
   const titleF = titleFontFor(titleWords, k, cv.w * 0.9)
   // Letter-spaced subtitle; on narrow phones where it would drop under the 12 px floor, the plain words.
-  const SUB_WIDE = 'F I N A L     T E R R I T O R Y     C O N T R O L'
-  const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : 'FINAL TERRITORY CONTROL'
+  const SUB_WIDE = b.kind === 'balloon' ? 'L A S T     P L A Y E R     S T A N D I N G' : 'F I N A L     T E R R I T O R Y     C O N T R O L'
+  const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : (b.kind === 'balloon' ? 'LAST PLAYER STANDING' : 'FINAL TERRITORY CONTROL')
   const subF = Math.min(fnt(SUMMARY_SUB_FONT, k), cv.w * 0.9 / textWSafe(SUB, 1))
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
@@ -359,7 +360,8 @@ function RoundSummary(p: number) {
           </UiEntity>
         )}
       </UiEntity>
-      {/* Territory pill: red left | unpainted | blue right */}
+      {/* Territory pill: red left | unpainted | blue right. Hidden for Balloon Battle. */}
+      {b.kind !== 'balloon' && (<UiEntity uiTransform={{ width: '100%', flexDirection: 'column', alignItems: 'center' }}>
       <UiEntity uiTransform={{ width: pw, height: ph, flexShrink: 0, borderRadius: ph / 2, padding: border }} uiBackground={{ color: p > 0.5 ? SUMMARY_INK : BAR_TRACK }}>
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR }} uiBackground={{ color: p > 0.5 ? SUMMARY_UNPAINTED : Color4.White() }}>
           <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: redW, height: '100%', borderRadius: { topLeft: innerR, bottomLeft: innerR, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'flex-start', }}
@@ -377,6 +379,8 @@ function RoundSummary(p: number) {
           <UiEntity uiTransform={{ width: stacked ? 1 : SUMMARY_CARD_GAP * k, height: stacked ? SUMMARY_GAP * 0.6 * k : 1 }} />
           <TeamCard team={2} rows={rows.filter(r => r.team === 2)} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} />
         </UiEntity>
+      )}
+      </UiEntity>
       )}
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
     </UiEntity>
@@ -435,11 +439,46 @@ function bannerHeadline(): string {
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
 }
 
+/** Prototype only. Vertical tank on the right: caption, number, fill from the bottom. */
+function PaintTankBar() {
+  if (!paintEconomyOn() || inLobby()) return null
+  const mob = isMobile()
+  const cv = canvasSize()
+  const trackH = mob ? 168 : 240
+  const trackW = mob ? 28 : 36
+  const n = Math.max(0, Math.min(PAINT_CAPACITY, paintTank()))
+  const fillH = Math.max(0, Math.round(trackH * (n / PAINT_CAPACITY)))
+  const top = Math.max(16, Math.round((cv.h - trackH - 48) / 2))
+  return (
+    <UiEntity
+      uiTransform={{
+        positionType: 'absolute',
+        position: { top, right: mob ? 10 : 22 },
+        width: 72,
+        height: trackH + 48,
+        flexDirection: 'column',
+        alignItems: 'center',
+        pointerFilter: 'none',
+      }}
+    >
+      <Label value={paintRefilling() ? 'REFILL' : 'PAINT'} fontSize={mob ? 13 : 15} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
+      <UiEntity
+        uiTransform={{ width: trackW, height: trackH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
+        uiBackground={{ color: Color4.create(0, 0, 0, 0.5) }}
+      >
+        <UiEntity uiTransform={{ width: trackW, height: fillH }} uiBackground={{ color: Color4.create(0.98, 0.78, 0.22, 1) }} />
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 // Full-screen UI root. Everything is a child of this so absolute-positioned
 // overlays (like the round-end banner) can size themselves as 100%×100% of
 // the viewport, not of the tiny HUD strip.
 export const uiMenu = () => (
   <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 } }}>
+    <PaintTankBar />
 
     {/* ─── Top-left: mute button ─────────────────────────────────────── */}
     {/* Mute button lives inside the timer panel below, pinned to its right edge. */}
@@ -450,6 +489,8 @@ export const uiMenu = () => (
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
+      const voteSecs = hudVoteCountdown()
+      const lobbyPillW = 520
       return (
         <UiEntity
           uiTransform={{
@@ -474,7 +515,7 @@ export const uiMenu = () => (
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+                  width: lobby ? Math.min(lobbyPillW, Math.max(MOBILE_TIMER_W, canvasW - 120)) : MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
                   // Key-tile frame: light rim, dark ring (padding), light inner panel filling the rest.
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
                 }}
@@ -482,8 +523,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={lobby && hudYourVote() ? 18 : lobby ? 28 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby && hudYourVote() ? 22 : '100%' }} />
-                  {lobby && hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={13} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 16 }} /> : null}
+                  <Label value={hudClockText(secs)} fontSize={lobby ? 16 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby ? 32 : '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -492,14 +532,14 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             ) : lobby ? (
-            <UiEntity uiTransform={{ width: 340 + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ width: lobbyPillW + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
                 <OverviewRow desktop besideEye />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: 340, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
+                  width: lobbyPillW, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
                   justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
                 }}
@@ -508,8 +548,7 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-                  <Label value={hudClockText(secs)} fontSize={hudYourVote() ? 22 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: hudYourVote() ? 28 : '100%' }} />
-                  {hudYourVote() !== '' ? <Label value={hudYourVote()} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 20 }} /> : null}
+                  <Label value={hudClockText(secs)} fontSize={22} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 36 }} />
                 </UiEntity>
               </UiEntity>
               <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
@@ -568,8 +607,9 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             )}
-            {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby. */}
-            {lobby ? null : getSummaryProgress() >= 0 || standingsOpen ? (
+            {voteSecs !== '' ? <Label value={voteSecs} fontSize={78} color={Color4.create(0.08, 0.09, 0.12, 1)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 200, height: 86, margin: { top: 2 } }} /> : null}
+            {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby and in Balloon Battle. */}
+            {lobby || isBalloonRound() ? null : getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()

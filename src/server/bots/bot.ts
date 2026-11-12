@@ -604,6 +604,18 @@ export class Bot {
     this.pauseRemainingMs = 0
   }
 
+  /** Keep walking to `cell`, and stay there once arrived. */
+  stay(cell: string): void {
+    if (this.currentCell === cell) {
+      this.path = []
+      this.chaseCell = cell
+      this.goal = cell
+      this.pauseRemainingMs = 0
+      return
+    }
+    if (this.goal !== cell) this.chase(cell)
+  }
+
   /** Manager can call this to force target re-selection (e.g. round reset). */
   clearPath(): void {
     this.path = []

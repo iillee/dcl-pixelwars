@@ -2,25 +2,46 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
-import { CELL, MAZE_ORIGIN, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
+import { clearLobbyVotes, countedMode, lobbyVerdict, noteLobbyPos, stepLobby, tallyVotes } from '../src/server/lobbyVote'
+import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
+import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
-  billboardAnchor, lobbyFeet, modeSubtitle, modeTitle, pickWinner, placedModes, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
+import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
 const tiles = placeLobbyLayout()
-if (tiles.length !== 3) {
-  console.error(`✗ lobby should be 3 tiles, got ${tiles.length}`)
+if (tiles.length !== 5) {
+  console.error(`✗ lobby should be 5 tiles, got ${tiles.length}`)
   process.exit(1)
 }
-if (LOBBY_MODES.length !== 4 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots')) {
-  console.error('✗ Color Garden and Pot Hunt must stay in the registry')
+if (LOBBY_MODES.length !== 6 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots') || !LOBBY_MODES.some(m => m.id === 'prototype') || !LOBBY_MODES.some(m => m.id === 'balloon')) {
+  console.error('✗ Color Garden, Pot Hunt, Prototype, and Balloon Battle must stay in the registry')
   process.exit(1)
 }
-if (placedModes().map(m => m.id).join() !== 'pvp,pvb') {
-  console.error('✗ only PvP and PvB are placed')
+if (placedModes().map(m => m.id).join() !== 'pvp,pvb,prototype,balloon') {
+  console.error('✗ Pixelwars, Bot Invasion, Prototype, and Balloon Battle should be the placed ends')
+  process.exit(1)
+}
+if (LOBBY_MODES.some(m => m.economy && m.id !== 'prototype') || !LOBBY_MODES.find(m => m.id === 'prototype')?.economy) {
+  console.error('✗ the paint economy flag belongs only on Prototype')
+  process.exit(1)
+}
+const cellKeys = LOBBY_MODES.map(m => `${m.cell.x},${m.cell.z}`)
+if (new Set(cellKeys).size !== cellKeys.length) {
+  console.error('✗ every mode in the registry needs its own cell')
+  process.exit(1)
+}
+const balloonMode = LOBBY_MODES.find(m => m.id === 'balloon')!
+if (!balloonMode.live || !balloonMode.placed || balloonMode.economy || balloonMode.teamRule !== 'balance' || balloonMode.cell.x !== 2 || balloonMode.cell.z !== 1 || balloonMode.label !== 'BALLOON BATTLE') {
+  console.error('✗ Balloon Battle should be a live south end with team balance and no paint economy')
+  process.exit(1)
+}
+const green = balloonMode.color
+if (Math.abs(green.r - 0x6F / 255) > 0.002 || Math.abs(green.g - 0xD0 / 255) > 0.002 || Math.abs(green.b - 0x8C / 255) > 0.002) {
+  console.error(`✗ Balloon Battle should use soft green #6FD08C, got ${green.r},${green.g},${green.b}`)
   process.exit(1)
 }
 if (!validate()) {
@@ -28,17 +49,18 @@ if (!validate()) {
   process.exit(1)
 }
 const center = tiles[0]
-if (center.type !== 'straight' || center.x !== LOBBY_CROSS.x || center.z !== LOBBY_CROSS.z) {
-  console.error('✗ the center should be the first tile, a straight between the ends')
+if (center.type !== 'cross' || center.x !== LOBBY_CROSS.x || center.z !== LOBBY_CROSS.z) {
+  console.error('✗ the center should be the first tile, a cross opening all four ways')
   process.exit(1)
 }
-if (!openingsAt('straight', center.r).has(1) || !openingsAt('straight', center.r).has(3)) {
-  console.error('✗ the center straight should open east and west')
+const centerOpen = openingsAt('cross', center.r)
+if (!centerOpen.has(0) || !centerOpen.has(1) || !centerOpen.has(2) || !centerOpen.has(3)) {
+  console.error('✗ the center cross should open north, east, south, and west')
   process.exit(1)
 }
 const ends = getPlacedTilesInOrder().filter(t => t.type === 'end')
-if (ends.length !== 2) {
-  console.error(`✗ expected 2 end tiles, got ${ends.length}`)
+if (ends.length !== 4) {
+  console.error(`✗ expected 4 end tiles, got ${ends.length}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {
@@ -79,6 +101,56 @@ for (const m of LOBBY_MODES) {
     console.error(`✗ ${m.id} center votes as '${got}', want '${want}'`)
     process.exit(1)
   }
+}
+const hold = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [baseSpawn(1).pos, baseSpawn(2).pos])
+if (hold.length !== 5) {
+  console.error(`✗ expected base, base, cross, prototype, and balloon pads, got ${hold.length}`)
+  process.exit(1)
+}
+const slab = BASE_Y + 0.5
+for (const p of hold) {
+  if (Math.abs(p.y + p.sy / 2 - slab) > 0.001) {
+    console.error('✗ a spawn pad top is not the walkable slab')
+    process.exit(1)
+  }
+}
+const forkFeet = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+if (!padContains(hold[2], forkFeet.x, forkFeet.z) || hold[2].sx !== 16) {
+  console.error('✗ the cross pad does not cover the lobby spawn')
+  process.exit(1)
+}
+for (const team of [1, 2]) {
+  const s = baseSpawn(team).pos
+  if (!padContains(hold[team - 1], s.x, s.z) || hold[team - 1].sx !== 16) {
+    console.error(`✗ team ${team} base pad moved`)
+    process.exit(1)
+  }
+}
+const protoMode = LOBBY_MODES.find(m => m.id === 'prototype')!
+const protoZone = voteZoneLocal(CELL)
+const protoDoor = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z1, protoMode.cell, MAZE_ORIGIN, CELL)
+const protoCap = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z0, protoMode.cell, MAZE_ORIGIN, CELL)
+const protoStand = voteTintPose(protoMode.cell, MAZE_ORIGIN, CELL)
+if (!padContains(hold[3], protoStand.x, protoStand.z) || !padContains(hold[3], protoDoor.x, protoDoor.z) || !padContains(hold[3], protoCap.x, protoCap.z)) {
+  console.error('✗ the prototype pad does not cover the north vote floor')
+  process.exit(1)
+}
+const teamFight = voteTintPose(LOBBY_MODES.find(m => m.id === 'pvp')!.cell, MAZE_ORIGIN, CELL)
+if (padContains(hold[3], teamFight.x, teamFight.z) || padContains(hold[2], teamFight.x, teamFight.z) || padContains(hold[4], teamFight.x, teamFight.z)) {
+  console.error('✗ a prototype, balloon, or cross pad reaches the Team Fight tile')
+  process.exit(1)
+}
+const balloonZone = voteZoneLocal(CELL)
+const balloonDoor = voteLocalToWorld((balloonZone.x0 + balloonZone.x1) / 2, balloonZone.z1, balloonMode.cell, MAZE_ORIGIN, CELL)
+const balloonCap = voteLocalToWorld((balloonZone.x0 + balloonZone.x1) / 2, balloonZone.z0, balloonMode.cell, MAZE_ORIGIN, CELL)
+const balloonStand = voteTintPose(balloonMode.cell, MAZE_ORIGIN, CELL)
+if (!padContains(hold[4], balloonStand.x, balloonStand.z) || !padContains(hold[4], balloonDoor.x, balloonDoor.z) || !padContains(hold[4], balloonCap.x, balloonCap.z)) {
+  console.error('✗ the balloon pad does not cover the south vote floor')
+  process.exit(1)
+}
+if (padContains(hold[2], balloonStand.x, balloonStand.z) || padContains(hold[3], balloonStand.x, balloonStand.z) || padContains(hold[4], protoStand.x, protoStand.z) || padContains(hold[4], forkFeet.x, forkFeet.z)) {
+  console.error('✗ the south or north pad reaches the other lobby floors')
+  process.exit(1)
 }
 function checkFrame(label: string, sceneM: number, origin: number, baseMeters: number): void {
   for (const m of LOBBY_MODES) {
@@ -173,8 +245,16 @@ if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
   console.error(`✗ idle phase with this sample did not start the ${LOBBY_VOTE_MS}ms countdown (${step.log} ends ${step.next.countdownEnds})`)
   process.exit(1)
 }
-if (LOBBY_VOTE_MS !== 15_000) {
-  console.error(`✗ the vote window should be 15s, got ${LOBBY_VOTE_MS}ms`)
+if (LOBBY_VOTE_MS !== 10_000) {
+  console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
+  process.exit(1)
+}
+if (hudVoteHeadline(false) !== 'STAND ON A TILE TO VOTE' || hudVoteHeadline(true) !== 'STARTING SOON' || /\d/.test(hudVoteHeadline(true))) {
+  console.error(`✗ vote pill copy should instruct, without repeating the seconds (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)})`)
+  process.exit(1)
+}
+if (PVB_RATIO !== 2 || pvbBotCount(1) !== 2 || pvbBotCount(2) !== 4 || pvbBotCount(7) !== 14 || pvbBotCount(8) !== PVB_BOT_MAX || pvbBotCount(0) !== 0) {
+  console.error(`✗ Bot Invasion should be 2× humans, capped at ${PVB_BOT_MAX}: 1→${pvbBotCount(1)} 2→${pvbBotCount(2)} 7→${pvbBotCount(7)} 8→${pvbBotCount(8)}`)
   process.exit(1)
 }
 const early = stepLobby(step.next, ['0xabc'], aged + 5_000)
@@ -193,6 +273,69 @@ if (held.log !== '' || held.next.countdownEnds !== 0) {
   console.error(`✗ a lobby with nobody voting started a countdown (${held.log})`)
   process.exit(1)
 }
+clearLobbyVotes()
+const protoX = 2 * CELL + CELL / 2 + MAZE_ORIGIN
+const protoZ = 3 * CELL + CELL / 2 + MAZE_ORIGIN
+if (voteModeAt(protoX, protoZ, MAZE_ORIGIN, CELL) !== 'prototype') {
+  console.error(`✗ ${protoX},${protoZ} must be the north Prototype end`)
+  process.exit(1)
+}
+if (!noteLobbyPos('proto', protoX, 190, protoZ, aged)) {
+  console.error('✗ server rejected the Prototype sample')
+  process.exit(1)
+}
+if (countedMode('proto', aged) !== 'prototype') {
+  console.error('✗ standing on Prototype was not counted as that vote')
+  process.exit(1)
+}
+const protoClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
+const protoStep = stepLobby(protoClock, ['proto'], aged)
+if (protoStep.log !== 'start' || protoStep.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
+  console.error(`✗ a Prototype vote did not start the ${LOBBY_VOTE_MS}ms countdown (${protoStep.log})`)
+  process.exit(1)
+}
+const protoTallied = tallyVotes(['proto'], aged)
+if (protoTallied.counts.prototype !== 1 || protoTallied.counts.pvp !== 0 || protoTallied.counts.pvb !== 0 || protoTallied.counts.balloon !== 0) {
+  console.error(`✗ Prototype tally leaked into the other modes (${protoTallied.counts.pvp}/${protoTallied.counts.pvb}/${protoTallied.counts.prototype})`)
+  process.exit(1)
+}
+const protoDone = stepLobby(protoStep.next, ['proto'], aged + LOBBY_VOTE_MS)
+if (protoDone.log !== 'resolve' || pickWinner(protoTallied.counts, 'pvp') !== 'prototype') {
+  console.error(`✗ a Prototype vote did not launch a Prototype round (${protoDone.log})`)
+  process.exit(1)
+}
+clearLobbyVotes()
+const balloonX = 2 * CELL + CELL / 2 + MAZE_ORIGIN
+const balloonZ = 1 * CELL + CELL / 2 + MAZE_ORIGIN
+if (voteModeAt(balloonX, balloonZ, MAZE_ORIGIN, CELL) !== 'balloon') {
+  console.error(`✗ ${balloonX},${balloonZ} must be the south Balloon Battle end`)
+  process.exit(1)
+}
+if (!noteLobbyPos('balloon', balloonX, 190, balloonZ, aged)) {
+  console.error('✗ server rejected the Balloon Battle sample')
+  process.exit(1)
+}
+if (countedMode('balloon', aged) !== 'balloon') {
+  console.error('✗ standing on Balloon Battle was not counted as that vote')
+  process.exit(1)
+}
+const balloonClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
+const balloonStep = stepLobby(balloonClock, ['balloon'], aged)
+if (balloonStep.log !== 'start' || balloonStep.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
+  console.error(`✗ a Balloon Battle vote did not start the ${LOBBY_VOTE_MS}ms countdown (${balloonStep.log})`)
+  process.exit(1)
+}
+const balloonTallied = tallyVotes(['balloon'], aged)
+if (balloonTallied.counts.balloon !== 1 || balloonTallied.counts.pvp !== 0 || balloonTallied.counts.pvb !== 0 || balloonTallied.counts.prototype !== 0) {
+  console.error(`✗ Balloon Battle tally leaked into the other modes (${balloonTallied.counts.pvp}/${balloonTallied.counts.pvb}/${balloonTallied.counts.prototype}/${balloonTallied.counts.balloon})`)
+  process.exit(1)
+}
+const balloonDone = stepLobby(balloonStep.next, ['balloon'], aged + LOBBY_VOTE_MS)
+if (balloonDone.log !== 'resolve' || pickWinner(balloonTallied.counts, 'pvp') !== 'balloon') {
+  console.error(`✗ a Balloon Battle vote did not launch a Balloon Battle round (${balloonDone.log})`)
+  process.exit(1)
+}
+clearLobbyVotes()
 const zone = voteZoneLocal(CELL)
 const pvpCell = LOBBY_MODES.find(m => m.id === 'pvp')!.cell
 const onTint = voteLocalToWorld(zone.x0 + 0.05, zone.z0 + 0.05, pvpCell, MAZE_ORIGIN, CELL)
@@ -213,11 +356,22 @@ if (Math.abs(zone.width - expectW) > 0.001 || Math.abs(zone.length - expectL) > 
 }
 for (const m of placedModes()) {
   const sign = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, 0)
-  const edge = m.cell.x * CELL + (m.cell.x < LOBBY_CROSS.x ? 0 : CELL) + MAZE_ORIGIN
-  const outside = m.cell.x < LOBBY_CROSS.x ? sign.x < edge - SIGN_CLEAR_M + 0.01 : sign.x > edge + SIGN_CLEAR_M - 0.01
-  if (!outside || Math.abs(sign.z - (m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN)) > 0.01) {
-    console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
-    process.exit(1)
+  const midX = m.cell.x * CELL + CELL / 2 + MAZE_ORIGIN
+  const midZ = m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN
+  if (m.cell.x !== LOBBY_CROSS.x) {
+    const edge = m.cell.x * CELL + (m.cell.x < LOBBY_CROSS.x ? 0 : CELL) + MAZE_ORIGIN
+    const outside = m.cell.x < LOBBY_CROSS.x ? sign.x < edge - SIGN_CLEAR_M + 0.01 : sign.x > edge + SIGN_CLEAR_M - 0.01
+    if (!outside || Math.abs(sign.z - midZ) > 0.01) {
+      console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
+      process.exit(1)
+    }
+  } else {
+    const edge = m.cell.z * CELL + (m.cell.z < LOBBY_CROSS.z ? 0 : CELL) + MAZE_ORIGIN
+    const outside = m.cell.z < LOBBY_CROSS.z ? sign.z < edge - SIGN_CLEAR_M + 0.01 : sign.z > edge + SIGN_CLEAR_M - 0.01
+    if (!outside || Math.abs(sign.x - midX) > 0.01) {
+      console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
+      process.exit(1)
+    }
   }
 }
 // Still standing on the same tile a minute later. That is a vote, not AFK.
@@ -234,6 +388,27 @@ clearLobbyVotes()
 const lobbySrc = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')
 if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
   console.error('✗ feet reports must not wait on the lobby layout flag')
+  process.exit(1)
+}
+if (lobbySrc.includes('SECS_FONT') || lobbySrc.includes('`${left}s`')) {
+  console.error('✗ billboards should keep the vote count and drop the countdown')
+  process.exit(1)
+}
+const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+if (!uiSrc.includes('hudVoteCountdown()')) {
+  console.error('✗ the countdown seconds should sit under the vote pill')
+  process.exit(1)
+}
+if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
+  console.error('✗ the vote pill should not name the player\'s vote')
+  process.exit(1)
+}
+if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.test(lobbySrc) || !lobbySrc.includes('MTM_OPAQUE')) {
+  console.error('✗ the vote tint should stay matte and opaque so the white floor does not wash it out')
+  process.exit(1)
+}
+if (lobbySrc.includes('setBox(tail)') || lobbySrc.includes('signCaretSize') || lobbySrc.includes('orthoSignPoses')) {
+  console.error('✗ signs should have no caret, and overview signs should stay on their anchors')
   process.exit(1)
 }
 if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_NONE') || !lobbySrc.includes('overviewSignRotation')) {
@@ -279,8 +454,40 @@ if (inFront < 0.1) {
   console.error(`✗ sign text Z ${face.toFixed(2)} is not on the camera side of the plate (gap ${inFront.toFixed(2)} m)`)
   process.exit(1)
 }
-if (modeTitle('pvb') !== 'BOT FIGHT' || modeTitle('pvp') !== 'TEAM FIGHT' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Humans') {
-  console.error('✗ lobby choices should read BOT FIGHT and TEAM FIGHT')
+if (modeTitle('pvb') !== 'BOT INVASION' || modeTitle('pvp') !== 'PIXELWARS' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Humans') {
+  console.error('✗ lobby choices should read BOT INVASION and PIXELWARS')
+  process.exit(1)
+}
+const lipBottom = -(SIGN_H_M + 0.55) / 2
+const chipTop = signBadgeY() + 3.4 / 2
+if (!(chipTop < lipBottom - 0.2) || !(chipTop > lipBottom - 1.2)) {
+  console.error('✗ the vote count chip should sit just under the pill')
+  process.exit(1)
+}
+if (modeTitle('prototype') !== 'PROTOTYPE' || modeSubtitle('prototype') !== 'Paint Economy') {
+  console.error('✗ Prototype should read PROTOTYPE / Paint Economy')
+  process.exit(1)
+}
+if (modeTitle('balloon') !== 'BALLOON BATTLE' || modeSubtitle('balloon') !== 'Testing') {
+  console.error('✗ Balloon Battle should read BALLOON BATTLE / Testing')
+  process.exit(1)
+}
+const proto = LOBBY_MODES.find(m => m.id === 'prototype')!
+const protoSign = billboardAnchor(proto.cell, MAZE_ORIGIN, CELL, BASE_Y)
+const northEdge = proto.cell.z * CELL + CELL + MAZE_ORIGIN
+if (Math.abs(protoSign.z - (northEdge + SIGN_CLEAR_M)) > 0.01 || protoSign.y !== BASE_Y + 22) {
+  console.error(`✗ Prototype sign should sit 10 m past the north edge at base+22, got ${protoSign.z}, ${protoSign.y}`)
+  process.exit(1)
+}
+const balloonSign = billboardAnchor(balloonMode.cell, MAZE_ORIGIN, CELL, BASE_Y)
+const southEdge = balloonMode.cell.z * CELL + MAZE_ORIGIN
+if (Math.abs(balloonSign.z - (southEdge - SIGN_CLEAR_M)) > 0.01 || balloonSign.y !== BASE_Y + 22) {
+  console.error(`✗ Balloon Battle sign should sit 10 m past the south edge at base+22, got ${balloonSign.z}, ${balloonSign.y}`)
+  process.exit(1)
+}
+const signSpan = SIGN_W_M * SIGN_ORTHO_AT_REF / 2
+if (Math.hypot(balloonSign.x - protoSign.x, balloonSign.z - protoSign.z) <= signSpan * 2) {
+  console.error('✗ the south and north signs overlap in the default overview')
   process.exit(1)
 }
 const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
@@ -293,6 +500,16 @@ const feet = lobbyFeet(CELL, MAZE_ORIGIN, 0)
 const abstain = voteModeAt(feet.x, feet.z, MAZE_ORIGIN, CELL)
 if (abstain !== '') {
   console.error(`✗ the cross should abstain, got ${abstain}`)
+  process.exit(1)
+}
+const floor = buildWalkableGraph(tiles)
+let onFork = false
+for (const id of floor.nodes) {
+  const p = floor.worldPos.get(id)
+  if (p && Math.hypot(p[0] - feet.x, p[2] - feet.z) <= 2) onFork = true
+}
+if (!onFork) {
+  console.error('✗ the lobby spawn is not on the cross floor')
   process.exit(1)
 }
 
@@ -317,6 +534,33 @@ lead.pvb = 3
 lead.pvp = 1
 if (pickWinner(lead, 'pvp') !== 'pvb') {
   console.error('✗ the higher count should win')
+  process.exit(1)
+}
+const protoLead = emptyCounts()
+protoLead.prototype = 4
+protoLead.pvp = 1
+protoLead.pvb = 2
+if (pickWinner(protoLead, 'pvp') !== 'prototype') {
+  console.error('✗ a Prototype lead should win the vote')
+  process.exit(1)
+}
+const balloonLead = emptyCounts()
+balloonLead.balloon = 3
+balloonLead.pvp = 2
+balloonLead.prototype = 2
+if (pickWinner(balloonLead, 'pvp') !== 'balloon') {
+  console.error('✗ a Balloon Battle lead should win the vote')
+  process.exit(1)
+}
+const balloonTie = emptyCounts()
+balloonTie.balloon = 2
+balloonTie.pvp = 2
+if (pickWinner(balloonTie, 'balloon') !== 'balloon') {
+  console.error('✗ a tie should keep Balloon Battle when it was the previous mode')
+  process.exit(1)
+}
+if (pickWinner(balloonTie, 'pvb') !== 'pvp') {
+  console.error('✗ a balloon/pvp tie with a different previous mode should fall back to PvP')
   process.exit(1)
 }
 if (!stillAfk(0, LOBBY_AFK_MS) || stillAfk(0, LOBBY_AFK_MS - 1)) {
@@ -372,6 +616,10 @@ if (!spawn.includes("layoutKind !== 'lobby'") || !spawn.includes("layoutKind ===
   console.error('✗ lobby tiles should skip paint masks and should not latch')
   process.exit(1)
 }
+if (!rebuild.includes('gridSize() === 5') || !rebuild.includes("p.type === 'end'")) {
+  console.error('✗ the lobby rebuild should skip a 5-tile floor and queue only the growing end tiles')
+  process.exit(1)
+}
 if (!rebuild.includes('holdSeed || layoutKind === \'lobby\'')) {
   console.error('✗ a maze seed can still replace the lobby')
   process.exit(1)
@@ -379,6 +627,32 @@ if (!rebuild.includes('holdSeed || layoutKind === \'lobby\'')) {
 const rescue = readFileSync(new URL('../src/client/fallRescue.ts', import.meta.url), 'utf8')
 if (!rescue.includes('isLobbyLayout()') || !rescue.includes('lobbyFeet')) {
   console.error('✗ fall rescue should return to the cross during the lobby')
+  process.exit(1)
+}
+const phaseSrc = readFileSync(new URL('../src/client/phase.ts', import.meta.url), 'utf8')
+if (!phaseSrc.includes("next === 'prototype'") || !phaseSrc.includes("next === 'balloon'")) {
+  console.error('✗ Prototype and Balloon Battle votes must not be dropped')
+  process.exit(1)
+}
+const handler = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
+if (handler.includes("format === 'pvb' ? 'pvb' : 'pvp'")) {
+  console.error('✗ the client still collapses every format that is not Bot Fight into Team Fight')
+  process.exit(1)
+}
+if (!server.includes("mode === 'prototype' ? 'prototype'") || server.includes("kind: 'prototype'")) {
+  console.error('✗ Prototype should keep its format and use Team Fight population')
+  process.exit(1)
+}
+if (!server.includes("mode === 'balloon' ? 'balloon'") || server.includes("kind: 'balloon'")) {
+  console.error('✗ Balloon Battle should keep its format and use Team Fight population')
+  process.exit(1)
+}
+if (!handler.includes("format === 'balloon'")) {
+  console.error('✗ the client must keep Balloon Battle as its own wire format')
+  process.exit(1)
+}
+if (!server.includes("roundFormat !== 'pvb'")) {
+  console.error('✗ Prototype should use the Team Fight rejoin flip')
   process.exit(1)
 }
 

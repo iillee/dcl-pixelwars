@@ -2,12 +2,14 @@
  * Lobby layout and vote rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * The built floor is three tiles: a straight center opening east and west,
- * PvP on the west end, PvB on the east end. Color Garden and Pot Hunt stay
- * in the registry so they can be placed again later. They are not on the floor.
+ * The built floor is five tiles: a cross center opening all four ways,
+ * Pixelwars on the west end, Bot Invasion on the east end, Prototype on the north end,
+ * and Balloon Battle on the south end.
+ * Color Garden and Pot Hunt stay in the registry so they can be placed again later.
+ * They are not on the floor.
  */
 
-export type ModeId = 'pvp' | 'pvb' | 'garden' | 'pots'
+export type ModeId = 'pvp' | 'pvb' | 'prototype' | 'balloon' | 'garden' | 'pots'
 export type TeamRule = 'balance' | 'humans-together'
 export type LobbyPhase = 'match' | 'summary' | 'lobby' | 'idle'
 
@@ -21,38 +23,43 @@ export type ModeDef = {
   live: boolean
   /** Built as an end tile against the center. Garden and pots are not, yet. */
   placed: boolean
+  /** Paint tank, and later depots / territory respawn. Prototype only. */
+  economy: boolean
   color: { r: number; g: number; b: number }
 }
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** West PvP and east PvB share an edge with the center. Garden and pots
- *  keep their cells for a later layout. They are not placed and cannot win. */
+/** West Pixelwars, east Bot Invasion, north Prototype, and south Balloon Battle
+ *  share an edge with the center. Garden and pots keep cells that are not built.
+ *  They cannot win a vote. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'TEAM FIGHT', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT FIGHT', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, color: { r: 0.29, g: 0.48, b: 0.95 } },
-  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 2, z: 3 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
-  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
+  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 1, g: 0.459, b: 0.467 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
+  { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
+  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.435, g: 0.816, b: 0.549 } },
+  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
+  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
 /** Full vote window, in one place. Starts when the first live vote is counted.
  *  Standing in a zone does not end it early, and an empty lobby does not start it. */
-export const LOBBY_VOTE_MS = 15_000
+export const LOBBY_VOTE_MS = 10_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
  *  The vote tint and the trigger both use this rectangle, pulled in by VOTE_TINT_INSET_M. */
 export const VOTE_FLOOR_WIDTH = 20 / 32
 export const VOTE_FLOOR_CLOSED = 6 / 32
 export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side.
- *  Far enough that a sign at the default overview scale stays off the three lobby tiles. */
+ *  Far enough that a sign at the default overview scale stays off the lobby tiles. */
 export const SIGN_CLEAR_M = 10
-/** One 4.5 m line of "TEAM FIGHT", with side margins inside the pill, plus the subtitle. */
-export const SIGN_W_M = 48
+/** One line of "BOT INVASION", the longest title, with side margins inside the pill. */
+export const SIGN_W_M = 58
 export const SIGN_H_M = 8.6
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
-/** World scale at that default framing. A 48 m plate is then ~24% of a 16:9 overview. */
-export const SIGN_ORTHO_AT_REF = 0.3
+/** World scale at that default framing. The wider pill stays about a quarter of the overview. */
+export const SIGN_ORTHO_AT_REF = 0.25
 export const SIGN_ZOOM_MIN = 0.05
 export const SIGN_ZOOM_MAX = 1
 /**
@@ -68,14 +75,18 @@ export const SIGN_LIP_DEPTH_M = 0.55
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb`. */
 export function modeTitle(id: string): string {
-  if (id === 'pvb') return 'BOT FIGHT'
-  if (id === 'pvp') return 'TEAM FIGHT'
+  if (id === 'pvb') return 'BOT INVASION'
+  if (id === 'pvp') return 'PIXELWARS'
+  if (id === 'prototype') return 'PROTOTYPE'
+  if (id === 'balloon') return 'BALLOON BATTLE'
   return ''
 }
 
 export function modeSubtitle(id: string): string {
   if (id === 'pvb') return 'vs Bots'
   if (id === 'pvp') return 'vs Humans'
+  if (id === 'prototype') return 'Paint Economy'
+  if (id === 'balloon') return 'Testing'
   return ''
 }
 
@@ -112,7 +123,7 @@ export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
 }
 
-/** End tiles actually built. PvP west, PvB east. */
+/** End tiles actually built. Pixelwars west, Bot Invasion east, Prototype north, Balloon Battle south. */
 export function placedModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.placed)
 }
@@ -210,6 +221,20 @@ export function voteTintPose(
   return { x: c.x, z: c.z, yawDeg: endYawQuarter(modeCell) * 90, width: zone.width, length: zone.length }
 }
 
+/** Downward caret under the pill. Width is 12% of the pill; height is a short triangle. */
+/** Local Y of the vote-count chip, tucked just under the pill's bottom lip. */
+export function signBadgeY(): number {
+  const lipBottom = -(SIGN_H_M + 0.55) / 2
+  const chipH = 3.4
+  return lipBottom - 0.5 - chipH / 2
+}
+
+/** Top HUD line. Seconds live in the big number under the pill, not in this text. */
+export function hudVoteHeadline(hasVote: boolean): string {
+  return hasVote ? 'STARTING SOON' : 'STAND ON A TILE TO VOTE'
+}
+
+
 /** Sign root, on the outer side of the end, facing back toward the cross. */
 export function billboardAnchor(
   modeCell: { x: number; z: number }, origin: number, cell: number, baseY: number,
@@ -253,10 +278,54 @@ export function lobbyFeet(cell: number, origin: number, baseY: number): { x: num
   }
 }
 
+/** Thin physics box. `feetY` is the stand height; the top of the box is the slab, 1 m below. */
+export type SpawnPad = { x: number; y: number; z: number; sx: number; sy: number; sz: number; yaw: number }
+
+export function spawnPadAt(x: number, feetY: number, z: number, sx = 16, sz = 16, yaw = 0): SpawnPad {
+  return { x, y: feetY - 1.1, z, sx, sy: 0.2, sz, yaw }
+}
+
+/**
+ * Invisible floors under the places a joiner is put down before the tile mesh
+ * can hold them. Team bases and the cross center match the original pads.
+ * Prototype and Balloon Battle also cover their vote floors, including the
+ * doorway off the cross. Bot Fight and Team Fight vote tiles are not given
+ * an extra pad.
+ */
+export function earlySpawnPads(
+  origin: number,
+  cell: number,
+  baseY: number,
+  bases: Array<{ x: number; z: number }>,
+): SpawnPad[] {
+  const feetY = baseY + 1.5
+  const pads = bases.map(b => spawnPadAt(b.x, feetY, b.z))
+  const cross = lobbyFeet(cell, origin, baseY)
+  pads.push(spawnPadAt(cross.x, cross.y, cross.z))
+  for (const m of LOBBY_MODES) {
+    if (!m.placed || m.id === 'pvp' || m.id === 'pvb') continue
+    const pose = voteTintPose(m.cell, origin, cell)
+    pads.push(spawnPadAt(pose.x, feetY, pose.z, pose.width, pose.length, pose.yawDeg))
+  }
+  return pads
+}
+
+/** True when a point lies on the pad's horizontal footprint. Yaw matches the entity. */
+export function padContains(pad: SpawnPad, x: number, z: number): boolean {
+  const dx = x - pad.x
+  const dz = z - pad.z
+  const rad = pad.yaw * Math.PI / 180
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  const lx = dx * c - dz * s
+  const lz = dx * s + dz * c
+  return Math.abs(lx) <= pad.sx / 2 + 1e-4 && Math.abs(lz) <= pad.sz / 2 + 1e-4
+}
+
 export type VoteCounts = Record<ModeId, number>
 
 export function emptyCounts(): VoteCounts {
-  return { pvp: 0, pvb: 0, garden: 0, pots: 0 }
+  return { pvp: 0, pvb: 0, prototype: 0, balloon: 0, garden: 0, pots: 0 }
 }
 
 /**

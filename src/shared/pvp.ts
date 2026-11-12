@@ -17,24 +17,26 @@
 // true → startNextRound flips pvp/pvb after each round that continues from
 // the summary. A cold start or an idle start is always PvP.
 // PvB: every human on one colour (Red, then Blue, … across PvB rounds);
-// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)),
-// taken at round start. Mid-round the count may grow as humans join; it does
-// not shrink until the next round, unless no humans are left.
+// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)).
+// Taken at round start and again whenever humans join or leave, so the pool
+// stays at 2× the humans. PVB_BOT_MAX is the hard cap.
 export const FORMAT_ALTERNATE = true
-/** Bots per active human in a PvB round. 1 = one bot each. */
-export const PVB_RATIO = 1.0
-/** Hard cap on PvB bots (playtest: up to 15). */
+/** Bots per active human in a Bot Invasion round. */
+export const PVB_RATIO = 2
+/** Hard cap on Bot Invasion bots. 8 humans would be 16; the pool stops at 15. */
 export const PVB_BOT_MAX = 15
 
-export type RoundFormat = 'pvp' | 'pvb'
+export type RoundFormat = 'pvp' | 'pvb' | 'prototype' | 'balloon'
 
 export function pvbBotCount(activeHumans: number): number {
   if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
   return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
 }
 
-/** Next round's format. `continuing` is false for a cold start and an idle start. */
+/** Next round's format. `continuing` is false for a cold start and an idle start.
+ *  Prototype and Balloon Battle are voted modes, not part of the pvp/pvb flip. */
 export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (current === 'prototype' || current === 'balloon') return current
   if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
   return current === 'pvb' ? 'pvp' : 'pvb'
 }

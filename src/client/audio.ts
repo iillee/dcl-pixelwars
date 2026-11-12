@@ -32,6 +32,7 @@ let muteClickEnt: Entity = 0 as Entity
 let claimSfxEnt: Entity = 0 as Entity
 let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
+let balloonPopSfxEnt: Entity = 0 as Entity
 let musicMuted = true
 let playStartMs = 0
 let pausedPositionSec = 0
@@ -50,6 +51,8 @@ export function initAudio(): void {
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
   Transform.create(dashHitSfxEnt, { parent: engine.CameraEntity })
+  balloonPopSfxEnt = engine.addEntity()
+  Transform.create(balloonPopSfxEnt, { parent: engine.CameraEntity })
   musicEnt = engine.addEntity()
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
@@ -175,6 +178,14 @@ export function playLungeSfx(): void {
 }
 
 /** Dash prototype: hit thud for the attacker (on contact) and the victim (on knockback). */
+export function playBalloonPopSfx(): void {
+  if (!balloonPopSfxEnt) return
+  AudioSource.createOrReplace(balloonPopSfxEnt, {
+    audioClipUrl: CLAIM_SRC,
+    playing: true, loop: false, volume: 0.55, global: true,
+  })
+}
+
 export function playDashHitSfx(): void {
   if (!dashHitSfxEnt) return
   AudioSource.createOrReplace(dashHitSfxEnt, {

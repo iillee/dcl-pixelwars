@@ -40,7 +40,7 @@ export const Messages = {
   // Anti-cheat (position validation) is deferred to Phase 5 per the plan.
   // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
   // is 90 max; anything larger is dropped as suspicious).
-  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String) }),
+  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String), at: Schemas.String }),
 
   // Server → Client: broadcast of paint state changes accumulated since
   // the last server tick (5Hz). Every delta carries the current coverage
@@ -52,6 +52,13 @@ export const Messages = {
     red: Schemas.Int,
     blue: Schemas.Int,
     total: Schemas.Int,
+  }),
+
+  // Server → the painter only. Prototype tank after a spend or a respawn.
+  // denied cells were requested and not applied because the tank was empty.
+  paintWallet: Schemas.Map({
+    tank: Schemas.Int,
+    denied: Schemas.Array(Schemas.String),
   }),
 
   // Client → Server: request the current authoritative paint state.
@@ -111,6 +118,9 @@ export const Messages = {
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
     finalTotal: Schemas.Int,
+    kind: Schemas.String,
+    victor: Schemas.String,
+    victorName: Schemas.String,
   }),
 
   // format: 'pvp' | 'pvb' for the round that is starting (the splash banner).
@@ -206,7 +216,7 @@ export const Messages = {
   // Server checks cooldown and rebroadcasts lungeStarted so every client
   // can show the lunge on that avatar.
   lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: lunge `id` touched `target` (player address, or
   // "bot:<id>"); (dx, dz) = knockback direction, (x, y, z) = attacker pos.
   lungeHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
@@ -231,7 +241,7 @@ export const Messages = {
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   // air 1 is the airborne press. A second burstFired with air 0, same id, is that
   // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
-  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
+  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.
@@ -246,6 +256,9 @@ export const Messages = {
   // Client → Server (round stats): anvil i launched me / I fell off and respawned.
   anvilLaunched: Schemas.Map({ i: Schemas.Int }),
   playerFell: Schemas.Map({}),
+  // Server -> Clients: Balloon Battle counts (full book) and one pop.
+  balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),
+  balloonPop: Schemas.Map({ id: Schemas.String, n: Schemas.Int }),
   // Fall rescue cloud for everyone else. The rider sends rescueStart at the
   // catch (who is ignored; the server stamps the authenticated id). mobile 1
   // means observers fly the cloud along catch → base; 0 means they follow the

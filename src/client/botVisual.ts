@@ -339,9 +339,9 @@ export function initBotVisual(): void {
   })
 }
 
-/** Where each bot is drawn right now (id → smoothed feet position). */
-export function getBotRenderPositions(): Array<{ id: number; team: number; pos: Vector3 }> {
-  const out: Array<{ id: number; team: number; pos: Vector3 }> = []
-  for (const [id, rec] of bots) out.push({ id, team: rec.team, pos: rec.renderPos })
+/** Where each bot is drawn right now (id, smoothed feet, facing, and the body entity). */
+export function getBotRenderPositions(): Array<{ id: number; team: number; pos: Vector3; yawDeg: number; entity: Entity }> {
+  const out: Array<{ id: number; team: number; pos: Vector3; yawDeg: number; entity: Entity }> = []
+  for (const [id, rec] of bots) out.push({ id, team: rec.team, pos: rec.renderPos, yawDeg: rec.lastYawDeg, entity: rec.root })
   return out
 }
