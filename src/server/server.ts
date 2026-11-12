@@ -235,7 +235,7 @@ export async function setupServer(): Promise<void> {
   // Playtest format. Cold start / idle start stays 'pvp'. A round that continues
   // from the summary flips when FORMAT_ALTERNATE (nextRoundFormat). pvbRoundIndex
   // counts PvB rounds only, so the human colour goes Red, Blue, Red…
-  let roundFormat: 'pvp' | 'pvb' | 'prototype' = 'pvp'
+  let roundFormat: 'pvp' | 'pvb' | 'prototype' | 'balloon' = 'pvp'
   const economyOn = () => modeById(roundFormat)?.economy === true
   const paintDry = (who: string) => (economyOn() && walletOf(who) <= 0 ? 1 : 0)
   const wouldFlip = (id: string, team: number) => {
@@ -402,7 +402,7 @@ export async function setupServer(): Promise<void> {
 
   /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
   function startNextRound(mode: ModeId): void {
-    roundFormat = mode === 'pvb' ? 'pvb' : mode === 'prototype' ? 'prototype' : 'pvp'
+    roundFormat = mode === 'pvb' ? 'pvb' : mode === 'prototype' ? 'prototype' : mode === 'balloon' ? 'balloon' : 'pvp'
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
     const c = pendingFinal
     const pruned = pruneForNewRound()

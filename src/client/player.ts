@@ -115,10 +115,10 @@ export function initPlayerNet(): void {
     if (!IS_SKY || myTeam === Team.None) teleportHome('initial')
   })
 
-  // Invisible boxes under the team bases, the fork center, and the Prototype
-  // north vote floor. The tile meshes are not colliders yet on the frame a
-  // player is placed there (join, lobby return, match start). Bot Fight and
-  // Team Fight keep the same base and fork pads they already had. Pads stay
+  // Invisible boxes under the team bases, the cross center, and the Prototype
+  // and Balloon Battle vote floors. The tile meshes are not colliders yet on
+  // the frame a player is placed there (join, lobby return, match start). Bot
+  // Fight and Team Fight keep the same base and cross pads they already had. Pads stay
   // through the lobby and until the match floor has finished growing, then
   // come back the next time the lobby is laid.
   if (IS_SKY) {

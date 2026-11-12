@@ -199,7 +199,7 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
-  if (inLobby() || currentFormat === 'prototype') return 'Vote with your feet'
+  if (inLobby() || currentFormat === 'prototype' || currentFormat === 'balloon') return 'Vote with your feet'
   if (!FORMAT_ALTERNATE) return `Next round: ${modeTitle('pvp')}`
   return `Next round: ${modeTitle(currentFormat === 'pvb' ? 'pvp' : 'pvb')}`
 }
@@ -216,5 +216,6 @@ export function getFormatSplash(): { format: RoundFormat; title: string; sub: st
   }
   if (armedFormat === 'pvb') return { format: 'pvb', title: modeTitle('pvb'), sub: modeSubtitle('pvb') }
   if (armedFormat === 'prototype') return { format: 'prototype', title: modeTitle('prototype'), sub: modeSubtitle('prototype') }
+  if (armedFormat === 'balloon') return { format: 'balloon', title: modeTitle('balloon'), sub: modeSubtitle('balloon') }
   return { format: 'pvp', title: modeTitle('pvp'), sub: modeSubtitle('pvp') }
 }

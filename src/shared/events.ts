@@ -74,7 +74,7 @@ export type Events = {
   'round:clock': {
     idx: number
     active: boolean
-    format: 'pvp' | 'pvb' | 'prototype'
+    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
     phase: 'match' | 'summary' | 'lobby' | 'idle'
     voteMs: number
     winner: string
@@ -88,7 +88,7 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
-    format: 'pvp' | 'pvb' | 'prototype'
+    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
     layout?: 'arena' | 'lobby'
   }
 

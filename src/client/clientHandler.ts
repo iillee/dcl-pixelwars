@@ -67,8 +67,8 @@ export function initClientHandler(): void {
 // Handlers do the minimum needed to translate wire types to event payloads.
 // `team as Team` casts are safe: server enforces wire values 0/1/2 (see
 // shared/team.ts and server/roster.ts).
-function wireFormat(format: string): 'pvp' | 'pvb' | 'prototype' {
-  if (format === 'pvb' || format === 'prototype') return format
+function wireFormat(format: string): 'pvp' | 'pvb' | 'prototype' | 'balloon' {
+  if (format === 'pvb' || format === 'prototype' || format === 'balloon') return format
   return 'pvp'
 }
 
