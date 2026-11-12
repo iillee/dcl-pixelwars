@@ -9,6 +9,14 @@
 
 export const BALLOON_START = 3
 
+/**
+ * How the balloons follow the avatar. Flip this to compare styles.
+ *  'attached' - parented with AvatarAttach (upper spine / back), zero lag, local jiggle.
+ *  'trail'    - the original world-space spring follow, with lag.
+ */
+export type BalloonStyle = 'attached' | 'trail'
+export const BALLOON_STYLE: BalloonStyle = 'attached'
+
 export type BalloonCounts = Record<string, number>
 
 export type BalloonVerdict =
