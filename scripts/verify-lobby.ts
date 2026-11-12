@@ -8,7 +8,7 @@ import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signCaretCenterY, signCaretSize, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -349,8 +349,8 @@ if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.tes
   console.error('✗ the vote tint should stay matte and opaque so the white floor does not wash it out')
   process.exit(1)
 }
-if (!lobbySrc.includes('-SIGN_W_M * 0.22') || !lobbySrc.includes('setBox(tail)') || lobbySrc.includes('orthoSignPoses')) {
-  console.error('✗ the caret should hang off the side of the pill, and overview signs should stay on their anchors')
+if (lobbySrc.includes('setBox(tail)') || lobbySrc.includes('signCaretSize') || lobbySrc.includes('orthoSignPoses')) {
+  console.error('✗ signs should have no caret, and overview signs should stay on their anchors')
   process.exit(1)
 }
 if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMode.BM_NONE') || !lobbySrc.includes('overviewSignRotation')) {
@@ -400,15 +400,10 @@ if (modeTitle('pvb') !== 'BOT INVASION' || modeTitle('pvp') !== 'PIXELWARS' || m
   console.error('✗ lobby choices should read BOT INVASION and PIXELWARS')
   process.exit(1)
 }
-const caret = signCaretSize()
-if (caret.w / SIGN_W_M < 0.1 || caret.w / SIGN_W_M > 0.15 || !(signCaretCenterY() < -SIGN_H_M / 2)) {
-  console.error('✗ the caret should be a chunky pointer under the pill')
-  process.exit(1)
-}
-const tailBottom = -SIGN_H_M * 0.42 - caret.h / 2
+const lipBottom = -(SIGN_H_M + 0.55) / 2
 const chipTop = signBadgeY() + 3.4 / 2
-if (!(chipTop < tailBottom - 0.2)) {
-  console.error('✗ the vote count chip overlaps the caret')
+if (!(chipTop < lipBottom - 0.2) || !(chipTop > lipBottom - 1.2)) {
+  console.error('✗ the vote count chip should sit just under the pill')
   process.exit(1)
 }
 if (modeTitle('prototype') !== 'PROTOTYPE' || modeSubtitle('prototype') !== 'Paint Economy') {

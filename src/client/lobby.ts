@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signCaretSize, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -44,9 +44,9 @@ const CONFIRM_SOUND = 'assets/sounds/click.wav'
 type Rgb = { r: number; g: number; b: number }
 
 const SIGN_COPY: Record<'pvp' | 'pvb' | 'prototype', { plate: Rgb; ink: Rgb }> = {
-  pvp: { plate: { r: 0.96, g: 0.24, b: 0.16 }, ink: { r: 0.45, g: 0.08, b: 0.05 } },
-  pvb: { plate: { r: 0.08, g: 0.62, b: 0.78 }, ink: { r: 0.02, g: 0.2, b: 0.32 } },
-  prototype: { plate: { r: 0.96, g: 0.72, b: 0.18 }, ink: { r: 0.35, g: 0.22, b: 0.04 } },
+  pvp: { plate: { r: 1, g: 0.459, b: 0.467 }, ink: { r: 0.45, g: 0.12, b: 0.13 } },
+  pvb: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
+  prototype: { plate: { r: 1, g: 0.796, b: 0.42 }, ink: { r: 0.42, g: 0.27, b: 0.06 } },
 }
 
 function clearSigns(): void {
@@ -115,15 +115,6 @@ function laySigns(): void {
     const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
-    const caret = signCaretSize()
-    // Same box and the same material as the pill, hung off one side like a speech-bubble tail.
-    const tail = add(
-      root,
-      Vector3.create(-SIGN_W_M * 0.22, -SIGN_H_M * 0.42, 0),
-      Vector3.create(caret.w, caret.h, 0.7),
-    )
-    MeshRenderer.setBox(tail)
-    Material.setPbrMaterial(tail, slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
       text: modeTitle(m.id),

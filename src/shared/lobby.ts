@@ -32,9 +32,9 @@ export const LOBBY_CROSS = { x: 2, z: 2 }
 /** West Team Fight, east Bot Fight, and north Prototype share an edge with the center.
  *  Garden and pots keep cells that are not built. They cannot win a vote. */
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.95, g: 0.28, b: 0.27 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.29, g: 0.48, b: 0.95 } },
-  { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 0.98, g: 0.78, b: 0.22 } },
+  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 1, g: 0.459, b: 0.467 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
+  { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 1 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
@@ -57,8 +57,6 @@ export const SIGN_H_M = 8.6
 export const SIGN_ZOOM_REF = 29
 /** World scale at that default framing. The wider pill stays about a quarter of the overview. */
 export const SIGN_ORTHO_AT_REF = 0.25
-/** Caret width as a fraction of the pill. A chunky pointer, 10–15% of the pill. */
-export const SIGN_CARET_FRAC = 0.12
 export const SIGN_ZOOM_MIN = 0.05
 export const SIGN_ZOOM_MAX = 1
 /**
@@ -219,24 +217,11 @@ export function voteTintPose(
 }
 
 /** Downward caret under the pill. Width is 12% of the pill; height is a short triangle. */
-export function signCaretSize(): { w: number; h: number } {
-  const w = SIGN_W_M * SIGN_CARET_FRAC
-  return { w, h: w * 0.7 }
-}
-
-/** Local Y of the caret centre. The base sits just under the pill; the tip points down. */
-export function signCaretCenterY(): number {
-  const caret = signCaretSize()
-  const base = -SIGN_H_M / 2 - 0.45
-  return base - caret.h / 2
-}
-
-/** Local Y of the vote-count chip, below the caret tip so the two do not meet. */
+/** Local Y of the vote-count chip, tucked just under the pill's bottom lip. */
 export function signBadgeY(): number {
-  const caret = signCaretSize()
-  const tip = signCaretCenterY() - caret.h / 2
+  const lipBottom = -(SIGN_H_M + 0.55) / 2
   const chipH = 3.4
-  return tip - 0.55 - chipH / 2
+  return lipBottom - 0.5 - chipH / 2
 }
 
 /** Top HUD line. Seconds live in the big number under the pill, not in this text. */
