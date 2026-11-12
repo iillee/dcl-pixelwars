@@ -4,15 +4,18 @@
  * one point on the back, floating in a cluster above the name tag.
  *
  * Follow style is BALLOON_STYLE in the shared config:
- *  - 'attached' follows the avatar root Transform (the same pose as
- *    AAPT_POSITION: no walk-cycle bob). The knot sits on the back,
- *    offset along a smoothed yaw, with a floaty local jiggle driven
- *    by low-passed planar velocity and turn rate.
+ *  - 'attached' parents the knot to the avatar root so it cannot lag.
+ *    Humans use AvatarAttach on AAPT_POSITION (no walk-cycle bob);
+ *    remotes pass avatarId; bots parent to their visual entity. The
+ *    back offset is a child of that attach, rotated by the unsmoothed
+ *    yaw. Balloons and strings are children of the knot: only the
+ *    balloon end jiggles, from low-passed planar velocity and turn.
  *  - 'trail' is the original world-space spring follow, with lag.
+ *    Strings still start at the live back knot, not a lagged point.
  *
  * Rigs exist only while a balloon match is live. Leaving the match
  * (summary, lobby, or idle), or a player leaving, tears down every
- * knot, balloon, string, pop, and cached count.
+ * attach, knot, balloon, string, pop, and cached count.
  */
 import {
   engine,
@@ -21,6 +24,8 @@ import {
   MeshRenderer,
   Transform,
   PlayerIdentityData,
+  AvatarAttach,
+  getWorldPosition,
   removeEntityWithChildren,
 } from '@dcl/sdk/ecs'
 import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
@@ -50,6 +55,8 @@ const BALL_SCALE: Vec = { x: 0.5, y: 0.62, z: 0.5 }
  */
 const BACK_Y = 1.38
 const BACK_Z = 0.2
+/** AAPT_POSITION - avatar root, not an animated bone. */
+const AAPT_POSITION = 0
 /** Height of the balloon centers above the back knot. ~1.43 m above a 1.8 m head. */
 const REST_Y = 1.85
 /** Slow idle bob: period 3.2 s, small amplitude. */
@@ -62,7 +69,7 @@ const SWAY = 0.05
 const TRAIL_SWAY = 0.16
 /** World-space follow rate for 'trail' (higher = less lag). */
 const FOLLOW = 7
-/** Exponential smoothing time constant for yaw, planar velocity, turn rate, and remote/bot position. */
+/** Exponential smoothing time constant for the spring's planar velocity and turn rate only. The knot is never smoothed. */
 const SMOOTH_TAU = 0.2
 /** Floaty spring, close to critically damped (zeta 0.85). omega = sqrt(14) ~ 3.74 rad/s. */
 const STIFF = 14
@@ -92,10 +99,10 @@ type Cluster = {
   id: string
   n: number
   style: 'attached' | 'trail'
+  /** AvatarAttach root for humans. Null for bots, whose knot is parented to the body. */
+  attach: Entity | null
   knot: Entity | null
   balloons: Balloon[]
-  smoothFeet: Vec
-  smoothYaw: number
   smoothVel: Vec
   smoothYawRate: number
   prevFeet: Vec
@@ -163,6 +170,11 @@ function rotateYaw(local: Vec, deg: number): Vec {
 function backAnchor(pose: Pose): Vec {
   const f = forward(pose.yawDeg)
   return v(pose.feet.x - f.x * BACK_Z, pose.feet.y + BACK_Y, pose.feet.z - f.z * BACK_Z)
+}
+
+function backOffset(yawDeg: number): Vec {
+  const f = forward(yawDeg)
+  return v(-f.x * BACK_Z, BACK_Y, -f.z * BACK_Z)
 }
 
 function restLocal(i: number, t: number, sway: number): Vec {
@@ -240,23 +252,6 @@ function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
   return { i, root, ball: root, string, pos: { ...at }, vel: v(0, 0, 0) }
 }
 
-function makeKnot(pose: Pose): Entity {
-  const knot = engine.addEntity()
-  const at = backAnchor(pose)
-  Transform.create(knot, {
-    position: Vector3.create(at.x, at.y, at.z),
-    rotation: Quaternion.fromEulerDegrees(0, pose.yawDeg, 0),
-  })
-  return knot
-}
-
-function placeKnot(knot: Entity, pose: Pose): void {
-  const at = backAnchor(pose)
-  const tf = Transform.getMutable(knot)
-  tf.position = Vector3.create(at.x, at.y, at.z)
-  tf.rotation = Quaternion.fromEulerDegrees(0, pose.yawDeg, 0)
-}
-
 function yawOf(tf: ReturnType<typeof Transform.getOrNull>): number {
   if (!tf) return 0
   return Quaternion.toEulerAngles(tf.rotation).y
@@ -284,8 +279,66 @@ function poseOf(id: string): Pose | null {
   return null
 }
 
+function remoteAvatarId(id: string): string | null {
+  for (const [, pid] of engine.getEntitiesWith(PlayerIdentityData)) {
+    if (pid.address.toLowerCase() === id) return pid.address
+  }
+  return null
+}
+
+/**
+ * Sit the knot on the avatar or bot itself. Humans: AvatarAttach on the
+ * root (AAPT_POSITION). Bots: parent to the bot visual entity. The back
+ * offset lives on a child so the engine can drive the attach point.
+ */
+function attachRig(id: string, pose: Pose): { attach: Entity | null; knot: Entity } | null {
+  const knot = engine.addEntity()
+  if (id.startsWith('bot:')) {
+    const host = pose.entity
+    if (!host) {
+      engine.removeEntity(knot)
+      return null
+    }
+    Transform.create(knot, {
+      parent: host,
+      position: Vector3.create(0, BACK_Y, -BACK_Z),
+    })
+    return { attach: null, knot }
+  }
+  const attach = engine.addEntity()
+  if (id === localId()) {
+    AvatarAttach.create(attach, { anchorPointId: AAPT_POSITION })
+  } else {
+    const avatarId = remoteAvatarId(id)
+    if (!avatarId) {
+      engine.removeEntity(attach)
+      engine.removeEntity(knot)
+      return null
+    }
+    AvatarAttach.create(attach, { avatarId, anchorPointId: AAPT_POSITION })
+  }
+  const off = backOffset(pose.yawDeg)
+  Transform.create(knot, {
+    parent: attach,
+    position: Vector3.create(off.x, off.y, off.z),
+    rotation: Quaternion.fromEulerDegrees(0, pose.yawDeg, 0),
+  })
+  return { attach, knot }
+}
+
+/** Keep the human knot on the back in the attach's (world-aligned) frame. Bots already inherit body yaw, so they are left alone. */
+function orientHumanKnot(knot: Entity, yawDeg: number): void {
+  const off = backOffset(yawDeg)
+  const tf = Transform.getMutable(knot)
+  tf.position = Vector3.create(off.x, off.y, off.z)
+  tf.rotation = Quaternion.fromEulerDegrees(0, yawDeg, 0)
+}
+
 function clearCluster(c: Cluster): void {
-  if (c.knot) {
+  if (c.attach) {
+    removeEntityWithChildren(engine, c.attach)
+  } else if (c.knot) {
+    // Knot may be a child of a bot body we do not own.
     removeEntityWithChildren(engine, c.knot)
   } else {
     for (const b of c.balloons) {
@@ -294,6 +347,7 @@ function clearCluster(c: Cluster): void {
     }
   }
   c.balloons.length = 0
+  c.attach = null
   c.knot = null
 }
 
@@ -321,41 +375,27 @@ function dropCluster(id: string): void {
 }
 
 function worldBalloonPos(c: Cluster, b: Balloon, pose: Pose): Vec {
+  if (c.style === 'attached') {
+    const wp = getWorldPosition(engine, b.root)
+    if (wp) return v(wp.x, wp.y, wp.z)
+  }
   if (c.style === 'trail' || !c.knot) return { ...b.pos }
   const knot = backAnchor(pose)
   const w = rotateYaw(b.pos, pose.yawDeg)
   return v(knot.x + w.x, knot.y + w.y, knot.z + w.z)
 }
 
-/** Smooth the follow pose. Local players keep raw root position (zero lag, no bone bob); remotes and bots also smooth position because their updates are steppy. Yaw is always smoothed so the knot does not snap. */
-function followPose(c: Cluster, raw: Pose, dt: number): Pose {
-  const k = smoothK(dt)
-  if (!c.primed) {
-    c.smoothFeet = { ...raw.feet }
-    c.smoothYaw = raw.yawDeg
+/** Planar velocity and turn rate, low-passed, with the vertical step-bob ignored. Drives the balloon spring only — never the knot. */
+function stepMotion(c: Cluster, pose: Pose, dt: number): { acc: Vec; dYaw: number } {
+  if (!c.primed || dt <= 0) {
+    c.prevFeet = { ...pose.feet }
+    c.prevVel = v(0, 0, 0)
     c.smoothVel = v(0, 0, 0)
     c.smoothYawRate = 0
-    c.prevFeet = { ...raw.feet }
-    c.prevVel = v(0, 0, 0)
-    c.prevYaw = raw.yawDeg
+    c.prevYaw = pose.yawDeg
     c.primed = true
-    return { feet: { ...c.smoothFeet }, yawDeg: c.smoothYaw }
+    return { acc: v(0, 0, 0), dYaw: 0 }
   }
-  const smoothPos = c.id !== localId()
-  if (smoothPos) {
-    c.smoothFeet.x += (raw.feet.x - c.smoothFeet.x) * k
-    c.smoothFeet.y += (raw.feet.y - c.smoothFeet.y) * k
-    c.smoothFeet.z += (raw.feet.z - c.smoothFeet.z) * k
-  } else {
-    c.smoothFeet = { ...raw.feet }
-  }
-  c.smoothYaw += wrapDeg(raw.yawDeg - c.smoothYaw) * k
-  return { feet: { ...c.smoothFeet }, yawDeg: c.smoothYaw }
-}
-
-/** Planar velocity and turn rate, low-passed, with the vertical step-bob ignored. */
-function stepMotion(c: Cluster, pose: Pose, dt: number): { acc: Vec; dYaw: number } {
-  if (dt <= 0) return { acc: v(0, 0, 0), dYaw: 0 }
   const k = smoothK(dt)
   const rawVel = v((pose.feet.x - c.prevFeet.x) / dt, 0, (pose.feet.z - c.prevFeet.z) / dt)
   c.smoothVel.x += (rawVel.x - c.smoothVel.x) * k
@@ -424,20 +464,19 @@ function placeTrailBalloon(b: Balloon, dest: Vec, knot: Vec, dt: number): void {
 function placeAttachedBalloon(b: Balloon): void {
   const tf = Transform.getMutable(b.root)
   tf.position = Vector3.create(b.pos.x, b.pos.y, b.pos.z)
+  // String is a child of the knot. Aim it in local space so the bottom
+  // end is the knot and the top end is the balloon, by construction.
   aimString(b.string, v(0, 0, 0), b.pos)
 }
 
-function ensureCluster(id: string, pose: Pose): Cluster {
-  const existing = clusters.get(id)
-  if (existing) return existing
-  const c: Cluster = {
+function emptyCluster(id: string, pose: Pose): Cluster {
+  return {
     id,
     n: 0,
     style: BALLOON_STYLE,
+    attach: null,
     knot: null,
     balloons: [],
-    smoothFeet: { ...pose.feet },
-    smoothYaw: pose.yawDeg,
     smoothVel: v(0, 0, 0),
     smoothYawRate: 0,
     prevFeet: { ...pose.feet },
@@ -445,8 +484,20 @@ function ensureCluster(id: string, pose: Pose): Cluster {
     prevYaw: pose.yawDeg,
     primed: false,
   }
-  if (BALLOON_STYLE === 'attached') c.knot = makeKnot(pose)
-  clusters.set(id, c)
+}
+
+function ensureCluster(id: string, pose: Pose): Cluster | null {
+  let c = clusters.get(id)
+  if (!c) {
+    c = emptyCluster(id, pose)
+    clusters.set(id, c)
+  }
+  if (c.style === 'attached' && !c.knot) {
+    const rig = attachRig(id, pose)
+    if (!rig) return null
+    c.attach = rig.attach
+    c.knot = rig.knot
+  }
   return c
 }
 
@@ -504,8 +555,7 @@ function applyPop(id: string, n: number): void {
   if (c && c.balloons.length > n) {
     const gone = c.balloons.pop()
     if (gone) {
-      const raw = poseOf(key)
-      const pose = raw ? followPose(c, raw, 0) : { feet: c.smoothFeet, yawDeg: c.smoothYaw }
+      const pose = poseOf(key) ?? { feet: c.prevFeet, yawDeg: c.prevYaw }
       popAt(worldBalloonPos(c, gone, pose))
       engine.removeEntity(gone.root)
       engine.removeEntity(gone.string)
@@ -530,13 +580,14 @@ function syncClusters(dt: number): void {
     const raw = poseOf(id)
     if (!raw) continue
     const c = ensureCluster(id, raw)
-    const pose = followPose(c, raw, step)
+    if (!c) continue
+    if (c.style === 'attached' && !c.knot) continue
     while (c.balloons.length < n) {
       const i = c.balloons.length
       const rest = restLocal(i, clock, c.style === 'trail' ? TRAIL_SWAY : SWAY)
       const at = c.style === 'trail' ? (() => {
-        const knot = backAnchor(pose)
-        const w = rotateYaw(rest, pose.yawDeg)
+        const knot = backAnchor(raw)
+        const w = rotateYaw(rest, raw.yawDeg)
         return v(knot.x + w.x, knot.y + w.y, knot.z + w.z)
       })() : rest
       c.balloons.push(spawnBalloon(i, at, c.knot))
@@ -550,17 +601,19 @@ function syncClusters(dt: number): void {
     }
     c.n = n
     if (c.style === 'attached') {
-      if (c.knot) placeKnot(c.knot, pose)
-      const mot = stepMotion(c, pose, step)
+      // The attach/parent drives the knot. Only refresh the human back
+      // offset's yaw; never write a smoothed world position.
+      if (c.knot && !id.startsWith('bot:')) orientHumanKnot(c.knot, raw.yawDeg)
+      const mot = stepMotion(c, raw, step)
       for (const b of c.balloons) {
-        jiggle(b, restLocal(b.i, clock, SWAY), mot.acc, mot.dYaw, pose.yawDeg, step)
+        jiggle(b, restLocal(b.i, clock, SWAY), mot.acc, mot.dYaw, raw.yawDeg, step)
         placeAttachedBalloon(b)
       }
     } else {
-      const knot = backAnchor(pose)
+      const knot = backAnchor(raw)
       for (const b of c.balloons) {
         const rest = restLocal(b.i, clock, TRAIL_SWAY)
-        const w = rotateYaw(rest, pose.yawDeg)
+        const w = rotateYaw(rest, raw.yawDeg)
         placeTrailBalloon(b, v(knot.x + w.x, knot.y + w.y, knot.z + w.z), knot, step)
       }
     }

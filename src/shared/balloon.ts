@@ -11,7 +11,7 @@ export const BALLOON_START = 3
 
 /**
  * How the balloons follow the avatar. Flip this to compare styles.
- *  'attached' - follows the avatar root (no walk-cycle bob), smoothed yaw, floaty jiggle.
+ *  'attached' - AvatarAttach on the avatar root (or parented to the bot), rigid knot, floaty balloon jiggle.
  *  'trail'    - the original world-space spring follow, with lag.
  */
 export type BalloonStyle = 'attached' | 'trail'
