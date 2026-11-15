@@ -277,15 +277,24 @@ export function initLobby(): void {
   })
   events.on('round:reset', ({ layout }) => {
     if (layout === 'arena') clearSigns()
+    else laySigns()
   })
   events.on('round:clock', () => refreshSigns())
 
   let posClock = 0
   engine.addSystem((dt: number) => {
-    // Phase alone. The layout flag used to gate this, so a joiner whose HUD
-    // already said VOTE (phase idle) but whose floor was still the arena
-    // never sent a sample. The server names the zone.
-    if (!inLobby()) { if (tints.length) clearSigns(); return }
+    // Signs follow the floor, not the phase. roundReset can swap in the
+    // lobby tiles while the clock is still 'match' for a frame; clearing
+    // on phase alone then skipped the rebuild and left the boards gone.
+    if (isLobbyLayout()) {
+      if (tints.length === 0) laySigns()
+    } else if (tints.length) {
+      clearSigns()
+    }
+    // Feet reports still follow phase alone. The layout flag used to gate
+    // this, so a joiner whose HUD already said VOTE (phase idle) but whose
+    // floor was still the arena never sent a sample. The server names the zone.
+    if (!inLobby()) return
     syncSignFacing()
     if (!readySent && isLobbyLayout()) {
       readySent = true

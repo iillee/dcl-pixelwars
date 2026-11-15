@@ -30,7 +30,7 @@ import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
-import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
+import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
 
 const HIDDEN = Vector3.create(8, -60, 8)
 const CELL_M = 2
@@ -38,6 +38,8 @@ type Slab = { ent: Entity; busy: boolean; t: number; delay: number; x: number; y
 const pool: Slab[] = []
 let graph: WalkableGraph | null = null
 let graphSeed = -1
+let graphLayout = ''
+let graphTiles = 0
 const FLAT = Quaternion.Identity()
 
 /** Ramp cells: tilt the slab to the slope under it (pitch from rampSurfaceY along the ramp's
@@ -54,9 +56,13 @@ function cellPose(id: string, c: [number, number, number]): { y: number; rot: Qu
 
 function ensureGraph(): WalkableGraph | null {
   const seed = getCurrentSeed()
-  if (!isRebuilding() && seed !== graphSeed && getPlacedTilesInOrder().length > 0) {
-    graph = buildWalkableGraph(getPlacedTilesInOrder())
+  const layout = isLobbyLayout() ? 'lobby' : 'arena'
+  const tiles = getPlacedTilesInOrder()
+  if (!isRebuilding() && tiles.length > 0 && (seed !== graphSeed || layout !== graphLayout || tiles.length !== graphTiles)) {
+    graph = buildWalkableGraph(tiles)
     graphSeed = seed
+    graphLayout = layout
+    graphTiles = tiles.length
   }
   return graph
 }
@@ -225,7 +231,9 @@ export function initBurstRipple(): void {
       const u = s.t - s.delay
       let h = 0
       if (u < 0) continue // wave not here yet: stay hidden
-      if (Transform.get(s.ent).scale.x === 0) Transform.getMutable(s.ent).scale = Vector3.create(BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_SIZE)
+      const tr0 = Transform.getMutableOrNull(s.ent)
+      if (!tr0) { s.busy = false; continue }
+      if (tr0.scale.x === 0) tr0.scale = Vector3.create(BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_SIZE)
       if (u < s.up) { const k = u / s.up; h = 1 - (1 - k) * (1 - k) } // ease-out up
       else if (u < s.up + s.down) { const k = (u - s.up) / s.down; h = 1 - k * k } // ease-in settle
       else {

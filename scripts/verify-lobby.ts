@@ -390,6 +390,10 @@ if (lobbySrc.includes('!isLobbyLayout() || !inLobby()')) {
   console.error('✗ feet reports must not wait on the lobby layout flag')
   process.exit(1)
 }
+if (!lobbySrc.includes('if (tints.length === 0) laySigns()') || !lobbySrc.includes("layout === 'arena'") || !lobbySrc.includes('else laySigns()')) {
+  console.error('✗ signs must be relaid whenever the lobby floor is up, including after a match returns to the lobby')
+  process.exit(1)
+}
 if (lobbySrc.includes('SECS_FONT') || lobbySrc.includes('`${left}s`')) {
   console.error('✗ billboards should keep the vote count and drop the countdown')
   process.exit(1)
@@ -604,6 +608,16 @@ if (!server.includes("room.send('roundEnded'") || !server.includes('openLobby(fa
 const lobbyFn = server.slice(server.indexOf('function openLobby'), server.indexOf('function closeCountdown'))
 if (lobbyFn.includes('rebuildBotGraph') || lobbyFn.includes('anvilsMazeChanged')) {
   console.error('✗ the lobby regen must not rebuild the bot graph or reseat anvils')
+  process.exit(1)
+}
+const rippleSrc = readFileSync(new URL('../src/client/burstRipple.ts', import.meta.url), 'utf8')
+if (!rippleSrc.includes('graphLayout') || !rippleSrc.includes('isLobbyLayout()')) {
+  console.error('✗ burst/dash tile effects must rebuild their walkable graph when the lobby floor returns')
+  process.exit(1)
+}
+const roundSrc = readFileSync(new URL('../src/round.ts', import.meta.url), 'utf8')
+if (!roundSrc.includes("gamePhase() === 'match'") || !roundSrc.includes('isBalloonRound')) {
+  console.error('✗ the balloon white-effect override must end when the match ends')
   process.exit(1)
 }
 const rebuild = readFileSync(new URL('../src/maze/rebuild.ts', import.meta.url), 'utf8')

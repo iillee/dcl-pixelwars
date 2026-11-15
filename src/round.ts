@@ -23,7 +23,7 @@ export {
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
 import { FORMAT_ALTERNATE, type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
-import { inLobby } from './client/phase'
+import { gamePhase, inLobby } from './client/phase'
 import { modeSubtitle, modeTitle } from './shared/lobby'
 
 export function getCountdownSeconds(): number {
@@ -226,7 +226,7 @@ export function showBalloonBanner(name: string): void {
 }
 
 export function isBalloonRound(): boolean {
-  return currentFormat === 'balloon' && !inLobby()
+  return currentFormat === 'balloon' && gamePhase() === 'match'
 }
 
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
