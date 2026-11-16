@@ -194,6 +194,11 @@ let localCatch: Vec | null = null
 let assignedHome: Vec | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
+/** Visible sea at these feet, or the pre-water line when the sea is off. */
+function liveTrigger(p: { x: number; z: number } | null | undefined): number {
+  if (!p) return fallTriggerY(0, 0, waterVisualSeconds())
+  return fallTriggerY(p.x, p.z, waterVisualSeconds())
+}
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
 function lerp(a: Vec, b: Vec, u: number): Vec {
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
@@ -724,7 +729,7 @@ function sendRescueEnd(): void {
 }
 
 function begin(p: Vec): void {
-  const line = fallLine()
+  const line = liveTrigger(p)
   const v = fallVelocity(p)
   const hold = catchPoint(p, v)
   phase = 'grab'
@@ -964,22 +969,20 @@ function tick(dt: number): void {
   // A background hitch shouldn't skip the whole pickup and drop on the same frame.
   const step = Math.min(dt, 0.1)
   tickRemotes(step)
-  const line = fallLine()
+  const p = playerPos()
+  const line = liveTrigger(p)
   if (!rearm) {
     if (rearmLeft > 0) rearmLeft -= step
-    const y = playerPos()?.y
+    const y = p?.y
     if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
   }
   if (phase !== 'idle') tickPhase(step)
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
-  const p = playerPos()
   if (p && phase === 'idle' && rearm) {
-    const trigger = LOOK.sea ? fallTriggerY(p.x, p.z, waterVisualSeconds()) : fallTriggerY(p.x, p.z)
-    // Below the floor by more than a few metres: the base ground at y 0, or a
-    // fall through tiles that are not colliders yet. Do not wait for the maze.
-    if (shouldBeginRescue(p.y, isMazeReady(), trigger, MIN_Y)) begin(p)
+    // Feet crossing the visible sea. Phase !== idle and rearm prevent a second trip.
+    if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) begin(p)
   }
   // Sample after the trip so the lead uses the fall, not the frame we just caught.
   if (p && phase === 'idle') remember(p)

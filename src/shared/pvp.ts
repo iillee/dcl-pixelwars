@@ -515,7 +515,7 @@ export function botJumpSpeed(heightM: number): number {
 
 /**
  * Edge recovery after a knock. Off: the bot keeps the knock and just falls,
- * then fallTriggerY (the swell, or y 112.47) starts the same cloud rescue a
+ * then fallTriggerY (the visible sea, or the pre-water line if the sea is off) starts the same cloud rescue a
  * human gets. No jump, double jump, glide, steer-home, or glide dash.
  * The attempt code below stays for when this comes back on.
  */

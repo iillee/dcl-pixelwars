@@ -1,7 +1,7 @@
 /**
- * The sea stays under the rescue line and inside the parcel box, the play
- * grid stays 5×5, and fog does not sit on the arena. Swells are geometric,
- * tall and slow, and the crest stays clear of the rescue line.
+ * The sea stays inside the parcel box, the play grid stays 5×5, and fog
+ * does not sit on the arena. Swells are geometric, tall and slow. Rescue
+ * triggers at the live sea surface, not the old fixed kill-Y.
  *
  * Run: npx tsx scripts/verify-water.ts
  */
@@ -347,9 +347,27 @@ if (high < y + (SWELL_VARIANT === '48m' ? 12 : 40)) {
   console.error(`✗ crest ${high.toFixed(1)} does not rise with the live swell`)
   process.exit(1)
 }
-if (fallTriggerY(SCENE_SIZE / 2, SCENE_SIZE / 2, 0) < rescue) {
-  console.error('✗ the fall trigger dropped below the fixed rescue line')
-  process.exit(1)
+const midX = SCENE_SIZE / 2
+const midZ = SCENE_SIZE / 2
+for (const s of [0, period / 4, period / 2]) {
+  const surface = swellSurfaceY(midX, midZ, s)
+  const trig = fallTriggerY(midX, midZ, s)
+  if (Math.abs(trig - surface) > 1e-9) {
+    console.error(`✗ fall trigger ${trig.toFixed(3)} must equal the live sea surface ${surface.toFixed(3)}`)
+    process.exit(1)
+  }
+  if (shouldBeginRescue(surface + 0.01, false, surface, MIN_Y)) {
+    console.error('✗ feet just above the water must not start a rescue')
+    process.exit(1)
+  }
+  if (!shouldBeginRescue(surface - 0.01, false, surface, MIN_Y)) {
+    console.error('✗ feet just under the water must rescue, even before the maze is ready')
+    process.exit(1)
+  }
+  if (MIN_Y - 4 > surface && shouldBeginRescue(MIN_Y - 4 + 0.01, false, surface, MIN_Y)) {
+    console.error('✗ a mid-air drop under the floor must not rescue above the sea')
+    process.exit(1)
+  }
 }
 if (SWELL_VARIANT === '48m') {
   let hi = -Infinity
@@ -421,4 +439,4 @@ inside('far haze inner', mid - hazeFar, mid - hazeFar)
 inside('far haze outer', mid + hazeFar, mid + hazeFar)
 inside('swell far', mid - WATER.swellFarM, mid - WATER.swellFarM)
 inside('swell far', mid + WATER.swellFarM, mid + WATER.swellFarM)
-console.log('✓ swells stay under the rescue line; lobby, maze, water, and spawns stay inside the scene')
+console.log('✓ rescue meets the live sea surface; lobby, maze, water, and spawns stay inside the scene')
