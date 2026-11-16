@@ -109,13 +109,8 @@ function recolor(dt: number): void {
 }
 
 export function initDepots(): void {
-  engine.addSystem((dt: number) => {
-    if (!paintEconomyOn() || inLobby() || isRebuilding()) {
-      if (posts.length) clearPosts()
-      predictDepotRefill(dt, false)
-      return
-    }
-    ensurePosts()
-    recolor(dt)
+  engine.addSystem(() => {
+    // Prototype no longer uses depot posts or depot recharge.
+    if (posts.length) clearPosts()
   })
 }

@@ -27,7 +27,7 @@ function lockedTeam(id: string): Team {
 export { Team } from './shared/team'
 import { Team } from './shared/team'
 import { events } from './shared/events'
-import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC } from './shared/territory'
+import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC } from './shared/territory'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -43,14 +43,18 @@ export function initPaintNet(): void {
   })
 
   events.on('paint:snapshot', ({ entries, red, blue, total }) => {
-    for (const { id, team } of entries) applyRemotePaint(id, team)
+    for (const { id, team } of entries) {
+      applyRemotePaint(id, team)
+      cellSince.set(id, 0)
+    }
     setServerCoverage({ red, blue, total })
   })
 
-  events.on('paint:wallet', ({ tank, denied }) => {
+  events.on('paint:wallet', ({ tank, denied, regen }) => {
     if (!paintEconomy) return
     paintLeft = tank
     paintFrac = 0
+    serverRegen = regen === 1
     // Only revert cells this client actually predicted. A Burst denial has
     // no undo record; defaulting those to empty would bleach enemy paint.
     for (const id of denied) {
@@ -68,12 +72,15 @@ export function initPaintNet(): void {
     paintLeft = PAINT_CAPACITY
     paintFrac = 0
     paintUndo.clear()
+    cellSince.clear()
+    serverRegen = false
   })
 
   events.on('round:clock', ({ format, active }) => {
     setPaintEconomy(active && format === 'prototype')
     setPaintWorld(active && paintAllowed(format))
   })
+  engine.addSystem((dt: number) => tickLocalPaintRegen(dt))
 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
@@ -359,6 +366,10 @@ export function resetPaintForTile(tileEntity: Entity) {
 const paintOutbox = new Set<string>()
 let paintEconomy = false
 let paintLeft = PAINT_CAPACITY
+/** Last ownership-change time (ms). 0 = pre-cured. Missing = not cured. */
+const cellSince = new Map<string, number>()
+let serverRegen = false
+let lastCenterGroundY = 0
 let paintFrac = 0
 let paintRefill = false
 const paintUndo = new Map<string, Team>()
@@ -389,13 +400,37 @@ export function refillPredictedTank(): void {
 
 /** Local bar climbs while the server's refill echo is in flight. */
 export function predictDepotRefill(dt: number, friendly: boolean): void {
-  paintRefill = paintEconomy && friendly && paintLeft < PAINT_CAPACITY
+  predictTerritoryRefill(dt, friendly)
+}
+
+/** Local bar climbs between throttled wallet echoes while on cured friendly ground. */
+export function predictTerritoryRefill(dt: number, eligible: boolean): void {
+  paintRefill = paintEconomy && eligible && paintLeft < PAINT_CAPACITY
   if (!paintRefill) return
   paintFrac += PAINT_REFILL_PER_SEC * dt
   const whole = Math.floor(paintFrac)
   if (whole <= 0) return
   paintFrac -= whole
   paintLeft = Math.min(PAINT_CAPACITY, paintLeft + whole)
+}
+
+function tickLocalPaintRegen(dt: number): void {
+  if (!paintEconomy) { paintRefill = false; return }
+  const t = Transform.getOrNull(engine.PlayerEntity)
+  const cell = lastCenterId
+  const team = localTeam as number
+  const owned = cell ? (cellTeam.get(cell) ?? 0) : 0
+  const since = cell && cellSince.has(cell) ? (cellSince.get(cell) as number) : Number.POSITIVE_INFINITY
+  const eligible = !!cell && isRegenEligible({
+    team,
+    cellTeam: owned as number,
+    ownedSince: since,
+    now: Date.now(),
+    grounded: playerGrounded,
+    feetY: t?.position.y ?? 0,
+    cellY: lastCenterGroundY,
+  })
+  predictTerritoryRefill(dt, eligible || (serverRegen && playerGrounded && owned === team && team !== 0))
 }
 
 function forceCell(id: string, team: Team): void {
@@ -484,6 +519,7 @@ export function applyRemotePaint(id: string, team: Team): void {
   if (!paintWorld && team !== Team.None) return
   if (lockedTeam(id) !== Team.None) return
   if (cellTeam.get(id) === team) return
+  cellSince.set(id, Date.now())
   cellTeam.set(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) {
@@ -804,6 +840,7 @@ export function initPaintingSystem(
       lastCenterId = center.id
       onOwnPaint = localTeam !== Team.None && cellTeam.get(center.id) === localTeam
     }
+    lastCenterGroundY = center.groundY
     playerGrounded = y - center.groundY <= GROUND_TOLERANCE
     // Fall rescue holds paint off through the pickup and the walk-only land brace.
     if (!playerGrounded || isMoveLocked()) return

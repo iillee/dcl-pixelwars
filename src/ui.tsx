@@ -461,13 +461,17 @@ function PaintTankBar() {
         pointerFilter: 'none',
       }}
     >
-      <Label value={paintRefilling() ? 'REFILL' : 'PAINT'} fontSize={mob ? 13 : 15} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
-      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
+      <Label value={n <= 0 && !paintRefilling() ? 'NO PAINT' : paintRefilling() ? 'RECHARGE' : 'PAINT'} fontSize={mob ? 13 : 15} color={n <= 0 && !paintRefilling() ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={n <= 0 && !paintRefilling() ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
       <UiEntity
         uiTransform={{ width: trackW, height: trackH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
-        uiBackground={{ color: Color4.create(0, 0, 0, 0.5) }}
+        uiBackground={{ color: Color4.create(0, 0, 0, n <= 0 && !paintRefilling() ? 0.72 : 0.5) }}
       >
-        <UiEntity uiTransform={{ width: trackW, height: fillH }} uiBackground={{ color: Color4.create(0.98, 0.78, 0.22, 1) }} />
+        <UiEntity uiTransform={{ width: trackW, height: Math.max(fillH, n <= 0 ? 0 : fillH) }} uiBackground={{ color: paintRefilling()
+          ? Color4.create(0.98, 0.78, 0.22, 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(Date.now() / 180)))
+          : n <= 0
+            ? Color4.create(0.35, 0.28, 0.12, 1)
+            : Color4.create(0.98, 0.78, 0.22, 1) }} />
       </UiEntity>
     </UiEntity>
   )

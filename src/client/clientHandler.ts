@@ -20,11 +20,11 @@ import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../
  * Pattern borrowed from stom66/dcl-sky-chaser (clientHandler.ts + eventBus).
  */
 
-import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
+import { engine, PlayerIdentityData, AvatarBase, Transform } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { Team } from '../shared/team'
-import { drainPaintOutbox, getCurrentCellId, paintEconomyOn, setLocalTeam } from '../paint'
+import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
 import { SeedHolder, seedHolder } from '../shared/components'
 
@@ -84,8 +84,8 @@ function wireInbound(): void {
     })
   })
 
-  room.onMessage('paintWallet', ({ tank, denied }) => {
-    events.emit('paint:wallet', { tank, denied: denied ?? [] })
+  room.onMessage('paintWallet', ({ tank, denied, regen }) => {
+    events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
   })
 
   room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
@@ -315,6 +315,7 @@ function wireOutbound(): void {
   let paintFlushClock = 0
   let lastFeetCell = ''
   let lastFeetAt = 0
+  let lastGrounded = true
   engine.addSystem((dt: number) => {
     paintFlushClock += dt
     if (paintFlushClock < 0.1) return
@@ -323,11 +324,14 @@ function wireOutbound(): void {
     const at = getCurrentCellId() ?? ''
     if (!paintOpen()) return
     const now = Date.now()
-    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || !paintEconomyOn())) return
+    const grounded = isPlayerGrounded()
+    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || !paintEconomyOn() || grounded !== lastGrounded)) return
     if (ids.length === 0 && !paintEconomyOn()) return
-    room.send('paintTick', { ids, at })
+    const y = Transform.getOrNull(engine.PlayerEntity)?.position.y ?? 0
+    room.send('paintTick', { ids, at, y, g: grounded ? 1 : 0 })
     lastFeetCell = at
     lastFeetAt = now
+    lastGrounded = grounded
   })
 }
 

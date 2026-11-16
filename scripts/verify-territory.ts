@@ -1,18 +1,29 @@
 /**
- * Paint tank rules for Prototype. Run: npx tsx scripts/verify-territory.ts
+ * Paint tank and territory-regen rules for Prototype.
+ * Run: npx tsx scripts/verify-territory.ts
  *
- * Depots, territory respawn, and elimination are later steps. This covers
- * the spend: 1 per flip, free on your own cells, stop at 0, nearest first.
+ * Spend: 1 per flip, free on your own cells, stop at 0, nearest first.
+ * Regen: only on cured friendly ground, at the cell's elevation.
  */
 import { readFileSync } from 'node:fs'
 import { LOBBY_MODES } from '../src/shared/lobby'
-import { PAINT_CAPACITY, PAINT_REFILL_PER_SEC, DEPOT_NEUTRAL_COUNT, WALLET_MIN_MS, FEET_IDLE_MS, WalletGate, applyTank, feetDue, nearestNode, onDepot, orderNearest, placeDepots } from '../src/shared/territory'
+import {
+  PAINT_CAPACITY, PAINT_COST, PAINT_REFILL_PER_SEC, PAINT_CURE_S, PAINT_GROUND_TOLERANCE,
+  DEPOT_NEUTRAL_COUNT, WALLET_MIN_MS, FEET_IDLE_MS,
+  WalletGate, accruePaint, applyTank, feetDue, isCuredSince, isRegenEligible,
+  nearestNode, onDepot, orderNearest, placeDepots,
+} from '../src/shared/territory'
 import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
+import { applyPaint, clearAll, ownedSince, seedOwned, teamOfCell } from '../src/server/paintState'
 import { refillWallet, resetWallets, setWallet, walletOf } from '../src/server/paintWallet'
 
-if (PAINT_CAPACITY !== 280) {
-  console.error(`✗ paint capacity should be 280, got ${PAINT_CAPACITY}`)
+if (PAINT_CAPACITY !== 80) {
+  console.error(`✗ paint capacity should be 80, got ${PAINT_CAPACITY}`)
+  process.exit(1)
+}
+if (PAINT_COST !== 1 || PAINT_REFILL_PER_SEC !== 10 || PAINT_CURE_S !== 5) {
+  console.error(`✗ expected cost 1, refill 10/s, cure 5s; got ${PAINT_COST}, ${PAINT_REFILL_PER_SEC}, ${PAINT_CURE_S}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {
@@ -134,9 +145,13 @@ if (!ui.includes('function PaintTankBar') || !ui.includes('paintEconomyOn()') ||
   console.error('✗ Prototype needs a vertical paint bar on the right')
   process.exit(1)
 }
+if (!ui.includes('NO PAINT') || !ui.includes('RECHARGE') || !ui.includes('Date.now() / 180')) {
+  console.error('✗ the paint bar should pulse while recharging and show NO PAINT when empty')
+  process.exit(1)
+}
 
-if (Math.abs(PAINT_REFILL_PER_SEC * 5 - PAINT_CAPACITY) > 1) {
-  console.error(`✗ a full refill should take about 5s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
+if (Math.abs(PAINT_REFILL_PER_SEC * 8 - PAINT_CAPACITY) > 1) {
+  console.error(`✗ a full refill should take about 8s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
   process.exit(1)
 }
 generateWithRetry(1, 40)
@@ -146,25 +161,25 @@ const blueAt = baseSpawn(2).pos
 const red = nearestNode(maze, redAt.x, redAt.y, redAt.z)
 const blue = nearestNode(maze, blueAt.x, blueAt.y, blueAt.z)
 if (!red || !blue) {
-  console.error('✗ could not anchor depots on the team bases')
+  console.error('✗ could not anchor team bases')
   process.exit(1)
 }
 const depots = placeDepots(maze, red, blue)
 if (depots.length !== 2 + DEPOT_NEUTRAL_COUNT) {
-  console.error(`✗ expected ${2 + DEPOT_NEUTRAL_COUNT} depots, got ${depots.length}`)
+  console.error(`✗ expected ${2 + DEPOT_NEUTRAL_COUNT} depot helper anchors, got ${depots.length}`)
   process.exit(1)
 }
 if (depots[0].owner !== 1 || depots[1].owner !== 2 || depots[0].id !== red || depots[1].id !== blue) {
-  console.error('✗ the first two depots should be the red and blue bases')
+  console.error('✗ the first two depot helper anchors should be the red and blue bases')
   process.exit(1)
 }
 for (const d of depots.slice(2)) {
   if (d.owner !== 0 || baseTeamOfCellId(d.id) !== 0) {
-    console.error(`✗ neutral depot ${d.id} is on a base or pre-owned`)
+    console.error(`✗ neutral depot helper ${d.id} is on a base or pre-owned`)
     process.exit(1)
   }
   if (!onDepot(maze, d.id, d.id)) {
-    console.error('✗ standing on a depot anchor should count')
+    console.error('✗ standing on a depot anchor should still count in the unused helper')
     process.exit(1)
   }
 }
@@ -174,8 +189,20 @@ if (placedAgain !== depots.map(d => `${d.owner}:${d.id}`).join()) {
   process.exit(1)
 }
 const botSrc = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
-if (!botSrc.includes('b.stay(cell)') || !botSrc.includes('economyOn?.()')) {
-  console.error('✗ Prototype bots should walk to a friendly depot when their tank is low')
+if (!botSrc.includes('b.stay(cell)') || !botSrc.includes('economyOn?.()') || !botSrc.includes('friendlyDepot')) {
+  console.error('✗ Prototype bots should walk to cured friendly ground when their tank is low')
+  process.exit(1)
+}
+if (!server.includes('nearestCuredCell') || !server.includes('tickTerritoryRegen') || !server.includes('seedStartTerritory')) {
+  console.error('✗ Prototype should seed start territory and tick cured-ground regen')
+  process.exit(1)
+}
+if (server.includes('seedDepots(') || server.includes('tickDepotRefill(') || server.includes('noteDepotFeet(')) {
+  console.error('✗ Prototype server should no longer seed or tick depots')
+  process.exit(1)
+}
+if (!server.includes('economyOn()') || !/if \(economyOn\(\)\) \{[\s\S]*tickTerritoryRegen/.test(server)) {
+  console.error('✗ territory regen must stay inside the Prototype economy gate')
   process.exit(1)
 }
 
@@ -204,6 +231,20 @@ if (gate.offer('p', 0, [], 1003, PAINT_CAPACITY)) {
   console.error('✗ a repeated empty tank should not echo again')
   process.exit(1)
 }
+const regenStart = gate.offer('p', 1, [], 1004, PAINT_CAPACITY, 1)
+if (!regenStart || regenStart.regen !== 1) {
+  console.error('✗ starting regen should echo immediately')
+  process.exit(1)
+}
+if (gate.offer('p', 1, [], 1005, PAINT_CAPACITY, 1)) {
+  console.error('✗ a repeated regen state should not echo again')
+  process.exit(1)
+}
+const regenStop = gate.offer('p', 1, [], 1006, PAINT_CAPACITY, 0)
+if (!regenStop || regenStop.regen !== 0) {
+  console.error('✗ stopping regen should echo immediately')
+  process.exit(1)
+}
 let feetSends = 0
 let lastCell = ''
 let lastMs = 0
@@ -222,10 +263,139 @@ if (!feetDue('2,2,0:9,8', lastCell, lastMs, lastMs + 10, false)) {
   console.error('✗ stepping onto a new cell should report immediately')
   process.exit(1)
 }
+if (!feetDue('2,2,0:9,8', lastCell, lastMs, lastMs + 10, true)) {
+  console.error('✗ a grounded flip should force a feet report')
+  process.exit(1)
+}
 const depotSrc = readFileSync(new URL('../src/client/depots.ts', import.meta.url), 'utf8')
-if (depotSrc.includes('getMutable') || !depotSrc.includes('shown !== post.team') || !depotSrc.includes('Tween.createOrReplace')) {
-  console.error('✗ depot posts should write material only when ownership changes')
+const initBlock = depotSrc.slice(depotSrc.indexOf('export function initDepots'), depotSrc.indexOf('export function initDepots') + 400)
+if (initBlock.includes('ensurePosts()') || initBlock.includes('predictDepotRefill') || initBlock.includes('recolor(')) {
+  console.error('✗ Prototype client should not spawn depot posts or refill from them')
+  process.exit(1)
+}
+if (!depotSrc.includes('if (posts.length) clearPosts()')) {
+  console.error('✗ leftover depot posts should be cleared in Prototype')
   process.exit(1)
 }
 
-console.log(`✓ paint tank, depots, empty-tank effects; wallet ${walletSends}/s refill, feet ${feetSends}/10s idle`)
+// ── Curing, regen eligibility, spend, start territory ──────────────
+const t0 = 1_000_000
+if (!isCuredSince(0, t0) || !isCuredSince(-1, t0)) {
+  console.error('✗ starting territory (since <= 0) must already be cured')
+  process.exit(1)
+}
+if (isCuredSince(t0, t0 + PAINT_CURE_S * 1000 - 1)) {
+  console.error('✗ a fresh capture must not be cured before the delay')
+  process.exit(1)
+}
+if (!isCuredSince(t0, t0 + PAINT_CURE_S * 1000)) {
+  console.error('✗ a capture should become cured after the delay')
+  process.exit(1)
+}
+
+const grounded = { team: 1, cellTeam: 1, ownedSince: 0, now: t0, grounded: true, feetY: 10, cellY: 10 }
+if (!isRegenEligible(grounded)) {
+  console.error('✗ cured friendly ground should refill')
+  process.exit(1)
+}
+if (isRegenEligible({ ...grounded, grounded: false })) {
+  console.error('✗ airborne players must not refill')
+  process.exit(1)
+}
+if (isRegenEligible({ ...grounded, feetY: 10 + PAINT_GROUND_TOLERANCE + 0.01 })) {
+  console.error('✗ a different elevation must not refill')
+  process.exit(1)
+}
+if (isRegenEligible({ ...grounded, cellTeam: 2 })) {
+  console.error('✗ enemy territory must not refill')
+  process.exit(1)
+}
+if (isRegenEligible({ ...grounded, cellTeam: 0 })) {
+  console.error('✗ neutral territory must not refill')
+  process.exit(1)
+}
+if (isRegenEligible({ ...grounded, ownedSince: t0, now: t0 + 1000 })) {
+  console.error('✗ freshly painted friendly ground must not refill')
+  process.exit(1)
+}
+if (!isRegenEligible({ ...grounded, ownedSince: t0, now: t0 + PAINT_CURE_S * 1000 })) {
+  console.error('✗ friendly ground should refill once cured')
+  process.exit(1)
+}
+
+const tick = accruePaint(0, 0, 1, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+if (tick.tank !== 10 || tick.gained !== 10) {
+  console.error(`✗ 1s of regen should grant 10 paint, got ${tick.tank}`)
+  process.exit(1)
+}
+const cap = accruePaint(PAINT_CAPACITY - 3, 0, 1, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+if (cap.tank !== PAINT_CAPACITY || cap.gained !== 3) {
+  console.error('✗ regen must stop at max paint')
+  process.exit(1)
+}
+const frac = accruePaint(0, 0, 0.04, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+if (frac.tank !== 0 || !(frac.frac > 0)) {
+  console.error('✗ sub-unit regen should carry a fraction and not over-spend')
+  process.exit(1)
+}
+const nextFrac = accruePaint(0, frac.frac, 0.08, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+if (nextFrac.tank !== 1) {
+  console.error(`✗ carried fraction plus 0.08s should grant 1 paint, got ${nextFrac.tank}`)
+  process.exit(1)
+}
+
+clearAll()
+seedOwned('start', 1, 'base', 0)
+if (teamOfCell('start') !== 1 || ownedSince('start') !== 0 || !isCuredSince(ownedSince('start'), Date.now())) {
+  console.error('✗ seeded start territory must be owned and pre-cured')
+  process.exit(1)
+}
+if (!applyPaint('fresh', 1, 'p1')) {
+  console.error('✗ the first capture of a cell should change ownership')
+  process.exit(1)
+}
+const firstSince = ownedSince('fresh')
+if (!Number.isFinite(firstSince) || firstSince <= 0 || isCuredSince(firstSince, firstSince + 1000)) {
+  console.error('✗ a newly captured cell must start a curing timer')
+  process.exit(1)
+}
+if (applyPaint('fresh', 1, 'p1')) {
+  console.error('✗ repainting your own cell must not spend or reset the cure timer')
+  process.exit(1)
+}
+if (ownedSince('fresh') !== firstSince) {
+  console.error('✗ a same-team repaint must not reset ownedSince')
+  process.exit(1)
+}
+while (Date.now() <= firstSince) { /* clock must move so a flip can retimestamp */ }
+if (!applyPaint('fresh', 2, 'p2')) {
+  console.error('✗ flipping a cell should change ownership')
+  process.exit(1)
+}
+const flipped = ownedSince('fresh')
+if (flipped <= firstSince) {
+  console.error('✗ flipping a cell must reset the curing timer')
+  process.exit(1)
+}
+if (ownedSince('ghost') !== Number.POSITIVE_INFINITY || isCuredSince(ownedSince('ghost'), Date.now())) {
+  console.error('✗ a cell with no ownership time must not count as cured')
+  process.exit(1)
+}
+clearAll()
+
+const handlerSrc = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
+if (!handlerSrc.includes('g: grounded ? 1 : 0') || !msgs.includes('y: Schemas.Number') || !msgs.includes('regen: Schemas.Int')) {
+  console.error('✗ paintTick should report feet height and grounded, and paintWallet should carry regen')
+  process.exit(1)
+}
+if (!paintSrc.includes('tickLocalPaintRegen') || !paintSrc.includes('cellSince') || !paintSrc.includes('predictTerritoryRefill')) {
+  console.error('✗ the client should interpolate regen from cured ground between wallet echoes')
+  process.exit(1)
+}
+const regenSrc = readFileSync(new URL('../src/server/territoryRegen.ts', import.meta.url), 'utf8')
+if (!regenSrc.includes('seedOwned(id, team,') || !regenSrc.includes('pushWallet(id, walletOf(id), 0)')) {
+  console.error('✗ start territory should be pre-cured and regen-stop should echo once')
+  process.exit(1)
+}
+
+console.log(`✓ paint tank 80 / 10s, curing, territory regen, empty-tank combat; wallet ${walletSends}/s refill, feet ${feetSends}/10s idle`)
