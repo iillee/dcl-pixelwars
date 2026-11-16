@@ -701,4 +701,10 @@ if (!server.includes("roundFormat !== 'pvb'")) {
   process.exit(1)
 }
 
+const nametags = readFileSync(new URL('../src/client/nametags.ts', import.meta.url), 'utf8')
+if (!nametags.includes("events.on('lobby:floor'") || !nametags.includes('isLobbyLayout()') || !nametags.includes('clearNametags') || !nametags.includes('getEntitiesWith(AvatarNametag)')) {
+  console.error('✗ team nametags should clear on the lobby floor, including leftover plates')
+  process.exit(1)
+}
+
 console.log('✓ lobby layout, votes, and match gates')

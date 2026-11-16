@@ -14,6 +14,7 @@
 import { engine, Entity, PlayerIdentityData, AvatarNametag } from '@dcl/sdk/ecs'
 import { Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
+import { isLobbyLayout } from '../maze/rebuild'
 import { Team, TEAM_RGB } from '../shared/team'
 
 const teamByUser = new Map<string, Team>() // lowercased userId → team
@@ -27,7 +28,19 @@ function color(team: Team): Color3 {
   return Color3.create(c.r, c.g, c.b)
 }
 
+function clearNametags(): void {
+  teamByUser.clear()
+  const extra = new Set(applied.keys())
+  for (const [entity] of engine.getEntitiesWith(AvatarNametag)) extra.add(entity)
+  for (const entity of extra) AvatarNametag.deleteFrom(entity)
+  applied.clear()
+}
+
 function applyPass(): void {
+  if (isLobbyLayout()) {
+    clearNametags()
+    return
+  }
   const seen = new Set<Entity>()
   for (const [entity, pid] of engine.getEntitiesWith(PlayerIdentityData)) {
     const uid = pid.address.toLowerCase()
@@ -60,6 +73,7 @@ export function initNametags(): void {
     console.log(`[Nametags] roster: ${entries.length} player(s)`)
     applyPass()
   })
+  events.on('lobby:floor', () => clearNametags())
   // Periodic pass picks up avatars that load after the roster arrived.
   let clock = 0
   engine.addSystem((dt: number) => {

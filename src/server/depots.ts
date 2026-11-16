@@ -3,7 +3,7 @@
  * and every client pick the same anchors. Ownership is the anchor cell's team.
  */
 import { baseSpawn } from '../maze/generator'
-import { nearestNode, onDepot, placeDepots, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, type DepotAnchor } from '../shared/territory'
+import { depotFeetFresh, nearestNode, onDepot, placeDepots, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, type DepotAnchor } from '../shared/territory'
 import { applyPaint, teamOfCell } from './paintState'
 import { setWallet, walletOf } from './paintWallet'
 import { getWalkableGraph } from './bots/manager'
@@ -16,6 +16,9 @@ export function depotAnchors(): readonly DepotAnchor[] {
 
 export function clearDepots(): void {
   anchors = []
+  feet.clear()
+  frac.clear()
+  lastGrant.clear()
 }
 
 /** Paint the two base anchors for free. Neutrals stay unpainted until captured. */
@@ -74,6 +77,7 @@ export function friendlyDepotCell(team: number, fromCell: string): string | null
 
 const feet = new Map<string, { cell: string; t: number }>()
 const frac = new Map<string, number>()
+const lastGrant = new Map<string, number>()
 
 export function noteDepotFeet(id: string, cell: string): void {
   if (!cell) return
@@ -92,8 +96,9 @@ export function tickDepotRefill(
   if (!graph || anchors.length === 0) return
   const now = Date.now()
   const queue = people.slice()
+  const granted = new Set<string>()
   for (const [id, s] of feet) {
-    if (now - s.t > 500) continue
+    if (!depotFeetFresh(s.t, now)) continue
     const team = teamOf(id)
     if (team !== 1 && team !== 2) continue
     queue.push({ id, team, cell: s.cell })
@@ -112,8 +117,18 @@ export function tickDepotRefill(
       continue
     }
     const have = walletOf(p.id)
-    if (have >= PAINT_CAPACITY) continue
-    const acc = (frac.get(p.id) ?? 0) + PAINT_REFILL_PER_SEC * dt
+    if (have >= PAINT_CAPACITY) {
+      lastGrant.set(p.id, now)
+      granted.add(p.id)
+      continue
+    }
+    // Wall-clock accrue so a slow host tick still grants the elapsed time,
+    // even when the engine dt was skipped because feet arrived after systems.
+    const prev = lastGrant.get(p.id) ?? now
+    const elapsed = Math.min(1, Math.max(dt, (now - prev) / 1000))
+    lastGrant.set(p.id, now)
+    granted.add(p.id)
+    const acc = (frac.get(p.id) ?? 0) + PAINT_REFILL_PER_SEC * elapsed
     const whole = Math.floor(acc)
     frac.set(p.id, acc - whole)
     if (whole <= 0) continue
@@ -121,4 +136,5 @@ export function tickDepotRefill(
     setWallet(p.id, next)
     pushWallet(p.id, next)
   }
+  for (const id of [...lastGrant.keys()]) if (!granted.has(id)) lastGrant.delete(id)
 }

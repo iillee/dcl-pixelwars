@@ -56,10 +56,13 @@ const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
 const BODY_XZ = 0.54
 const BODY_Y = 0.62
 const BODY_Y_OFF = 0.03
-/** Smooth cone from the underside of the egg down to a small tied nub. */
-const NECK_H = 0.14
-const NECK_XZ = 0.28
-const NECK_TUCK = 0.05
+/** Short cone tucked into the egg: top diameter is ~28% of the body
+ *  width, so it does not flare out as a skirt. setCylinder(1, tip)
+ *  is scaled by NECK_XZ, so the visual top radius is NECK_XZ. */
+const NECK_H = 0.1
+const NECK_XZ = 0.076
+const NECK_TUCK = 0.07
+const NECK_TIP_RATIO = 0.32
 const NUB_XZ = 0.05
 const NUB_Y = 0.046
 const NUB_OVERLAP = 0.01
@@ -409,7 +412,7 @@ function addBalloonPart(parent: Entity, pos: Vec, scale: Vec, cone = false): Ent
     position: Vector3.create(pos.x, pos.y, pos.z),
     scale: Vector3.create(scale.x, scale.y, scale.z),
   })
-  if (cone) MeshRenderer.setCylinder(ent, 1, 0.18)
+  if (cone) MeshRenderer.setCylinder(ent, 1, NECK_TIP_RATIO)
   else MeshRenderer.setSphere(ent)
   paintBalloon(ent)
   return ent

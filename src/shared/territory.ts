@@ -93,6 +93,14 @@ export function applyTank(ops: readonly TankOp[], tank: number): { taken: string
 export const WALLET_MIN_MS = 200
 /** Standing still reports the cell underfoot at this gap. A cell change sends at once. */
 export const FEET_IDLE_MS = 500
+/** A depot feet sample stays valid this long. Must outlast both the idle
+ *  feet interval and a slow hosted tick (~500–900 ms), or standing still
+ *  never refills and the next wallet echo snaps the bar down. */
+export const DEPOT_FEET_MS = 2500
+
+export function depotFeetFresh(sampledAt: number, now = Date.now()): boolean {
+  return now - sampledAt <= DEPOT_FEET_MS
+}
 
 export type WalletMsg = { tank: number; denied: string[]; regen: number }
 

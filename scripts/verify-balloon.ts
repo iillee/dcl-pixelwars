@@ -163,5 +163,14 @@ const aspect = bodyY / bodyXz
 if (!(aspect >= 1.12 && aspect <= 1.18)) {
   fail(`balloon body should be a mild egg (1.12–1.18 tall), got ${aspect.toFixed(3)}`)
 }
+const neckXz = Number((client.match(/const NECK_XZ = ([0-9.]+)/) || [])[1])
+const neckH = Number((client.match(/const NECK_H = ([0-9.]+)/) || [])[1])
+const neckTuck = Number((client.match(/const NECK_TUCK = ([0-9.]+)/) || [])[1])
+if (!(neckXz > 0) || neckXz * 2 > bodyXz * 0.32) {
+  fail(`balloon cone top should be well inside the egg (~25–30% of body width), got diameter ${(neckXz * 2).toFixed(3)} vs body ${bodyXz}`)
+}
+if (!(neckH > 0) || !(neckTuck > 0) || neckTuck < neckH * 0.5) {
+  fail('the balloon cone should be tucked up into the egg so only a short tip shows')
+}
 
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')

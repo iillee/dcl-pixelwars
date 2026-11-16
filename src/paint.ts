@@ -52,8 +52,7 @@ export function initPaintNet(): void {
 
   events.on('paint:wallet', ({ tank, denied, regen }) => {
     if (!paintEconomy) return
-    paintLeft = tank
-    paintFrac = 0
+    adoptWallet(tank)
     serverRegen = regen === 1
     // Only revert cells this client actually predicted. A Burst denial has
     // no undo record; defaulting those to empty would bleach enemy paint.
@@ -69,8 +68,7 @@ export function initPaintNet(): void {
     setServerCoverage({ red: 0, blue: 0, total: 0 })
     setPaintEconomy(layout !== 'lobby' && format === 'prototype')
     setPaintWorld(layout !== 'lobby' && paintAllowed(format))
-    paintLeft = PAINT_CAPACITY
-    paintFrac = 0
+    adoptWallet(PAINT_CAPACITY)
     paintUndo.clear()
     cellSince.clear()
     serverRegen = false
@@ -402,6 +400,8 @@ export function resetPaintForTile(tileEntity: Entity) {
 const paintOutbox = new Set<string>()
 let paintEconomy = false
 let paintLeft = PAINT_CAPACITY
+let serverTank = PAINT_CAPACITY
+let serverTankAt = 0
 /** Last ownership-change time (ms). 0 = pre-cured. Missing = not cured. */
 const cellSince = new Map<string, number>()
 let serverRegen = false
@@ -420,17 +420,22 @@ export function paintRefilling(): boolean { return paintRefill }
 function setPaintEconomy(on: boolean): void {
   if (on === paintEconomy) return
   paintEconomy = on
-  paintLeft = PAINT_CAPACITY
-  paintFrac = 0
+  adoptWallet(PAINT_CAPACITY)
   paintRefill = false
   paintUndo.clear()
+}
+
+function adoptWallet(tank: number): void {
+  serverTank = Math.max(0, Math.min(PAINT_CAPACITY, tank))
+  serverTankAt = Date.now()
+  paintLeft = serverTank
+  paintFrac = 0
 }
 
 /** Cloud landed. The server refills too; this updates the bar before that echo. */
 export function refillPredictedTank(): void {
   if (!paintEconomy) return
-  paintLeft = PAINT_CAPACITY
-  paintFrac = 0
+  adoptWallet(PAINT_CAPACITY)
   paintUndo.clear()
 }
 
@@ -442,7 +447,16 @@ export function predictDepotRefill(dt: number, friendly: boolean): void {
 /** Local bar climbs between throttled wallet echoes while on cured friendly ground. */
 export function predictTerritoryRefill(dt: number, eligible: boolean): void {
   paintRefill = paintEconomy && eligible && paintLeft < PAINT_CAPACITY
-  if (!paintRefill) return
+  if (!paintEconomy || !eligible) return
+  // Climb from the last server tank, not from a runaway local value, so a
+  // late wallet echo cannot snap the bar back down.
+  if (serverTankAt > 0) {
+    const expected = Math.min(PAINT_CAPACITY, serverTank + PAINT_REFILL_PER_SEC * ((Date.now() - serverTankAt) / 1000))
+    paintLeft = expected
+    paintFrac = 0
+    paintRefill = paintLeft < PAINT_CAPACITY
+    return
+  }
   paintFrac += PAINT_REFILL_PER_SEC * dt
   const whole = Math.floor(paintFrac)
   if (whole <= 0) return
@@ -509,6 +523,8 @@ export function noteLocalPaintCandidate(id: string): void {
     if (prev !== localTeam) {
       if (paintLeft <= 0) return
       paintLeft -= 1
+      serverTank = Math.max(0, serverTank - 1)
+      serverTankAt = Date.now()
       paintUndo.set(id, prev)
     }
   }

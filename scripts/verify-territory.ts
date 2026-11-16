@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { LOBBY_MODES } from '../src/shared/lobby'
 import {
   PAINT_CAPACITY, PAINT_COST, PAINT_REFILL_MODE, PAINT_REFILL_PER_SEC, PAINT_CURE_S, PAINT_GROUND_TOLERANCE,
-  DEPOT_NEUTRAL_COUNT, WALLET_MIN_MS, FEET_IDLE_MS,
+  DEPOT_NEUTRAL_COUNT, DEPOT_FEET_MS, WALLET_MIN_MS, FEET_IDLE_MS, depotFeetFresh,
   WalletGate, accruePaint, applyTank, feetDue, isCuredSince, isRegenEligible,
   nearestNode, onDepot, orderNearest, placeDepots,
 } from '../src/shared/territory'
@@ -216,6 +216,23 @@ if (!server.includes('tickTerritoryRegen') || !server.includes('seedStartTerrito
 }
 if (!server.includes('economyOn()') || !/if \(refillAtDepot\(\)\) \{[\s\S]*tickDepotRefill/.test(server)) {
   console.error('✗ depot refill must stay inside the Prototype economy gate')
+  process.exit(1)
+}
+if (DEPOT_FEET_MS < 2000) {
+  console.error(`✗ depot feet must stay valid longer than a slow host tick, got ${DEPOT_FEET_MS}ms`)
+  process.exit(1)
+}
+if (!depotFeetFresh(0, 600) || !depotFeetFresh(0, 1500) || depotFeetFresh(0, DEPOT_FEET_MS + 1)) {
+  console.error('✗ standing still at a depot should still count as present after a delayed tick')
+  process.exit(1)
+}
+const depotTickSrc = readFileSync(new URL('../src/server/depots.ts', import.meta.url), 'utf8')
+if (!depotTickSrc.includes('depotFeetFresh') || !depotTickSrc.includes('lastGrant') || depotTickSrc.includes('s.t > 500')) {
+  console.error('✗ depot refill should keep late feet and accrue with wall-clock time')
+  process.exit(1)
+}
+if (!paintSrc.includes('adoptWallet') || !paintSrc.includes('serverTank') || !paintSrc.includes('serverTankAt')) {
+  console.error('✗ the paint bar should climb from the last server wallet, not a runaway local value')
   process.exit(1)
 }
 
