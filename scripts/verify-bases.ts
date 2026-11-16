@@ -3,7 +3,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  accrueProgress, baseThresholdVerdict, baseTimeoutVerdict, basesOn,
+  accrueProgress, adoptConnected, baseThresholdVerdict, baseTimeoutVerdict, basesOn,
   connectedCells, GROWTH_PER_CELL_PER_SEC, VICTORY_PROGRESS,
 } from '../src/shared/bases'
 import { EAST_LOBBY_CELL, EAST_PARK_CELL, EAST_SLOT_MODE, LOBBY_MODES, modeSubtitle, modeTitle, placedModes } from '../src/shared/lobby'
@@ -45,6 +45,15 @@ if (connectedCells(2, ['b'], teamOf, adj).has('a')) fail("blue should not claim 
 owner.set('b', 1)
 const restored = connectedCells(1, ['a'], teamOf, adj)
 if (!restored.has('c') || !restored.has('d')) fail('restoring the link should reconnect the region')
+
+const edge = new Set<string>(['a'])
+owner.set('b', 1)
+owner.set('c', 1)
+owner.set('d', 1)
+const grew = adoptConnected('b', 1, teamOf, adj, edge)
+if (!grew.includes('b') || !edge.has('c') || !edge.has('d')) fail('painting a cell next to connected territory should attach it and anything it relinks')
+const island = adoptConnected('e', 1, teamOf, adj, edge)
+if (island.length !== 0 || edge.has('e')) fail('a cell that does not touch the network must stay disconnected')
 
 const started = accrueProgress(0, 500, 0)
 if (started !== 0) fail('zero dt should not add charge')
@@ -199,5 +208,23 @@ if (!server.includes("mode === 'bases' ? 'bases'")) fail('BASES needs its own ro
 if (!server.includes("roundFormat === 'pvb'")) fail('Bot Invasion start-up logic must remain reachable')
 const msgs = readFileSync(new URL('../src/shared/messages.ts', import.meta.url), 'utf8')
 if (!msgs.includes('baseState') || !msgs.includes('baseWin')) fail('clients need baseState and baseWin messages')
+const paint = readFileSync(new URL('../src/paint.ts', import.meta.url), 'utf8')
+if (!paint.includes('MUTE_WASH') || paint.includes('c.r * 0.52') || !paint.includes('(1 - c.r)')) {
+  fail('disconnected BASES paint should be a lighter pastel, not a darker shade')
+}
+if (!paint.includes('setPaintConnect') || !paint.includes('paintConnect?.(')) {
+  fail('fresh paint should notify BASES so the leading edge can attach immediately')
+}
+const beams = readFileSync(new URL('../src/client/baseBeams.ts', import.meta.url), 'utf8')
+if (!beams.includes('adoptConnected') || !beams.includes('noteBasePaint') || !beams.includes('setPaintConnect(noteBasePaint)')) {
+  fail('the client should incrementally attach paint that touches the connected network')
+}
+const ui = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+if (!ui.includes('function BasesChargeHud') || !ui.includes('FILL THE BASE') || !ui.includes('+${rate}/s')) {
+  fail('BASES should have its own two-team charge HUD, not the single territory bar')
+}
+if (!ui.includes('isBasesRound() ? (') || !ui.includes('BasesChargeHud')) {
+  fail('the shared territory-% bar must stay hidden during a BASES match')
+}
 
 console.log(`✓ BASES network, charge, locked origins, ramps; walk-isolated cells on seed 42: ${airOnly}; spawns ${spawnR.x.toFixed(0)},${spawnB.x.toFixed(0)}`)

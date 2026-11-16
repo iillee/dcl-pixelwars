@@ -5,11 +5,11 @@
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
 import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
-import { basesOn, connectedCells, GROWTH_PER_CELL_PER_SEC, VICTORY_PROGRESS } from '../shared/bases'
+import { adoptConnected, basesOn, connectedCells, GROWTH_PER_CELL_PER_SEC, VICTORY_PROGRESS } from '../shared/bases'
 import { baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { buildWalkableGraph, type WalkableGraph } from '../shared/mazeGraph'
 import { isLobbyLayout } from '../maze/rebuild'
-import { paintTeamOf, retintAllPaint, retintCell, setPaintMute } from '../paint'
+import { paintTeamOf, retintAllPaint, retintCell, setPaintConnect, setPaintMute } from '../paint'
 import { Team, TEAM_RGB } from '../shared/team'
 
 type Charge = {
@@ -45,6 +45,31 @@ const cached: { 1: Set<string>; 2: Set<string> } = { 1: new Set(), 2: new Set() 
 function muteOf(id: string, team: number): boolean {
   if (!live || (team !== 1 && team !== 2)) return false
   return !cached[team as 1 | 2].has(id)
+}
+
+/**
+ * Optimistic local / incoming paint: if the new cell touches connected
+ * territory, mark it (and anything it relinks) connected immediately so
+ * the leading edge of a run does not flash as cut off. A cut recomputes
+ * that team from the origins. The server remains authoritative for
+ * counts and charge; a later refresh uses the same fill, so colors do
+ * not flicker when the tick arrives.
+ */
+function noteBasePaint(id: string, team: number): void {
+  if (!live || !graph) return
+  const teamOf = (cell: string) => paintTeamOf(cell) as number
+  if (team === 1 || team === 2) {
+    const added = adoptConnected(id, team, teamOf, graph.adj, cached[team])
+    for (const n of added) if (n !== id) retintCell(n)
+  }
+  for (const t of [1, 2] as const) {
+    if (t === team || !cached[t].has(id)) continue
+    const prev = cached[t]
+    const next = connectedCells(t, origins(t), teamOf, graph.adj)
+    cached[t] = next
+    for (const n of prev) if (!next.has(n)) retintCell(n)
+    for (const n of next) if (!prev.has(n)) retintCell(n)
+  }
 }
 
 function rebuildGraph(): void {
@@ -212,6 +237,7 @@ function setLive(on: boolean): void {
 
 export function initBaseBeams(): void {
   setPaintMute(muteOf)
+  setPaintConnect(noteBasePaint)
   events.on('base:state', (msg) => {
     applyState(msg)
     if (live) refreshConnected()

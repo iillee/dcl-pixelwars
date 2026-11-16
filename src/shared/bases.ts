@@ -44,6 +44,42 @@ export function connectedCells(
   return out
 }
 
+/**
+ * If `id` is a friendly 4-neighbor of any already-connected cell, add it
+ * and flood through any further friendly cells it relinks. Returns the
+ * newly added ids, or [] when the cell is still cut off.
+ */
+export function adoptConnected(
+  id: string,
+  team: number,
+  teamOf: (cell: string) => number,
+  adj: Map<string, readonly string[]>,
+  connected: Set<string>,
+): string[] {
+  if (!id || teamOf(id) !== team || connected.has(id)) return []
+  let attached = false
+  const nbrs = adj.get(id)
+  if (nbrs) {
+    for (const n of nbrs) if (connected.has(n)) { attached = true; break }
+  }
+  if (!attached) return []
+  const added: string[] = []
+  const q = [id]
+  connected.add(id)
+  added.push(id)
+  for (let i = 0; i < q.length; i++) {
+    const next = adj.get(q[i])
+    if (!next) continue
+    for (const n of next) {
+      if (connected.has(n) || teamOf(n) !== team) continue
+      connected.add(n)
+      added.push(n)
+      q.push(n)
+    }
+  }
+  return added
+}
+
 export function accrueProgress(
   progress: number,
   connected: number,

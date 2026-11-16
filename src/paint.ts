@@ -280,7 +280,12 @@ export function cellMaterial(team: Team, dim = false) {
   const c = TEAM_COLORS[team]
   const albedo = (!dim || team === Team.None)
     ? c
-    : Color4.create(c.r * 0.52, c.g * 0.52, c.b * 0.52, c.a)
+    : Color4.create(
+      c.r + (1 - c.r) * MUTE_WASH,
+      c.g + (1 - c.g) * MUTE_WASH,
+      c.b + (1 - c.b) * MUTE_WASH,
+      c.a,
+    )
   return {
     albedoColor: albedo,
     roughness: 1.0,
@@ -289,9 +294,16 @@ export function cellMaterial(team: Team, dim = false) {
   }
 }
 
+/** Mix disconnected paint toward white so it reads as a lighter pastel of the team color. */
+const MUTE_WASH = 0.48
+
 let muteFn: ((id: string, team: number) => boolean) | null = null
 export function setPaintMute(fn: ((id: string, team: number) => boolean) | null): void {
   muteFn = fn
+}
+let paintConnect: ((id: string, team: number) => void) | null = null
+export function setPaintConnect(fn: ((id: string, team: number) => void) | null): void {
+  paintConnect = fn
 }
 function muted(id: string, team: Team): boolean {
   return !!muteFn && muteFn(id, team)
@@ -460,6 +472,7 @@ function tickLocalPaintRegen(dt: number): void {
 function forceCell(id: string, team: Team): void {
   if (team === Team.None) cellTeam.delete(id)
   else cellTeam.set(id, team)
+  paintConnect?.(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
 }
@@ -545,6 +558,7 @@ export function applyRemotePaint(id: string, team: Team): void {
   if (cellTeam.get(id) === team) return
   cellSince.set(id, Date.now())
   cellTeam.set(id, team)
+  paintConnect?.(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) {
     Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
