@@ -453,7 +453,7 @@ function bannerHeadline(): string {
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
 }
 
-/** Prototype only. Vertical pill on the right: caption, number, team-colored fill from the bottom. */
+/** Prototype only. Vertical pill on the right: caption and team-colored fill from the bottom. */
 function PaintTankBar() {
   if (!paintEconomyOn() || inLobby()) return null
   const mob = isMobile()
@@ -473,21 +473,20 @@ function PaintTankBar() {
   const pulse = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(Date.now() / 180))
   const fillColor = filling ? Color4.create(teamColor.r, teamColor.g, teamColor.b, pulse) : teamColor
   const labelColor = empty ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()
-  const top = Math.max(16, Math.round((cv.h - trackH - 48) / 2))
+  const top = Math.max(16, Math.round((cv.h - trackH - 24) / 2))
   return (
     <UiEntity
       uiTransform={{
         positionType: 'absolute',
         position: { top, right: mob ? 10 : 22 },
         width: 72,
-        height: trackH + 48,
+        height: trackH + 24,
         flexDirection: 'column',
         alignItems: 'center',
         pointerFilter: 'none',
       }}
     >
-      <Label value={empty ? 'NO PAINT' : filling ? (PAINT_REFILL_MODE === 'depot' ? 'REFILL' : 'RECHARGE') : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
-      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
+      <Label value={empty ? 'NO PAINT' : filling ? (PAINT_REFILL_MODE === 'depot' ? 'REFILL' : 'RECHARGE') : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16, margin: { bottom: 8 } }} />
       <UiEntity
         uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
         uiBackground={{ color: Color4.create(0, 0, 0, empty ? 0.72 : 0.5) }}

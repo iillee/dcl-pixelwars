@@ -154,6 +154,10 @@ if (!ui.includes('NO PAINT') || !ui.includes('REFILL') || !ui.includes('RECHARGE
   console.error('✗ the paint bar should show REFILL at a depot, keep RECHARGE for territory mode, pulse while filling, and show NO PAINT when empty')
   process.exit(1)
 }
+if (ui.includes('value={`${n}`}')) {
+  console.error('✗ the paint bar should not show a numeric tank readout')
+  process.exit(1)
+}
 if (!ui.includes('painterTeam()') || !ui.includes('borderRadius: radius') || !ui.includes('borderRadius: innerR') || !ui.includes('Team.Blue ? BLUE_COLOR : RED_COLOR')) {
   console.error('✗ the paint bar should be a team-colored pill with rounded ends on the track and the fill')
   process.exit(1)
