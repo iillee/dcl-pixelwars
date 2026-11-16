@@ -43,9 +43,10 @@ const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-const SIGN_COPY: Record<'pvp' | 'pvb' | 'prototype' | 'balloon', { plate: Rgb; ink: Rgb }> = {
+const SIGN_COPY: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', { plate: Rgb; ink: Rgb }> = {
   pvp: { plate: { r: 1, g: 0.459, b: 0.467 }, ink: { r: 0.45, g: 0.12, b: 0.13 } },
   pvb: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
+  bases: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
   prototype: { plate: { r: 1, g: 0.796, b: 0.42 }, ink: { r: 0.42, g: 0.27, b: 0.06 } },
   balloon: { plate: { r: 0.435, g: 0.816, b: 0.549 }, ink: { r: 0.08, g: 0.32, b: 0.16 } },
 }
@@ -99,7 +100,7 @@ function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, 
 function laySigns(): void {
   clearSigns()
   for (const m of placedModes()) {
-    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype' | 'balloon']
+    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
     // Letters sit on local −Z, the side a yaw billboard turns toward the camera.
@@ -261,7 +262,7 @@ function tickTints(_dt: number, local: ModeId | ''): void {
     const show = here || others
     if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    const plate = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'prototype' | 'balloon'].plate
+    const plate = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'].plate
     Material.setPbrMaterial(tints[i], zoneMat(plate, here || confirmed))
   }
 }

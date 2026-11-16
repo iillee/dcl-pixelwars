@@ -17,12 +17,12 @@ if (tiles.length !== 5) {
   console.error(`✗ lobby should be 5 tiles, got ${tiles.length}`)
   process.exit(1)
 }
-if (LOBBY_MODES.length !== 6 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots') || !LOBBY_MODES.some(m => m.id === 'prototype') || !LOBBY_MODES.some(m => m.id === 'balloon')) {
-  console.error('✗ Color Garden, Pot Hunt, Prototype, and Balloon Battle must stay in the registry')
+if (LOBBY_MODES.length !== 7 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots') || !LOBBY_MODES.some(m => m.id === 'prototype') || !LOBBY_MODES.some(m => m.id === 'balloon') || !LOBBY_MODES.some(m => m.id === 'bases') || !LOBBY_MODES.some(m => m.id === 'pvb')) {
+  console.error('✗ Color Garden, Pot Hunt, Prototype, Balloon Battle, Bases, and Bot Invasion must stay in the registry')
   process.exit(1)
 }
-if (placedModes().map(m => m.id).join() !== 'pvp,pvb,prototype,balloon') {
-  console.error('✗ Pixelwars, Bot Invasion, Prototype, and Balloon Battle should be the placed ends')
+if (placedModes().map(m => m.id).join() !== 'pvp,bases,prototype,balloon') {
+  console.error('✗ Pixelwars, Bases, Prototype, and Balloon Battle should be the placed ends')
   process.exit(1)
 }
 if (LOBBY_MODES.some(m => m.economy && m.id !== 'prototype') || !LOBBY_MODES.find(m => m.id === 'prototype')?.economy) {
@@ -103,8 +103,8 @@ for (const m of LOBBY_MODES) {
   }
 }
 const hold = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [baseSpawn(1).pos, baseSpawn(2).pos])
-if (hold.length !== 5) {
-  console.error(`✗ expected base, base, cross, prototype, and balloon pads, got ${hold.length}`)
+if (hold.length !== 6) {
+  console.error(`✗ expected base, base, cross, bases, prototype, and balloon pads, got ${hold.length}`)
   process.exit(1)
 }
 const slab = BASE_Y + 0.5
@@ -131,12 +131,24 @@ const protoZone = voteZoneLocal(CELL)
 const protoDoor = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z1, protoMode.cell, MAZE_ORIGIN, CELL)
 const protoCap = voteLocalToWorld((protoZone.x0 + protoZone.x1) / 2, protoZone.z0, protoMode.cell, MAZE_ORIGIN, CELL)
 const protoStand = voteTintPose(protoMode.cell, MAZE_ORIGIN, CELL)
-if (!padContains(hold[3], protoStand.x, protoStand.z) || !padContains(hold[3], protoDoor.x, protoDoor.z) || !padContains(hold[3], protoCap.x, protoCap.z)) {
+const basesPad = hold[3]
+const protoPad = hold[4]
+const balloonPad = hold[5]
+const basesMode = LOBBY_MODES.find(m => m.id === 'bases')!
+const basesZone = voteZoneLocal(CELL)
+const basesDoor = voteLocalToWorld((basesZone.x0 + basesZone.x1) / 2, basesZone.z1, basesMode.cell, MAZE_ORIGIN, CELL)
+const basesCap = voteLocalToWorld((basesZone.x0 + basesZone.x1) / 2, basesZone.z0, basesMode.cell, MAZE_ORIGIN, CELL)
+const basesStand = voteTintPose(basesMode.cell, MAZE_ORIGIN, CELL)
+if (!padContains(basesPad, basesStand.x, basesStand.z) || !padContains(basesPad, basesDoor.x, basesDoor.z) || !padContains(basesPad, basesCap.x, basesCap.z)) {
+  console.error('✗ the bases pad does not cover the east vote floor')
+  process.exit(1)
+}
+if (!padContains(protoPad, protoStand.x, protoStand.z) || !padContains(protoPad, protoDoor.x, protoDoor.z) || !padContains(protoPad, protoCap.x, protoCap.z)) {
   console.error('✗ the prototype pad does not cover the north vote floor')
   process.exit(1)
 }
 const teamFight = voteTintPose(LOBBY_MODES.find(m => m.id === 'pvp')!.cell, MAZE_ORIGIN, CELL)
-if (padContains(hold[3], teamFight.x, teamFight.z) || padContains(hold[2], teamFight.x, teamFight.z) || padContains(hold[4], teamFight.x, teamFight.z)) {
+if (padContains(protoPad, teamFight.x, teamFight.z) || padContains(hold[2], teamFight.x, teamFight.z) || padContains(balloonPad, teamFight.x, teamFight.z)) {
   console.error('✗ a prototype, balloon, or cross pad reaches the Team Fight tile')
   process.exit(1)
 }
@@ -144,11 +156,11 @@ const balloonZone = voteZoneLocal(CELL)
 const balloonDoor = voteLocalToWorld((balloonZone.x0 + balloonZone.x1) / 2, balloonZone.z1, balloonMode.cell, MAZE_ORIGIN, CELL)
 const balloonCap = voteLocalToWorld((balloonZone.x0 + balloonZone.x1) / 2, balloonZone.z0, balloonMode.cell, MAZE_ORIGIN, CELL)
 const balloonStand = voteTintPose(balloonMode.cell, MAZE_ORIGIN, CELL)
-if (!padContains(hold[4], balloonStand.x, balloonStand.z) || !padContains(hold[4], balloonDoor.x, balloonDoor.z) || !padContains(hold[4], balloonCap.x, balloonCap.z)) {
+if (!padContains(balloonPad, balloonStand.x, balloonStand.z) || !padContains(balloonPad, balloonDoor.x, balloonDoor.z) || !padContains(balloonPad, balloonCap.x, balloonCap.z)) {
   console.error('✗ the balloon pad does not cover the south vote floor')
   process.exit(1)
 }
-if (padContains(hold[2], balloonStand.x, balloonStand.z) || padContains(hold[3], balloonStand.x, balloonStand.z) || padContains(hold[4], protoStand.x, protoStand.z) || padContains(hold[4], forkFeet.x, forkFeet.z)) {
+if (padContains(hold[2], balloonStand.x, balloonStand.z) || padContains(protoPad, balloonStand.x, balloonStand.z) || padContains(balloonPad, protoStand.x, protoStand.z) || padContains(balloonPad, forkFeet.x, forkFeet.z)) {
   console.error('✗ the south or north pad reaches the other lobby floors')
   process.exit(1)
 }
@@ -476,6 +488,10 @@ if (modeTitle('balloon') !== 'BALLOON BATTLE' || modeSubtitle('balloon') !== 'Te
   console.error('✗ Balloon Battle should read BALLOON BATTLE / Testing')
   process.exit(1)
 }
+if (modeTitle('bases') !== 'BASES' || modeSubtitle('bases') !== 'Charge the Base') {
+  console.error('✗ Bases should read BASES / Charge the Base')
+  process.exit(1)
+}
 const proto = LOBBY_MODES.find(m => m.id === 'prototype')!
 const protoSign = billboardAnchor(proto.cell, MAZE_ORIGIN, CELL, BASE_Y)
 const northEdge = proto.cell.z * CELL + CELL + MAZE_ORIGIN
@@ -519,8 +535,8 @@ if (!onFork) {
 
 const tied = emptyCounts()
 tied.pvp = 2
-tied.pvb = 2
-if (pickWinner(tied, 'pvb') !== 'pvb') {
+tied.bases = 2
+if (pickWinner(tied, 'bases') !== 'bases') {
   console.error('✗ a tie should keep the previous mode')
   process.exit(1)
 }
@@ -529,21 +545,28 @@ if (pickWinner(tied, 'garden') !== 'pvp') {
   process.exit(1)
 }
 const none = emptyCounts()
-if (pickWinner(none, 'pvb') !== null) {
+if (pickWinner(none, 'bases') !== null) {
   console.error('✗ zero votes should not pick a winner')
   process.exit(1)
 }
 const lead = emptyCounts()
-lead.pvb = 3
+lead.bases = 3
 lead.pvp = 1
-if (pickWinner(lead, 'pvp') !== 'pvb') {
+if (pickWinner(lead, 'pvp') !== 'bases') {
   console.error('✗ the higher count should win')
+  process.exit(1)
+}
+const parked = emptyCounts()
+parked.pvb = 5
+parked.pvp = 1
+if (pickWinner(parked, 'pvp') !== 'pvp') {
+  console.error('✗ parked Bot Invasion votes must not win')
   process.exit(1)
 }
 const protoLead = emptyCounts()
 protoLead.prototype = 4
 protoLead.pvp = 1
-protoLead.pvb = 2
+protoLead.bases = 2
 if (pickWinner(protoLead, 'pvp') !== 'prototype') {
   console.error('✗ a Prototype lead should win the vote')
   process.exit(1)
@@ -644,8 +667,8 @@ if (!rescue.includes('isLobbyLayout()') || !rescue.includes('lobbyFeet')) {
   process.exit(1)
 }
 const phaseSrc = readFileSync(new URL('../src/client/phase.ts', import.meta.url), 'utf8')
-if (!phaseSrc.includes("next === 'prototype'") || !phaseSrc.includes("next === 'balloon'")) {
-  console.error('✗ Prototype and Balloon Battle votes must not be dropped')
+if (!phaseSrc.includes("next === 'prototype'") || !phaseSrc.includes("next === 'balloon'") || !phaseSrc.includes("next === 'bases'")) {
+  console.error('✗ Prototype, Balloon Battle, and Bases votes must not be dropped')
   process.exit(1)
 }
 const handler = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
@@ -663,6 +686,14 @@ if (!server.includes("mode === 'balloon' ? 'balloon'") || server.includes("kind:
 }
 if (!handler.includes("format === 'balloon'")) {
   console.error('✗ the client must keep Balloon Battle as its own wire format')
+  process.exit(1)
+}
+if (!handler.includes("format === 'bases'")) {
+  console.error('✗ the client must keep Bases as its own wire format')
+  process.exit(1)
+}
+if (!server.includes("mode === 'bases' ? 'bases'")) {
+  console.error('✗ Bases should keep its own round format')
   process.exit(1)
 }
 if (!server.includes("roundFormat !== 'pvb'")) {

@@ -26,7 +26,7 @@ export const PVB_RATIO = 2
 /** Hard cap on Bot Invasion bots. 8 humans would be 16; the pool stops at 15. */
 export const PVB_BOT_MAX = 15
 
-export type RoundFormat = 'pvp' | 'pvb' | 'prototype' | 'balloon'
+export type RoundFormat = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
 
 export function pvbBotCount(activeHumans: number): number {
   if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0

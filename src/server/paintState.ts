@@ -17,6 +17,16 @@ import { baseTeamOfCellId } from '../maze/generator'
 import { BASE_PAINT_LOCK } from '../maze/level'
 
 const cellTeam = new Map<string, number>()
+let lockTeamBases = false
+let paintListener: (() => void) | null = null
+
+export function setLockTeamBases(on: boolean): void {
+  lockTeamBases = on
+}
+
+export function setPaintListener(fn: (() => void) | null): void {
+  paintListener = fn
+}
 // Owner of each painted cell = its last painter (player address, or `bot:<id>`). Round summary shades.
 const cellPainter = new Map<string, string>()
 /** Last ownership-change time (ms). 0 = pre-cured starting territory. Missing = not cured. */
@@ -40,6 +50,11 @@ let dirtyAt = 0
 export function applyPaint(id: string, team: number, painter: string): boolean {
   // Sky-mode bases are locked to their team colour: not paintable, not counted.
   if (BASE_PAINT_LOCK && baseTeamOfCellId(id) !== 0) return false
+  // BASES mode: each team's origin cells stay locked to that team.
+  if (lockTeamBases) {
+    const home = baseTeamOfCellId(id)
+    if ((home === 1 || home === 2) && home !== team) return false
+  }
   // Last painter owns the cell, even a teammate re-painting our own colour (no score credit for that).
   cellPainter.set(id, painter)
   const prev = cellTeam.get(id)
@@ -48,6 +63,7 @@ export function applyPaint(id: string, team: number, painter: string): boolean {
   cellSince.set(id, Date.now())
   if (dirty.size === 0) dirtyAt = Date.now()
   dirty.set(id, team)
+  paintListener?.()
   return true
 }
 
@@ -161,4 +177,5 @@ export function clearAll(): void {
   cellSince.clear()
   dirty.clear()
   dirtyAt = 0
+  lockTeamBases = false
 }

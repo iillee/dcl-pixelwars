@@ -68,7 +68,7 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
-    kind: 'paint' | 'balloon'
+    kind: 'paint' | 'balloon' | 'bases'
     victor: string
     victorName: string
   }
@@ -77,7 +77,7 @@ export type Events = {
   'round:clock': {
     idx: number
     active: boolean
-    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
+    format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
     phase: 'match' | 'summary' | 'lobby' | 'idle'
     voteMs: number
     winner: string
@@ -91,7 +91,7 @@ export type Events = {
     finalRed: number
     finalBlue: number
     finalTotal: number
-    format: 'pvp' | 'pvb' | 'prototype' | 'balloon'
+    format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
     layout?: 'arena' | 'lobby'
   }
 
@@ -100,6 +100,16 @@ export type Events = {
 
   'balloon:state': { entries: Array<{ id: string; n: number }> }
   'balloon:pop': { id: string; n: number }
+  'base:state': {
+    redConnected: number
+    blueConnected: number
+    redProgress: number
+    blueProgress: number
+    threshold: number
+    redGrowing: boolean
+    blueGrowing: boolean
+  }
+  'base:win': { team: number }
 
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).

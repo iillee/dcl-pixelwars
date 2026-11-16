@@ -67,8 +67,8 @@ export function initClientHandler(): void {
 // Handlers do the minimum needed to translate wire types to event payloads.
 // `team as Team` casts are safe: server enforces wire values 0/1/2 (see
 // shared/team.ts and server/roster.ts).
-function wireFormat(format: string): 'pvp' | 'pvb' | 'prototype' | 'balloon' {
-  if (format === 'pvb' || format === 'prototype' || format === 'balloon') return format
+function wireFormat(format: string): 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' {
+  if (format === 'pvb' || format === 'bases' || format === 'prototype' || format === 'balloon') return format
   return 'pvp'
 }
 
@@ -136,7 +136,7 @@ function wireInbound(): void {
   })
 
   room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal, kind, victor, victorName }) => {
-    events.emit('round:ended', { finalRed, finalBlue, finalTotal, kind: kind === 'balloon' ? 'balloon' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
+    events.emit('round:ended', { finalRed, finalBlue, finalTotal, kind: kind === 'balloon' ? 'balloon' : kind === 'bases' ? 'bases' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
   })
 
   room.onMessage('balloonState', ({ entries }) => {
@@ -144,6 +144,15 @@ function wireInbound(): void {
   })
   room.onMessage('balloonPop', ({ id, n }) => {
     events.emit('balloon:pop', { id, n })
+  })
+  room.onMessage('baseState', ({ redConnected, blueConnected, redProgress, blueProgress, threshold, redGrowing, blueGrowing }) => {
+    events.emit('base:state', {
+      redConnected, blueConnected, redProgress, blueProgress, threshold,
+      redGrowing: !!redGrowing, blueGrowing: !!blueGrowing,
+    })
+  })
+  room.onMessage('baseWin', ({ team }) => {
+    events.emit('base:win', { team })
   })
 
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {

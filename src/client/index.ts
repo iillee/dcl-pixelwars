@@ -48,6 +48,7 @@ import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
 import { initBalloons } from './balloons'
+import { initBaseBeams } from './baseBeams'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -145,6 +146,7 @@ export async function setupClient(): Promise<void> {
   initDepots()
   initLobby()
   initBalloons()
+  initBaseBeams()
   // Cross exists before the first frame the player can fall. The server
   // also starts in the lobby and sends roundReset; this is the local floor
   // so join does not wait on that message. A match clock replaces it.

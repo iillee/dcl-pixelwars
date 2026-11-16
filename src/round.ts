@@ -76,7 +76,7 @@ interface BannerState {
   bluePct: number
   winner: 'RED' | 'BLUE' | 'TIE' | 'PLAYER'
   victorName: string
-  kind: 'paint' | 'balloon'
+  kind: 'paint' | 'balloon' | 'bases'
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
@@ -171,6 +171,7 @@ export function initRoundNet(): void {
       `serverTotal=${finalTotal} localTotal=${localTotal}`
     )
     if (kind === 'balloon') showBalloonBanner(victorName || 'SOMEONE')
+    else if (kind === 'bases') showBasesBanner(finalRed, finalBlue, finalTotal)
     else showRoundEndBanner(finalRed, finalBlue, localTotal)
   })
   events.on('round:clock', ({ idx, active, format }) => {
@@ -206,7 +207,7 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
-  if (inLobby() || currentFormat === 'prototype' || currentFormat === 'balloon') return 'Vote with your feet'
+  if (inLobby() || currentFormat === 'prototype' || currentFormat === 'balloon' || currentFormat === 'bases') return 'Vote with your feet'
   if (!FORMAT_ALTERNATE) return `Next round: ${modeTitle('pvp')}`
   return `Next round: ${modeTitle(currentFormat === 'pvb' ? 'pvp' : 'pvb')}`
 }
@@ -229,6 +230,25 @@ export function isBalloonRound(): boolean {
   return currentFormat === 'balloon' && gamePhase() === 'match'
 }
 
+export function isBasesRound(): boolean {
+  return currentFormat === 'bases' && gamePhase() === 'match'
+}
+
+export function showBasesBanner(red: number, blue: number, threshold: number): void {
+  const t = threshold > 0 ? threshold : 1
+  banner.visible = true
+  banner.redPct = (red / t) * 100
+  banner.bluePct = (blue / t) * 100
+  banner.winner = red > blue ? 'RED' : blue > red ? 'BLUE' : 'TIE'
+  banner.victorName = ''
+  banner.kind = 'bases'
+  banner.shownAtMs = Date.now()
+  banner.personal = ''
+  banner.myCells = 0
+  banner.total = threshold
+  banner.owners = []
+}
+
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
   if (!armedFormat) return null
   if (formatStartedAt === 0) {
@@ -242,5 +262,6 @@ export function getFormatSplash(): { format: RoundFormat; title: string; sub: st
   if (armedFormat === 'pvb') return { format: 'pvb', title: modeTitle('pvb'), sub: modeSubtitle('pvb') }
   if (armedFormat === 'prototype') return { format: 'prototype', title: modeTitle('prototype'), sub: modeSubtitle('prototype') }
   if (armedFormat === 'balloon') return { format: 'balloon', title: modeTitle('balloon'), sub: modeSubtitle('balloon') }
+  if (armedFormat === 'bases') return { format: 'bases', title: modeTitle('bases'), sub: modeSubtitle('bases') }
   return { format: 'pvp', title: modeTitle('pvp'), sub: modeSubtitle('pvp') }
 }

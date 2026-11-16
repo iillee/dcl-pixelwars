@@ -3,13 +3,13 @@
  * the server decides a zone from a player's feet. No engine imports.
  *
  * The built floor is five tiles: a cross center opening all four ways,
- * Pixelwars on the west end, Bot Invasion on the east end, Prototype on the north end,
+ * Pixelwars on the west end, Bases on the east end, Prototype on the north end,
  * and Balloon Battle on the south end.
- * Color Garden and Pot Hunt stay in the registry so they can be placed again later.
- * They are not on the floor.
+ * Bot Invasion stays in the registry, parked off the floor, so the east tile
+ * can be swapped back. Color Garden and Pot Hunt stay unplaced too.
  */
 
-export type ModeId = 'pvp' | 'pvb' | 'prototype' | 'balloon' | 'garden' | 'pots'
+export type ModeId = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' | 'garden' | 'pots'
 export type TeamRule = 'balance' | 'humans-together'
 export type LobbyPhase = 'match' | 'summary' | 'lobby' | 'idle'
 
@@ -30,12 +30,20 @@ export type ModeDef = {
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** West Pixelwars, east Bot Invasion, north Prototype, and south Balloon Battle
- *  share an edge with the center. Garden and pots keep cells that are not built.
- *  They cannot win a vote. */
+/** West Pixelwars, east Bases, north Prototype, and south Balloon Battle
+ *  share an edge with the center. Bot Invasion is parked on an unused cell.
+ *  Garden and pots stay unbuilt. They cannot win a vote.
+ *  Flip EAST_SLOT_MODE to `'pvb'` to put Bot Invasion back on the east tile. */
+export const EAST_LOBBY_CELL = { x: 3, z: 2 }
+export const EAST_PARK_CELL = { x: 3, z: 0 }
+export const EAST_SLOT_MODE: 'pvb' | 'bases' = 'bases'
+const eastCell = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id ? EAST_LOBBY_CELL : EAST_PARK_CELL
+const eastLive = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id
+
 export const LOBBY_MODES: ModeDef[] = [
   { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 1, g: 0.459, b: 0.467 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: { x: 3, z: 2 }, teamRule: 'humans-together', live: true, placed: true, economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
+  { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
+  { id: 'bases', label: 'BASES', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
   { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
   { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.435, g: 0.816, b: 0.549 } },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
@@ -73,10 +81,11 @@ export const SIGN_PLATE_DEPTH_M = 0.7
 export const SIGN_LIP_Z = -0.18
 export const SIGN_LIP_DEPTH_M = 0.55
 
-/** Player-facing name. Internal ids stay `pvp` / `pvb`. */
+/** Player-facing name. Internal ids stay `pvp` / `pvb` / `bases`. */
 export function modeTitle(id: string): string {
   if (id === 'pvb') return 'BOT INVASION'
   if (id === 'pvp') return 'PIXELWARS'
+  if (id === 'bases') return 'BASES'
   if (id === 'prototype') return 'PROTOTYPE'
   if (id === 'balloon') return 'BALLOON BATTLE'
   return ''
@@ -85,6 +94,7 @@ export function modeTitle(id: string): string {
 export function modeSubtitle(id: string): string {
   if (id === 'pvb') return 'vs Bots'
   if (id === 'pvp') return 'vs Humans'
+  if (id === 'bases') return 'Charge the Base'
   if (id === 'prototype') return 'Paint Economy'
   if (id === 'balloon') return 'Testing'
   return ''
@@ -123,7 +133,7 @@ export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
 }
 
-/** End tiles actually built. Pixelwars west, Bot Invasion east, Prototype north, Balloon Battle south. */
+/** End tiles actually built. Pixelwars west, Bases (or parked Bot Invasion) east, Prototype north, Balloon Battle south. */
 export function placedModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.placed)
 }
@@ -288,8 +298,8 @@ export function spawnPadAt(x: number, feetY: number, z: number, sx = 16, sz = 16
 /**
  * Invisible floors under the places a joiner is put down before the tile mesh
  * can hold them. Team bases and the cross center match the original pads.
- * Prototype and Balloon Battle also cover their vote floors, including the
- * doorway off the cross. Bot Fight and Team Fight vote tiles are not given
+ * Bases, Prototype, and Balloon Battle also cover their vote floors, including
+ * the doorway off the cross. Bot Fight and Team Fight vote tiles are not given
  * an extra pad.
  */
 export function earlySpawnPads(
@@ -325,7 +335,7 @@ export function padContains(pad: SpawnPad, x: number, z: number): boolean {
 export type VoteCounts = Record<ModeId, number>
 
 export function emptyCounts(): VoteCounts {
-  return { pvp: 0, pvb: 0, prototype: 0, balloon: 0, garden: 0, pots: 0 }
+  return { pvp: 0, pvb: 0, bases: 0, prototype: 0, balloon: 0, garden: 0, pots: 0 }
 }
 
 /**

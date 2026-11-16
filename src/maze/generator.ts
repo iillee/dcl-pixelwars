@@ -102,7 +102,8 @@ export function getPlacedTilesInOrder(): Placed[] {
 
 /**
  * Five tiles. A cross at the center opens north, east, south, and west.
- * Pixelwars, Bot Invasion, Prototype, and Balloon Battle ends sit on those edges.
+ * Pixelwars, Bases, Prototype, and Balloon Battle ends sit on those edges.
+ * Bot Invasion stays in the registry and can take the east tile back.
  * The center is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {

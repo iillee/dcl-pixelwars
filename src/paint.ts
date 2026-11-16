@@ -276,12 +276,36 @@ export function cellId(tx: number, tz: number, ty: number, col: number, row: num
 export function paintTeamOf(id: string): Team {
   return cellTeam.get(id) ?? Team.None
 }
-export function cellMaterial(team: Team) {
+export function cellMaterial(team: Team, dim = false) {
+  const c = TEAM_COLORS[team]
+  const albedo = (!dim || team === Team.None)
+    ? c
+    : Color4.create(c.r * 0.52, c.g * 0.52, c.b * 0.52, c.a)
   return {
-    albedoColor: TEAM_COLORS[team],
+    albedoColor: albedo,
     roughness: 1.0,
     metallic: 0.0,
     specularIntensity: 0.0,
+  }
+}
+
+let muteFn: ((id: string, team: number) => boolean) | null = null
+export function setPaintMute(fn: ((id: string, team: number) => boolean) | null): void {
+  muteFn = fn
+}
+function muted(id: string, team: Team): boolean {
+  return !!muteFn && muteFn(id, team)
+}
+export function retintCell(id: string, team?: Team, visualOnly = false): void {
+  const e = cellEntity.get(id)
+  if (e === undefined) return
+  const t = (team ?? cellTeam.get(id) ?? Team.None) as Team
+  Material.setPbrMaterial(e, cellMaterial(t, visualOnly ? false : muted(id, t)))
+}
+export function retintAllPaint(): void {
+  for (const [id, e] of cellEntity) {
+    const t = cellTeam.get(id) ?? Team.None
+    Material.setPbrMaterial(e, cellMaterial(t, muted(id, t)))
   }
 }
 
@@ -352,7 +376,7 @@ export function resetPaintForTile(tileEntity: Entity) {
   if (!rec) return
   for (let i = 0; i < rec.entities.length; i++) {
     const t = lockedTeam(rec.ids[i])
-    Material.setPbrMaterial(rec.entities[i], cellMaterial(t))
+    Material.setPbrMaterial(rec.entities[i], cellMaterial(t, muted(rec.ids[i], t)))
     cellTeam.set(rec.ids[i], t)
   }
 }
@@ -437,7 +461,7 @@ function forceCell(id: string, team: Team): void {
   if (team === Team.None) cellTeam.delete(id)
   else cellTeam.set(id, team)
   const e = cellEntity.get(id)
-  if (e !== undefined) Material.setPbrMaterial(e, cellMaterial(team))
+  if (e !== undefined) Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
 }
 
 export function drainPaintOutbox(): string[] {
@@ -523,7 +547,7 @@ export function applyRemotePaint(id: string, team: Team): void {
   cellTeam.set(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) {
-    Material.setPbrMaterial(e, cellMaterial(team))
+    Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
   }
   // Note: if the cell entity hasn't spawned yet (grow-in delay window),
   // cellTeam still records the color — spawnOne() adopts it when the
@@ -623,7 +647,7 @@ function spawnCellsForTileImmediate(
       scale: Vector3.create(cellSize, scaleY, 1),
     })
     MeshRenderer.setPlane(e)
-    Material.setPbrMaterial(e, cellMaterial(preexisting))
+    Material.setPbrMaterial(e, cellMaterial(preexisting, muted(id, preexisting)))
     cellEntity.set(id, e)
     cellTeam.set(id, preexisting)
     tileRec!.entities.push(e)

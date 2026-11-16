@@ -16,7 +16,7 @@ import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
-import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
@@ -58,6 +58,8 @@ import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
 import { clearDepots } from './depots'
 import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen' 
 import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, WalletGate } from '../shared/territory'
+import { basesOn, baseThresholdVerdict, baseTimeoutVerdict, VICTORY_PROGRESS, type BaseSnapshot, type BaseVerdict } from '../shared/bases'
+import { baseProgress, baseSnapshot, clearBaseNetwork, markNetworkDirty, seedBaseTerritory, tickBaseGrowth } from './baseNetwork'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
 // the generous cap; anything beyond is either a bug or a cheater and we drop
@@ -244,7 +246,7 @@ export async function setupServer(): Promise<void> {
   // Playtest format. Cold start / idle start stays 'pvp'. A round that continues
   // from the summary flips when FORMAT_ALTERNATE (nextRoundFormat). pvbRoundIndex
   // counts PvB rounds only, so the human colour goes Red, Blue, Red…
-  let roundFormat: 'pvp' | 'pvb' | 'prototype' | 'balloon' = 'pvp'
+  let roundFormat: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' = 'pvp'
   const economyOn = () => modeById(roundFormat)?.economy === true
   const paintDry = (who: string) => (economyOn() && walletOf(who) <= 0 ? 1 : 0)
   const wouldFlip = (id: string, team: number) => {
@@ -458,6 +460,33 @@ export async function setupServer(): Promise<void> {
   const forceBalloonEnd = (verdict: ReturnType<typeof lastStanding>, why: string) => {
     if (pickBalloonEnd(verdict, why)) setRoundState(currentRoundIndex(), Date.now(), true)
   }
+  let basesResolved = false
+  let basesWinner: '' | 'RED' | 'BLUE' = ''
+  let lastBaseSnap: BaseSnapshot = baseSnapshot()
+  const sendBaseState = (snap: BaseSnapshot, to?: string) => {
+    const msg = {
+      redConnected: snap.redConnected,
+      blueConnected: snap.blueConnected,
+      redProgress: Math.round(snap.redProgress),
+      blueProgress: Math.round(snap.blueProgress),
+      threshold: snap.threshold,
+      redGrowing: snap.redGrowing ? 1 : 0,
+      blueGrowing: snap.blueGrowing ? 1 : 0,
+    }
+    if (to) room.send('baseState', msg, { to: [to] })
+    else room.send('baseState', msg)
+  }
+  const pickBasesEnd = (verdict: BaseVerdict, why: string): boolean => {
+    if (!basesOn(roundFormat) || basesResolved || verdict.kind === 'continue') return false
+    basesResolved = true
+    basesWinner = verdict.kind === 'winner' ? (verdict.team === 1 ? 'RED' : 'BLUE') : ''
+    console.log(`[Bases] ${why} -> ${verdict.kind} ${basesWinner || 'tie'}`)
+    return true
+  }
+  const forceBasesEnd = (verdict: BaseVerdict, why: string) => {
+    if (pickBasesEnd(verdict, why)) setRoundState(currentRoundIndex(), Date.now(), true)
+  }
+  setPaintListener(() => { if (basesOn(roundFormat)) markNetworkDirty() })
   const onBalloonFall = (id: string) => {
     if (!balloonOn() || !isRoundActive() || balloonResolved) return
     const result = popBalloon(balloons, id)
@@ -479,7 +508,7 @@ export async function setupServer(): Promise<void> {
 
   /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
   function startNextRound(mode: ModeId): void {
-    roundFormat = mode === 'pvb' ? 'pvb' : mode === 'prototype' ? 'prototype' : mode === 'balloon' ? 'balloon' : 'pvp'
+    roundFormat = mode === 'pvb' ? 'pvb' : mode === 'bases' ? 'bases' : mode === 'prototype' ? 'prototype' : mode === 'balloon' ? 'balloon' : 'pvp'
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
     const c = pendingFinal
     const pruned = pruneForNewRound()
@@ -509,6 +538,10 @@ export async function setupServer(): Promise<void> {
     anvilsAwake(true)
     room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena' })
     clearPaintState()
+    clearBaseNetwork()
+    basesResolved = false
+    basesWinner = ''
+    lastBaseSnap = baseSnapshot()
     resetWallets()
     walletGate.reset()
     clearTerritoryRegen()
@@ -516,13 +549,22 @@ export async function setupServer(): Promise<void> {
     rebuildBotGraph(seed)
     if (balloonOn()) { freezeBots(false); tickBots(0) }
     seedBalloons()
-    if (economyOn()) {
-      seedStartTerritory()
+    const sendPaintSnapshot = () => {
       const entries = getFullState()
       const cov = coverage()
       for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
         room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, seed: currentRoundIndex() })
       }
+    }
+    if (economyOn()) {
+      seedStartTerritory()
+      sendPaintSnapshot()
+    }
+    if (basesOn(roundFormat)) {
+      seedBaseTerritory()
+      sendPaintSnapshot()
+      lastBaseSnap = baseSnapshot()
+      sendBaseState(lastBaseSnap)
     }
     anvilsMazeChanged()
     void saveLeaderboard()
@@ -721,6 +763,7 @@ export async function setupServer(): Promise<void> {
   let frameMax = 0
   let frames = 0
   let tickLogAt = Date.now()
+  let baseStateClock = 0
   engine.addSystem((dt: number) => {
     const t0 = Date.now()
     if (isRoundActive()) tickBots(dt)
@@ -728,6 +771,17 @@ export async function setupServer(): Promise<void> {
       tickTerritoryRegen(dt, botRegenStances(), (id) => getTeam(id), (id, tank, regen) => {
         sendWallet(id, tank, [], regen)
       })
+    }
+    if (basesOn(roundFormat) && isRoundActive() && !basesResolved) {
+      lastBaseSnap = tickBaseGrowth(dt, getWalkableGraph())
+      forceBasesEnd(baseThresholdVerdict(lastBaseSnap.redProgress, lastBaseSnap.blueProgress), 'threshold')
+      baseStateClock += dt
+      if (baseStateClock >= 0.2) {
+        baseStateClock = 0
+        sendBaseState(lastBaseSnap)
+      }
+    } else {
+      baseStateClock = 0
     }
     flushWallets()
     const ms = Date.now() - t0
@@ -1273,6 +1327,7 @@ export async function setupServer(): Promise<void> {
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
       room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, seed: currentRoundIndex() }, { to: [from] })
     }
+    if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
   })
 
@@ -1399,15 +1454,33 @@ export async function setupServer(): Promise<void> {
     pendingNextIdx = idx
     pendingFinal = { red: c.red, blue: c.blue, total: c.total }
     if (balloonOn() && !balloonResolved) pickBalloonEnd(balloonTimeout(balloons), 'clock')
-    room.send('roundEnded', {
-      finalRed: balloonOn() ? 0 : c.red,
-      finalBlue: balloonOn() ? 0 : c.blue,
-      finalTotal: balloonOn() ? 0 : c.total,
-      kind: balloonOn() ? 'balloon' : 'paint',
-      victor: balloonOn() ? balloonVictor : '',
-      victorName: balloonOn() ? balloonVictorName : '',
-    })
+    if (basesOn(roundFormat) && !basesResolved) {
+      const p = baseProgress()
+      pickBasesEnd(baseTimeoutVerdict(p.red, p.blue), 'clock')
+    }
+    if (basesOn(roundFormat)) {
+      const p = baseProgress()
+      room.send('roundEnded', {
+        finalRed: Math.round(p.red),
+        finalBlue: Math.round(p.blue),
+        finalTotal: VICTORY_PROGRESS,
+        kind: 'bases',
+        victor: basesWinner,
+        victorName: '',
+      })
+      room.send('baseWin', { team: basesWinner === 'RED' ? 1 : basesWinner === 'BLUE' ? 2 : 0 })
+    } else {
+      room.send('roundEnded', {
+        finalRed: balloonOn() ? 0 : c.red,
+        finalBlue: balloonOn() ? 0 : c.blue,
+        finalTotal: balloonOn() ? 0 : c.total,
+        kind: balloonOn() ? 'balloon' : 'paint',
+        victor: balloonOn() ? balloonVictor : '',
+        victorName: balloonOn() ? balloonVictorName : '',
+      })
+    }
     clearPaintState()
+    clearBaseNetwork()
     void saveLeaderboard()
     publishLeaderboard()
     openLobby(false)

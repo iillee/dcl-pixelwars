@@ -6,7 +6,8 @@ import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
 import { PAINT_CAPACITY } from "./shared/territory"
 import { hudClockText, hudVoteCountdown } from "./client/lobby"
 import { inLobby } from "./client/phase"
-import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound } from "./round"
+import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound, isBasesRound } from "./round"
+import { baseCharge } from "./client/baseBeams"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_RGB } from "./shared/team"
@@ -328,8 +329,9 @@ function RoundSummary(p: number) {
   const pw = lerp(barW(), tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
   const border = lerp(BAR_BORDER, SUMMARY_OUTLINE * k, p)
   const innerW = pw - border * 2, cap = lerp(BAR_CAP, SUMMARY_PILL_CAP * k, p)
-  const redW = cap + (innerW - cap * 2) * b.redPct / 100
-  const blueW = cap + (innerW - cap * 2) * b.bluePct / 100
+  const fillScale = b.kind === 'bases' ? 0.5 : 1
+  const redW = cap + (innerW - cap * 2) * b.redPct / 100 * fillScale
+  const blueW = cap + (innerW - cap * 2) * b.bluePct / 100 * fillScale
   const innerR = (ph - border * 2) / 2
   const rows = (b.owners as SummaryRow[]).slice().sort((x, y) => y.cells - x.cells)
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
@@ -339,8 +341,8 @@ function RoundSummary(p: number) {
   const titleWords = teamWord !== '' ? [teamWord, 'WINS!'] : ["IT'S A TIE"]
   const titleF = titleFontFor(titleWords, k, cv.w * 0.9)
   // Letter-spaced subtitle; on narrow phones where it would drop under the 12 px floor, the plain words.
-  const SUB_WIDE = b.kind === 'balloon' ? 'L A S T     P L A Y E R     S T A N D I N G' : 'F I N A L     T E R R I T O R Y     C O N T R O L'
-  const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : (b.kind === 'balloon' ? 'LAST PLAYER STANDING' : 'FINAL TERRITORY CONTROL')
+  const SUB_WIDE = b.kind === 'balloon' ? 'L A S T     P L A Y E R     S T A N D I N G' : b.kind === 'bases' ? 'F I N A L     B A S E     C H A R G E' : 'F I N A L     T E R R I T O R Y     C O N T R O L'
+  const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : (b.kind === 'balloon' ? 'LAST PLAYER STANDING' : b.kind === 'bases' ? 'FINAL BASE CHARGE' : 'FINAL TERRITORY CONTROL')
   const subF = Math.min(fnt(SUMMARY_SUB_FONT, k), cv.w * 0.9 / textWSafe(SUB, 1))
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
@@ -389,6 +391,14 @@ function RoundSummary(p: number) {
 
 /** Territory shares in %, same source and 1-decimal rounding the old text readout showed. */
 function coveragePct(): { red: number; blue: number } {
+  if (isBasesRound()) {
+    const c = baseCharge()
+    const t = c.threshold > 0 ? c.threshold : 1
+    return {
+      red: Number(((c.redProgress / t) * 100).toFixed(1)),
+      blue: Number(((c.blueProgress / t) * 100).toFixed(1)),
+    }
+  }
   const { red, blue, total } = coverage()
   if (total === 0) return { red: 0, blue: 0 }
   return {
@@ -617,9 +627,10 @@ export const uiMenu = () => (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()
+              const fillScale = isBasesRound() ? 0.5 : 1
               // Winning star: centred in the leader's segment, only if it fits with padding; none on a tie / 0–0.
               const lead = pct.red > pct.blue ? 'red' : pct.blue > pct.red ? 'blue' : null
-              const leadW = lead ? barInnerW() * (lead === 'red' ? pct.red : pct.blue) / 100 : 0
+              const leadW = lead ? barInnerW() * (lead === 'red' ? pct.red : pct.blue) / 100 * fillScale : 0
               const star = lead !== null && leadW >= STAR_SIZE + STAR_PAD * 2
                 ? <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE, margin: lead === 'red' ? { bottom: 1 } : undefined }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />
                 : null
@@ -638,11 +649,11 @@ export const uiMenu = () => (
                     uiBackground={{ color: PANEL_LIGHT }}
                   >
                     {<UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.red / 100, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.red / 100 * fillScale, height: '100%', borderRadius: { topLeft: BAR_INNER_R, bottomLeft: BAR_INNER_R, topRight: 0, bottomRight: 0 }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_RED }}
                     >{lead === 'red' && star}</UiEntity>}
                     {<UiEntity
-                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.blue / 100, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
+                      uiTransform={{ positionType: 'absolute', position: { top: 0, right: 0 }, width: BAR_CAP + (barInnerW() - BAR_CAP * 2) * pct.blue / 100 * fillScale, height: '100%', borderRadius: { topLeft: 0, bottomLeft: 0, topRight: BAR_INNER_R, bottomRight: BAR_INNER_R }, justifyContent: 'center', alignItems: 'center' }}
                       uiBackground={{ color: BAR_BLUE }}
                     >{lead === 'blue' && star}</UiEntity>}
                   </UiEntity>

@@ -260,6 +260,18 @@ export const Messages = {
   // Server -> Clients: Balloon Battle counts (full book) and one pop.
   balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),
   balloonPop: Schemas.Map({ id: Schemas.String, n: Schemas.Int }),
+  // Server → Clients: BASES connected counts and charge (5 Hz + late-join).
+  baseState: Schemas.Map({
+    redConnected: Schemas.Int,
+    blueConnected: Schemas.Int,
+    redProgress: Schemas.Int,
+    blueProgress: Schemas.Int,
+    threshold: Schemas.Int,
+    redGrowing: Schemas.Int,
+    blueGrowing: Schemas.Int,
+  }),
+  // Server → Clients: BASES winner (0 tie, 1 red, 2 blue). Visual shockwave only.
+  baseWin: Schemas.Map({ team: Schemas.Int }),
   // Fall rescue cloud for everyone else. The rider sends rescueStart at the
   // catch (who is ignored; the server stamps the authenticated id). mobile 1
   // means observers fly the cloud along catch → base; 0 means they follow the
