@@ -138,8 +138,17 @@ if (!client.includes('function balloonBottom') || !client.includes('BALL_BOTTOM'
 if (client.includes('const BALL_SCALE') && client.includes('y: 0.62')) {
   fail('balloons should read as round balloons, not stretched eggs')
 }
-if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.includes('buildBalloonParts')) {
-  fail('balloons should taper to a small tied nub at the bottom')
+if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.includes('buildBalloonParts') || !client.includes('CHIN_Y')) {
+  fail('balloons should be a slight egg with a blended taper and a small tied nub')
+}
+if (!client.includes('AIM_BLEND') || !client.includes('MAX_AIM_DEG') || !client.includes('AIM_TAU') || !client.includes('aimNub')) {
+  fail('the nub should tilt along the string, smoothly and capped')
+}
+const bodyXz = Number((client.match(/const BODY_XZ = ([0-9.]+)/) || [])[1])
+const bodyY = Number((client.match(/const BODY_Y = ([0-9.]+)/) || [])[1])
+const aspect = bodyY / bodyXz
+if (!(aspect >= 1.12 && aspect <= 1.18)) {
+  fail(`balloon body should be a mild egg (1.12–1.18 tall), got ${aspect.toFixed(3)}`)
 }
 
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')

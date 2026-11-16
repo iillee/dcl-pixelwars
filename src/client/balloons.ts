@@ -11,9 +11,10 @@
  *    (0, BACK_Y, -BACK_Z). AvatarAttach already carries the avatar's
  *    yaw, so the child is not rotated again. Balloons and strings are
  *    children of the knot: only the balloon end jiggles, from
- *    low-passed planar velocity and turn. Each balloon is a round body
- *    with a taper and a small nub; the string always meets that nub,
- *    computed from the balloon's live transform.
+ *    low-passed planar velocity and turn. Each balloon is a slight egg
+ *    with a blended taper and a small nub; the nub tilts along the
+ *    string's top segment, and the string always meets that nub from
+ *    the balloon's live transform.
  *  - 'trail' is the original world-space spring follow, with lag.
  *    Strings still start at the live back knot, not a lagged point.
  *
@@ -51,24 +52,35 @@ type Pose = { feet: Vec; yawDeg: number; entity?: Entity }
 
 /** Deep red #B3121E, matte with a little gloss. */
 const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
-/** Round, slightly full body. A unit sphere; not a tall egg. */
+/** Slight egg: about 1.15× taller than wide, close to the current size. */
 const BODY_XZ = 0.54
-const BODY_Y = 0.50
-const BODY_Y_OFF = 0.02
-const NECK_H = 0.13
-const NECK_XZ = 0.14
-const NUB_XZ = 0.06
-const NUB_Y = 0.048
-/**
- * Local distance from the balloon root to the nub tip. Body bottom is
- * BODY_Y_OFF - BODY_Y/2, the neck hangs 0.08 m past that after a 0.05 m
- * overlap, and the nub extends NUB_Y/2 below the neck tip:
- * 0.23 + 0.08 + 0.024, plus the nub overlap, = 0.352.
- */
-const BALL_BOTTOM = 0.352
-/** Inward lean (deg per metre of offset from the knot). Capped. */
-const LEAN_PER_M = 12
-const MAX_LEAN = 16
+const BODY_Y = 0.62
+const BODY_Y_OFF = 0.03
+/** Squashed lower sphere that blends the body into the taper. */
+const CHIN_XZ = 0.3
+const CHIN_Y = 0.22
+const CHIN_OVERLAP = 0.02
+/** Short cone, wide end tucked into the chin, narrow end at the nub. */
+const NECK_H = 0.07
+const NECK_XZ = 0.1
+const NECK_TUCK = 0.035
+const NUB_XZ = 0.055
+const NUB_Y = 0.046
+const NUB_OVERLAP = 0.008
+const BODY_BOTTOM = BODY_Y_OFF - BODY_Y * 0.5
+const CHIN_Y_OFF = BODY_BOTTOM + CHIN_OVERLAP
+const CHIN_BOTTOM = CHIN_Y_OFF - CHIN_Y * 0.5
+const NECK_TOP = CHIN_BOTTOM + NECK_TUCK
+const NECK_TIP = NECK_TOP - NECK_H
+const NUB_CENTER = NECK_TIP - NUB_Y * 0.5 + NUB_OVERLAP
+const NUB_TIP = NUB_CENTER - NUB_Y * 0.5
+/** Local distance from the balloon root to the nub tip. */
+const BALL_BOTTOM = -NUB_TIP
+/** Aim the nub along the string's top segment, blended toward that
+ *  direction, capped, and smoothed so it does not jitter. */
+const AIM_BLEND = 0.7
+const MAX_AIM_DEG = 28
+const AIM_TAU = 0.16
 /**
  * Upper-back knot on the avatar root (no bone bob): 1.68 m up, between
  * the shoulder blades, 0.20 m behind along the facing. Avatar yaw 0
@@ -124,6 +136,9 @@ type Balloon = {
   /** Lagged catenary mid. Reused every frame; no per-tick allocations. */
   lagMid: Vec
   lagReady: boolean
+  /** Smoothed direction of the balloon's local -Y (nub axis). */
+  aim: Vec
+  aimReady: boolean
 }
 
 type Cluster = {
@@ -253,11 +268,80 @@ function balloonBottom(tf: { position: { x: number; y: number; z: number }; rota
   out.z = tf.position.z + w.z
 }
 
-/** Hang the nub slightly toward the knot so a tilt still meets the string. */
-function leanToward(ox: number, oz: number) {
-  const lx = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, oz * LEAN_PER_M))
-  const lz = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ox * LEAN_PER_M))
-  return Quaternion.fromEulerDegrees(lx, 0, lz)
+const _aimWant = { x: 0, y: -1, z: 0 }
+const _downAxis = Vector3.create(0, -1, 0)
+
+/** Point on the sagged string at parameter t (0 at the knot, 1 at the nub). */
+function stringPoint(from: Vec, mid: Vec, to: Vec, t: number, out: Vec): void {
+  const u = 1 - t
+  out.x = u * u * from.x + 2 * u * t * mid.x + t * t * to.x
+  out.y = u * u * from.y + 2 * u * t * mid.y + t * t * to.y
+  out.z = u * u * from.z + 2 * u * t * mid.z + t * t * to.z
+}
+
+/**
+ * Rotate the balloon so its nub aims along the string's top segment,
+ * 70% toward that direction, capped at 28°, and low-passed.
+ */
+function aimNub(b: Balloon, tip: Vec, toward: Vec, dt: number) {
+  let dx = toward.x - tip.x
+  let dy = toward.y - tip.y
+  let dz = toward.z - tip.z
+  let len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  _aimWant.x = 0
+  _aimWant.y = -1
+  _aimWant.z = 0
+  if (len > 0.02) {
+    dx /= len
+    dy /= len
+    dz /= len
+    _aimWant.x = dx * AIM_BLEND
+    _aimWant.y = -1 * (1 - AIM_BLEND) + dy * AIM_BLEND
+    _aimWant.z = dz * AIM_BLEND
+    len = Math.sqrt(_aimWant.x * _aimWant.x + _aimWant.y * _aimWant.y + _aimWant.z * _aimWant.z) || 1
+    _aimWant.x /= len
+    _aimWant.y /= len
+    _aimWant.z /= len
+    const ang = Math.acos(Math.max(-1, Math.min(1, -_aimWant.y)))
+    const max = MAX_AIM_DEG * Math.PI / 180
+    if (ang > max && ang > 1e-5) {
+      const t = max / ang
+      _aimWant.x *= t
+      _aimWant.y = -1 + (_aimWant.y + 1) * t
+      _aimWant.z *= t
+      len = Math.sqrt(_aimWant.x * _aimWant.x + _aimWant.y * _aimWant.y + _aimWant.z * _aimWant.z) || 1
+      _aimWant.x /= len
+      _aimWant.y /= len
+      _aimWant.z /= len
+    }
+  }
+  if (!b.aimReady) {
+    b.aim.x = _aimWant.x
+    b.aim.y = _aimWant.y
+    b.aim.z = _aimWant.z
+    b.aimReady = true
+  } else {
+    const k = 1 - Math.exp(-Math.max(0, dt) / AIM_TAU)
+    b.aim.x += (_aimWant.x - b.aim.x) * k
+    b.aim.y += (_aimWant.y - b.aim.y) * k
+    b.aim.z += (_aimWant.z - b.aim.z) * k
+    len = Math.sqrt(b.aim.x * b.aim.x + b.aim.y * b.aim.y + b.aim.z * b.aim.z) || 1
+    b.aim.x /= len
+    b.aim.y /= len
+    b.aim.z /= len
+  }
+  _dir.x = b.aim.x
+  _dir.y = b.aim.y
+  _dir.z = b.aim.z
+  return Quaternion.fromToRotation(_downAxis, _dir)
+}
+
+function orientBalloon(b: Balloon, tf: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number; w: number }; scale: { x: number; y: number; z: number } }, knot: Vec, dt: number): void {
+  balloonBottom(tf, _tip)
+  const t = (STRING_SEGS - 1) / STRING_SEGS
+  if (b.lagReady) stringPoint(knot, b.lagMid, _tip, t, _from)
+  else { _from.x = knot.x; _from.y = knot.y; _from.z = knot.z }
+  tf.rotation = aimNub(b, _tip, _from, dt)
 }
 
 function aimString(ent: Entity, from: Vec, to: Vec): void {
@@ -331,21 +415,18 @@ function addBalloonPart(parent: Entity, pos: Vec, scale: Vec, cone = false): Ent
     position: Vector3.create(pos.x, pos.y, pos.z),
     scale: Vector3.create(scale.x, scale.y, scale.z),
   })
-  if (cone) MeshRenderer.setCylinder(ent, 0.16, 1)
+  if (cone) MeshRenderer.setCylinder(ent, 1, 0.22)
   else MeshRenderer.setSphere(ent)
   paintBalloon(ent)
   return ent
 }
 
-/** Round body, downward taper, and a small tied nub. Root is unscaled. */
+/** Slight egg, blended taper, and a small tied nub. Root is unscaled. */
 function buildBalloonParts(root: Entity): void {
-  const bodyBottom = BODY_Y_OFF - BODY_Y * 0.5
-  const neckTop = bodyBottom + 0.05
-  const neckCenter = neckTop - NECK_H * 0.5
-  const neckTip = neckTop - NECK_H
   addBalloonPart(root, v(0, BODY_Y_OFF, 0), v(BODY_XZ, BODY_Y, BODY_XZ))
-  addBalloonPart(root, v(0, neckCenter, 0), v(NECK_XZ, NECK_H, NECK_XZ), true)
-  addBalloonPart(root, v(0, neckTip - NUB_Y * 0.5 + 0.006, 0), v(NUB_XZ, NUB_Y, NUB_XZ))
+  addBalloonPart(root, v(0, CHIN_Y_OFF, 0), v(CHIN_XZ, CHIN_Y, CHIN_XZ))
+  addBalloonPart(root, v(0, NECK_TOP - NECK_H * 0.5, 0), v(NECK_XZ, NECK_H, NECK_XZ), true)
+  addBalloonPart(root, v(0, NUB_CENTER, 0), v(NUB_XZ, NUB_Y, NUB_XZ))
 }
 
 function makeBalloon(parent: Entity | null, pos: Vec): Entity {
@@ -396,6 +477,8 @@ function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
     i, root, ball: root, segs, pos: { ...at }, vel: v(0, 0, 0),
     lagMid: { x: at.x * 0.5, y: at.y * 0.5 - STRING_SAG, z: at.z * 0.5 },
     lagReady: false,
+    aim: { x: 0, y: -1, z: 0 },
+    aimReady: false,
   }
 }
 
@@ -607,7 +690,7 @@ function placeTrailBalloon(b: Balloon, dest: Vec, knot: Vec, dt: number): void {
   tf.position.x = b.pos.x
   tf.position.y = b.pos.y
   tf.position.z = b.pos.z
-  tf.rotation = leanToward(b.pos.x - knot.x, b.pos.z - knot.z)
+  orientBalloon(b, tf, knot, dt)
   balloonBottom(tf, _tip)
   placeString(b.segs, b.lagMid, b, knot, _tip, dt)
 }
@@ -617,12 +700,12 @@ function placeAttachedBalloon(b: Balloon, dt: number): void {
   tf.position.x = b.pos.x
   tf.position.y = b.pos.y
   tf.position.z = b.pos.z
-  tf.rotation = leanToward(b.pos.x, b.pos.z)
   // String is a child of the knot. Aim it in local space so the bottom
   // end is the knot and the top end is the live nub tip.
   _knot.x = 0
   _knot.y = 0
   _knot.z = 0
+  orientBalloon(b, tf, _knot, dt)
   balloonBottom(tf, _tip)
   placeString(b.segs, b.lagMid, b, _knot, _tip, dt)
 }
