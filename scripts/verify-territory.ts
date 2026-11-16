@@ -311,6 +311,14 @@ if (!depotSrc.includes('TEAM_RGB[team]') || !depotSrc.includes('NEUTRAL')) {
   console.error('✗ depot cylinders should use the team paint color, with off-white for unowned posts')
   process.exit(1)
 }
+const ownedGlow = Number((depotSrc.match(/OWNED_GLOW\s*=\s*([0-9.]+)/) || [])[1])
+const neutralGlow = Number((depotSrc.match(/NEUTRAL_GLOW\s*=\s*([0-9.]+)/) || [])[1])
+if (!(ownedGlow <= 0.3) || !(neutralGlow <= 0.15) || depotSrc.includes('1.4') && depotSrc.includes('emissiveIntensity')) {
+  if (!(Number.isFinite(ownedGlow) && ownedGlow <= 0.3 && Number.isFinite(neutralGlow) && neutralGlow <= 0.15)) {
+    console.error(`✗ depot emission should stay low so the team paint color is not washed out (owned=${ownedGlow}, neutral=${neutralGlow})`)
+    process.exit(1)
+  }
+}
 
 // ── Curing, regen eligibility, spend, start territory ──────────────
 const t0 = 1_000_000

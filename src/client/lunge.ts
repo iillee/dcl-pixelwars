@@ -55,7 +55,7 @@ import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeH
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { hitsOpen } from './phase'
-import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
@@ -515,6 +515,10 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   const att = attacker.toLowerCase()
   const tgt = target.toLowerCase()
   const attTeam = teamOfUser(att)
+  if (tgt.startsWith('bot:')) {
+    const bid = parseInt(tgt.slice(4), 10)
+    if (Number.isFinite(bid)) playBotKnock(bid, dx, dz, 'lunge')
+  }
   if (me && att === me) return // attacker already showed its FX
   flashSlash(att)
   flashHitbox(att)

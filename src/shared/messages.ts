@@ -80,6 +80,11 @@ export const Messages = {
     // Current round's maze seed (= server round index): late joiners build the maze from this
     // even if the SeedHolder CRDT never reaches them.
     seed: Schemas.Int,
+    // Authoritative floor + generation. A lower seq is stale and must be ignored.
+    layout: Schemas.String,
+    seq: Schemas.Int,
+    format: Schemas.String,
+    phase: Schemas.String,
   }),
 
   // Server → Client (broadcast): UTC round boundary crossed. Carries the
@@ -111,6 +116,10 @@ export const Messages = {
     why: Schemas.String,
     // Addressed clocks only: the mode this recipient is counted for, or ''.
     mine: Schemas.String,
+    // Same authoritative floor as roundReset / snapshot, so a late clock cannot diverge.
+    seed: Schemas.Int,
+    layout: Schemas.String,
+    seq: Schemas.Int,
   }),
 
   // Server → Clients: round just ended (scores for the win screen). The lobby
@@ -133,6 +142,7 @@ export const Messages = {
     format: Schemas.String,
     // 'arena' grows the match maze. 'lobby' grows the voting cross in its place.
     layout: Schemas.String,
+    seq: Schemas.Int,
   }),
   // Client → Server, ~2 Hz, only while the phase is lobby or idle. Feet, not a zone id.
   lobbyPos: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),

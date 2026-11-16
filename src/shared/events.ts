@@ -93,6 +93,7 @@ export type Events = {
     finalTotal: number
     format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
     layout?: 'arena' | 'lobby'
+    seq?: number
   }
 
   // The lobby cross is in the world at full size. Teleport onto it before teardown.

@@ -1,6 +1,7 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
 import { paintOpen, setGamePhase, setMyVote, setServerLobbyCounts } from './phase'
-import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../maze/rebuild'
+import { applyServerWorld } from '../maze/rebuild'
+import { parseWorldLayout } from '../shared/worldState'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -26,7 +27,6 @@ import { events } from '../shared/events'
 import { Team } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
-import { SeedHolder, seedHolder } from '../shared/components'
 import { noteLagPong, noteServerRx } from './lagHud'
 
 // Locally-tracked team for this session. Written on team:assigned; used
@@ -92,13 +92,18 @@ function wireInbound(): void {
     events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
   })
 
-  room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
+  room.onMessage('snapshot', ({ entries, red, blue, total, seed, layout, seq, format, phase }) => {
     noteServerRx()
     console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
     gotSnapshot = true
-    // Authoritative seed: build now (before the paint lands) if the SeedHolder CRDT hasn't given us it.
-    if (seed && SeedHolder.get(seedHolder).seed !== seed) SeedHolder.createOrReplace(seedHolder, { seed })
-    ensureMazeSeed(seed)
+    // Build the server's floor before the paint lands, even on a late join.
+    applyServerWorld({
+      seq: seq ?? 0,
+      seed,
+      layout: parseWorldLayout(layout),
+      format: format ?? '',
+      phase: phase ?? '',
+    }, 'snapshot')
     events.emit('paint:snapshot', {
       entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
       red, blue, total,
@@ -122,8 +127,16 @@ function wireInbound(): void {
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine, seed, layout, seq }) => {
     noteServerRx()
+    // Ignore a stale clock so a late match packet cannot rebuild the arena over the lobby.
+    if (!applyServerWorld({
+      seq: seq ?? 0,
+      seed: seed ?? idx,
+      layout: parseWorldLayout(layout, active),
+      format: format ?? '',
+      phase: phase ?? '',
+    }, 'clock')) return
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
@@ -132,10 +145,6 @@ function wireInbound(): void {
     setGamePhase(ph, voteMs ?? 0, votes ?? [], winner ?? '')
     setServerLobbyCounts(present ?? 0, feet ?? 0, srvZone || 'none', why || 'none')
     setMyVote(mine ?? '')
-    setHoldMazeSeed(ph === 'lobby' || ph === 'idle')
-    // A running match must replace the boot lobby. joinRoster does not send a
-    // second roundReset while the round is already active.
-    if (ph === 'match' && isLobbyLayout()) rebuildMaze(idx || 1, 'arena', 'match-clock')
     events.emit('round:clock', {
       idx, active, format: wireFormat(format),
       phase: ph, voteMs: voteMs ?? 0, winner: winner ?? '', votes: votes ?? [],
@@ -162,11 +171,12 @@ function wireInbound(): void {
     events.emit('base:win', { team })
   })
 
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout, seq }) => {
     events.emit('round:reset', {
       seed, finalRed, finalBlue, finalTotal,
       format: wireFormat(format),
       layout: layout === 'lobby' ? 'lobby' : 'arena',
+      seq: seq ?? 0,
     })
   })
 

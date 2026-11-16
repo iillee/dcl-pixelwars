@@ -4,7 +4,7 @@ import { isOverviewActive } from './overviewCamera'
  * (server/anvils.ts + shared/anvilSim.ts: spawn spots, yaw, slide sim, falls, respawns) and
  * broadcasts anvilState (~10 Hz while moving, keep-alive every 2 s). This client:
  *  - renders each anvil smoothed toward the latest snapshot (extrapolated by its velocity for
- *    up to 150 ms), model + collider follow the rendered position;
+ *    up to ~850 ms, enough to cover a hosted ~530 ms tick), model + collider follow the rendered position;
  *  - reports lunge / burst hits on an anvil to the server (anvilHit; server dedupes) and, for
  *    our OWN hits, predicts the knock locally at once (ANVIL_PREDICT_*, shared/anvilSim.ts) until
  *    the server's snapshot for it arrives / times out, then blends to the server state;
@@ -39,8 +39,8 @@ const ANVIL_SRC = 'assets/asset-packs/anvil/Anvil_01/Anvil_01.glb'
 const ANVIL_SCALE = 1.5
 const ANVIL_OFFSET_X = -0.07 * ANVIL_SCALE
 const HIDDEN = Vector3.create(8, -50, 8)
-const EXTRAPOLATE_MAX_S = 0.15
-const SMOOTH_RATE = 15 // 1/s, exponential approach to the extrapolated server position
+const EXTRAPOLATE_MAX_S = 0.85
+const SMOOTH_RATE = 5 // 1/s, gentle approach so 2 Hz snapshot corrections do not snap
 
 type V3 = { x: number; y: number; z: number }
 type Dummy = {
@@ -49,6 +49,7 @@ type Dummy = {
   srv: V3 // last server position
   vel: V3 // last server velocity
   age: number // s since that snapshot
+  gap: number // last observed snapshot interval (s)
   alive: boolean
   moving: boolean
   yaw: number
@@ -124,9 +125,10 @@ function startPredict(d: Dummy, i: number, dx: number, dz: number, kind: 0 | 1):
   d.blendLeft = 0
 }
 
-/** Server target position (latest snapshot, extrapolated by its velocity for ≤ 150 ms). */
+/** Server target: latest snapshot, extrapolated by velocity up to the observed interval (capped). */
 function serverTarget(d: Dummy): V3 {
-  const t = d.moving ? Math.min(d.age, EXTRAPOLATE_MAX_S) : 0
+  const cap = Math.min(EXTRAPOLATE_MAX_S, Math.max(0.2, d.gap * 1.15))
+  const t = d.moving ? Math.min(d.age, cap) : 0
   return { x: d.srv.x + d.vel.x * t, y: d.srv.y + d.vel.y * t, z: d.srv.z + d.vel.z * t }
 }
 
@@ -265,7 +267,7 @@ export function initLungeDummy(): void {
     // so it follows the rendered position.
     GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     const z = { x: 0, y: 0, z: 0 }
-    dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
+    dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, gap: 0.2, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
       predicted: false, confirmed: false, predictDir: { ...z }, predictLeft: 0, predictSlide: -1, offset: { ...z }, blendLeft: 0, blendTotal: 1 })
   }
   room.onMessage('anvilState', ({ a, st }) => {
@@ -280,6 +282,7 @@ export function initLungeDummy(): void {
       const respawned = s.alive === 1 && (!d.alive || (s.slide !== d.slide && s.moving === 0))
       d.srv = { x: s.x, y: s.y, z: s.z }
       d.vel = { x: s.vx, y: s.vy, z: s.vz }
+      if (!respawned && d.age > 0.05) d.gap = d.age
       d.age = 0
       d.alive = s.alive === 1
       d.moving = s.moving === 1

@@ -14,6 +14,9 @@ import { getCurrentCellId, paintEconomyOn, paintTeamOf, painterTeam, predictDepo
 import { inLobby } from './phase'
 
 const NEUTRAL = { r: 0.93, g: 0.93, b: 0.9 }
+/** Keep emission low so TEAM_RGB (red #FF7577 / blue #6A99FC) and off-white neutrals read clearly. */
+const OWNED_GLOW = 0.16
+const NEUTRAL_GLOW = 0.06
 type Post = { ent: Entity; id: string; team: Team }
 
 let posts: Post[] = []
@@ -71,13 +74,13 @@ function ensurePosts(): void {
       scale: Vector3.create(0.7, 3.2, 0.7),
     })
     MeshRenderer.setCylinder(ent)
-    Material.setPbrMaterial(ent, tint(team, team === Team.None ? 0.4 : 1.4))
+    Material.setPbrMaterial(ent, tint(team, team === Team.None ? NEUTRAL_GLOW : OWNED_GLOW))
     posts.push({ ent, id: d.id, team })
   }
 }
 
 function paintPost(post: Post): void {
-  Material.setPbrMaterial(post.ent, tint(post.team, post.team === Team.None ? 0.35 : 1.2))
+  Material.setPbrMaterial(post.ent, tint(post.team, post.team === Team.None ? NEUTRAL_GLOW : OWNED_GLOW))
 }
 
 function pulsePost(post: Post): void {

@@ -53,7 +53,7 @@ import { LOBBY_MODES, LOBBY_VOTE_MS, modeById, pickWinner, type ModeId } from '.
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
 import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
-import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
+import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder, placeLobbyLayout } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
 import { beginLagFrame, endLagFrame, hookRoomSend, noteLagSection } from './lagStats'
 import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
@@ -208,7 +208,9 @@ export async function setupServer(): Promise<void> {
     economyTank: (painter) => walletOf(painter),
     friendlyDepot: (team, from) => refillAtDepot() ? friendlyDepotCell(team, from) : nearestCuredCell(team, from),
   })
-  rebuildBotGraph(currentRoundIndex())
+  // Stay on the lobby cross until a vote starts a match. Generating the
+  // arena here left the server grid on a different floor than the clients.
+  placeLobbyLayout()
   initAnvils()
   anvilsMazeChanged()
 
@@ -318,6 +320,9 @@ export async function setupServer(): Promise<void> {
       srvZone: verdict.zone,
       why: verdict.why,
       mine: to ? countedMode(to, now) : '',
+      seed: currentRoundIndex(),
+      layout: worldLayout(),
+      seq: worldSeq,
     }
     if (to) room.send('roundClock', msg, { to: [to] }); else room.send('roundClock', msg)
     if (balloonOn() && isRoundActive()) sendBalloonState(to)
@@ -347,6 +352,17 @@ export async function setupServer(): Promise<void> {
   let pendingFinal = { red: 0, blue: 0, total: 0 }
   let pendingNextIdx = 0
   let lobbyOpen = false
+  /** Bumps on every lobby/arena floor change. Clients ignore a lower seq. */
+  let worldSeq = 0
+  const bumpWorld = () => ++worldSeq
+  const worldLayout = (): 'arena' | 'lobby' => isRoundActive() ? 'arena' : 'lobby'
+  const worldFields = () => ({
+    seed: currentRoundIndex(),
+    layout: worldLayout(),
+    seq: worldSeq,
+    format: roundFormat,
+    phase: isRoundActive() ? 'match' : intermission === 'lobby' ? 'lobby' : 'idle',
+  })
   /** Set after a summary. The vote still waits for the first live sample. */
   let wantFull = false
   let readyAt = 0
@@ -361,6 +377,7 @@ export async function setupServer(): Promise<void> {
       finalRed: pendingFinal.red, finalBlue: pendingFinal.blue, finalTotal: pendingFinal.total,
       format: roundFormat,
       layout: 'lobby',
+      seq: worldSeq,
     }
     if (to) room.send('roundReset', msg, { to: [to] })
     else room.send('roundReset', msg)
@@ -377,12 +394,14 @@ export async function setupServer(): Promise<void> {
     setRoundState(currentRoundIndex(), Date.now(), false)
     freezeBots(false)
     sleepBots()
+    placeLobbyLayout()
     clearDepots()
     clearTerritoryRegen()
     anvilsAwake(false)
     if (!lobbyOpen) {
       lobbyOpen = true
       clearLobbyVotes()
+      bumpWorld()
       sendLobbyLayout()
       console.log(`[Lobby] open ${fromSummary ? 'after summary, idle until a vote' : 'idle until a vote'}`)
     }
@@ -544,8 +563,11 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
     }
     lobbyOpen = false
+    intermission = 'idle'
+    setRoundState(seed, Date.now() + ROUND_INTERVAL_MS, true)
     anvilsAwake(true)
-    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena' })
+    bumpWorld()
+    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena', seq: worldSeq })
     clearPaintState()
     clearBaseNetwork()
     basesResolved = false
@@ -562,7 +584,7 @@ export async function setupServer(): Promise<void> {
       const entries = getFullState()
       const cov = coverage()
       for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-        room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, seed: currentRoundIndex() })
+        room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, ...worldFields() })
       }
     }
     if (economyOn() && refillAtDepot()) {
@@ -581,10 +603,8 @@ export async function setupServer(): Promise<void> {
     anvilsMazeChanged()
     void saveLeaderboard()
     publishLeaderboard()
-    setRoundState(seed, Date.now() + ROUND_INTERVAL_MS, true)
     pendingNextIdx = 0
     pendingFinal = { red: 0, blue: 0, total: 0 }
-    intermission = 'idle'
     console.log(`[Server] round ${seed} started format=${roundFormat} humanTeam=${humanTeamLabel} bots=${plannedBots} (activeHumans=${activeHumanCount()})`)
     sendRoundClock()
   }
@@ -1361,7 +1381,7 @@ export async function setupServer(): Promise<void> {
     // (same path as paint:delta), so order and count don't matter. An empty
     // round still sends one empty chunk so the client sees the server alive.
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, seed: currentRoundIndex() }, { to: [from] })
+      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, ...worldFields() }, { to: [from] })
     }
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)

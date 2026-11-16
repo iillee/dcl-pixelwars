@@ -64,7 +64,7 @@ import {
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { hitsOpen, inLobby, paintOpen } from './phase'
-import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { burstKnock, spikeKnock } from '../shared/knocks'
@@ -669,6 +669,8 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     }
   }
   if (tgt.startsWith('bot:')) {
+    const bid = parseInt(tgt.slice(4), 10)
+    if (Number.isFinite(bid)) playBotKnock(bid, dx, dz, air ? 'spike' : 'burst')
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
     if (b) {
       const pos = { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }

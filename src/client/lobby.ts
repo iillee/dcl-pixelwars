@@ -69,15 +69,17 @@ function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Iden
   return e
 }
 
+/** Matte, same RGB as the occupied floor tint. Emission was washing the plate to a pale tan. */
 function plateMat(c: Rgb) {
   return {
     albedoColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: 0.55,
+    emissiveColor: Color4.create(0, 0, 0, 1),
+    emissiveIntensity: 0,
     roughness: 1,
     metallic: 0,
     specularIntensity: 0,
     reflectivityColor: Color3.create(0, 0, 0),
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
     castShadows: false,
   }
 }

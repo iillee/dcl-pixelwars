@@ -2,8 +2,9 @@
  * botVisual.ts — client-side bot renderer.
  *
  * Each bot is an AvatarShape standing on the server position: red clothes
- * with blue skin, or blue clothes with red skin. The 10 Hz botPositions
- * broadcast is smoothed with per-frame lerp and dead-reckoning.
+ * with blue skin, or blue clothes with red skin. botPositions is smoothed
+ * with per-frame lerp, velocity dead-reckoning, and snapshot interpolation
+ * (long enough to cover a hosted ~530 ms tick).
  *
  * The lerp target is where the body should be. A same-point Tween.Move is
  * refreshed every frame so the NPC's built-in walker (about 4 m/s toward
@@ -34,7 +35,8 @@ import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
-import { BOT_AIM_REPORT_HZ } from '../shared/pvp'
+import { BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT } from '../shared/pvp'
+import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { teamPlatesHidden } from './nametags'
 
@@ -60,16 +62,13 @@ const BLUE_CLOTHES = [
 /** Avatar origin is the feet, same as a player. Hit tests subtract this. */
 export const FLOAT_HEIGHT = 0
 
-// Dead-reckoning: how far ahead of the last server position to aim the
-// render lerp. Roughly one broadcast interval (100ms at 10Hz) so we
-// stay one step ahead of the arriving packets instead of chasing them.
-const PREDICT_AHEAD_SEC = 0.1
+// Walking: extrapolate along last velocity for up to this long so a hosted
+// ~530 ms tick does not stall the body between packets.
+const WALK_EXTRAPOLATE_MAX_S = 0.85
 // How aggressively the render position chases the prediction. Larger =
-// snappier response, smaller = smoother but laggy. 4/s tracks well
-// without visible overshoot at typical bot walking speed.
-const LERP_SPEED_PER_SEC = 4.0
-// Broadcast rate; used only to size the velocity denominator. Keep in
-// sync with BOT_POS_HZ in server.ts.
+// snappier response, smaller = smoother but laggy.
+const LERP_SPEED_PER_SEC = 6.0
+// Fallback only when we have no measured packet interval yet.
 const BROADCAST_INTERVAL_SEC = 0.1
 
 // Big teleport threshold — beyond this distance we snap instead of
@@ -83,12 +82,22 @@ const TELEPORT_THRESHOLD = 8
 const TELEPORT_THRESHOLD_FAST = 60
 const INTERP_DELAY_S = 0.25
 const SNAP_KEEP = 16
-/** Past the newest snapshot, extrapolate at most this long. */
-const INTERP_EXTRAPOLATE_MAX_S = 0.1
+/** Past the newest snapshot, extrapolate at most this long (covers a 2 Hz gap). */
+const INTERP_EXTRAPOLATE_MAX_S = 0.7
 /** Keep interpolating this long after the last fast packet (covers the delay). */
-const FAST_HOLD_S = INTERP_DELAY_S + 0.15
+const FAST_HOLD_S = INTERP_DELAY_S + 0.5
+const KNOCK_BLEND_S = 0.35
+const LOCAL_KNOCK_S = 2
 
+type V3 = { x: number; y: number; z: number }
 type Snap = { t: number; pos: Vector3 }
+type LocalKnock = {
+  pos: V3
+  vel: V3
+  force: V3
+  forceLeft: number
+  floorY: number | null
+}
 /** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
 let clockOffset: number | null = null
 
@@ -103,13 +112,18 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  pktAt: number         // Date.now() of the last position packet
+  lastSimT: number      // server sim time of that packet
+  localKnock: LocalKnock | null
+  knockBlend: number
+  localKnockUntil: number
 }
 
 /** Draw far enough in the past to stay between snapshots: the usual gap plus margin. */
 function interpDelay(snaps: Snap[]): number {
   if (snaps.length < 2) return INTERP_DELAY_S
   const gap = (snaps[snaps.length - 1].t - snaps[0].t) / (snaps.length - 1)
-  return Math.min(0.6, Math.max(INTERP_DELAY_S, gap * 1.5 + 0.05))
+  return Math.min(0.9, Math.max(INTERP_DELAY_S, gap * 1.5 + 0.05))
 }
 
 function interpolate(snaps: Snap[], rt: number): Vector3 | null {
@@ -194,7 +208,67 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     fastUntil: 0,
     snaps: [],
     riding: false,
+    pktAt: 0,
+    lastSimT: 0,
+    localKnock: null,
+    knockBlend: 0,
+    localKnockUntil: 0,
   }
+}
+
+function stepLocalKnock(rec: BotVisual, dt: number): void {
+  const k = rec.localKnock
+  if (!k) return
+  let left = Math.min(Number.isFinite(dt) ? dt : 0, 0.1)
+  while (left > 1e-6) {
+    const s = Math.min(left, 0.05)
+    left -= s
+    if (k.forceLeft > 0) {
+      k.vel.x += k.force.x * s
+      k.vel.y += k.force.y * s
+      k.vel.z += k.force.z * s
+      k.forceLeft -= s
+    }
+    k.vel.y -= BOT_GRAVITY * s
+    k.pos.x += k.vel.x * s
+    k.pos.y += k.vel.y * s
+    k.pos.z += k.vel.z * s
+    if (k.floorY !== null && k.pos.y <= k.floorY) {
+      k.pos.y = k.floorY
+      if (k.vel.y < 0) k.vel.y = 0
+      const h = Math.hypot(k.vel.x, k.vel.z)
+      const nh = Math.max(0, h - BOT_FRICTION * s)
+      if (h > 1e-4) { k.vel.x *= nh / h; k.vel.z *= nh / h } else { k.vel.x = 0; k.vel.z = 0 }
+    }
+  }
+  rec.velocity = Vector3.create(k.vel.x, k.vel.y, k.vel.z)
+}
+
+/** Play the confirmed knock arc locally, then blend toward the server path once snapshots arrive. */
+export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' | 'burst' | 'spike'): void {
+  const rec = bots.get(id)
+  if (!rec || rec.riding) return
+  const len = Math.hypot(dx, dz)
+  const ux = len > 1e-3 ? dx / len : 0
+  const uz = len > 1e-3 ? dz / len : 0
+  const grounded = Math.abs(rec.velocity.y) < 2
+  const spec = kind === 'lunge' ? lungeKnock(ux, uz) : kind === 'spike' ? spikeKnock(ux, uz, grounded) : burstKnock(ux, uz)
+  const u = BOT_KNOCK_UNIT
+  rec.localKnock = {
+    pos: { x: rec.renderPos.x, y: rec.renderPos.y, z: rec.renderPos.z },
+    vel: {
+      x: rec.velocity.x + spec.impulse.x * u,
+      y: rec.velocity.y + spec.impulse.y * u,
+      z: rec.velocity.z + spec.impulse.z * u,
+    },
+    force: { x: spec.forceDir.x * spec.force * u, y: spec.forceDir.y * spec.force * u, z: spec.forceDir.z * spec.force * u },
+    forceLeft: spec.forceS,
+    floorY: grounded ? rec.renderPos.y : null,
+  }
+  rec.knockBlend = 0
+  rec.snaps = []
+  rec.fastUntil = Date.now() + LOCAL_KNOCK_S * 1000
+  rec.localKnockUntil = rec.fastUntil
 }
 
 export function initBotVisual(): void {
@@ -234,6 +308,8 @@ export function initBotVisual(): void {
       let rec = bots.get(b.id)
       if (!rec) {
         rec = createBotVisual(b.team, serverPos, b.id)
+        rec.pktAt = now
+        rec.lastSimT = simT ?? 0
         bots.set(b.id, rec)
         continue
       }
@@ -256,6 +332,12 @@ export function initBotVisual(): void {
       const wasFast = now < rec.fastUntil
       rec.riding = b.st === 2
       if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
+      const interval = (simT !== null && rec.lastSimT > 0)
+        ? Math.max(0.08, simT - rec.lastSimT)
+        : rec.pktAt > 0 ? Math.max(0.08, (now - rec.pktAt) / 1000)
+        : BROADCAST_INTERVAL_SEC
+      rec.pktAt = now
+      if (simT !== null) rec.lastSimT = simT
       if (now < rec.fastUntil) {
         // Knocked / riding: the render system interpolates the snapshots.
         rec.lastServerPos = Vector3.clone(serverPos)
@@ -270,12 +352,8 @@ export function initBotVisual(): void {
         rec.lastServerPos = Vector3.clone(serverPos)
         rec.velocity = Vector3.Zero()
       } else if (distSq > 1e-5) {
-        // New position — update velocity estimate from the delta.
-        rec.velocity = Vector3.create(
-          dx / BROADCAST_INTERVAL_SEC,
-          dy / BROADCAST_INTERVAL_SEC,
-          dz / BROADCAST_INTERVAL_SEC,
-        )
+        // New position — update velocity from the actual packet interval.
+        rec.velocity = Vector3.create(dx / interval, dy / interval, dz / interval)
         rec.lastServerPos = serverPos
       }
       // If distSq ~ 0, keep the previous velocity — the bot may just
@@ -301,18 +379,29 @@ export function initBotVisual(): void {
       // On the cloud: hang from the cloud this client draws (it runs on local
       // time, so a past-time interpolation would trail it by metres on the rise).
       const ride = rec.riding ? remoteRiderFeet(`bot:${id}`) : null
-      const interp = ride ? null : now < rec.fastUntil && clockOffset !== null
+      const interp = ride ? null : now < rec.fastUntil && clockOffset !== null && rec.snaps.length >= 2
         ? interpolate(rec.snaps, now / 1000 - clockOffset - interpDelay(rec.snaps))
         : null
+      if (rec.localKnock && now > rec.localKnockUntil) rec.localKnock = null
       if (ride) {
+        rec.localKnock = null
         rec.renderPos = Vector3.create(ride.x, ride.y + FLOAT_HEIGHT, ride.z)
+      } else if (rec.localKnock) {
+        stepLocalKnock(rec, dt)
+        if (interp) {
+          rec.knockBlend = Math.min(1, rec.knockBlend + dt / KNOCK_BLEND_S)
+          rec.renderPos = Vector3.lerp(Vector3.create(rec.localKnock.pos.x, rec.localKnock.pos.y, rec.localKnock.pos.z), interp, rec.knockBlend)
+          if (rec.knockBlend >= 1) rec.localKnock = null
+        } else {
+          rec.renderPos = Vector3.create(rec.localKnock.pos.x, rec.localKnock.pos.y, rec.localKnock.pos.z)
+        }
       } else if (interp) {
         rec.renderPos = Vector3.clone(interp)
       } else {
-        const predX = rec.lastServerPos.x + rec.velocity.x * PREDICT_AHEAD_SEC
-        const predY = rec.lastServerPos.y + rec.velocity.y * PREDICT_AHEAD_SEC
-        const predZ = rec.lastServerPos.z + rec.velocity.z * PREDICT_AHEAD_SEC
-        // Per-frame lerp — adapts to dt automatically.
+        const look = rec.pktAt > 0 ? Math.min(WALK_EXTRAPOLATE_MAX_S, (now - rec.pktAt) / 1000) : 0
+        const predX = rec.lastServerPos.x + rec.velocity.x * look
+        const predY = rec.lastServerPos.y + rec.velocity.y * look
+        const predZ = rec.lastServerPos.z + rec.velocity.z * look
         const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
         rec.renderPos = Vector3.create(
           rec.renderPos.x + (predX - rec.renderPos.x) * k,

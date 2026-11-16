@@ -423,6 +423,10 @@ if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.tes
   console.error('✗ the vote tint should stay matte and opaque so the white floor does not wash it out')
   process.exit(1)
 }
+if (!/function plateMat[\s\S]{0,500}emissiveIntensity:\s*0,/.test(lobbySrc) || /function plateMat[\s\S]{0,500}emissiveIntensity:\s*0\.\d+/.test(lobbySrc)) {
+  console.error('✗ lobby billboard plates should be matte like the occupied floor, with no emission')
+  process.exit(1)
+}
 if (lobbySrc.includes('setBox(tail)') || lobbySrc.includes('signCaretSize') || lobbySrc.includes('orthoSignPoses')) {
   console.error('✗ signs should have no caret, and overview signs should stay on their anchors')
   process.exit(1)
@@ -661,6 +665,24 @@ if (!rebuild.includes('holdSeed || layoutKind === \'lobby\'')) {
   console.error('✗ a maze seed can still replace the lobby')
   process.exit(1)
 }
+if (!rebuild.includes('applyServerWorld') || !rebuild.includes('isStaleWorld') || !rebuild.includes('flushTeardown')) {
+  console.error('✗ clients must apply the server world and drop a stale match floor')
+  process.exit(1)
+}
+const handler = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
+if (!handler.includes('applyServerWorld') || handler.includes("rebuildMaze(idx || 1, 'arena', 'match-clock')")) {
+  console.error('✗ a stale match clock must not rebuild the arena over the lobby')
+  process.exit(1)
+}
+const msgs = readFileSync(new URL('../src/shared/messages.ts', import.meta.url), 'utf8')
+if (!msgs.includes('layout: Schemas.String') || !msgs.includes('seq: Schemas.Int')) {
+  console.error('✗ snapshot, clock, and reset must carry the server layout and seq')
+  process.exit(1)
+}
+if (!server.includes('bumpWorld') || !server.includes('placeLobbyLayout()') || !server.includes('...worldFields()')) {
+  console.error('✗ the server must author the floor and keep its grid on the lobby while voting')
+  process.exit(1)
+}
 const rescue = readFileSync(new URL('../src/client/fallRescue.ts', import.meta.url), 'utf8')
 if (!rescue.includes('isLobbyLayout()') || !rescue.includes('lobbyFeet')) {
   console.error('✗ fall rescue should return to the cross during the lobby')
@@ -671,7 +693,6 @@ if (!phaseSrc.includes("next === 'prototype'") || !phaseSrc.includes("next === '
   console.error('✗ Prototype, Balloon Battle, and Bases votes must not be dropped')
   process.exit(1)
 }
-const handler = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
 if (handler.includes("format === 'pvb' ? 'pvb' : 'pvp'")) {
   console.error('✗ the client still collapses every format that is not Bot Fight into Team Fight')
   process.exit(1)

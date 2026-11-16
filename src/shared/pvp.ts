@@ -631,13 +631,15 @@ export const ANVIL_LAUNCH_COOLDOWN_S = 1
  *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot
  *  for that hit arrives (or PREDICT_TIMEOUT_S passes: e.g. the hit was rejected); then the render
  *  blends to the server state: error ≤ PREDICT_CLOSE_M over BLEND_S, else over BLEND_FAR_S.
- *  Errors > SNAP_M snap (same as plain snapshot rendering), and respawns always snap. */
+ *  Errors > SNAP_M snap (same as plain snapshot rendering), and respawns always snap.
+ *  Timeouts and blend windows are long enough for a hosted ~530 ms tick; SNAP_M only
+ *  catches teleports, not ordinary inter-tick travel. */
 export const ANVIL_PREDICT_ENABLED = true
-export const ANVIL_PREDICT_TIMEOUT_S = 0.5
+export const ANVIL_PREDICT_TIMEOUT_S = 1.6
 export const ANVIL_PREDICT_CLOSE_M = 1.0
-export const ANVIL_BLEND_S = 0.2
-export const ANVIL_BLEND_FAR_S = 0.12
-export const ANVIL_SNAP_M = 3
+export const ANVIL_BLEND_S = 0.4
+export const ANVIL_BLEND_FAR_S = 0.35
+export const ANVIL_SNAP_M = 10
 /** After the server confirms our predicted slide, keep rendering the local sim (it runs ~RTT ahead of the
  *  snapshots on the same path) until the server anvil stops, diverges, or this many seconds pass. */
 export const ANVIL_PREDICT_CONFIRMED_MAX_S = 4
