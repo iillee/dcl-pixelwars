@@ -19,6 +19,8 @@ import { BASE_PAINT_LOCK } from '../maze/level'
 const cellTeam = new Map<string, number>()
 // Owner of each painted cell = its last painter (player address, or `bot:<id>`). Round summary shades.
 const cellPainter = new Map<string, string>()
+/** Last ownership-change time (ms). 0 = pre-cured starting territory. Missing = not cured. */
+const cellSince = new Map<string, number>()
 
 // Changes accumulated since the last drainDelta(). Map (not array) so
 // last-write-wins within a tick — if Red then Blue paint the same cell
@@ -43,9 +45,25 @@ export function applyPaint(id: string, team: number, painter: string): boolean {
   const prev = cellTeam.get(id)
   if (prev === team) return false
   cellTeam.set(id, team)
+  cellSince.set(id, Date.now())
   if (dirty.size === 0) dirtyAt = Date.now()
   dirty.set(id, team)
   return true
+}
+
+/** Last ownership change (ms). 0 is pre-cured start paint; missing is treated as not cured. */
+export function ownedSince(id: string): number {
+  if (!cellSince.has(id)) return Number.POSITIVE_INFINITY
+  return cellSince.get(id) as number
+}
+
+/** Paint a cell as already owned, usually pre-cured starting territory (`since` 0). */
+export function seedOwned(id: string, team: number, painter: string, since = 0): void {
+  cellPainter.set(id, painter)
+  cellTeam.set(id, team)
+  cellSince.set(id, since)
+  if (dirty.size === 0) dirtyAt = Date.now()
+  dirty.set(id, team)
 }
 
 /** How long the oldest unsent paint change has been waiting, or 0. */
@@ -140,5 +158,7 @@ export function sampleEnemyCells(myTeam: number, k: number): string[] {
 export function clearAll(): void {
   cellTeam.clear()
   cellPainter.clear()
+  cellSince.clear()
   dirty.clear()
+  dirtyAt = 0
 }

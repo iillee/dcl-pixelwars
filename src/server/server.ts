@@ -19,7 +19,7 @@ import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
-import { balloonBotIds, benchBot, botCount, botDepotFeet, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
+import { balloonBotIds, benchBot, botCount, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -55,7 +55,8 @@ import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyV
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
-import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
+import { clearDepots } from './depots'
+import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen' 
 import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, WalletGate } from '../shared/territory'
 
 // Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
@@ -200,7 +201,7 @@ export async function setupServer(): Promise<void> {
     onSpawn: (id, team) => { botTeams.set(`bot:${id}`, team) },
     economyOn: () => economyOn(),
     economyTank: (painter) => walletOf(painter),
-    friendlyDepot: (team, from) => friendlyDepotCell(team, from),
+    friendlyDepot: (team, from) => nearestCuredCell(team, from),
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()
@@ -251,14 +252,14 @@ export async function setupServer(): Promise<void> {
     return teamOfCell(id) !== team
   }
   const walletGate = new WalletGate()
-  const sendWallet = (to: string, tank: number, denied: string[]) => {
+  const sendWallet = (to: string, tank: number, denied: string[], regen = 0) => {
     if (to.startsWith('bot:')) return
-    const msg = walletGate.offer(to, tank, denied, Date.now(), PAINT_CAPACITY)
+    const msg = walletGate.offer(to, tank, denied, Date.now(), PAINT_CAPACITY, regen)
     if (msg) room.send('paintWallet', msg, { to: [to] })
   }
   const flushWallets = () => {
     for (const msg of walletGate.due(Date.now(), PAINT_CAPACITY)) {
-      room.send('paintWallet', { tank: msg.tank, denied: msg.denied }, { to: [msg.id] })
+      room.send('paintWallet', { tank: msg.tank, denied: msg.denied, regen: msg.regen ? 1 : 0 }, { to: [msg.id] })
     }
   }
   /** Nearest flips first. Returns how many cells changed team. `notify` echoes the tank to a human. */
@@ -510,11 +511,19 @@ export async function setupServer(): Promise<void> {
     clearPaintState()
     resetWallets()
     walletGate.reset()
+    clearTerritoryRegen()
     broadcastRoster('reset')
     rebuildBotGraph(seed)
     if (balloonOn()) { freezeBots(false); tickBots(0) }
     seedBalloons()
-    seedDepots(economyOn())
+    if (economyOn()) {
+      seedStartTerritory()
+      const entries = getFullState()
+      const cov = coverage()
+      for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
+        room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, seed: currentRoundIndex() })
+      }
+    }
     anvilsMazeChanged()
     void saveLeaderboard()
     publishLeaderboard()
@@ -647,7 +656,7 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] ${type} from ${from.slice(0, 10)} dropped: ${why}`)
   }
 
-  room.onMessage('paintTick', ({ ids, at }, context) => {
+  room.onMessage('paintTick', ({ ids, at, y, g }, context) => {
     const from = context?.from
     if (!from) return
     if (!matchLive()) { logDrop(from, 'paintTick', 'round inactive (intermission/idle)'); return }
@@ -670,7 +679,9 @@ export async function setupServer(): Promise<void> {
     // itself is proof the player is real — mark them active so scraper
     // bots that never send paintTick are filtered out.
     markActive(from)
-    if (typeof at === 'string' && at) noteDepotFeet(from, at)
+    if (typeof at === 'string' && at) {
+      noteRegenStance(from, at, typeof y === 'number' && isFinite(y) ? y : NaN, g === 1)
+    }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
       roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
@@ -714,10 +725,8 @@ export async function setupServer(): Promise<void> {
     const t0 = Date.now()
     if (isRoundActive()) tickBots(dt)
     if (economyOn()) {
-      tickDepotRefill(dt, botDepotFeet(), (id) => getTeam(id), (id, team, cell) => {
-        paintCells(id, team, [cell], cell, !id.startsWith('bot:'))
-      }, (id, tank) => {
-        if (!id.startsWith('bot:')) sendWallet(id, tank, [])
+      tickTerritoryRegen(dt, botRegenStances(), (id) => getTeam(id), (id, tank, regen) => {
+        sendWallet(id, tank, [], regen)
       })
     }
     flushWallets()

@@ -752,6 +752,21 @@ export function botDepotFeet(): Array<{ id: string; team: number; cell: string }
   return out
 }
 
+/** Grounded bot stance for Prototype territory regen. */
+export function botRegenStances(): Array<{ id: string; team: number; cell: string; y: number; grounded: boolean }> {
+  const out: Array<{ id: string; team: number; cell: string; y: number; grounded: boolean }> = []
+  for (const b of bots) {
+    out.push({
+      id: `bot:${b.botId}`,
+      team: b.team,
+      cell: b.currentCell,
+      y: b.body.pos.y,
+      grounded: b.body.isGrounded() && !b.body.inRescue(),
+    })
+  }
+  return out
+}
+
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {
   if (!graph) return []
   const out: Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> = []

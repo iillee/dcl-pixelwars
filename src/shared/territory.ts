@@ -5,12 +5,22 @@
  * A flip is a neutral or enemy cell becoming yours. A cell you already own
  * is free. Area paints that cost more than the tank take the nearest flips
  * first and leave the rest unchanged. Combat does not consult the tank.
+ *
+ * All Prototype paint-economy balance knobs live in this file.
  */
 
 import { baseTeamOfCellId } from '../maze/generator'
 import type { WalkableGraph } from './mazeGraph'
 
-export const PAINT_CAPACITY = 280
+export const PAINT_CAPACITY = 80
+/** Paint spent per cell that actually changes ownership. */
+export const PAINT_COST = 1
+/** Paint regained each second while on cured friendly ground. */
+export const PAINT_REFILL_PER_SEC = 10
+/** Seconds a newly captured cell must wait before it can refill paint. */
+export const PAINT_CURE_S = 5
+/** Feet must be this close to the cell's walkable Y to count as on that tile. */
+export const PAINT_GROUND_TOLERANCE = 0.4
 
 /** Tile-column plane of a cell id, so two cells on neighbouring tiles still sort. */
 export function cellPlane(id: string): { x: number; z: number } | null {
@@ -59,8 +69,8 @@ export function applyTank(ops: readonly TankOp[], tank: number): { taken: string
   let left = tank
   for (const op of ops) {
     if (!op.flip) { taken.push(op.id); continue }
-    if (left <= 0) { denied.push(op.id); continue }
-    left -= 1
+    if (left < PAINT_COST) { denied.push(op.id); continue }
+    left -= PAINT_COST
     taken.push(op.id)
   }
   return { taken, denied, tank: left }
@@ -71,7 +81,7 @@ export const WALLET_MIN_MS = 200
 /** Standing still reports the cell underfoot at this gap. A cell change sends at once. */
 export const FEET_IDLE_MS = 500
 
-export type WalletMsg = { tank: number; denied: string[] }
+export type WalletMsg = { tank: number; denied: string[]; regen: number }
 
 /**
  * One player's paintWallet traffic. `offer` remembers the latest tank.
@@ -79,12 +89,12 @@ export type WalletMsg = { tank: number; denied: string[] }
  * most once per WALLET_MIN_MS, and never when the tank has not changed.
  */
 export class WalletGate {
-  private last = new Map<string, { tank: number; at: number }>()
+  private last = new Map<string, { tank: number; at: number; regen: number }>()
   private pending = new Map<string, WalletMsg>()
 
-  offer(id: string, tank: number, denied: readonly string[], now: number, capacity: number): WalletMsg | null {
+  offer(id: string, tank: number, denied: readonly string[], now: number, capacity: number, regen = 0): WalletMsg | null {
     const prev = this.pending.get(id)
-    this.pending.set(id, { tank, denied: [...(prev?.denied ?? []), ...denied] })
+    this.pending.set(id, { tank, denied: [...(prev?.denied ?? []), ...denied], regen })
     return this.take(id, now, capacity)
   }
 
@@ -107,15 +117,15 @@ export class WalletGate {
     const msg = this.pending.get(id)
     if (!msg) return null
     const sent = this.last.get(id)
-    const urgent = msg.denied.length > 0 || msg.tank <= 0 || msg.tank >= capacity
-    const changed = !sent || sent.tank !== msg.tank || msg.denied.length > 0
+    const urgent = msg.denied.length > 0 || msg.tank <= 0 || msg.tank >= capacity || (!!sent && sent.regen !== msg.regen)
+    const changed = !sent || sent.tank !== msg.tank || msg.denied.length > 0 || sent.regen !== msg.regen
     if (!changed) {
       this.pending.delete(id)
       return null
     }
     if (!urgent && sent && now - sent.at < WALLET_MIN_MS) return null
     this.pending.delete(id)
-    this.last.set(id, { tank: msg.tank, at: now })
+    this.last.set(id, { tank: msg.tank, at: now, regen: msg.regen })
     return msg
   }
 }
@@ -128,8 +138,7 @@ export function feetDue(cell: string, lastCell: string, lastMs: number, now: num
   return now - lastMs >= FEET_IDLE_MS
 }
 
-export const PAINT_REFILL_PER_SEC = 56
-/** Neutral depots in addition to the two team bases. 2, or 3–4. */
+/** Neutral depots in addition to the two team bases. Unused in Prototype. 2, or 3–4. */
 export const DEPOT_NEUTRAL_COUNT = 2
 /** Metres between depot anchors. Relaxed once if the maze is too tight. */
 export const DEPOT_MIN_SEPARATION_M = 40
@@ -224,3 +233,47 @@ export function placeDepots(
   for (const id of chosen) out.push({ id, owner: 0 })
   return out
 }
+
+export type RegenQuery = {
+  team: number
+  cellTeam: number
+  /** Last ownership-change time (ms). 0 = pre-cured starting territory. */
+  ownedSince: number
+  now: number
+  grounded: boolean
+  feetY: number
+  cellY: number
+  cureS?: number
+  groundTol?: number
+}
+
+/** True once a cell has been held by its current team for the curing delay. */
+export function isCuredSince(ownedSince: number, now: number, cureS: number = PAINT_CURE_S): boolean {
+  if (ownedSince <= 0) return true
+  return now - ownedSince >= cureS * 1000
+}
+
+/**
+ * Regen only while grounded on a friendly cell that has finished curing,
+ * at that cell's elevation. No regen in the air, on a different level,
+ * or on neutral / enemy / fresh paint.
+ */
+export function isRegenEligible(q: RegenQuery): boolean {
+  if (!q.grounded) return false
+  if (q.team !== 1 && q.team !== 2) return false
+  if (q.cellTeam !== q.team) return false
+  if (!isCuredSince(q.ownedSince, q.now, q.cureS ?? PAINT_CURE_S)) return false
+  if (!Number.isFinite(q.feetY) || !Number.isFinite(q.cellY)) return false
+  if (Math.abs(q.feetY - q.cellY) > (q.groundTol ?? PAINT_GROUND_TOLERANCE)) return false
+  return true
+}
+
+/** Whole-paint accrual. `frac` carries the leftover fraction into the next tick. */
+export function accruePaint(tank: number, frac: number, dt: number, rate: number = PAINT_REFILL_PER_SEC, cap: number = PAINT_CAPACITY): { tank: number; frac: number; gained: number } {
+  if (dt <= 0 || rate <= 0 || tank >= cap) return { tank: Math.min(Math.max(0, tank), cap), frac: 0, gained: 0 }
+  const acc = Math.max(0, frac) + rate * dt
+  const whole = Math.floor(acc)
+  const next = Math.min(cap, tank + whole)
+  return { tank: next, frac: acc - whole, gained: next - tank }
+}
+

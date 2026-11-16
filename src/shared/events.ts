@@ -51,7 +51,7 @@ export type Events = {
   }
 
   // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
-  'paint:wallet': { tank: number; denied: string[] }
+  'paint:wallet': { tank: number; denied: string[]; regen: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.
   // Same shape family as paint:delta, but semantically "authoritative
