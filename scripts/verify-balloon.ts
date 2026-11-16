@@ -138,8 +138,11 @@ if (!client.includes('function balloonBottom') || !client.includes('BALL_BOTTOM'
 if (client.includes('const BALL_SCALE') && client.includes('y: 0.62')) {
   fail('balloons should read as round balloons, not stretched eggs')
 }
-if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.includes('buildBalloonParts') || !client.includes('CHIN_Y')) {
-  fail('balloons should be a slight egg with a blended taper and a small tied nub')
+if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.includes('buildBalloonParts')) {
+  fail('balloons should be a slight egg with a cone taper and a small tied nub')
+}
+if (client.includes('CHIN_Y') || client.includes('CHIN_XZ')) {
+  fail('the balloon base should be a simple cone, not an extra rounded collar')
 }
 if (!client.includes('AIM_BLEND') || !client.includes('MAX_AIM_DEG') || !client.includes('AIM_TAU') || !client.includes('aimNub')) {
   fail('the nub should tilt along the string, smoothly and capped')

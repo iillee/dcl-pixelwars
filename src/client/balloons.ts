@@ -12,7 +12,7 @@
  *    yaw, so the child is not rotated again. Balloons and strings are
  *    children of the knot: only the balloon end jiggles, from
  *    low-passed planar velocity and turn. Each balloon is a slight egg
- *    with a blended taper and a small nub; the nub tilts along the
+ *    with a simple cone taper and a small nub; the nub tilts along the
  *    string's top segment, and the string always meets that nub from
  *    the balloon's live transform.
  *  - 'trail' is the original world-space spring follow, with lag.
@@ -56,21 +56,15 @@ const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
 const BODY_XZ = 0.54
 const BODY_Y = 0.62
 const BODY_Y_OFF = 0.03
-/** Squashed lower sphere that blends the body into the taper. */
-const CHIN_XZ = 0.3
-const CHIN_Y = 0.22
-const CHIN_OVERLAP = 0.02
-/** Short cone, wide end tucked into the chin, narrow end at the nub. */
-const NECK_H = 0.07
-const NECK_XZ = 0.1
-const NECK_TUCK = 0.035
-const NUB_XZ = 0.055
+/** Smooth cone from the underside of the egg down to a small tied nub. */
+const NECK_H = 0.14
+const NECK_XZ = 0.28
+const NECK_TUCK = 0.05
+const NUB_XZ = 0.05
 const NUB_Y = 0.046
-const NUB_OVERLAP = 0.008
+const NUB_OVERLAP = 0.01
 const BODY_BOTTOM = BODY_Y_OFF - BODY_Y * 0.5
-const CHIN_Y_OFF = BODY_BOTTOM + CHIN_OVERLAP
-const CHIN_BOTTOM = CHIN_Y_OFF - CHIN_Y * 0.5
-const NECK_TOP = CHIN_BOTTOM + NECK_TUCK
+const NECK_TOP = BODY_BOTTOM + NECK_TUCK
 const NECK_TIP = NECK_TOP - NECK_H
 const NUB_CENTER = NECK_TIP - NUB_Y * 0.5 + NUB_OVERLAP
 const NUB_TIP = NUB_CENTER - NUB_Y * 0.5
@@ -415,16 +409,15 @@ function addBalloonPart(parent: Entity, pos: Vec, scale: Vec, cone = false): Ent
     position: Vector3.create(pos.x, pos.y, pos.z),
     scale: Vector3.create(scale.x, scale.y, scale.z),
   })
-  if (cone) MeshRenderer.setCylinder(ent, 1, 0.22)
+  if (cone) MeshRenderer.setCylinder(ent, 1, 0.18)
   else MeshRenderer.setSphere(ent)
   paintBalloon(ent)
   return ent
 }
 
-/** Slight egg, blended taper, and a small tied nub. Root is unscaled. */
+/** Slight egg, a simple cone taper, and a small tied nub. Root is unscaled. */
 function buildBalloonParts(root: Entity): void {
   addBalloonPart(root, v(0, BODY_Y_OFF, 0), v(BODY_XZ, BODY_Y, BODY_XZ))
-  addBalloonPart(root, v(0, CHIN_Y_OFF, 0), v(CHIN_XZ, CHIN_Y, CHIN_XZ))
   addBalloonPart(root, v(0, NECK_TOP - NECK_H * 0.5, 0), v(NECK_XZ, NECK_H, NECK_XZ), true)
   addBalloonPart(root, v(0, NUB_CENTER, 0), v(NUB_XZ, NUB_Y, NUB_XZ))
 }
