@@ -1166,6 +1166,8 @@ export async function setupServer(): Promise<void> {
   /** Nearest safe team-coloured cell, or null when paint revival does not apply. */
   function paintedRescueHome(team: number, from: { x: number; y: number; z: number }, occupied?: Set<string>): { x: number; y: number; z: number } | null {
     if (!matchLive() || !paintAllowed(roundFormat)) return null
+    // BASES always returns to the team base, never the nearest paint.
+    if (basesOn(roundFormat)) return null
     if (team !== 1 && team !== 2) return null
     const g = getWalkableGraph()
     if (!g) return null
@@ -1187,12 +1189,13 @@ export async function setupServer(): Promise<void> {
     if (now - (rescueStartAt.get(who) ?? 0) < 400) return
     rescueStartAt.set(who, now)
     rescueRiders.add(who)
-    // Paint modes land on the nearest owned cell. Lobby / Balloon Battle keep
-    // the client's dest (lobby feet or team spawn) after a bounds check.
+    // BASES always lands at the team base. Other paint modes land on the
+    // nearest owned cell. Lobby / Balloon Battle keep the client's dest
+    // (lobby feet or team spawn) after a bounds check.
     const catchAt = { x: m.x, y: m.y, z: m.z }
     const painted = paintedRescueHome(team, catchAt)
     const hinted = rescuePosOk(m.bx, m.by, m.bz) ? { x: m.bx, y: m.by, z: m.bz } : null
-    const home = painted ?? hinted ?? baseSpawn(team).pos
+    const home = basesOn(roundFormat) ? baseSpawn(team).pos : (painted ?? hinted ?? baseSpawn(team).pos)
     const msg = {
       who,
       x: m.x, y: m.y, z: m.z,

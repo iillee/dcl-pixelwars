@@ -43,8 +43,8 @@ const eastLive = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id
 export const LOBBY_MODES: ModeDef[] = [
   { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 1, g: 0.459, b: 0.467 } },
   { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
-  { id: 'bases', label: 'BASES', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
-  { id: 'prototype', label: 'PROTOTYPE', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
+  { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
+  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
   { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.435, g: 0.816, b: 0.549 } },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
@@ -85,18 +85,18 @@ export const SIGN_LIP_DEPTH_M = 0.55
 export function modeTitle(id: string): string {
   if (id === 'pvb') return 'BOT INVASION'
   if (id === 'pvp') return 'PIXELWARS'
-  if (id === 'bases') return 'BASES'
-  if (id === 'prototype') return 'PROTOTYPE'
+  if (id === 'bases') return 'BASE CHARGE'
+  if (id === 'prototype') return 'PAINT LIMIT'
   if (id === 'balloon') return 'BALLOON BATTLE'
   return ''
 }
 
 export function modeSubtitle(id: string): string {
   if (id === 'pvb') return 'vs Bots'
-  if (id === 'pvp') return 'vs Humans'
-  if (id === 'bases') return 'Charge the Base'
-  if (id === 'prototype') return 'Paint Economy'
-  if (id === 'balloon') return 'Testing'
+  if (id === 'pvp') return 'Classic'
+  if (id === 'bases') return 'Prototype'
+  if (id === 'prototype') return 'Prototype'
+  if (id === 'balloon') return 'Prototype'
   return ''
 }
 

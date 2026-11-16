@@ -470,8 +470,8 @@ if (inFront < 0.1) {
   console.error(`✗ sign text Z ${face.toFixed(2)} is not on the camera side of the plate (gap ${inFront.toFixed(2)} m)`)
   process.exit(1)
 }
-if (modeTitle('pvb') !== 'BOT INVASION' || modeTitle('pvp') !== 'PIXELWARS' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'vs Humans') {
-  console.error('✗ lobby choices should read BOT INVASION and PIXELWARS')
+if (modeTitle('pvb') !== 'BOT INVASION' || modeTitle('pvp') !== 'PIXELWARS' || modeSubtitle('pvb') !== 'vs Bots' || modeSubtitle('pvp') !== 'Classic') {
+  console.error('✗ lobby choices should read BOT INVASION and PIXELWARS / Classic')
   process.exit(1)
 }
 const lipBottom = -(SIGN_H_M + 0.55) / 2
@@ -480,16 +480,16 @@ if (!(chipTop < lipBottom - 0.2) || !(chipTop > lipBottom - 1.2)) {
   console.error('✗ the vote count chip should sit just under the pill')
   process.exit(1)
 }
-if (modeTitle('prototype') !== 'PROTOTYPE' || modeSubtitle('prototype') !== 'Paint Economy') {
-  console.error('✗ Prototype should read PROTOTYPE / Paint Economy')
+if (modeTitle('prototype') !== 'PAINT LIMIT' || modeSubtitle('prototype') !== 'Prototype') {
+  console.error('✗ the north mode should read PAINT LIMIT / Prototype')
   process.exit(1)
 }
-if (modeTitle('balloon') !== 'BALLOON BATTLE' || modeSubtitle('balloon') !== 'Testing') {
-  console.error('✗ Balloon Battle should read BALLOON BATTLE / Testing')
+if (modeTitle('balloon') !== 'BALLOON BATTLE' || modeSubtitle('balloon') !== 'Prototype') {
+  console.error('✗ Balloon Battle should read BALLOON BATTLE / Prototype')
   process.exit(1)
 }
-if (modeTitle('bases') !== 'BASES' || modeSubtitle('bases') !== 'Charge the Base') {
-  console.error('✗ Bases should read BASES / Charge the Base')
+if (modeTitle('bases') !== 'BASE CHARGE' || modeSubtitle('bases') !== 'Prototype') {
+  console.error('✗ the east mode should read BASE CHARGE / Prototype')
   process.exit(1)
 }
 const proto = LOBBY_MODES.find(m => m.id === 'prototype')!

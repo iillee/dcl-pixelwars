@@ -86,7 +86,7 @@ if (!pvbMode || pvbMode.live || pvbMode.placed || pvbMode.economy || pvbMode.tea
 if (pvbMode.cell.x !== EAST_PARK_CELL.x || pvbMode.cell.z !== EAST_PARK_CELL.z) fail('parked Bot Invasion should use the unused east park cell')
 if (placedModes().some(m => m.id === 'pvb') || !placedModes().some(m => m.id === 'bases')) fail('the lobby floor should show BASES, not Bot Invasion')
 if (modeTitle('pvb') !== 'BOT INVASION' || modeSubtitle('pvb') !== 'vs Bots') fail('Bot Invasion titles must stay intact')
-if (modeTitle('bases') !== 'BASES' || modeSubtitle('bases') !== 'Charge the Base') fail('BASES lobby copy is wrong')
+if (modeTitle('bases') !== 'BASE CHARGE' || modeSubtitle('bases') !== 'Prototype') fail('BASES lobby copy is wrong')
 const blue = basesMode.color
 if (Math.abs(blue.r - 0x6A / 255) > 0.002 || Math.abs(blue.g - 0x99 / 255) > 0.002 || Math.abs(blue.b - 0xFC / 255) > 0.002) {
   fail('BASES should keep the Bot Invasion blue #6A99FC')
@@ -206,6 +206,9 @@ if (!server.includes('seedBaseTerritory') || !server.includes('tickBaseGrowth') 
 }
 if (!server.includes("mode === 'bases' ? 'bases'")) fail('BASES needs its own round format, not pvb')
 if (!server.includes("roundFormat === 'pvb'")) fail('Bot Invasion start-up logic must remain reachable')
+if (!server.includes('if (basesOn(roundFormat)) return null') || !server.includes("basesOn(roundFormat) ? baseSpawn(team).pos")) {
+  fail('BASES rescues must always land at the team base, not the nearest paint')
+}
 const msgs = readFileSync(new URL('../src/shared/messages.ts', import.meta.url), 'utf8')
 if (!msgs.includes('baseState') || !msgs.includes('baseWin')) fail('clients need baseState and baseWin messages')
 const paint = readFileSync(new URL('../src/paint.ts', import.meta.url), 'utf8')
