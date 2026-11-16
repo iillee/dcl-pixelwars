@@ -100,6 +100,9 @@ export function footprintAt(p: V3, cell: string): number {
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
 export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
+  // Team.None is the lobby (white slabs). In a match it means an empty tank —
+  // knockback and the white shockwave only, no bleached floor ripple.
+  if (team === Team.None && !inLobby() && !isBalloonRound()) return
   const g = ensureGraph()
   if (!g) return
   const centre = burstCentre(g, cell, p)

@@ -51,7 +51,12 @@ export function initPaintNet(): void {
     if (!paintEconomy) return
     paintLeft = tank
     paintFrac = 0
-    for (const id of denied) forceCell(id, paintUndo.get(id) ?? Team.None)
+    // Only revert cells this client actually predicted. A Burst denial has
+    // no undo record; defaulting those to empty would bleach enemy paint.
+    for (const id of denied) {
+      const prev = paintUndo.get(id)
+      if (prev !== undefined) forceCell(id, prev)
+    }
     paintUndo.clear()
   })
 

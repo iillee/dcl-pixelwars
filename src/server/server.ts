@@ -171,7 +171,9 @@ export async function setupServer(): Promise<void> {
       const centre = graph ? burstCentre(graph, '', at) : null
       const fp = graph && centre ? burstFootprint(graph, centre) : []
       const list = economyOn() ? orderNearest(fp, centre) : fp
-      for (const cid of list) applyBotPaint(cid, team, by)
+      if (!paintDry(by)) {
+        for (const cid of list) applyBotPaint(cid, team, by)
+      }
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
         if (a && e.team !== team && now - a.t <= BOT_AIM_STALE_S * 1000 && inBurst(at, a)) noteHit(by, e.userId)
@@ -183,7 +185,9 @@ export async function setupServer(): Promise<void> {
       const fp = graph && centre ? burstFootprint(graph, centre) : []
       const by = `bot:${id}`
       const list = economyOn() ? orderNearest(fp, centre) : fp
-      for (const cid of list) applyBotPaint(cid, team, by)
+      if (!paintDry(by)) {
+        for (const cid of list) applyBotPaint(cid, team, by)
+      }
       room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(by) })
       const now = Date.now()
       for (const e of rosterEntries()) {
@@ -907,6 +911,8 @@ export async function setupServer(): Promise<void> {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
     const fp = graph && centre ? burstFootprint(graph, centre) : []
+    // Empty tank: knockback still uses the full footprint; no cell changes.
+    if (paintDry(from)) return fp
     const gained = paintCells(from, team, fp, centre, true)
     if (gained > 0) {
       leaderboardIncrement(from, gained)

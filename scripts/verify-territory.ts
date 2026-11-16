@@ -107,6 +107,24 @@ if (!burst.includes('return fp')) {
   console.error('✗ a short tank must not shrink the burst knockback footprint')
   process.exit(1)
 }
+if (!burst.includes('paintDry') || !burst.includes('paintCells')) {
+  console.error('✗ an empty tank must skip burst paint, and a short tank must still spend')
+  process.exit(1)
+}
+if ((server.split('if (!paintDry(by))').length - 1) < 2) {
+  console.error('✗ empty-tank bot Burst and landing must not paint cells')
+  process.exit(1)
+}
+const paintSrc = readFileSync(new URL('../src/paint.ts', import.meta.url), 'utf8')
+if (paintSrc.includes('forceCell(id, paintUndo.get(id) ?? Team.None)') || !paintSrc.includes('paintUndo.get(id)')) {
+  console.error('✗ a denied cell must revert only predicted paint, not bleach to empty')
+  process.exit(1)
+}
+const rippleSrc = readFileSync(new URL('../src/client/burstRipple.ts', import.meta.url), 'utf8')
+if (!rippleSrc.includes('team === Team.None && !inLobby()')) {
+  console.error('✗ an empty-tank Burst must not raise a floor ripple over enemy paint')
+  process.exit(1)
+}
 const ui = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
 if (!ui.includes('function PaintTankBar') || !ui.includes('paintEconomyOn()') || !ui.includes("position: { top, right:")) {
   console.error('✗ Prototype needs a vertical paint bar on the right')
