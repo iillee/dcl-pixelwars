@@ -144,6 +144,16 @@ if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.incl
 if (client.includes('CHIN_Y') || client.includes('CHIN_XZ')) {
   fail('the balloon base should be a simple cone, not an extra rounded collar')
 }
+if (!server.includes('balloonBotIds()') || !server.includes('startingBalloons(ids)') || !server.includes('freezeBots(false); tickBots(0)')) {
+  fail('Balloon Battle must fill bots, then seed 3 balloons for each human and bot, before freezing the pool')
+}
+if (!server.includes('for (const e of rosterEntries()) markActive(e.userId)')) {
+  fail('connected lobby players must count as present so Balloon Battle can fill bots after a long vote')
+}
+if (!server.includes("key.startsWith('bot:')") || !server.includes('benchBot')) {
+  fail('an eliminated bot must drop out of last-standing')
+}
+
 if (!client.includes('AIM_BLEND') || !client.includes('MAX_AIM_DEG') || !client.includes('AIM_TAU') || !client.includes('aimNub')) {
   fail('the nub should tilt along the string, smoothly and capped')
 }

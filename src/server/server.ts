@@ -513,6 +513,11 @@ export async function setupServer(): Promise<void> {
     const c = pendingFinal
     const pruned = pruneForNewRound()
     if (pruned > 0) console.log(`[Server] roster: pruned ${pruned} inactive player(s) at round start`)
+    // Everyone still connected in the lobby counts as present for bot fill.
+    // The 60s paint-activity window often expires while voting (the lobby
+    // has no paint), and Balloon Battle never paints. Without this, the
+    // one-shot fill + freeze would lock in an empty bot pool for the match.
+    for (const e of rosterEntries()) markActive(e.userId)
     let humanTeamLabel = '-'
     let plannedBots = 0
     if (roundFormat === 'pvb') {
