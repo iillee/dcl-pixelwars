@@ -261,7 +261,7 @@ if (LOBBY_VOTE_MS !== 10_000) {
   console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
-if (hudVoteHeadline(false) !== 'STAND ON A TILE TO VOTE' || hudVoteHeadline(true) !== 'STARTING SOON' || /\d/.test(hudVoteHeadline(true))) {
+if (hudVoteHeadline(false) !== 'CHOOSE A GAME MODE' || hudVoteHeadline(true) !== 'STARTING SOON' || /\d/.test(hudVoteHeadline(true))) {
   console.error(`✗ vote pill copy should instruct, without repeating the seconds (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)})`)
   process.exit(1)
 }

@@ -241,7 +241,7 @@ export function signBadgeY(): number {
 
 /** Top HUD line. Seconds live in the big number under the pill, not in this text. */
 export function hudVoteHeadline(hasVote: boolean): string {
-  return hasVote ? 'STARTING SOON' : 'STAND ON A TILE TO VOTE'
+  return hasVote ? 'STARTING SOON' : 'CHOOSE A GAME MODE'
 }
 
 
