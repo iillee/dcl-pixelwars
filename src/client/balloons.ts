@@ -35,6 +35,7 @@ import { getPlayer } from '@dcl/sdk/players'
 import { events } from '../shared/events'
 import { BALLOON_STYLE, balloonsLive } from '../shared/balloon'
 import { gamePhase } from './phase'
+import { isLobbyLayout } from '../maze/rebuild'
 import { isBalloonRound } from '../round'
 import { getBotRenderPositions } from './botVisual'
 import { playBalloonPopSfx } from './audio'
@@ -129,7 +130,9 @@ export function isEliminated(): boolean {
 }
 
 function balloonMatchLive(): boolean {
-  return balloonsLive(gamePhase(), isBalloonRound() ? 'balloon' : '')
+  // The lobby floor can land while the clock is still 'match'. Treat
+  // that as the end of the round so AvatarAttach rigs do not linger.
+  return !isLobbyLayout() && balloonsLive(gamePhase(), isBalloonRound() ? 'balloon' : '')
 }
 
 function localId(): string {
@@ -325,12 +328,13 @@ function attachRig(id: string, pose: Pose): { attach: Entity | null; knot: Entit
 }
 
 function clearCluster(c: Cluster): void {
-  if (c.attach) {
-    removeEntityWithChildren(engine, c.attach)
-  } else if (c.knot) {
-    // Knot may be a child of a bot body we do not own.
-    removeEntityWithChildren(engine, c.knot)
-  } else {
+  // The AvatarAttach root often has no Transform, so a tree walk starting
+  // there would skip the knot and leak the local player's balloons.
+  // Always drop the knot (and its balloons and strings) first, then the
+  // attach entity itself. Never remove a bot body we do not own.
+  if (c.knot) removeEntityWithChildren(engine, c.knot)
+  if (c.attach) engine.removeEntity(c.attach)
+  if (!c.knot && !c.attach) {
     for (const b of c.balloons) {
       engine.removeEntity(b.root)
       engine.removeEntity(b.string)
@@ -638,6 +642,7 @@ export function initBalloons(): void {
   events.on('balloon:pop', ({ id, n }) => applyPop(id, n))
   events.on('round:ended', () => teardownBalloons())
   events.on('round:reset', () => teardownBalloons())
+  events.on('lobby:floor', () => teardownBalloons())
   events.on('team:roster', ({ entries }) => dropLeavers(entries))
   engine.addSystem((dt: number) => {
     clock += dt

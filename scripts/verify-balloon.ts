@@ -114,6 +114,12 @@ if (!client.includes('balloonsLive') || !client.includes('teardownBalloons')) {
 if (!client.includes("events.on('round:ended'") || !client.includes("events.on('round:reset'")) {
   fail('the client must tear down balloon rigs on round end and reset')
 }
+if (!client.includes("events.on('lobby:floor'") || !client.includes('isLobbyLayout()')) {
+  fail('balloon rigs must come down when the lobby floor is up, even if the phase still says match')
+}
+if (!client.includes('engine.removeEntity(c.attach)')) {
+  fail('the AvatarAttach root must be removed directly, because it may have no Transform')
+}
 if (!client.includes("events.on('team:roster'") || !client.includes('dropLeavers')) {
   fail('the client must remove a balloon rig when a player leaves')
 }
