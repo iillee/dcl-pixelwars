@@ -423,8 +423,20 @@ if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.tes
   console.error('✗ the vote tint should stay matte and opaque so the white floor does not wash it out')
   process.exit(1)
 }
-if (!/function plateMat[\s\S]{0,500}emissiveIntensity:\s*0,/.test(lobbySrc) || /function plateMat[\s\S]{0,500}emissiveIntensity:\s*0\.\d+/.test(lobbySrc)) {
-  console.error('✗ lobby billboard plates should be matte like the occupied floor, with no emission')
+if (
+  !lobbySrc.includes('const FLOOR_LIT_LIFT') ||
+  !lobbySrc.includes('function litPlate') ||
+  !lobbySrc.includes('Material.setBasicMaterial') ||
+  !/function plateMat[\s\S]{0,250}diffuseColor/.test(lobbySrc) ||
+  /function plateMat[\s\S]{0,250}emissiveIntensity/.test(lobbySrc) ||
+  !lobbySrc.includes('const display = litPlate(copy.plate)')
+) {
+  console.error('✗ lobby billboard plates should be unlit and use the apparent lit floor colour')
+  process.exit(1)
+}
+const liftMatch = lobbySrc.match(/FLOOR_LIT_LIFT\s*=\s*([0-9.]+)/)
+if (!liftMatch || Number(liftMatch[1]) < 0.25 || Number(liftMatch[1]) > 0.4) {
+  console.error(`✗ FLOOR_LIT_LIFT should stay near the measured occupied-floor lift (~0.33), got ${liftMatch && liftMatch[1]}`)
   process.exit(1)
 }
 if (lobbySrc.includes('setBox(tail)') || lobbySrc.includes('signCaretSize') || lobbySrc.includes('orthoSignPoses')) {
@@ -436,11 +448,11 @@ if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMod
   process.exit(1)
 }
 if (!lobbySrc.includes('roughness: 1') || !lobbySrc.includes('specularIntensity: 0') || !lobbySrc.includes('metallic: 0')) {
-  console.error('✗ sign plates should be matte')
+  console.error('✗ vote floor tints should stay matte PBR')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('outlineWidth: 0') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
-  console.error('✗ titles should be one 4.5 m line, unoutlined, and scale with the overview zoom')
+if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('outlineColor:') || !lobbySrc.includes('outlineWidth: 0.2') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
+  console.error('✗ titles should be one 4.5 m line with a subtle ink outline, and scale with the overview zoom')
   process.exit(1)
 }
 if (SIGN_W_M < 40 || SIGN_H_M > 12) {

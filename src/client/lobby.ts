@@ -69,17 +69,25 @@ function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Iden
   return e
 }
 
-/** Matte, same RGB as the occupied floor tint. Emission was washing the plate to a pale tan. */
+/**
+ * Occupied floors are sunlit and read lighter than their plate RGB.
+ * Vertical billboards skip scene lighting, so they use this lifted colour
+ * as an unlit diffuse and match the apparent floor. 0.33 was measured from
+ * the Balloon Battle floor (#A3DCB8) vs its plate (#6FD08C).
+ * Display hexes at this lift: Classic #FFA3A4, Paint Limit #FFDC9C,
+ * Base Charge #9BBBFD, Balloon Battle #9EE0B2.
+ */
+const FLOOR_LIT_LIFT = 0.33
+
+function litPlate(c: Rgb): Rgb {
+  const mix = (v: number) => v + (1 - v) * FLOOR_LIT_LIFT
+  return { r: mix(c.r), g: mix(c.g), b: mix(c.b) }
+}
+
+/** Unlit so scene light cannot darken or re-tint the plate. */
 function plateMat(c: Rgb) {
   return {
-    albedoColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveColor: Color4.create(0, 0, 0, 1),
-    emissiveIntensity: 0,
-    roughness: 1,
-    metallic: 0,
-    specularIntensity: 0,
-    reflectivityColor: Color3.create(0, 0, 0),
-    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    diffuseColor: Color4.create(c.r, c.g, c.b, 1),
     castShadows: false,
   }
 }
@@ -88,14 +96,14 @@ function plateMat(c: Rgb) {
 function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, mat: ReturnType<typeof plateMat>): void {
   const box = add(parent, center, Vector3.create(Math.max(0.2, w - h), h, d))
   MeshRenderer.setBox(box)
-  Material.setPbrMaterial(box, mat)
+  Material.setBasicMaterial(box, mat)
   const spin = Quaternion.fromEulerDegrees(90, 0, 0)
   const capScale = Vector3.create(h, d, h)
   const x = (w - h) / 2
   for (const side of [-1, 1]) {
     const cap = add(parent, Vector3.create(center.x + side * x, center.y, center.z), capScale, spin)
     MeshRenderer.setCylinder(cap)
-    Material.setPbrMaterial(cap, mat)
+    Material.setBasicMaterial(cap, mat)
   }
 }
 
@@ -115,8 +123,9 @@ function laySigns(): void {
     signRoots.push(root)
     signBaseY.push(pose.y)
     const face = signFaceZ()
-    const slab = plateMat(copy.plate)
-    const lip = plateMat({ r: copy.plate.r * 0.55, g: copy.plate.g * 0.55, b: copy.plate.b * 0.55 })
+    const display = litPlate(copy.plate)
+    const slab = plateMat(display)
+    const lip = plateMat({ r: display.r * 0.55, g: display.g * 0.55, b: display.b * 0.55 })
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
@@ -125,7 +134,8 @@ function laySigns(): void {
       fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0,
+      outlineWidth: 0.2,
+      outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
       textWrapping: false,
       width: SIGN_W_M - 4,
       height: 5.2,
@@ -136,7 +146,8 @@ function laySigns(): void {
       fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(1, 1, 1, 1),
-      outlineWidth: 0,
+      outlineWidth: 0.2,
+      outlineColor: Color3.create(copy.ink.r, copy.ink.g, copy.ink.b),
       textWrapping: false,
       width: 40,
       height: 2,
