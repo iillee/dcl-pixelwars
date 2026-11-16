@@ -27,7 +27,7 @@ function lockedTeam(id: string): Team {
 export { Team } from './shared/team'
 import { Team } from './shared/team'
 import { events } from './shared/events'
-import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC } from './shared/territory'
+import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, refillOnTerritory } from './shared/territory'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -451,6 +451,7 @@ export function predictTerritoryRefill(dt: number, eligible: boolean): void {
 }
 
 function tickLocalPaintRegen(dt: number): void {
+  if (!refillOnTerritory()) return
   if (!paintEconomy) { paintRefill = false; return }
   const t = Transform.getOrNull(engine.PlayerEntity)
   const cell = lastCenterId

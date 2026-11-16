@@ -9,7 +9,7 @@ import { baseSpawn, getPlacedTilesInOrder } from '../maze/generator'
 import { isRebuilding } from '../maze/rebuild'
 import { buildWalkableGraph, type WalkableGraph } from '../shared/mazeGraph'
 import { Team, TEAM_RGB } from '../shared/team'
-import { nearestNode, onDepot, placeDepots, type DepotAnchor } from '../shared/territory'
+import { nearestNode, onDepot, PAINT_REFILL_MODE, placeDepots, type DepotAnchor } from '../shared/territory'
 import { getCurrentCellId, paintEconomyOn, paintTeamOf, painterTeam, predictDepotRefill } from '../paint'
 import { inLobby } from './phase'
 
@@ -20,6 +20,7 @@ let posts: Post[] = []
 let builtFor = ''
 let graph: WalkableGraph | null = null
 
+/** Same RGB as floor paint (TEAM_RGB / pallet.jpeg). Neutral posts stay off-white until captured. */
 function tint(team: Team, glow: number) {
   const c = team === Team.Red || team === Team.Blue ? TEAM_RGB[team] : NEUTRAL
   return {
@@ -109,8 +110,13 @@ function recolor(dt: number): void {
 }
 
 export function initDepots(): void {
-  engine.addSystem(() => {
-    // Prototype no longer uses depot posts or depot recharge.
-    if (posts.length) clearPosts()
+  engine.addSystem((dt: number) => {
+    if (PAINT_REFILL_MODE !== 'depot' || !paintEconomyOn() || inLobby() || isRebuilding()) {
+      if (posts.length) clearPosts()
+      if (PAINT_REFILL_MODE === 'depot') predictDepotRefill(dt, false)
+      return
+    }
+    ensurePosts()
+    recolor(dt)
   })
 }

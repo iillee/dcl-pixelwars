@@ -3,12 +3,13 @@
  * Run: npx tsx scripts/verify-territory.ts
  *
  * Spend: 1 per flip, free on your own cells, stop at 0, nearest first.
- * Regen: only on cured friendly ground, at the cell's elevation.
+ * Live refill is checkpoint depots. Cured-ground recharge stays parked
+ * behind PAINT_REFILL_MODE = 'territory'.
  */
 import { readFileSync } from 'node:fs'
 import { LOBBY_MODES } from '../src/shared/lobby'
 import {
-  PAINT_CAPACITY, PAINT_COST, PAINT_REFILL_PER_SEC, PAINT_CURE_S, PAINT_GROUND_TOLERANCE,
+  PAINT_CAPACITY, PAINT_COST, PAINT_REFILL_MODE, PAINT_REFILL_PER_SEC, PAINT_CURE_S, PAINT_GROUND_TOLERANCE,
   DEPOT_NEUTRAL_COUNT, WALLET_MIN_MS, FEET_IDLE_MS,
   WalletGate, accruePaint, applyTank, feetDue, isCuredSince, isRegenEligible,
   nearestNode, onDepot, orderNearest, placeDepots,
@@ -18,12 +19,16 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { applyPaint, clearAll, ownedSince, seedOwned, teamOfCell } from '../src/server/paintState'
 import { refillWallet, resetWallets, setWallet, walletOf } from '../src/server/paintWallet'
 
-if (PAINT_CAPACITY !== 80) {
-  console.error(`✗ paint capacity should be 80, got ${PAINT_CAPACITY}`)
+if (PAINT_REFILL_MODE !== 'depot') {
+  console.error(`✗ live Prototype refill should be depots, got ${PAINT_REFILL_MODE}`)
   process.exit(1)
 }
-if (PAINT_COST !== 1 || PAINT_REFILL_PER_SEC !== 10 || PAINT_CURE_S !== 5) {
-  console.error(`✗ expected cost 1, refill 10/s, cure 5s; got ${PAINT_COST}, ${PAINT_REFILL_PER_SEC}, ${PAINT_CURE_S}`)
+if (PAINT_CAPACITY !== 280) {
+  console.error(`✗ paint capacity should be 280 in depot mode, got ${PAINT_CAPACITY}`)
+  process.exit(1)
+}
+if (PAINT_COST !== 1 || PAINT_REFILL_PER_SEC !== 56 || PAINT_CURE_S !== 5) {
+  console.error(`✗ expected cost 1, depot refill 56/s, cure 5s; got ${PAINT_COST}, ${PAINT_REFILL_PER_SEC}, ${PAINT_CURE_S}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {
@@ -145,8 +150,8 @@ if (!ui.includes('function PaintTankBar') || !ui.includes('paintEconomyOn()') ||
   console.error('✗ Prototype needs a vertical paint bar on the right')
   process.exit(1)
 }
-if (!ui.includes('NO PAINT') || !ui.includes('RECHARGE') || !ui.includes('Date.now() / 180')) {
-  console.error('✗ the paint bar should pulse while recharging and show NO PAINT when empty')
+if (!ui.includes('NO PAINT') || !ui.includes('REFILL') || !ui.includes('RECHARGE') || !ui.includes('Date.now() / 180')) {
+  console.error('✗ the paint bar should show REFILL at a depot, keep RECHARGE for territory mode, pulse while filling, and show NO PAINT when empty')
   process.exit(1)
 }
 if (!ui.includes('painterTeam()') || !ui.includes('borderRadius: radius') || !ui.includes('borderRadius: innerR') || !ui.includes('Team.Blue ? BLUE_COLOR : RED_COLOR')) {
@@ -154,8 +159,8 @@ if (!ui.includes('painterTeam()') || !ui.includes('borderRadius: radius') || !ui
   process.exit(1)
 }
 
-if (Math.abs(PAINT_REFILL_PER_SEC * 8 - PAINT_CAPACITY) > 1) {
-  console.error(`✗ a full refill should take about 8s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
+if (Math.abs(PAINT_REFILL_PER_SEC * 5 - PAINT_CAPACITY) > 1) {
+  console.error(`✗ a full depot refill should take about 5s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
   process.exit(1)
 }
 generateWithRetry(1, 40)
@@ -194,19 +199,23 @@ if (placedAgain !== depots.map(d => `${d.owner}:${d.id}`).join()) {
 }
 const botSrc = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
 if (!botSrc.includes('b.stay(cell)') || !botSrc.includes('economyOn?.()') || !botSrc.includes('friendlyDepot')) {
-  console.error('✗ Prototype bots should walk to cured friendly ground when their tank is low')
+  console.error('✗ Prototype bots should walk to a friendly depot when their tank is low')
   process.exit(1)
 }
-if (!server.includes('nearestCuredCell') || !server.includes('tickTerritoryRegen') || !server.includes('seedStartTerritory')) {
-  console.error('✗ Prototype should seed start territory and tick cured-ground regen')
+if (!server.includes('seedDepots(') || !server.includes('tickDepotRefill(') || !server.includes('noteDepotFeet(') || !server.includes('friendlyDepotCell')) {
+  console.error('✗ Prototype should seed depots and tick depot refill')
   process.exit(1)
 }
-if (server.includes('seedDepots(') || server.includes('tickDepotRefill(') || server.includes('noteDepotFeet(')) {
-  console.error('✗ Prototype server should no longer seed or tick depots')
+if (!server.includes('refillAtDepot()') || !server.includes('refillOnTerritory()')) {
+  console.error('✗ depot and territory refill must be selected by the shared toggle')
   process.exit(1)
 }
-if (!server.includes('economyOn()') || !/if \(economyOn\(\)\) \{[\s\S]*tickTerritoryRegen/.test(server)) {
-  console.error('✗ territory regen must stay inside the Prototype economy gate')
+if (!server.includes('tickTerritoryRegen') || !server.includes('seedStartTerritory') || !server.includes('nearestCuredCell')) {
+  console.error('✗ cured-ground recharge should stay parked behind the territory toggle')
+  process.exit(1)
+}
+if (!server.includes('economyOn()') || !/if \(refillAtDepot\(\)\) \{[\s\S]*tickDepotRefill/.test(server)) {
+  console.error('✗ depot refill must stay inside the Prototype economy gate')
   process.exit(1)
 }
 
@@ -273,12 +282,16 @@ if (!feetDue('2,2,0:9,8', lastCell, lastMs, lastMs + 10, true)) {
 }
 const depotSrc = readFileSync(new URL('../src/client/depots.ts', import.meta.url), 'utf8')
 const initBlock = depotSrc.slice(depotSrc.indexOf('export function initDepots'), depotSrc.indexOf('export function initDepots') + 400)
-if (initBlock.includes('ensurePosts()') || initBlock.includes('predictDepotRefill') || initBlock.includes('recolor(')) {
-  console.error('✗ Prototype client should not spawn depot posts or refill from them')
+if (!initBlock.includes('ensurePosts()') || !initBlock.includes('predictDepotRefill') || !initBlock.includes('recolor(')) {
+  console.error('✗ Prototype client should spawn depot posts and refill from them')
   process.exit(1)
 }
-if (!depotSrc.includes('if (posts.length) clearPosts()')) {
-  console.error('✗ leftover depot posts should be cleared in Prototype')
+if (!depotSrc.includes("PAINT_REFILL_MODE !== 'depot'") || !depotSrc.includes('if (posts.length) clearPosts()')) {
+  console.error('✗ depot posts should only spawn in depot mode, and leftover posts should clear otherwise')
+  process.exit(1)
+}
+if (!depotSrc.includes('TEAM_RGB[team]') || !depotSrc.includes('NEUTRAL')) {
+  console.error('✗ depot cylinders should use the team paint color, with off-white for unowned posts')
   process.exit(1)
 }
 
@@ -327,24 +340,29 @@ if (!isRegenEligible({ ...grounded, ownedSince: t0, now: t0 + PAINT_CURE_S * 100
   process.exit(1)
 }
 
-const tick = accruePaint(0, 0, 1, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+const tick = accruePaint(0, 0, 1, 10, 80)
 if (tick.tank !== 10 || tick.gained !== 10) {
-  console.error(`✗ 1s of regen should grant 10 paint, got ${tick.tank}`)
+  console.error(`✗ 1s of territory regen should grant 10 paint, got ${tick.tank}`)
   process.exit(1)
 }
-const cap = accruePaint(PAINT_CAPACITY - 3, 0, 1, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
-if (cap.tank !== PAINT_CAPACITY || cap.gained !== 3) {
+const cap = accruePaint(80 - 3, 0, 1, 10, 80)
+if (cap.tank !== 80 || cap.gained !== 3) {
   console.error('✗ regen must stop at max paint')
   process.exit(1)
 }
-const frac = accruePaint(0, 0, 0.04, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+const frac = accruePaint(0, 0, 0.04, 10, 80)
 if (frac.tank !== 0 || !(frac.frac > 0)) {
   console.error('✗ sub-unit regen should carry a fraction and not over-spend')
   process.exit(1)
 }
-const nextFrac = accruePaint(0, frac.frac, 0.08, PAINT_REFILL_PER_SEC, PAINT_CAPACITY)
+const nextFrac = accruePaint(0, frac.frac, 0.08, 10, 80)
 if (nextFrac.tank !== 1) {
   console.error(`✗ carried fraction plus 0.08s should grant 1 paint, got ${nextFrac.tank}`)
+  process.exit(1)
+}
+const depotTick = accruePaint(0, 0, 1, 56, 280)
+if (depotTick.tank !== 56 || depotTick.gained !== 56) {
+  console.error(`✗ 1s at a depot should grant 56 paint, got ${depotTick.tank}`)
   process.exit(1)
 }
 
@@ -392,8 +410,8 @@ if (!handlerSrc.includes('g: grounded ? 1 : 0') || !msgs.includes('y: Schemas.Nu
   console.error('✗ paintTick should report feet height and grounded, and paintWallet should carry regen')
   process.exit(1)
 }
-if (!paintSrc.includes('tickLocalPaintRegen') || !paintSrc.includes('cellSince') || !paintSrc.includes('predictTerritoryRefill')) {
-  console.error('✗ the client should interpolate regen from cured ground between wallet echoes')
+if (!paintSrc.includes('tickLocalPaintRegen') || !paintSrc.includes('cellSince') || !paintSrc.includes('predictTerritoryRefill') || !paintSrc.includes('refillOnTerritory()')) {
+  console.error('✗ cured-ground client regen should stay parked behind the territory toggle')
   process.exit(1)
 }
 const regenSrc = readFileSync(new URL('../src/server/territoryRegen.ts', import.meta.url), 'utf8')
@@ -402,4 +420,4 @@ if (!regenSrc.includes('seedOwned(id, team,') || !regenSrc.includes('pushWallet(
   process.exit(1)
 }
 
-console.log(`✓ paint tank 80 / 10s, curing, territory regen, empty-tank combat; wallet ${walletSends}/s refill, feet ${feetSends}/10s idle`)
+console.log(`✓ paint tank 280 / 5s depot refill, parked territory regen, empty-tank combat; wallet ${walletSends}/s refill, feet ${feetSends}/10s idle`)

@@ -3,7 +3,7 @@ import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
-import { PAINT_CAPACITY } from "./shared/territory"
+import { PAINT_CAPACITY, PAINT_REFILL_MODE } from "./shared/territory"
 import { hudClockText, hudVoteCountdown } from "./client/lobby"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound, isBasesRound } from "./round"
@@ -485,7 +485,7 @@ function PaintTankBar() {
         pointerFilter: 'none',
       }}
     >
-      <Label value={empty ? 'NO PAINT' : filling ? 'RECHARGE' : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={empty ? 'NO PAINT' : filling ? (PAINT_REFILL_MODE === 'depot' ? 'REFILL' : 'RECHARGE') : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
       <Label value={`${n}`} fontSize={mob ? 22 : 28} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
       <UiEntity
         uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}

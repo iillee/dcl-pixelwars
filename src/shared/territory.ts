@@ -12,12 +12,25 @@
 import { baseTeamOfCellId } from '../maze/generator'
 import type { WalkableGraph } from './mazeGraph'
 
-export const PAINT_CAPACITY = 80
+/** How Prototype refills the tank. `'depot'` is the live checkpoint setup.
+ *  Flip to `'territory'` to park depots and restore cured-ground recharge. */
+export type PaintRefillMode = 'depot' | 'territory'
+export const PAINT_REFILL_MODE: PaintRefillMode = 'depot'
+
+export function refillAtDepot(): boolean {
+  return PAINT_REFILL_MODE === 'depot'
+}
+
+export function refillOnTerritory(): boolean {
+  return PAINT_REFILL_MODE === 'territory'
+}
+
+export const PAINT_CAPACITY = PAINT_REFILL_MODE === 'depot' ? 280 : 80
 /** Paint spent per cell that actually changes ownership. */
 export const PAINT_COST = 1
-/** Paint regained each second while on cured friendly ground. */
-export const PAINT_REFILL_PER_SEC = 10
-/** Seconds a newly captured cell must wait before it can refill paint. */
+/** Paint regained each second at a friendly depot, or on cured friendly ground in territory mode. */
+export const PAINT_REFILL_PER_SEC = PAINT_REFILL_MODE === 'depot' ? 56 : 10
+/** Seconds a newly captured cell must wait before it can refill paint (territory mode). */
 export const PAINT_CURE_S = 5
 /** Feet must be this close to the cell's walkable Y to count as on that tile. */
 export const PAINT_GROUND_TOLERANCE = 0.4

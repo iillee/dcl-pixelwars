@@ -19,7 +19,7 @@ import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
-import { balloonBotIds, benchBot, botCount, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
+import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -55,9 +55,9 @@ import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyV
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
-import { clearDepots } from './depots'
-import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen' 
-import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, WalletGate } from '../shared/territory'
+import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
+import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen'
+import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, refillAtDepot, refillOnTerritory, WalletGate } from '../shared/territory'
 import { basesOn, baseThresholdVerdict, baseTimeoutVerdict, VICTORY_PROGRESS, type BaseSnapshot, type BaseVerdict } from '../shared/bases'
 import { baseProgress, baseSnapshot, clearBaseNetwork, markNetworkDirty, seedBaseTerritory, tickBaseGrowth } from './baseNetwork'
 
@@ -203,7 +203,7 @@ export async function setupServer(): Promise<void> {
     onSpawn: (id, team) => { botTeams.set(`bot:${id}`, team) },
     economyOn: () => economyOn(),
     economyTank: (painter) => walletOf(painter),
-    friendlyDepot: (team, from) => nearestCuredCell(team, from),
+    friendlyDepot: (team, from) => refillAtDepot() ? friendlyDepotCell(team, from) : nearestCuredCell(team, from),
   })
   rebuildBotGraph(currentRoundIndex())
   initAnvils()
@@ -375,6 +375,7 @@ export async function setupServer(): Promise<void> {
     freezeBots(false)
     sleepBots()
     clearDepots()
+    clearTerritoryRegen()
     anvilsAwake(false)
     if (!lobbyOpen) {
       lobbyOpen = true
@@ -561,7 +562,10 @@ export async function setupServer(): Promise<void> {
         room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, seed: currentRoundIndex() })
       }
     }
-    if (economyOn()) {
+    if (economyOn() && refillAtDepot()) {
+      seedDepots(true)
+    }
+    if (economyOn() && refillOnTerritory()) {
       seedStartTerritory()
       sendPaintSnapshot()
     }
@@ -727,7 +731,8 @@ export async function setupServer(): Promise<void> {
     // bots that never send paintTick are filtered out.
     markActive(from)
     if (typeof at === 'string' && at) {
-      noteRegenStance(from, at, typeof y === 'number' && isFinite(y) ? y : NaN, g === 1)
+      if (refillAtDepot()) noteDepotFeet(from, at)
+      else noteRegenStance(from, at, typeof y === 'number' && isFinite(y) ? y : NaN, g === 1)
     }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
@@ -773,9 +778,17 @@ export async function setupServer(): Promise<void> {
     const t0 = Date.now()
     if (isRoundActive()) tickBots(dt)
     if (economyOn()) {
-      tickTerritoryRegen(dt, botRegenStances(), (id) => getTeam(id), (id, tank, regen) => {
-        sendWallet(id, tank, [], regen)
-      })
+      if (refillAtDepot()) {
+        tickDepotRefill(dt, botDepotFeet(), (id) => getTeam(id), (id, team, cell) => {
+          paintCells(id, team, [cell], cell, !id.startsWith('bot:'))
+        }, (id, tank) => {
+          if (!id.startsWith('bot:')) sendWallet(id, tank, [])
+        })
+      } else {
+        tickTerritoryRegen(dt, botRegenStances(), (id) => getTeam(id), (id, tank, regen) => {
+          sendWallet(id, tank, [], regen)
+        })
+      }
     }
     if (basesOn(roundFormat) && isRoundActive() && !basesResolved) {
       lastBaseSnap = tickBaseGrowth(dt, getWalkableGraph())
