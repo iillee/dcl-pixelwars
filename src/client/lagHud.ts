@@ -1,6 +1,7 @@
 /**
  * Optional lag readout. Off by default: set DEBUG_LAG to true and
- * preview/deploy, or press 5 (IA_ACTION_5) when the overview camera is closed.
+ * preview/deploy, or press 3 (IA_ACTION_5) when the overview camera is closed.
+ * Decentraland does not expose a 5 key: IA_ACTION_3..6 are the 1..4 keys.
  *
  * Line reads: ping (round-trip to our scene server), upd (ms since the last
  * server message), fps (client frames). High ping or upd with a normal
@@ -11,7 +12,7 @@ import { engine, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs
 import { room } from '../shared/messages'
 import { isOverviewActive } from './overviewCamera'
 
-/** Set true to show the lag HUD on load. 5 still toggles it at runtime. */
+/** Set true to show the lag HUD on load. The 3 key still toggles it at runtime. */
 export const DEBUG_LAG = false
 
 let on = DEBUG_LAG
@@ -42,6 +43,7 @@ export function initLagHud(): void {
   engine.addSystem((dt: number) => {
     if (!isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
       on = !on
+      console.log(`[Lag] HUD ${on ? 'on' : 'off'}`)
     }
     if (dt > 0 && dt < 1) fps = fps > 0 ? fps * 0.9 + (1 / dt) * 0.1 : 1 / dt
     if (!on) return

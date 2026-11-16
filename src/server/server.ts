@@ -780,7 +780,7 @@ export async function setupServer(): Promise<void> {
   // rescued ghosts lurched and stopped.
   let baseStateClock = 0
   engine.addSystem((dt: number) => {
-    beginLagFrame()
+    beginLagFrame(dt)
     const tBots = Date.now()
     if (isRoundActive()) tickBots(dt)
     noteLagSection('bots', tBots)
@@ -810,10 +810,11 @@ export async function setupServer(): Promise<void> {
     }
     flushWallets()
   })
-  engine.addSystem((dt: number) => {
-    broadcastClock += dt
-    if (broadcastClock < BROADCAST_INTERVAL) return
-    broadcastClock = 0
+  // Incoming comms are processed after the system loop (see safeSystems.ts).
+  // A burst handled at the end of a turn used to wait until the next engine
+  // tick to flush paintDelta. On a slow host tick that is a full gap later,
+  // so combat paint now flushes from the handler in the same turn.
+  const flushPaintNow = () => {
     const queued = paintWaitMs()
     const t0 = Date.now()
     const changes = drainDelta()
@@ -827,6 +828,12 @@ export async function setupServer(): Promise<void> {
       room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total })
     }
     noteLagSection('paint', t0)
+  }
+  engine.addSystem((dt: number) => {
+    broadcastClock += dt
+    if (broadcastClock < BROADCAST_INTERVAL) return
+    broadcastClock = 0
+    flushPaintNow()
   })
 
   // Bot position broadcast (10 Hz). One batched `botPositions` message for the
@@ -845,16 +852,19 @@ export async function setupServer(): Promise<void> {
   // (their reap loop only fires when a botPositions message arrives),
   // so the ghost freezes in place after a 2nd human joins.
   let lastBotCount = 0
-  engine.addSystem((dt: number) => {
-    botPosClock += dt
-    if (botPosClock < BOT_POS_INTERVAL) return
-    botPosClock = 0
+  const sendBotPositionsNow = () => {
     const tNet = Date.now()
     const positions = getBotBroadcast()
     if (positions.length === 0 && lastBotCount === 0) { noteLagSection('net', tNet); return }
     lastBotCount = positions.length
     room.send('botPositions', { bots: positions, t: botSimTime() })
     noteLagSection('net', tNet)
+  }
+  engine.addSystem((dt: number) => {
+    botPosClock += dt
+    if (botPosClock < BOT_POS_INTERVAL) return
+    botPosClock = 0
+    sendBotPositionsNow()
   })
 
   // Coverage log tick (5s). Kept as a low-frequency health signal;
@@ -970,6 +980,7 @@ export async function setupServer(): Promise<void> {
   // Same radius and direction as the client shockwave. Slack matches the old inline bot check.
   const radialBotShock = (from: string, id: number, team: number, origin: { x: number; y: number; z: number }, fx: number, fz: number, now: number, footprint: readonly string[]) => {
     const painted = new Set(footprint)
+    let shoved = false
     for (const b of getBotHitPoints()) {
       if (b.team === team) continue
       const key = `bot:${b.id}`
@@ -983,8 +994,10 @@ export async function setupServer(): Promise<void> {
         bursts.hit(from, id, key, now)
         noteHit(from, key)
         room.send('burstImpact', { attacker: from, id, target: key, dx: d.x, dz: d.z, air: 0 })
+        shoved = true
       }
     }
+    if (shoved) sendBotPositionsNow()
   }
   const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number): string[] => {
     const graph = getWalkableGraph()
@@ -1004,6 +1017,7 @@ export async function setupServer(): Promise<void> {
     if (fp.length === 0 || !bursts.commitPaint(from, id)) return
     bursts.rememberCells(from, id, fp)
     sendPainted(from, id, fp.length, ct, sin)
+    flushPaintNow()
   }
   const sendPainted = (from: string, id: number, n: number, ct: number, sin: number) => {
     const sout = Date.now()
@@ -1072,6 +1086,7 @@ export async function setupServer(): Promise<void> {
       radialBotShock(from, id, team, origin, fx, fz, now, fp)
     }
     if (airborne && !nearFloor) {
+      let spiked = false
       for (const b of getBotPositions()) {
         if (b.team === team || !inAirSpike(origin, { x: b.x, y: b.y, z: b.z })) continue
         let dx = b.x - x, dz = b.z - z
@@ -1082,8 +1097,10 @@ export async function setupServer(): Promise<void> {
           bursts.hit(from, id, `bot:${b.id}`, now)
           noteHit(from, `bot:${b.id}`)
           room.send('burstImpact', { attacker: from, id, target: `bot:${b.id}`, dx: dx / dl, dz: dz / dl, air: 1 })
+          spiked = true
         }
       }
+      if (spiked) sendBotPositionsNow()
     }
   })
 

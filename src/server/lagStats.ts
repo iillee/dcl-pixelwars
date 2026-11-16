@@ -23,11 +23,14 @@ let open = false
 
 export function noteLagSend(): void { sent++ }
 
-export function beginLagFrame(): void {
+let frameDtMs = 0
+
+export function beginLagFrame(dt?: number): void {
   const now = Date.now()
   if (open) finish(0, 0)
   frameGap = lastStart > 0 ? now - lastStart : 0
   lastStart = now
+  frameDtMs = dt !== undefined && Number.isFinite(dt) ? Math.round(dt * 1000) : 0
   if (!windowAt) windowAt = now
   frameBots = 0
   framePaint = 0
@@ -57,7 +60,7 @@ function finish(cells: number, bots: number): void {
   if (gap > maxGap) maxGap = gap
   if (tick >= SLOW_TICK_MS || gap >= SLOW_GAP_MS) {
     const why = tick >= SLOW_TICK_MS ? 'slow tick' : 'slow gap'
-    console.log(`[Lag] ${why} tick=${tick}ms bots=${frameBots} paint=${framePaint} net=${frameNet} gap=${gap}ms cells=${cells} botsN=${bots}`)
+    console.log(`[Lag] ${why} tick=${tick}ms bots=${frameBots} paint=${framePaint} net=${frameNet} gap=${gap}ms dt=${frameDtMs}ms cells=${cells} botsN=${bots}`)
   }
   const now = Date.now()
   if (now - windowAt < REPORT_MS || frames <= 0) return
