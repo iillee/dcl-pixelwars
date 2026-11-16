@@ -9,6 +9,9 @@
  * Player entity ids are not stable across disconnects, so we resolve
  * userId → entity from PlayerIdentityData on every pass and drop plates
  * from entities whose user is no longer in the roster.
+ *
+ * Balloon Battle is a free-for-all, so team plates stay off for that
+ * round (players and bots) and any leftover pills are stripped at start.
  */
 
 import { engine, Entity, PlayerIdentityData, AvatarNametag } from '@dcl/sdk/ecs'
@@ -22,6 +25,12 @@ const teamByUser = new Map<string, Team>() // lowercased userId → team
 const applied = new Map<Entity, string>() // entity → `${userId}:${team}`
 
 const PASS_INTERVAL_S = 0.5
+/** True while a Balloon Battle arena is live (not the lobby). */
+let balloonMode = false
+
+export function teamPlatesHidden(): boolean {
+  return balloonMode || isLobbyLayout()
+}
 
 function color(team: Team): Color3 {
   const c = TEAM_RGB[team]
@@ -37,7 +46,7 @@ function clearNametags(): void {
 }
 
 function applyPass(): void {
-  if (isLobbyLayout()) {
+  if (teamPlatesHidden()) {
     clearNametags()
     return
   }
@@ -73,7 +82,21 @@ export function initNametags(): void {
     console.log(`[Nametags] roster: ${entries.length} player(s)`)
     applyPass()
   })
-  events.on('lobby:floor', () => clearNametags())
+  events.on('lobby:floor', () => {
+    balloonMode = false
+    clearNametags()
+  })
+  events.on('round:reset', ({ format, layout }) => {
+    balloonMode = layout !== 'lobby' && format === 'balloon'
+    if (teamPlatesHidden()) clearNametags()
+    else applyPass()
+  })
+  // Late join into a Balloon Battle already running (no roundReset).
+  events.on('round:clock', ({ format, active }) => {
+    if (!active || format !== 'balloon') return
+    balloonMode = true
+    clearNametags()
+  })
   // Periodic pass picks up avatars that load after the roster arrived.
   let clock = 0
   engine.addSystem((dt: number) => {

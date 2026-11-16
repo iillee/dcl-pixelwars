@@ -173,4 +173,13 @@ if (!(neckH > 0) || !(neckTuck > 0) || neckTuck < neckH * 0.5) {
   fail('the balloon cone should be tucked up into the egg so only a short tip shows')
 }
 
+const nametags = readFileSync(new URL('../src/client/nametags.ts', import.meta.url), 'utf8')
+const bots = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+if (!nametags.includes("format === 'balloon'") || !nametags.includes('balloonMode') || !nametags.includes("events.on('round:reset'") || !nametags.includes("events.on('round:clock'")) {
+  fail('Balloon Battle should clear team nametags at round start, including a late join')
+}
+if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('AvatarNametag.deleteFrom')) {
+  fail('Balloon Battle should not put RED/BLUE nametag plates on players or bots')
+}
+
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')

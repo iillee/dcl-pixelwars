@@ -36,6 +36,7 @@ import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
 import { BOT_AIM_REPORT_HZ } from '../shared/pvp'
 import { Team, TEAM_RGB } from '../shared/team'
+import { teamPlatesHidden } from './nametags'
 
 const BODY = 'urn:decentraland:off-chain:base-avatars:BaseMale'
 const FACE = [
@@ -148,14 +149,18 @@ function paintAvatar(entity: Entity, team: number, id: number): void {
     wearables: FACE.concat(red ? RED_CLOTHES : BLUE_CLOTHES),
     emotes: [],
   })
-  // Same red/blue plate as players (client/nametags.ts).
-  const bg = rgb(team)
-  AvatarNametag.createOrReplace(entity, {
-    label: red ? 'RED' : 'BLUE',
-    labelColor: Color3.White(),
-    backgroundColor: bg,
-    borderColor: bg,
-  })
+  // Same red/blue plate as players, except in Balloon Battle (no teams).
+  if (teamPlatesHidden()) {
+    AvatarNametag.deleteFrom(entity)
+  } else {
+    const bg = rgb(team)
+    AvatarNametag.createOrReplace(entity, {
+      label: red ? 'RED' : 'BLUE',
+      labelColor: Color3.White(),
+      backgroundColor: bg,
+      borderColor: bg,
+    })
+  }
 }
 
 /** A finished move tween replaces the NPC's 4 m/s walker. Position stays ours. */
