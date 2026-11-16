@@ -2,7 +2,7 @@ import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
-import { coverage, paintEconomyOn, paintRefilling, paintTank } from "./paint"
+import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
 import { PAINT_CAPACITY } from "./shared/territory"
 import { hudClockText, hudVoteCountdown } from "./client/lobby"
 import { inLobby } from "./client/phase"
@@ -452,15 +452,26 @@ function bannerHeadline(): string {
   return b.winner === 'TIE' ? "IT'S A TIE" : `${b.winner} WINS`
 }
 
-/** Prototype only. Vertical tank on the right: caption, number, fill from the bottom. */
+/** Prototype only. Vertical pill on the right: caption, number, team-colored fill from the bottom. */
 function PaintTankBar() {
   if (!paintEconomyOn() || inLobby()) return null
   const mob = isMobile()
   const cv = canvasSize()
   const trackH = mob ? 168 : 240
   const trackW = mob ? 28 : 36
+  const pad = 3
+  const radius = trackW / 2
+  const innerW = trackW - pad * 2
+  const innerH = trackH - pad * 2
+  const innerR = innerW / 2
   const n = Math.max(0, Math.min(PAINT_CAPACITY, paintTank()))
-  const fillH = Math.max(0, Math.round(trackH * (n / PAINT_CAPACITY)))
+  const filling = paintRefilling()
+  const empty = n <= 0 && !filling
+  const fillH = n <= 0 ? 0 : Math.max(innerW, Math.round(innerH * (n / PAINT_CAPACITY)))
+  const teamColor = painterTeam() === Team.Blue ? BLUE_COLOR : RED_COLOR
+  const pulse = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(Date.now() / 180))
+  const fillColor = filling ? Color4.create(teamColor.r, teamColor.g, teamColor.b, pulse) : teamColor
+  const labelColor = empty ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()
   const top = Math.max(16, Math.round((cv.h - trackH - 48) / 2))
   return (
     <UiEntity
@@ -474,17 +485,15 @@ function PaintTankBar() {
         pointerFilter: 'none',
       }}
     >
-      <Label value={n <= 0 && !paintRefilling() ? 'NO PAINT' : paintRefilling() ? 'RECHARGE' : 'PAINT'} fontSize={mob ? 13 : 15} color={n <= 0 && !paintRefilling() ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
-      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={n <= 0 && !paintRefilling() ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
+      <Label value={empty ? 'NO PAINT' : filling ? 'RECHARGE' : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16 }} />
+      <Label value={`${n}`} fontSize={mob ? 22 : 28} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: mob ? 26 : 32 }} />
       <UiEntity
-        uiTransform={{ width: trackW, height: trackH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
-        uiBackground={{ color: Color4.create(0, 0, 0, n <= 0 && !paintRefilling() ? 0.72 : 0.5) }}
+        uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
+        uiBackground={{ color: Color4.create(0, 0, 0, empty ? 0.72 : 0.5) }}
       >
-        <UiEntity uiTransform={{ width: trackW, height: Math.max(fillH, n <= 0 ? 0 : fillH) }} uiBackground={{ color: paintRefilling()
-          ? Color4.create(0.98, 0.78, 0.22, 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(Date.now() / 180)))
-          : n <= 0
-            ? Color4.create(0.35, 0.28, 0.12, 1)
-            : Color4.create(0.98, 0.78, 0.22, 1) }} />
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
+          <UiEntity uiTransform={{ width: '100%', height: fillH, borderRadius: innerR }} uiBackground={{ color: fillColor }} />
+        </UiEntity>
       </UiEntity>
     </UiEntity>
   )

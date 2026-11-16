@@ -149,6 +149,10 @@ if (!ui.includes('NO PAINT') || !ui.includes('RECHARGE') || !ui.includes('Date.n
   console.error('✗ the paint bar should pulse while recharging and show NO PAINT when empty')
   process.exit(1)
 }
+if (!ui.includes('painterTeam()') || !ui.includes('borderRadius: radius') || !ui.includes('borderRadius: innerR') || !ui.includes('Team.Blue ? BLUE_COLOR : RED_COLOR')) {
+  console.error('✗ the paint bar should be a team-colored pill with rounded ends on the track and the fill')
+  process.exit(1)
+}
 
 if (Math.abs(PAINT_REFILL_PER_SEC * 8 - PAINT_CAPACITY) > 1) {
   console.error(`✗ a full refill should take about 8s (${PAINT_REFILL_PER_SEC}/s vs ${PAINT_CAPACITY})`)
