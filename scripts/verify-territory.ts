@@ -14,6 +14,7 @@ import {
   WalletGate, accruePaint, applyTank, feetDue, isCuredSince, isRegenEligible,
   nearestNode, onDepot, orderNearest, placeDepots,
 } from '../src/shared/territory'
+import { PaintBarPredict, PAINT_BAR_DRIFT } from '../src/shared/paintBar'
 import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId } from '../src/maze/generator'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { applyPaint, clearAll, ownedSince, seedOwned, teamOfCell } from '../src/server/paintState'
@@ -235,9 +236,65 @@ if (!depotTickSrc.includes('depotFeetFresh') || !depotTickSrc.includes('lastGran
   console.error('✗ depot refill should keep late feet and accrue with wall-clock time')
   process.exit(1)
 }
-if (!paintSrc.includes('adoptWallet') || !paintSrc.includes('serverTank') || !paintSrc.includes('serverTankAt')) {
-  console.error('✗ the paint bar should climb from the last server wallet, not a runaway local value')
+if (!paintSrc.includes('PaintBarPredict') || !paintSrc.includes('paintBar.spend') || !paintSrc.includes('paintBar.tick') || !paintSrc.includes('paintBar.adopt')) {
+  console.error('✗ the paint bar should predict spends and refill locally, then reconcile with the server wallet')
   process.exit(1)
+}
+if (paintSrc.includes('paintLeft = serverTank') || paintSrc.includes('adoptWallet')) {
+  console.error('✗ a server wallet must not snap the paint bar')
+  process.exit(1)
+}
+
+function failBar(msg: string): void {
+  console.error(`✗ ${msg}`)
+  process.exit(1)
+}
+{
+  const b = new PaintBarPredict()
+  b.reset(100)
+  if (!b.spend() || Math.abs(b.tank - 99) > 1e-9) failBar('a claim should deduct PAINT_COST on the bar immediately')
+  b.spend(); b.spend()
+  const afterSpend = b.tank
+  b.adopt(100)
+  if (Math.abs(b.tank - afterSpend) > 1e-9) failBar('a stale higher wallet must not undo local deducts')
+
+  b.reset(0)
+  b.tick(1, true, 0)
+  if (Math.abs(b.tank - PAINT_REFILL_PER_SEC) > 1e-6) failBar(`1s at a depot should climb ${PAINT_REFILL_PER_SEC}, got ${b.tank}`)
+  b.tick(10, true, 1000)
+  if (b.tank !== PAINT_CAPACITY) failBar(`refill should cap at ${PAINT_CAPACITY}, got ${b.tank}`)
+
+  b.reset(0)
+  b.tick(1, true, 0)
+  const climbed = b.tank
+  b.adopt(20, 0)
+  if (b.tank < climbed - 1e-6) failBar('a lagging wallet must not pull the bar down during refill')
+  b.tick(0.5, true, 500)
+  const mid = b.tank
+  b.adopt(40, 500)
+  b.adopt(70, 500)
+  if (b.tank < mid - 1e-6) failBar('later lagging wallets must not make the bar bounce during refill')
+
+  b.reset(100)
+  b.adopt(100 + PAINT_BAR_DRIFT, 0)
+  if (Math.abs(b.tank - 100) > 1e-6) failBar('a small wallet drift should not move the bar')
+
+  b.reset(100)
+  b.tick(0, false, 0)
+  b.adopt(40, 0)
+  if (Math.abs(b.tank - 40) < 1e-6) failBar('a large wallet correction must not snap the bar in one step')
+  const beforeEase = b.tank
+  b.tick(0.05, false, 50)
+  if (!(b.tank < beforeEase) || Math.abs(b.tank - 40) < 1e-6) failBar('a large wallet correction should ease toward the server')
+  for (let i = 0; i < 80; i++) b.tick(0.05, false, 100 + i * 50)
+  if (Math.abs(b.tank - 40) > 1) failBar(`easing should settle near the server tank, got ${b.tank}`)
+
+  b.reset(0)
+  if (b.spend()) failBar('an empty tank should not spend')
+  b.reset(10)
+  b.spend()
+  b.refund()
+  if (Math.abs(b.tank - 10) > 1e-9) failBar('a denied flip should credit the bar back')
 }
 
 const gate = new WalletGate()

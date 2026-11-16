@@ -27,7 +27,8 @@ function lockedTeam(id: string): Team {
 export { Team } from './shared/team'
 import { Team } from './shared/team'
 import { events } from './shared/events'
-import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, refillOnTerritory } from './shared/territory'
+import { isRegenEligible, PAINT_CAPACITY, refillOnTerritory } from './shared/territory'
+import { PaintBarPredict } from './shared/paintBar'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -52,15 +53,18 @@ export function initPaintNet(): void {
 
   events.on('paint:wallet', ({ tank, denied, regen }) => {
     if (!paintEconomy) return
-    adoptWallet(tank)
     serverRegen = regen === 1
     // Only revert cells this client actually predicted. A Burst denial has
     // no undo record; defaulting those to empty would bleach enemy paint.
     for (const id of denied) {
       const prev = paintUndo.get(id)
-      if (prev !== undefined) forceCell(id, prev)
+      if (prev !== undefined) {
+        forceCell(id, prev)
+        paintBar.refund()
+      }
     }
     paintUndo.clear()
+    paintBar.adopt(tank)
   })
 
   events.on('round:reset', ({ format, layout }) => {
@@ -68,7 +72,7 @@ export function initPaintNet(): void {
     setServerCoverage({ red: 0, blue: 0, total: 0 })
     setPaintEconomy(layout !== 'lobby' && format === 'prototype')
     setPaintWorld(layout !== 'lobby' && paintAllowed(format))
-    adoptWallet(PAINT_CAPACITY)
+    paintBar.reset(PAINT_CAPACITY)
     paintUndo.clear()
     cellSince.clear()
     serverRegen = false
@@ -399,43 +403,31 @@ export function resetPaintForTile(tileEntity: Entity) {
 // (We do NOT paint locally anymore — pure server-authoritative.)
 const paintOutbox = new Set<string>()
 let paintEconomy = false
-let paintLeft = PAINT_CAPACITY
-let serverTank = PAINT_CAPACITY
-let serverTankAt = 0
+const paintBar = new PaintBarPredict()
 /** Last ownership-change time (ms). 0 = pre-cured. Missing = not cured. */
 const cellSince = new Map<string, number>()
 let serverRegen = false
 let lastCenterGroundY = 0
-let paintFrac = 0
-let paintRefill = false
 const paintUndo = new Map<string, Team>()
 
 export function paintEconomyOn(): boolean { return paintEconomy }
 let paintWorld = true
 function setPaintWorld(on: boolean): void { paintWorld = on }
 export function paintWorldOn(): boolean { return paintWorld }
-export function paintTank(): number { return paintLeft }
-export function paintRefilling(): boolean { return paintRefill }
+export function paintTank(): number { return paintBar.tank }
+export function paintRefilling(): boolean { return paintBar.refilling }
 
 function setPaintEconomy(on: boolean): void {
   if (on === paintEconomy) return
   paintEconomy = on
-  adoptWallet(PAINT_CAPACITY)
-  paintRefill = false
+  paintBar.reset(PAINT_CAPACITY)
   paintUndo.clear()
-}
-
-function adoptWallet(tank: number): void {
-  serverTank = Math.max(0, Math.min(PAINT_CAPACITY, tank))
-  serverTankAt = Date.now()
-  paintLeft = serverTank
-  paintFrac = 0
 }
 
 /** Cloud landed. The server refills too; this updates the bar before that echo. */
 export function refillPredictedTank(): void {
   if (!paintEconomy) return
-  adoptWallet(PAINT_CAPACITY)
+  paintBar.fill()
   paintUndo.clear()
 }
 
@@ -444,29 +436,15 @@ export function predictDepotRefill(dt: number, friendly: boolean): void {
   predictTerritoryRefill(dt, friendly)
 }
 
-/** Local bar climbs between throttled wallet echoes while on cured friendly ground. */
+/** Local bar climbs at the refill rate and eases toward a trusted wallet. */
 export function predictTerritoryRefill(dt: number, eligible: boolean): void {
-  paintRefill = paintEconomy && eligible && paintLeft < PAINT_CAPACITY
-  if (!paintEconomy || !eligible) return
-  // Climb from the last server tank, not from a runaway local value, so a
-  // late wallet echo cannot snap the bar back down.
-  if (serverTankAt > 0) {
-    const expected = Math.min(PAINT_CAPACITY, serverTank + PAINT_REFILL_PER_SEC * ((Date.now() - serverTankAt) / 1000))
-    paintLeft = expected
-    paintFrac = 0
-    paintRefill = paintLeft < PAINT_CAPACITY
-    return
-  }
-  paintFrac += PAINT_REFILL_PER_SEC * dt
-  const whole = Math.floor(paintFrac)
-  if (whole <= 0) return
-  paintFrac -= whole
-  paintLeft = Math.min(PAINT_CAPACITY, paintLeft + whole)
+  if (!paintEconomy) return
+  paintBar.tick(dt, eligible)
 }
 
 function tickLocalPaintRegen(dt: number): void {
   if (!refillOnTerritory()) return
-  if (!paintEconomy) { paintRefill = false; return }
+  if (!paintEconomy) return
   const t = Transform.getOrNull(engine.PlayerEntity)
   const cell = lastCenterId
   const team = localTeam as number
@@ -521,10 +499,7 @@ export function noteLocalPaintCandidate(id: string): void {
   if (paintEconomy && localTeam !== Team.None) {
     const prev = cellTeam.get(id) ?? Team.None
     if (prev !== localTeam) {
-      if (paintLeft <= 0) return
-      paintLeft -= 1
-      serverTank = Math.max(0, serverTank - 1)
-      serverTankAt = Date.now()
+      if (!paintBar.spend()) return
       paintUndo.set(id, prev)
     }
   }
