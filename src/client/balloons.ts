@@ -11,7 +11,9 @@
  *    (0, BACK_Y, -BACK_Z). AvatarAttach already carries the avatar's
  *    yaw, so the child is not rotated again. Balloons and strings are
  *    children of the knot: only the balloon end jiggles, from
- *    low-passed planar velocity and turn.
+ *    low-passed planar velocity and turn. Each balloon is a round body
+ *    with a taper and a small nub; the string always meets that nub,
+ *    computed from the balloon's live transform.
  *  - 'trail' is the original world-space spring follow, with lag.
  *    Strings still start at the live back knot, not a lagged point.
  *
@@ -49,8 +51,24 @@ type Pose = { feet: Vec; yawDeg: number; entity?: Entity }
 
 /** Deep red #B3121E, matte with a little gloss. */
 const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
-/** ~1.8x the original 0.28 x 0.34 x 0.28 spheres. */
-const BALL_SCALE: Vec = { x: 0.5, y: 0.62, z: 0.5 }
+/** Round, slightly full body. A unit sphere; not a tall egg. */
+const BODY_XZ = 0.54
+const BODY_Y = 0.50
+const BODY_Y_OFF = 0.02
+const NECK_H = 0.13
+const NECK_XZ = 0.14
+const NUB_XZ = 0.06
+const NUB_Y = 0.048
+/**
+ * Local distance from the balloon root to the nub tip. Body bottom is
+ * BODY_Y_OFF - BODY_Y/2, the neck hangs 0.08 m past that after a 0.05 m
+ * overlap, and the nub extends NUB_Y/2 below the neck tip:
+ * 0.23 + 0.08 + 0.024, plus the nub overlap, = 0.352.
+ */
+const BALL_BOTTOM = 0.352
+/** Inward lean (deg per metre of offset from the knot). Capped. */
+const LEAN_PER_M = 12
+const MAX_LEAN = 16
 /**
  * Upper-back knot on the avatar root (no bone bob): 1.68 m up, between
  * the shoulder blades, 0.20 m behind along the facing. Avatar yaw 0
@@ -217,7 +235,30 @@ function stringMat() {
 
 const _from = { x: 0, y: 0, z: 0 }
 const _to = { x: 0, y: 0, z: 0 }
+const _tip = { x: 0, y: 0, z: 0 }
+const _down = Vector3.create(0, -1, 0)
 const _dir = Vector3.create(0, 1, 0)
+
+/**
+ * World or parent-local point at the nub tip: the root position plus
+ * the rotated, scaled (0, -BALL_BOTTOM, 0) offset.
+ */
+function balloonBottom(tf: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number; w: number }; scale: { x: number; y: number; z: number } }, out: Vec): void {
+  _down.x = 0
+  _down.y = -BALL_BOTTOM * tf.scale.y
+  _down.z = 0
+  const w = Vector3.rotate(_down, tf.rotation)
+  out.x = tf.position.x + w.x
+  out.y = tf.position.y + w.y
+  out.z = tf.position.z + w.z
+}
+
+/** Hang the nub slightly toward the knot so a tilt still meets the string. */
+function leanToward(ox: number, oz: number) {
+  const lx = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, oz * LEAN_PER_M))
+  const lz = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, ox * LEAN_PER_M))
+  return Quaternion.fromEulerDegrees(lx, 0, lz)
+}
 
 function aimString(ent: Entity, from: Vec, to: Vec): void {
   const dx = to.x - from.x
@@ -279,6 +320,45 @@ function placeString(segs: Entity[], lag: Vec, ready: { lagReady: boolean }, fro
   }
 }
 
+function paintBalloon(ent: Entity, a = 1): void {
+  Material.setPbrMaterial(ent, balloonMat(a))
+}
+
+function addBalloonPart(parent: Entity, pos: Vec, scale: Vec, cone = false): Entity {
+  const ent = engine.addEntity()
+  Transform.create(ent, {
+    parent,
+    position: Vector3.create(pos.x, pos.y, pos.z),
+    scale: Vector3.create(scale.x, scale.y, scale.z),
+  })
+  if (cone) MeshRenderer.setCylinder(ent, 0.16, 1)
+  else MeshRenderer.setSphere(ent)
+  paintBalloon(ent)
+  return ent
+}
+
+/** Round body, downward taper, and a small tied nub. Root is unscaled. */
+function buildBalloonParts(root: Entity): void {
+  const bodyBottom = BODY_Y_OFF - BODY_Y * 0.5
+  const neckTop = bodyBottom + 0.05
+  const neckCenter = neckTop - NECK_H * 0.5
+  const neckTip = neckTop - NECK_H
+  addBalloonPart(root, v(0, BODY_Y_OFF, 0), v(BODY_XZ, BODY_Y, BODY_XZ))
+  addBalloonPart(root, v(0, neckCenter, 0), v(NECK_XZ, NECK_H, NECK_XZ), true)
+  addBalloonPart(root, v(0, neckTip - NUB_Y * 0.5 + 0.006, 0), v(NUB_XZ, NUB_Y, NUB_XZ))
+}
+
+function makeBalloon(parent: Entity | null, pos: Vec): Entity {
+  const root = engine.addEntity()
+  Transform.create(root, {
+    position: Vector3.create(pos.x, pos.y, pos.z),
+    scale: Vector3.One(),
+    ...(parent ? { parent } : {}),
+  })
+  buildBalloonParts(root)
+  return root
+}
+
 function makeSphere(parent: Entity | null, pos: Vec, scale: Vec): Entity {
   const ent = engine.addEntity()
   Transform.create(ent, {
@@ -287,7 +367,7 @@ function makeSphere(parent: Entity | null, pos: Vec, scale: Vec): Entity {
     ...(parent ? { parent } : {}),
   })
   MeshRenderer.setSphere(ent)
-  Material.setPbrMaterial(ent, balloonMat())
+  paintBalloon(ent)
   return ent
 }
 
@@ -310,7 +390,7 @@ function makeStringSegs(parent: Entity | null): Entity[] {
 }
 
 function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
-  const root = makeSphere(parent, at, BALL_SCALE)
+  const root = makeBalloon(parent, at)
   const segs = makeStringSegs(parent)
   return {
     i, root, ball: root, segs, pos: { ...at }, vel: v(0, 0, 0),
@@ -403,7 +483,7 @@ function clearCluster(c: Cluster): void {
   if (c.attach) engine.removeEntity(c.attach)
   if (!c.knot && !c.attach) {
     for (const b of c.balloons) {
-      engine.removeEntity(b.root)
+      removeEntityWithChildren(engine, b.root)
       dropSegs(b)
     }
   }
@@ -527,7 +607,9 @@ function placeTrailBalloon(b: Balloon, dest: Vec, knot: Vec, dt: number): void {
   tf.position.x = b.pos.x
   tf.position.y = b.pos.y
   tf.position.z = b.pos.z
-  placeString(b.segs, b.lagMid, b, knot, b.pos, dt)
+  tf.rotation = leanToward(b.pos.x - knot.x, b.pos.z - knot.z)
+  balloonBottom(tf, _tip)
+  placeString(b.segs, b.lagMid, b, knot, _tip, dt)
 }
 
 function placeAttachedBalloon(b: Balloon, dt: number): void {
@@ -535,12 +617,14 @@ function placeAttachedBalloon(b: Balloon, dt: number): void {
   tf.position.x = b.pos.x
   tf.position.y = b.pos.y
   tf.position.z = b.pos.z
+  tf.rotation = leanToward(b.pos.x, b.pos.z)
   // String is a child of the knot. Aim it in local space so the bottom
-  // end is the knot and the top end is the balloon, by construction.
+  // end is the knot and the top end is the live nub tip.
   _knot.x = 0
   _knot.y = 0
   _knot.z = 0
-  placeString(b.segs, b.lagMid, b, _knot, b.pos, dt)
+  balloonBottom(tf, _tip)
+  placeString(b.segs, b.lagMid, b, _knot, _tip, dt)
 }
 
 function emptyCluster(id: string, pose: Pose): Cluster {
@@ -609,10 +693,10 @@ function popAt(pos: Vec): void {
   const ent = engine.addEntity()
   Transform.create(ent, {
     position: Vector3.create(pos.x, pos.y, pos.z),
-    scale: Vector3.create(BALL_SCALE.x, BALL_SCALE.y, BALL_SCALE.z),
+    scale: Vector3.create(BODY_XZ, BODY_XZ, BODY_XZ),
   })
   MeshRenderer.setSphere(ent)
-  Material.setPbrMaterial(ent, balloonMat(1))
+  paintBalloon(ent, 1)
   pops.push({ ent, t: 0, x: pos.x, y: pos.y, z: pos.z })
   playBalloonPopSfx()
 }
@@ -631,7 +715,7 @@ function applyPop(id: string, n: number): void {
     if (gone) {
       const pose = poseOf(key) ?? { feet: c.prevFeet, yawDeg: c.prevYaw }
       popAt(worldBalloonPos(c, gone, pose))
-      engine.removeEntity(gone.root)
+      removeEntityWithChildren(engine, gone.root)
       dropSegs(gone)
     }
   }
@@ -669,7 +753,7 @@ function syncClusters(dt: number): void {
     while (c.balloons.length > n) {
       const gone = c.balloons.pop()
       if (gone) {
-        engine.removeEntity(gone.root)
+        removeEntityWithChildren(engine, gone.root)
         dropSegs(gone)
       }
     }
@@ -706,10 +790,10 @@ function tickPops(dt: number): void {
     const p = pops[i]
     p.t += dt
     const u = Math.min(1, p.t / POP_S)
-    const s = BALL_SCALE.x + u * 0.55
+    const s = BODY_XZ + u * 0.55
     const tf = Transform.getMutableOrNull(p.ent)
-    if (tf) tf.scale = Vector3.create(s, s * (BALL_SCALE.y / BALL_SCALE.x), s)
-    Material.setPbrMaterial(p.ent, balloonMat(1 - u))
+    if (tf) tf.scale = Vector3.create(s, s, s)
+    paintBalloon(p.ent, 1 - u)
     if (p.t >= POP_S) {
       engine.removeEntity(p.ent)
       pops.splice(i, 1)

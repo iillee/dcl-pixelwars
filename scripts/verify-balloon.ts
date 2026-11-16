@@ -132,5 +132,14 @@ if (!client.includes('const BACK_Y = 1.68')) {
 if (!client.includes('STRING_SEGS') || !client.includes('placeString') || !client.includes('STRING_SAG')) {
   fail('balloon strings should be segmented with a slight sag, not one rigid cylinder')
 }
+if (!client.includes('function balloonBottom') || !client.includes('BALL_BOTTOM') || !client.includes('Vector3.rotate')) {
+  fail('each string must meet the balloon nub, from the live transform and scale')
+}
+if (client.includes('const BALL_SCALE') && client.includes('y: 0.62')) {
+  fail('balloons should read as round balloons, not stretched eggs')
+}
+if (!client.includes('setCylinder') || !client.includes('NUB_Y') || !client.includes('buildBalloonParts')) {
+  fail('balloons should taper to a small tied nub at the bottom')
+}
 
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')
