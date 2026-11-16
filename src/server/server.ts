@@ -16,7 +16,7 @@ import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
-import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
+import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, paintedCount, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
@@ -55,6 +55,7 @@ import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyV
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
+import { beginLagFrame, endLagFrame, hookRoomSend, noteLagSection } from './lagStats'
 import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
 import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen'
 import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, refillAtDepot, refillOnTerritory, WalletGate } from '../shared/territory'
@@ -71,6 +72,7 @@ const MAX_IDS_PER_TICK = 100
 const MAX_CHANGES_PER_MSG = 200
 
 export async function setupServer(): Promise<void> {
+  hookRoomSend(room)
   console.log(`[Server] Starting Pixelwars server... scene=${SCENE_SIZE}m parcels=${(SCENE_SIZE / 16) * (SCENE_SIZE / 16)}`)
 
   // Load leaderboard from Storage before any paintTicks land, so we don't
@@ -119,7 +121,8 @@ export async function setupServer(): Promise<void> {
   // to `bot:<id>` on the live scoreboard; the persisted top-painters board
   // stays human-only.
   initBots({
-    rescuePaintedHome: (team, from, occupied) => paintedRescueHome(team, from, occupied),
+    rescuePaintedHome: (team, from, occupied, painted) => paintedRescueHome(team, from, occupied, painted),
+    paintedCells: getFullState,
     applyPaint: applyBotPaint,
     paint: {
       teamOf: teamOfCell,
@@ -586,6 +589,12 @@ export async function setupServer(): Promise<void> {
     sendRoundClock()
   }
 
+  room.onMessage('lagPing', ({ t }, context) => {
+    const from = context?.from
+    if (!from || typeof t !== 'number' || !Number.isFinite(t)) return
+    room.send('lagPong', { t }, { to: [from] })
+  })
+
   room.onMessage('presencePing', (_d, context) => {
     const from = context?.from
     if (!from) return
@@ -769,14 +778,12 @@ export async function setupServer(): Promise<void> {
   // frame's bot paint rides out on that frame's broadcast). Ticking them only
   // at 5 Hz made the 10 Hz botPositions repeat every other packet: knocked and
   // rescued ghosts lurched and stopped.
-  let botMax = 0
-  let frameMax = 0
-  let frames = 0
-  let tickLogAt = Date.now()
   let baseStateClock = 0
   engine.addSystem((dt: number) => {
-    const t0 = Date.now()
+    beginLagFrame()
+    const tBots = Date.now()
     if (isRoundActive()) tickBots(dt)
+    noteLagSection('bots', tBots)
     if (economyOn()) {
       if (refillAtDepot()) {
         tickDepotRefill(dt, botDepotFeet(), (id) => getTeam(id), (id, team, cell) => {
@@ -802,18 +809,6 @@ export async function setupServer(): Promise<void> {
       baseStateClock = 0
     }
     flushWallets()
-    const ms = Date.now() - t0
-    if (ms > botMax) botMax = ms
-    const frame = dt * 1000
-    if (frame > frameMax) frameMax = frame
-    frames++
-    const now = Date.now()
-    if (now - tickLogAt < 5000) return
-    console.log(`[Server] tick frames=${frames}/5s botMax=${botMax}ms frameMax=${frameMax.toFixed(1)}ms scene=${SCENE_SIZE}m`)
-    botMax = 0
-    frameMax = 0
-    frames = 0
-    tickLogAt = now
   })
   engine.addSystem((dt: number) => {
     broadcastClock += dt
@@ -823,7 +818,7 @@ export async function setupServer(): Promise<void> {
     const t0 = Date.now()
     const changes = drainDelta()
     const work = Date.now() - t0
-    if (changes.length === 0) return
+    if (changes.length === 0) { noteLagSection('paint', t0); return }
     console.log(`[Server] paintFlush n=${changes.length} wait=${queued}ms work=${work}ms`)
     const c = coverage()
     // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
@@ -831,6 +826,7 @@ export async function setupServer(): Promise<void> {
     for (let i = 0; i < changes.length; i += MAX_CHANGES_PER_MSG) {
       room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total })
     }
+    noteLagSection('paint', t0)
   })
 
   // Bot position broadcast (10 Hz). One batched `botPositions` message for the
@@ -853,10 +849,12 @@ export async function setupServer(): Promise<void> {
     botPosClock += dt
     if (botPosClock < BOT_POS_INTERVAL) return
     botPosClock = 0
+    const tNet = Date.now()
     const positions = getBotBroadcast()
-    if (positions.length === 0 && lastBotCount === 0) return
+    if (positions.length === 0 && lastBotCount === 0) { noteLagSection('net', tNet); return }
     lastBotCount = positions.length
     room.send('botPositions', { bots: positions, t: botSimTime() })
+    noteLagSection('net', tNet)
   })
 
   // Coverage log tick (5s). Kept as a low-frequency health signal;
@@ -1182,14 +1180,14 @@ export async function setupServer(): Promise<void> {
   // authenticated sender, not the payload. Timings are clamped so a bad
   // client cannot pin a cloud up.
   /** Nearest safe team-coloured cell, or null when paint revival does not apply. */
-  function paintedRescueHome(team: number, from: { x: number; y: number; z: number }, occupied?: Set<string>): { x: number; y: number; z: number } | null {
+  function paintedRescueHome(team: number, from: { x: number; y: number; z: number }, occupied?: Set<string>, painted?: Array<{ id: string; team: number }>): { x: number; y: number; z: number } | null {
     if (!matchLive() || !paintAllowed(roundFormat)) return null
     // BASES always returns to the team base, never the nearest paint.
     if (basesOn(roundFormat)) return null
     if (team !== 1 && team !== 2) return null
     const g = getWalkableGraph()
     if (!g) return null
-    return pickTeamRescueCell(team, from, getFullState(), g, occupied)?.pos ?? null
+    return pickTeamRescueCell(team, from, painted ?? getFullState(), g, occupied)?.pos ?? null
   }
   const clampRescueT = (v: number) => Math.min(8, Math.max(0.05, v))
   const rescuePosOk = (x: number, y: number, z: number) =>
@@ -1517,6 +1515,8 @@ export async function setupServer(): Promise<void> {
     discordFlushClock = 0
     flushPendingJoins()
   })
+
+  engine.addSystem(() => { endLagFrame(paintedCount(), botCount()) })
 
   // Cold start is the lobby, not a match and not a quiet idle. Joiners get
   // the cross from sendLobbyLayout; nobody has to wait for a round to end.

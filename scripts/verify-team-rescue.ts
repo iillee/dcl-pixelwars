@@ -1,6 +1,7 @@
 /**
  * Nearest team-paint rescue cell. Run: npx tsx scripts/verify-team-rescue.ts
  */
+import { readFileSync } from 'node:fs'
 import { pickTeamRescueCell, type RescueGraph, type PaintedCell } from '../src/shared/teamRescue'
 
 function fail(msg: string): never {
@@ -80,6 +81,11 @@ if (unknown) fail('a painted id that is not walkable must be ignored')
 
 if (pickTeamRescueCell(0, from, painted, g) || pickTeamRescueCell(3, from, painted, g)) {
   fail('only red or blue teams can be revived on paint')
+}
+
+const mgr = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
+if (!mgr.includes("b.body.mode === 'knock'") || !mgr.includes('paintedSnap') || !mgr.includes('paintedCells')) {
+  fail('bots should only search a painted landing while knocked, and share one paint snapshot per tick')
 }
 
 console.log('✓ nearest painted rescue cell, occupancy, safety, and spawn fallback')

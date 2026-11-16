@@ -100,7 +100,9 @@ export interface ManagerDeps {
   economyTank?: (painter: string) => number
   friendlyDepot?: (team: number, fromCell: string) => string | null
   /** Paint-mode landing: nearest owned walkable cell, or null to use the team spawn. */
-  rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>) => V3 | null
+  rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>, painted?: Array<{ id: string; team: number }>) => V3 | null
+  /** One paint snapshot per tick, shared when several bots fall together. */
+  paintedCells?: () => Array<{ id: string; team: number }>
 }
 
 let deps: ManagerDeps | null = null
@@ -435,15 +437,22 @@ export function tickBots(dtSec: number): void {
   // neighbors, matching the ~3x3 footprint human players apply via
   // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
+  // Only a knocked body can cross the fall line this tick (botBody.ts).
+  // Share one paint snapshot if several bots are in the air together.
+  let paintedSnap: Array<{ id: string; team: number }> | undefined
   for (const b of bots) {
     const spawn = cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos
-    const occupied = new Set<string>()
-    for (const o of bots) {
-      if (o === b || o.body.inRescue()) continue
-      occupied.add(o.currentCell)
+    let home = spawn
+    if (b.body.mode === 'knock' && deps.rescuePaintedHome) {
+      if (paintedSnap === undefined) paintedSnap = deps.paintedCells ? deps.paintedCells() : []
+      const occupied = new Set<string>()
+      for (const o of bots) {
+        if (o === b || o.body.inRescue()) continue
+        occupied.add(o.currentCell)
+      }
+      home = deps.rescuePaintedHome(b.team, b.body.pos, occupied, paintedSnap) ?? spawn
     }
-    const painted = deps.rescuePaintedHome?.(b.team, b.body.pos, occupied)
-    const world = { graph, rampTiles, tiles: placedTiles, base: painted ?? spawn }
+    const world = { graph, rampTiles, tiles: placedTiles, base: home }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)

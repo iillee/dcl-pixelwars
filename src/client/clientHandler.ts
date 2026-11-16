@@ -27,6 +27,7 @@ import { Team } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
 import { SeedHolder, seedHolder } from '../shared/components'
+import { noteLagPong, noteServerRx } from './lagHud'
 
 // Locally-tracked team for this session. Written on team:assigned; used
 // only to log the human-readable team name. paint.ts owns the "does this
@@ -73,11 +74,14 @@ function wireFormat(format: string): 'pvp' | 'pvb' | 'bases' | 'prototype' | 'ba
 }
 
 function wireInbound(): void {
+  room.onMessage('lagPong', ({ t }) => { noteLagPong(t) })
+
   room.onMessage('teamAssigned', ({ team }) => {
     events.emit('team:assigned', { team: team as Team })
   })
 
   room.onMessage('paintDelta', ({ changes, red, blue, total }) => {
+    noteServerRx()
     events.emit('paint:delta', {
       changes: changes.map(c => ({ id: c.id, team: c.team as Team })),
       red, blue, total,
@@ -89,6 +93,7 @@ function wireInbound(): void {
   })
 
   room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
+    noteServerRx()
     console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
     gotSnapshot = true
     // Authoritative seed: build now (before the paint lands) if the SeedHolder CRDT hasn't given us it.
@@ -113,10 +118,12 @@ function wireInbound(): void {
   })
 
   room.onMessage('botPositions', ({ bots, t }) => {
+    noteServerRx()
     events.emit('bots:positions', { bots, t })
   })
 
   room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine }) => {
+    noteServerRx()
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs

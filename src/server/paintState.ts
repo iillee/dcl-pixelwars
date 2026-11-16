@@ -132,6 +132,11 @@ export function coverage(): { red: number; blue: number; total: number } {
   return { red, blue, total: cellTeam.size }
 }
 
+/** O(1) painted-cell count for lag logs. */
+export function paintedCount(): number {
+  return cellTeam.size
+}
+
 /**
  * Full state dump for the snapshot message. Returns every painted cell
  * as a fresh array so the caller can serialize without touching internal

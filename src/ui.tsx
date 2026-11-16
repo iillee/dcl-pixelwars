@@ -5,6 +5,7 @@ import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
 import { PAINT_CAPACITY, PAINT_REFILL_MODE } from "./shared/territory"
 import { hudClockText, hudVoteCountdown } from "./client/lobby"
+import { lagHudLine, lagHudOn } from "./client/lagHud"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound, isBasesRound } from "./round"
 import { baseCharge } from "./client/baseBeams"
@@ -862,6 +863,11 @@ export const uiMenu = () => (
     {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
     {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
     <FormatSplash />
+    {lagHudOn() ? (
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 16, bottom: 16 }, pointerFilter: 'none' }}>
+        <Label value={lagHudLine()} fontSize={16} color={Color4.White()} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 22 }} />
+      </UiEntity>
+    ) : null}
     {/* Load splash: last child = top-most layer. */}
     <SplashScreen />
   </UiEntity>

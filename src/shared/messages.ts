@@ -310,6 +310,11 @@ export const Messages = {
   // opponents of `team` within BOMB_KNOCKBACK_RADIUS push themselves.
   // Painted cells arrive through the normal paintDelta tick.
   bombBlast: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, cells: Schemas.Int }),
+
+  // Cheap lag probe. Client sends its clock; the server echoes it to that
+  // sender only. Used by the optional lag HUD, about once every 2s.
+  lagPing: Schemas.Map({ t: Schemas.Number }),
+  lagPong: Schemas.Map({ t: Schemas.Number }),
 }
 
 export const room = registerMessages(Messages)

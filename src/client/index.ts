@@ -49,6 +49,7 @@ import { armSea } from './water'
 import { initLobby } from './lobby'
 import { initBalloons } from './balloons'
 import { initBaseBeams } from './baseBeams'
+import { initLagHud } from './lagHud'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -157,6 +158,7 @@ export async function setupClient(): Promise<void> {
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.
   initClientHandler()
+  initLagHud()
 
   // Register the SeedHolder for cross-client sync. Doing this inside
   // setupClient() (not at module top) ensures the networking layer is
