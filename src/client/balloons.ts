@@ -52,11 +52,12 @@ const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
 /** ~1.8x the original 0.28 x 0.34 x 0.28 spheres. */
 const BALL_SCALE: Vec = { x: 0.5, y: 0.62, z: 0.5 }
 /**
- * Shoulder-blade knot on the avatar root (no bone bob): 1.38 m up,
- * 0.20 m behind along the facing. Avatar yaw 0 faces +Z, so back is
- * -local Z: world offset is -sin(yaw) on X, -cos(yaw) on Z.
+ * Upper-back knot on the avatar root (no bone bob): 1.68 m up, between
+ * the shoulder blades, 0.20 m behind along the facing. Avatar yaw 0
+ * faces +Z, so back is -local Z: world offset is -sin(yaw) on X,
+ * -cos(yaw) on Z.
  */
-const BACK_Y = 1.38
+const BACK_Y = 1.68
 const BACK_Z = 0.2
 /** AAPT_POSITION - avatar root, not an animated bone. */
 const AAPT_POSITION = 0
@@ -81,6 +82,12 @@ const DAMP = 2 * ZETA * Math.sqrt(STIFF)
 const MAX_JIGGLE = 0.4
 const POP_S = 0.28
 const STRING_R = 0.028
+/** Four short cylinders with a slight catenary sag. */
+const STRING_SEGS = 4
+/** Mid-span sag (m). Small enough to read as string, not a rope. */
+const STRING_SAG = 0.14
+/** Midpoint trails the balloon so the string bends as it moves. */
+const STRING_LAG_TAU = 0.16
 
 /** Rest slots in knot-local space, fanned up and slightly back so the larger spheres do not overlap. */
 const SLOTS: Vec[] = [
@@ -93,9 +100,12 @@ type Balloon = {
   i: number
   root: Entity
   ball: Entity
-  string: Entity
+  segs: Entity[]
   pos: Vec
   vel: Vec
+  /** Lagged catenary mid. Reused every frame; no per-tick allocations. */
+  lagMid: Vec
+  lagReady: boolean
 }
 
 type Cluster = {
@@ -205,6 +215,10 @@ function stringMat() {
   }
 }
 
+const _from = { x: 0, y: 0, z: 0 }
+const _to = { x: 0, y: 0, z: 0 }
+const _dir = Vector3.create(0, 1, 0)
+
 function aimString(ent: Entity, from: Vec, to: Vec): void {
   const dx = to.x - from.x
   const dy = to.y - from.y
@@ -212,14 +226,57 @@ function aimString(ent: Entity, from: Vec, to: Vec): void {
   const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
   const tf = Transform.getMutable(ent)
   if (len < 0.04) {
-    tf.position = Vector3.create(from.x, from.y, from.z)
-    tf.scale = Vector3.create(STRING_R, 0.04, STRING_R)
+    tf.position.x = from.x
+    tf.position.y = from.y
+    tf.position.z = from.z
+    tf.scale.x = STRING_R
+    tf.scale.y = 0.04
+    tf.scale.z = STRING_R
     tf.rotation = Quaternion.Identity()
     return
   }
-  tf.position = Vector3.create(from.x + dx * 0.5, from.y + dy * 0.5, from.z + dz * 0.5)
-  tf.scale = Vector3.create(STRING_R, len, STRING_R)
-  tf.rotation = Quaternion.fromToRotation(Vector3.Up(), Vector3.create(dx / len, dy / len, dz / len))
+  tf.position.x = from.x + dx * 0.5
+  tf.position.y = from.y + dy * 0.5
+  tf.position.z = from.z + dz * 0.5
+  tf.scale.x = STRING_R
+  tf.scale.y = len
+  tf.scale.z = STRING_R
+  _dir.x = dx / len
+  _dir.y = dy / len
+  _dir.z = dz / len
+  tf.rotation = Quaternion.fromToRotation(Vector3.Up(), _dir)
+}
+
+/** Quadratic bezier from the knot through a lagged, sagged mid to the balloon. */
+function placeString(segs: Entity[], lag: Vec, ready: { lagReady: boolean }, from: Vec, to: Vec, dt: number): void {
+  const midX = (from.x + to.x) * 0.5
+  const midZ = (from.z + to.z) * 0.5
+  const midY = (from.y + to.y) * 0.5 - STRING_SAG
+  if (!ready.lagReady) {
+    lag.x = midX
+    lag.y = midY
+    lag.z = midZ
+    ready.lagReady = true
+  } else {
+    const k = 1 - Math.exp(-Math.max(0, dt) / STRING_LAG_TAU)
+    lag.x += (midX - lag.x) * k
+    lag.y += (midY - lag.y) * k
+    lag.z += (midZ - lag.z) * k
+  }
+  _from.x = from.x
+  _from.y = from.y
+  _from.z = from.z
+  for (let i = 1; i <= STRING_SEGS; i++) {
+    const t = i / STRING_SEGS
+    const u = 1 - t
+    _to.x = u * u * from.x + 2 * u * t * lag.x + t * t * to.x
+    _to.y = u * u * from.y + 2 * u * t * lag.y + t * t * to.y
+    _to.z = u * u * from.z + 2 * u * t * lag.z + t * t * to.z
+    aimString(segs[i - 1], _from, _to)
+    _from.x = _to.x
+    _from.y = _to.y
+    _from.z = _to.z
+  }
 }
 
 function makeSphere(parent: Entity | null, pos: Vec, scale: Vec): Entity {
@@ -246,10 +303,20 @@ function makeString(parent: Entity | null): Entity {
   return ent
 }
 
+function makeStringSegs(parent: Entity | null): Entity[] {
+  const segs: Entity[] = []
+  for (let i = 0; i < STRING_SEGS; i++) segs.push(makeString(parent))
+  return segs
+}
+
 function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
   const root = makeSphere(parent, at, BALL_SCALE)
-  const string = makeString(parent)
-  return { i, root, ball: root, string, pos: { ...at }, vel: v(0, 0, 0) }
+  const segs = makeStringSegs(parent)
+  return {
+    i, root, ball: root, segs, pos: { ...at }, vel: v(0, 0, 0),
+    lagMid: { x: at.x * 0.5, y: at.y * 0.5 - STRING_SAG, z: at.z * 0.5 },
+    lagReady: false,
+  }
 }
 
 function yawOf(tf: ReturnType<typeof Transform.getOrNull>): number {
@@ -337,7 +404,7 @@ function clearCluster(c: Cluster): void {
   if (!c.knot && !c.attach) {
     for (const b of c.balloons) {
       engine.removeEntity(b.root)
-      engine.removeEntity(b.string)
+      dropSegs(b)
     }
   }
   c.balloons.length = 0
@@ -448,19 +515,32 @@ function follow(cur: Vec, dest: Vec, dt: number): Vec {
   return v(cur.x + (dest.x - cur.x) * k, cur.y + (dest.y - cur.y) * k, cur.z + (dest.z - cur.z) * k)
 }
 
+function dropSegs(b: Balloon): void {
+  for (let i = 0; i < b.segs.length; i++) engine.removeEntity(b.segs[i])
+}
+
+const _knot = { x: 0, y: 0, z: 0 }
+
 function placeTrailBalloon(b: Balloon, dest: Vec, knot: Vec, dt: number): void {
   b.pos = follow(b.pos, dest, dt)
   const tf = Transform.getMutable(b.root)
-  tf.position = Vector3.create(b.pos.x, b.pos.y, b.pos.z)
-  aimString(b.string, knot, b.pos)
+  tf.position.x = b.pos.x
+  tf.position.y = b.pos.y
+  tf.position.z = b.pos.z
+  placeString(b.segs, b.lagMid, b, knot, b.pos, dt)
 }
 
-function placeAttachedBalloon(b: Balloon): void {
+function placeAttachedBalloon(b: Balloon, dt: number): void {
   const tf = Transform.getMutable(b.root)
-  tf.position = Vector3.create(b.pos.x, b.pos.y, b.pos.z)
+  tf.position.x = b.pos.x
+  tf.position.y = b.pos.y
+  tf.position.z = b.pos.z
   // String is a child of the knot. Aim it in local space so the bottom
   // end is the knot and the top end is the balloon, by construction.
-  aimString(b.string, v(0, 0, 0), b.pos)
+  _knot.x = 0
+  _knot.y = 0
+  _knot.z = 0
+  placeString(b.segs, b.lagMid, b, _knot, b.pos, dt)
 }
 
 function emptyCluster(id: string, pose: Pose): Cluster {
@@ -552,7 +632,7 @@ function applyPop(id: string, n: number): void {
       const pose = poseOf(key) ?? { feet: c.prevFeet, yawDeg: c.prevYaw }
       popAt(worldBalloonPos(c, gone, pose))
       engine.removeEntity(gone.root)
-      engine.removeEntity(gone.string)
+      dropSegs(gone)
     }
   }
   if (n <= 0) dropCluster(key)
@@ -590,7 +670,7 @@ function syncClusters(dt: number): void {
       const gone = c.balloons.pop()
       if (gone) {
         engine.removeEntity(gone.root)
-        engine.removeEntity(gone.string)
+        dropSegs(gone)
       }
     }
     c.n = n
@@ -599,7 +679,7 @@ function syncClusters(dt: number): void {
       const mot = stepMotion(c, raw, step)
       for (const b of c.balloons) {
         jiggle(b, restLocal(b.i, clock, SWAY), mot.acc, mot.dYaw, raw.yawDeg, step)
-        placeAttachedBalloon(b)
+        placeAttachedBalloon(b, step)
       }
     } else {
       const knot = backAnchor(raw)

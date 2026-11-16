@@ -126,5 +126,11 @@ if (!client.includes("events.on('team:roster'") || !client.includes('dropLeavers
 if (client.includes('AAPT_SPINE') || client.includes('ANCHOR_SPINE')) {
   fail('attached balloons must not follow an animated spine bone')
 }
+if (!client.includes('const BACK_Y = 1.68')) {
+  fail('the knot should sit on the upper back, about 1.68 m up')
+}
+if (!client.includes('STRING_SEGS') || !client.includes('placeString') || !client.includes('STRING_SAG')) {
+  fail('balloon strings should be segmented with a slight sag, not one rigid cylinder')
+}
 
 console.log('✓ balloon start, pop, eliminate, last standing, and no paint')
