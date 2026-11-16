@@ -100,9 +100,8 @@ export function footprintAt(p: V3, cell: string): number {
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
 export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
-  // Team.None is the lobby (white slabs). In a match it means an empty tank —
-  // knockback and the white shockwave only, no bleached floor ripple.
-  if (team === Team.None && !inLobby() && !isBalloonRound()) return
+  // Team.None (lobby, Balloon Battle, or an empty tank) raises temporary white
+  // slabs. They are pooled visuals only and never write the paint grid.
   const g = ensureGraph()
   if (!g) return
   const centre = burstCentre(g, cell, p)
@@ -144,8 +143,9 @@ function cellNear(g: WalkableGraph, x: number, y: number, z: number, r: number):
  *  centre column DASH_TILE_INNER_LAG_S later; the forward row uses DASH_TILE_AHEAD_DELAY_S so it
  *  leads. Visual only; capped at DASH_TILE_MAX live slabs. */
 export function dashPop(who: string, p: V3, team: Team): void {
-  // Team.None is the lobby (white slabs). Outside the lobby it still means "no trail".
-  if (!DASH_TILE_POP || pool.length === 0 || (team === Team.None && !inLobby() && !isBalloonRound())) return
+  // Team.None (lobby, Balloon Battle, or an empty tank) is a white trail.
+  // Pooled visuals only; this never writes the paint grid.
+  if (!DASH_TILE_POP || pool.length === 0) return
   const g = ensureGraph()
   if (!g) return
   const centre = cellNear(g, p.x, p.y, p.z, CELL_M)

@@ -121,8 +121,12 @@ if (paintSrc.includes('forceCell(id, paintUndo.get(id) ?? Team.None)') || !paint
   process.exit(1)
 }
 const rippleSrc = readFileSync(new URL('../src/client/burstRipple.ts', import.meta.url), 'utf8')
-if (!rippleSrc.includes('team === Team.None && !inLobby()')) {
-  console.error('✗ an empty-tank Burst must not raise a floor ripple over enemy paint')
+if (rippleSrc.includes('team === Team.None && !inLobby()')) {
+  console.error('✗ empty-tank Burst and Dash should show the same white floor effect as Balloon Battle')
+  process.exit(1)
+}
+if (!rippleSrc.includes('cellMaterial(s.team)') || rippleSrc.includes('noteLocalPaintCandidate') || rippleSrc.includes('applyRemotePaint') || rippleSrc.includes('forceCell')) {
+  console.error('✗ the white Burst and Dash slabs must be temporary visuals, not paint-grid writes')
   process.exit(1)
 }
 const ui = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
