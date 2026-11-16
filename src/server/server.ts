@@ -17,6 +17,7 @@ import { room } from '../shared/messages'
 import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, teamOfCell, sampleEnemyCells, clearAll as clearPaintState } from './paintState'
+import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botDepotFeet, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
@@ -52,7 +53,7 @@ import { LOBBY_MODES, LOBBY_VOTE_MS, modeById, pickWinner, type ModeId } from '.
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
 import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
-import { SCENE_SIZE, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
+import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
 import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
 import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, WalletGate } from '../shared/territory'
@@ -115,6 +116,7 @@ export async function setupServer(): Promise<void> {
   // to `bot:<id>` on the live scoreboard; the persisted top-painters board
   // stays human-only.
   initBots({
+    rescuePaintedHome: (team, from, occupied) => paintedRescueHome(team, from, occupied),
     applyPaint: applyBotPaint,
     paint: {
       teamOf: teamOfCell,
@@ -1092,24 +1094,40 @@ export async function setupServer(): Promise<void> {
   // Relay the rider's cloud so every other client can show it. who is the
   // authenticated sender, not the payload. Timings are clamped so a bad
   // client cannot pin a cloud up.
+  /** Nearest safe team-coloured cell, or null when paint revival does not apply. */
+  function paintedRescueHome(team: number, from: { x: number; y: number; z: number }, occupied?: Set<string>): { x: number; y: number; z: number } | null {
+    if (!matchLive() || !paintAllowed(roundFormat)) return null
+    if (team !== 1 && team !== 2) return null
+    const g = getWalkableGraph()
+    if (!g) return null
+    return pickTeamRescueCell(team, from, getFullState(), g, occupied)?.pos ?? null
+  }
   const clampRescueT = (v: number) => Math.min(8, Math.max(0.05, v))
   const rescuePosOk = (x: number, y: number, z: number) =>
     [x, y, z].every(n => typeof n === 'number' && isFinite(n)) &&
     x >= -40 && z >= -40 && x <= SCENE_SIZE + 40 && z <= SCENE_SIZE + 40 && y >= -80 && y <= 260
   room.onMessage('rescueStart', (m, context) => {
     const from = context?.from
-    if (!from || getTeam(from) === null) return
-    if (!rescuePosOk(m.x, m.y, m.z) || !rescuePosOk(m.bx, m.by, m.bz)) return
+    if (!from) return
+    const team = getTeam(from)
+    if (team === null) return
+    if (!rescuePosOk(m.x, m.y, m.z)) return
     if (![m.grab, m.rise, m.cruise, m.descend].every(n => typeof n === 'number' && isFinite(n))) return
     const who = from.toLowerCase()
     const now = Date.now()
     if (now - (rescueStartAt.get(who) ?? 0) < 400) return
     rescueStartAt.set(who, now)
     rescueRiders.add(who)
+    // Paint modes land on the nearest owned cell. Lobby / Balloon Battle keep
+    // the client's dest (lobby feet or team spawn) after a bounds check.
+    const catchAt = { x: m.x, y: m.y, z: m.z }
+    const painted = paintedRescueHome(team, catchAt)
+    const hinted = rescuePosOk(m.bx, m.by, m.bz) ? { x: m.bx, y: m.by, z: m.bz } : null
+    const home = painted ?? hinted ?? baseSpawn(team).pos
     const msg = {
       who,
       x: m.x, y: m.y, z: m.z,
-      bx: m.bx, by: m.by, bz: m.bz,
+      bx: home.x, by: home.y, bz: home.z,
       mobile: m.mobile ? 1 : 0,
       grab: clampRescueT(m.grab), rise: clampRescueT(m.rise), cruise: clampRescueT(m.cruise), descend: clampRescueT(m.descend),
     }

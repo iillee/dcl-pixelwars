@@ -190,6 +190,8 @@ let slipAccum = 0
 let sample: { p: Vec; at: number } | null = null
 /** Catch we just broadcast, so a self-echo with no address yet is not a second cloud. */
 let localCatch: Vec | null = null
+/** Server-chosen landing (nearest team paint, or the fallback spawn). Kept until the trip ends so a slip-off teleport uses it. */
+let assignedHome: Vec | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
@@ -418,9 +420,15 @@ function playLeg(index: number): void {
 }
 
 function rescueHome(): Vec {
+  if (assignedHome) return assignedHome
   // Center of the 3-tile lobby (straight between the PvP and PvB ends).
   if (isLobbyLayout()) return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
   return baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+}
+
+/** Landing the last rescueStart assigned, if any. Used by the slip-off teleport. */
+export function assignedRescueHome(): Vec | null {
+  return assignedHome
 }
 
 function tripSeconds(): number {
@@ -690,6 +698,7 @@ function finish(how: FallRescueEnd, why: string): void {
   else if (rode) console.log(`[FallRescue] mobile camera ride arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   onEnd(how)
+  assignedHome = null
   // After onEnd's exitOverview, so a mobile overview does not steal the ride
   // and does not pop back on this same frame.
   pinOverviewClosed(false)
@@ -772,6 +781,7 @@ function tickPhase(dt: number): void {
   phase = 'idle'
   phaseLeft = 0
   localCatch = null
+  assignedHome = null
   setFallMoveLock('open')
   console.log('[FallRescue] land lock done')
     }
@@ -893,7 +903,16 @@ function onRemoteStart(m: {
 }): void {
   const who = m.who.toLowerCase()
   const catchP = { x: m.x, y: m.y, z: m.z }
-  if (!who || isOwnRescue(who, catchP)) return
+  if (!who) return
+  // Local player's own start: they already began on the fall; do not reset
+  // the pose from a slightly later echo (that snap is what "pulled me back").
+  // Still take the server landing so startPath / a slip-off teleport use it.
+  if (isOwnRescue(who, catchP)) {
+    if (Number.isFinite(m.bx) && Number.isFinite(m.by) && Number.isFinite(m.bz)) {
+      assignedHome = { x: m.bx, y: m.by, z: m.bz }
+    }
+    return
+  }
   if (![m.x, m.y, m.z, m.bx, m.by, m.bz, m.grab, m.rise, m.cruise, m.descend].every(n => Number.isFinite(n))) return
   clearRemote(who)
   const root = engine.addEntity()
@@ -978,6 +997,7 @@ export function cancelFallRescue(why: string): void {
   console.log(`[FallRescue] cancel (${why})`)
   sendRescueEnd()
   localCatch = null
+  assignedHome = null
   releaseRideCamera()
   clearCarryDisguise()
   pinOverviewClosed(false)

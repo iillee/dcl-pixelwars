@@ -99,6 +99,8 @@ export interface ManagerDeps {
   economyOn?: () => boolean
   economyTank?: (painter: string) => number
   friendlyDepot?: (team: number, fromCell: string) => string | null
+  /** Paint-mode landing: nearest owned walkable cell, or null to use the team spawn. */
+  rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>) => V3 | null
 }
 
 let deps: ManagerDeps | null = null
@@ -434,7 +436,14 @@ export function tickBots(dtSec: number): void {
   // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
   for (const b of bots) {
-    const world = { graph, rampTiles, tiles: placedTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
+    const spawn = cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos
+    const occupied = new Set<string>()
+    for (const o of bots) {
+      if (o === b || o.body.inRescue()) continue
+      occupied.add(o.currentCell)
+    }
+    const painted = deps.rescuePaintedHome?.(b.team, b.body.pos, occupied)
+    const world = { graph, rampTiles, tiles: placedTiles, base: painted ?? spawn }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)
@@ -456,7 +465,7 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} fell at ${ev.catch.x.toFixed(1)},${ev.catch.y.toFixed(1)},${ev.catch.z.toFixed(1)} - cloud home`)
         deps.onFell?.(b.botId, ev.catch, world.base)
       } else if (ev.type === 'landed') {
-        b.currentCell = baseStartCell(b.team)
+        b.currentCell = cellNear(b.body.pos) ?? baseStartCell(b.team)
         b.clearPath()
         deps.onRescueEnd?.(b.botId)
         console.log(`[Bots] ghost ${b.botId} home`)

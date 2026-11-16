@@ -27,7 +27,7 @@ import { earlySpawnPads } from '../shared/lobby'
 import { Team } from '../shared/team'
 import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
-import { cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
+import { assignedRescueHome, cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
 import { lobbyStand } from './lobby'
 import { gamePhase } from './phase'
 
@@ -64,7 +64,10 @@ function teleportHome(why: string): void {
     pos = c
     look = { x: c.x, y: c.y, z: c.z + 8 }
   } else if (IS_SKY) {
-    const s = baseSpawn(myTeam === Team.Blue ? 2 : 1) // no team yet → RED base (scene.json default)
+    const assigned = why === 'fell' ? assignedRescueHome() : null
+    const s = assigned
+      ? { pos: assigned, look: { x: assigned.x, y: assigned.y, z: assigned.z + 8 } }
+      : baseSpawn(myTeam === Team.Blue ? 2 : 1) // no team yet → RED base (scene.json default)
     pos = s.pos; look = s.look
   }
   console.log(`[Player] teleport (${why}) → ${pos.x.toFixed(0)},${pos.y.toFixed(1)},${pos.z.toFixed(0)}`)
