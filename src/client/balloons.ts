@@ -7,9 +7,11 @@
  *  - 'attached' parents the knot to the avatar root so it cannot lag.
  *    Humans use AvatarAttach on AAPT_POSITION (no walk-cycle bob);
  *    remotes pass avatarId; bots parent to their visual entity. The
- *    back offset is a child of that attach, rotated by the unsmoothed
- *    yaw. Balloons and strings are children of the knot: only the
- *    balloon end jiggles, from low-passed planar velocity and turn.
+ *    back offset is a child of that attach in avatar-local space
+ *    (0, BACK_Y, -BACK_Z). AvatarAttach already carries the avatar's
+ *    yaw, so the child is not rotated again. Balloons and strings are
+ *    children of the knot: only the balloon end jiggles, from
+ *    low-passed planar velocity and turn.
  *  - 'trail' is the original world-space spring follow, with lag.
  *    Strings still start at the live back knot, not a lagged point.
  *
@@ -172,11 +174,6 @@ function backAnchor(pose: Pose): Vec {
   return v(pose.feet.x - f.x * BACK_Z, pose.feet.y + BACK_Y, pose.feet.z - f.z * BACK_Z)
 }
 
-function backOffset(yawDeg: number): Vec {
-  const f = forward(yawDeg)
-  return v(-f.x * BACK_Z, BACK_Y, -f.z * BACK_Z)
-}
-
 function restLocal(i: number, t: number, sway: number): Vec {
   const s = SLOTS[i % SLOTS.length]
   return v(
@@ -317,21 +314,14 @@ function attachRig(id: string, pose: Pose): { attach: Entity | null; knot: Entit
     }
     AvatarAttach.create(attach, { avatarId, anchorPointId: AAPT_POSITION })
   }
-  const off = backOffset(pose.yawDeg)
+  // AAPT_POSITION already follows the avatar's yaw. A second yaw on the
+  // child (or a world-space back offset in that rotated frame) put the
+  // knot on the chest. Same local back offset as the bots.
   Transform.create(knot, {
     parent: attach,
-    position: Vector3.create(off.x, off.y, off.z),
-    rotation: Quaternion.fromEulerDegrees(0, pose.yawDeg, 0),
+    position: Vector3.create(0, BACK_Y, -BACK_Z),
   })
   return { attach, knot }
-}
-
-/** Keep the human knot on the back in the attach's (world-aligned) frame. Bots already inherit body yaw, so they are left alone. */
-function orientHumanKnot(knot: Entity, yawDeg: number): void {
-  const off = backOffset(yawDeg)
-  const tf = Transform.getMutable(knot)
-  tf.position = Vector3.create(off.x, off.y, off.z)
-  tf.rotation = Quaternion.fromEulerDegrees(0, yawDeg, 0)
 }
 
 function clearCluster(c: Cluster): void {
@@ -601,9 +591,7 @@ function syncClusters(dt: number): void {
     }
     c.n = n
     if (c.style === 'attached') {
-      // The attach/parent drives the knot. Only refresh the human back
-      // offset's yaw; never write a smoothed world position.
-      if (c.knot && !id.startsWith('bot:')) orientHumanKnot(c.knot, raw.yawDeg)
+      // The attach/parent drives the knot. Do not rewrite its offset.
       const mot = stepMotion(c, raw, step)
       for (const b of c.balloons) {
         jiggle(b, restLocal(b.i, clock, SWAY), mot.acc, mot.dYaw, raw.yawDeg, step)
