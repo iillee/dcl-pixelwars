@@ -5,6 +5,10 @@ ghost.glb armature (same Avatar_* joint names). Writes ghost-recover.glb.
 Hips stay in the ghost's centimetre-scale armature space (rest z ≈ -100).
 Official clips already live in that space, so bone rotations transfer directly.
 Animator can only play clips embedded in the same GltfContainer GLB.
+
+The official Glide_Avatar loop rocks Avatar_Hips pitch about ±20° every 0.167s
+(a human soaring under a worn glider). After copy, that motion is frozen to the
+mid-clip pose so the ghost holds a steady arms-up glide.
 """
 from __future__ import annotations
 
@@ -248,6 +252,48 @@ def duration_of(channels):
     return m
 
 
+def freeze_to_mid_hold(channels):
+    """Replace moving channels with a two-key hold of the mid-clip pose."""
+    dur = duration_of(channels)
+    mid_t = dur * 0.5
+    frozen = 0
+    for (nname, path), ch in channels.items():
+        times = ch['times']
+        typ = ch['out_type']
+        interp = ch['interpolation']
+        c = comps_of(typ)
+        mul = 3 if interp == 'CUBICSPLINE' else 1
+        width = 4 * c * mul
+        values = ch['values']
+        count = len(times)
+        if count == 0:
+            continue
+        def key_delta(a: bytes, b: bytes) -> float:
+            n = min(len(a), len(b)) // 4
+            if n == 0 or len(a) != len(b):
+                return 1.0
+            fa = struct.unpack('<' + 'f' * n, a[:n * 4])
+            fb = struct.unpack('<' + 'f' * n, b[:n * 4])
+            return max(abs(x - y) for x, y in zip(fa, fb))
+        first = values[:width]
+        delta = 0.0
+        for i in range(count):
+            delta = max(delta, key_delta(first, values[i * width:(i + 1) * width]))
+        if delta < 1e-4:
+            continue
+        idx = min(range(count), key=lambda i: abs(times[i] - mid_t))
+        pose = values[idx * width:(idx + 1) * width]
+        if interp == 'CUBICSPLINE':
+            zeros = b'\x00' * (4 * c)
+            pose = zeros + pose[4 * c:8 * c] + zeros
+        ch['times'] = [0.0, dur if dur > 0 else times[-1]]
+        ch['values'] = pose + pose
+        ch['interpolation'] = 'STEP'
+        frozen += 1
+        print(f'  freeze {nname} {path} @ t={times[idx]:.3f}s ({count} keys -> hold)')
+    return frozen
+
+
 LOCO_URL = 'https://raw.githubusercontent.com/decentraland/godot-explorer/main/godot/assets/no-export/locomotion/Avatar_Locomotion_Fix.glb'
 DOUBLE_URL = 'https://raw.githubusercontent.com/decentraland/bevy-explorer/main/crates/assets/src/assets/animations/double_jump.glb'
 GLIDE_URL = 'https://raw.githubusercontent.com/decentraland/bevy-explorer/main/crates/assets/src/assets/animations/glide.glb'
@@ -293,6 +339,9 @@ def main():
     slide_ch = chans(loco, loco_bin, 'Slide')
     double_ch = chans(djump, djump_bin, 'Double_Jump_Base')
     glide_ch = chans(glide, glide_bin, 'Glide_Avatar')
+    # Official glide rocks the hips; hold the mid pose (pitch ≈ 0) with arms up.
+    n = freeze_to_mid_hold(glide_ch)
+    print(f'glide hold: froze {n} moving channel(s)')
 
     specs = [
         ('idle', idle_ch),
