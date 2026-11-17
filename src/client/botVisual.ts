@@ -7,7 +7,9 @@
  * ghost raises its arms only in that glide clip. Classic, Base Charge, and
  * Paint Limit get a team light and a billboarded RED/BLUE plate; Balloon
  * Battle is FFA so the light is neutral and the plate stays hidden.
- * The AvatarShape path remains as a fallback if recovery is off for a format.
+ * The visual is always the ghost (not gated on the current format), so a late
+ * mode sync cannot leave an AvatarShape standing. The AvatarShape path remains
+ * as a gated fallback only.
  * botPositions is smoothed with per-frame lerp, velocity dead-reckoning, and
  * snapshot interpolation (long enough to cover a hosted ~530 ms tick).
  *
@@ -44,7 +46,7 @@ import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
 import {
   BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
-  RoundFormat, botRecoveryEnabled,
+  RoundFormat,
 } from '../shared/pvp'
 import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botAnim'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
@@ -203,7 +205,11 @@ function interpolate(snaps: Snap[], rt: number): Vector3 | null {
 const bots = new Map<number, BotVisual>()
 
 function visualKind(): VisualKind {
-  return botRecoveryEnabled(roundFormat) ? 'ghost' : 'avatar'
+  // Always the ghost. Tying this to botRecoveryEnabled(roundFormat) left
+  // humanoids in Base Charge whenever the client still had a stale format,
+  // or when a deployed bundle had not been rebuilt after recovery was
+  // turned on for every mode.
+  return 'ghost'
 }
 
 function rgb(team: number): Color3 {

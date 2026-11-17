@@ -237,6 +237,9 @@ if (!beams.includes("events.on('base:win'") || !beams.includes('startWave') || !
 if (!beams.includes('TEAM_RGB[team]') || !beams.includes('TEAM_RGB[wave.team]')) {
   fail('beacons and the shockwave should use the team colors (red #FF7577, blue #6A99FC)')
 }
+if (!beams.includes('EMISSIVE_INNER = 0.35') || !beams.includes('roughness: 1') || !beams.includes('specularIntensity: 0') || beams.includes('EMISSIVE_INNER = 3.0')) {
+  fail('beacon emission should stay low so TEAM_RGB matches the paint tiles instead of washing pink or purple')
+}
 const ui = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
 if (!ui.includes('function BasesChargeHud') || !ui.includes('FILL THE BASE') || !ui.includes('+${rate}/s')) {
   fail('BASES should have its own two-team charge HUD, not the single territory bar')

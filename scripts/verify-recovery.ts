@@ -50,6 +50,9 @@ const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta
 if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
   fail('ghosts should play jump, double, and glide clips from ghost-recover.glb')
 }
+if (!visualSrc.includes("function visualKind(): VisualKind") || !visualSrc.includes("return 'ghost'") || visualSrc.includes('botRecoveryEnabled(roundFormat) ?')) {
+  fail('the bot visual should always be the ghost, not gated on the current format')
+}
 if (!visualSrc.includes('function syncGhostTag') || !visualSrc.includes('BillboardMode.BM_Y') || !visualSrc.includes("text: red ? 'RED' : 'BLUE'") || visualSrc.includes('paintPlate(root, team, id)')) {
   fail('team-mode ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
 }

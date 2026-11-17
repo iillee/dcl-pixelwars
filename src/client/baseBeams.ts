@@ -46,8 +46,9 @@ const MIN_SIZE = 0.75
 const MAX_SIZE = 1.0
 const INNER_ALPHA = 0.7
 const OUTER_ALPHA = 0.35
-const EMISSIVE_INNER = 3.0
-const EMISSIVE_OUTER = 2.0
+/** Low emission, same idea as depot posts, so TEAM_RGB (#FF7577 / #6A99FC) is not washed toward pink or purple. */
+const EMISSIVE_INNER = 0.35
+const EMISSIVE_OUTER = 0.18
 const PULSE_SPEED = 2.5
 const PULSE_RANGE = 0.15
 const SIZE_EASE_S = 0.28
@@ -132,6 +133,8 @@ function dropBeams(): void {
 }
 
 function beaconMat(team: 1 | 2, inner: boolean) {
+  // Same TEAM_RGB as floor paint and nametag plates. The white gradient only
+  // masks the pillar; roughness 1 and a low emissive keep the hue from drifting.
   const c = TEAM_RGB[team]
   const a = inner ? INNER_ALPHA : OUTER_ALPHA
   return {
@@ -140,7 +143,10 @@ function beaconMat(team: 1 | 2, inner: boolean) {
     albedoColor: Color4.create(c.r, c.g, c.b, a),
     emissiveColor: Color3.create(c.r, c.g, c.b),
     emissiveIntensity: inner ? EMISSIVE_INNER : EMISSIVE_OUTER,
-    transparencyMode: MaterialTransparencyMode.MTM_AUTO,
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
     castShadows: false,
   }
 }
