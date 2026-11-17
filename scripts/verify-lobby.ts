@@ -451,8 +451,8 @@ if (!lobbySrc.includes('roughness: 1') || !lobbySrc.includes('specularIntensity:
   console.error('✗ vote floor tints should stay matte PBR')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('outlineColor:') || !lobbySrc.includes('outlineWidth: 0.2') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
-  console.error('✗ titles should be one 4.5 m line with a subtle ink outline, and scale with the overview zoom')
+if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || lobbySrc.includes('outlineColor:') || !lobbySrc.includes('outlineWidth: 0') || lobbySrc.includes('outlineWidth: 0.2') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
+  console.error('✗ titles should be one 4.5 m line of unoutlined white text, and scale with the overview zoom')
   process.exit(1)
 }
 if (SIGN_W_M < 40 || SIGN_H_M > 12) {
