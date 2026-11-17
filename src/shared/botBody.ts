@@ -7,7 +7,8 @@
  *           a held force, gravity and floor friction, exactly like the anvils. No floor
  *           under it = it falls. Back on a floor and slow = walk again.
  *           Edge recovery (jump, double jump, glide, steer-home, glide dash) is
- *           gated by BOT_RECOVERY_ENABLED. Off, the knock just falls into rescue.
+ *           gated by this.recoveryEnabled, set from botRecoveryEnabled(format).
+ *           Off, the knock just falls into rescue.
  *   rescue  crossed the fall line: rides the Lakitu cloud home along the shared path
  *           (shared/rescuePath.ts) that every client draws for it.
  *   drop    the cloud let go above the base: falls onto it, then a land hold and
@@ -19,7 +20,6 @@ import { Placed } from '../maze/generator'
 import { fallTriggerY } from './swell'
 import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
-  BOT_RECOVERY_ENABLED,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_MIN_S, BOT_RECOVER_REACT_MAX_S, BOT_RECOVER_SKIP_DOUBLE_CHANCE,
   BOT_RECOVER_MISJUDGE_CHANCE, BOT_RECOVER_MISJUDGE_M, BOT_RECOVER_STEER_ACCEL,
   BOT_RECOVER_EDGE_SPEED, BOT_RECOVER_RUN_JUMP_AT, BOT_RECOVER_GIVE_UP_M, BOT_GLIDE_TURN,
@@ -81,6 +81,8 @@ export class BotBody {
   private glideDashDir: V3 = { x: 0, y: 0, z: 0 }
   /** Random source for the recover roll (scripts pass a fixed one). */
   rng: () => number = Math.random
+  /** Set by the manager from botRecoveryEnabled(format). Default off. */
+  recoveryEnabled = false
 
   constructor(pos: V3, rng?: () => number) {
     this.pos = { ...pos }
@@ -89,6 +91,10 @@ export class BotBody {
 
   /** Gliding back toward a floor right now. */
   isGliding(): boolean { return this.mode === 'knock' && this.phase === 'glide' && !this.grounded }
+  /** Mid recovery jump, double jump, or glide. */
+  isRecovering(): boolean {
+    return this.willRecover && this.mode === 'knock' && !this.grounded && (this.phase === 'jump' || this.phase === 'glide')
+  }
 
   /**
    * Pose for the client. Does not affect the integrator.
@@ -102,7 +108,8 @@ export class BotBody {
     if (this.isDashing()) return BOT_ANIM_LOCO
     if (this.phase === 'glide' && !this.grounded) return BOT_ANIM_GLIDE
     if (this.phase === 'jump' && !this.grounded) return this.didDouble ? BOT_ANIM_DOUBLE : BOT_ANIM_JUMP
-    if (!this.grounded) return this.vel.y > 0.4 ? BOT_ANIM_JUMP : BOT_ANIM_FALL
+    // A raw knock lift is not a recovery jump, so the glider stays down.
+    if (!this.grounded) return BOT_ANIM_FALL
     if (this.forceLeft > 0 || this.lockLeft > 0 || Math.hypot(this.vel.x, this.vel.z) >= BOT_RECOVER_SPEED) return BOT_ANIM_SLIDE
     return BOT_ANIM_LOCO
   }
@@ -306,7 +313,7 @@ export class BotBody {
     this.jumpTime = 0
     this.glideTime = 0
     this.noJumpLeft = blockS
-    this.willRecover = BOT_RECOVERY_ENABLED && this.rng() < BOT_RECOVER_CHANCE
+    this.willRecover = this.recoveryEnabled && this.rng() < BOT_RECOVER_CHANCE
     if (!this.willRecover) { this.reactLeft = 0; return }
     if (this.reactS === null) {
       const span = BOT_RECOVER_REACT_MAX_S - BOT_RECOVER_REACT_MIN_S

@@ -1,15 +1,15 @@
 /**
  * botVisual.ts — client-side bot renderer.
  *
- * Each bot is an AvatarShape standing on the server position: red clothes
- * with blue skin, or blue clothes with red skin. botPositions is smoothed
+ * Classic (`pvp`) draws the original Aug 2026 ghost.glb (d86d6fe) as a
+ * GltfContainer, team-lit, with a glider that pops out during recovery.
+ * Every other mode keeps the humanoid AvatarShape. botPositions is smoothed
  * with per-frame lerp, velocity dead-reckoning, and snapshot interpolation
  * (long enough to cover a hosted ~530 ms tick).
  *
- * The lerp target is where the body should be. A same-point Tween.Move is
- * refreshed every frame so the NPC's built-in walker (about 4 m/s toward
+ * The lerp target is the feet. A same-point Tween.Move is refreshed every
+ * frame on humanoid bots so the NPC's built-in walker (about 4 m/s toward
  * whatever position you write) does not drag the body off that target.
- * Locomotion from that setup is untested until a preview pass.
  *
  * ── Why per-frame lerp ──────────────────────────────────────────────
  *
@@ -29,13 +29,18 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
+  GltfContainer, LightSource,
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
-import { BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT } from '../shared/pvp'
+import {
+  BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
+  RoundFormat, botRecoveryEnabled,
+} from '../shared/pvp'
+import { botShowsGlider } from '../shared/botAnim'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { teamPlatesHidden } from './nametags'
@@ -59,8 +64,26 @@ const BLUE_CLOTHES = [
   'urn:decentraland:off-chain:base-avatars:sport_blue_shoes',
 ]
 
-/** Avatar origin is the feet, same as a player. Hit tests subtract this. */
+/** Avatar origin is the feet, same as a player. Hit tests subtract this. Ghost float is applied only when drawing. */
 export const FLOAT_HEIGHT = 0
+
+/** Original solo-bot ghost from d86d6fe, not the Nov 2 Pac-Man meshes or the PR #15 mannequin. */
+const GHOST_MODEL_SRC = 'assets/models/bots/ghost.glb'
+const GLIDER_SRC = 'assets/models/glider.glb'
+const GHOST_SCALE = 1.2
+const GHOST_FLOAT = 1.0
+const LIGHT_INTENSITY = 250
+const LIGHT_RANGE = 8
+const RED_LIGHT = Color3.create(1.00, 0.25, 0.28)
+const BLUE_LIGHT = Color3.create(0.30, 0.55, 1.00)
+const BOB_AMPLITUDE = 0.25
+const BOB_HZ = 0.5
+const DRIFT_AMPLITUDE = 0.15
+const DRIFT_HZ_X = 0.27
+const DRIFT_HZ_Z = 0.21
+const PULSE_AMPLITUDE = 0.04
+const PULSE_HZ = 0.8
+const GLIDER_POP_S = 0.16
 
 // Walking: extrapolate along last velocity for up to this long so a hosted
 // ~530 ms tick does not stall the body between packets.
@@ -98,16 +121,24 @@ type LocalKnock = {
   forceLeft: number
   floorY: number | null
 }
+type VisualKind = 'ghost' | 'avatar'
 /** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
 let clockOffset: number | null = null
+let roundFormat: RoundFormat = 'pvp'
 
 interface BotVisual {
   root: Entity
   id: number
   team: number
+  kind: VisualKind
+  light: Entity | null
+  glider: Entity | null
+  gliderScale: number
+  pose: number
+  timeSec: number
   lastServerPos: Vector3
   velocity: Vector3     // metres/sec, estimated from server updates
-  renderPos: Vector3    // smoothed position we actually draw at
+  renderPos: Vector3    // smoothed feet position we actually track
   lastYawDeg: number    // last committed yaw — held when velocity too low
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
@@ -144,9 +175,41 @@ function interpolate(snaps: Snap[], rt: number): Vector3 | null {
 // Keyed by bot id (stable per bot, server-assigned).
 const bots = new Map<number, BotVisual>()
 
+function visualKind(): VisualKind {
+  return botRecoveryEnabled(roundFormat) ? 'ghost' : 'avatar'
+}
+
 function rgb(team: number): Color3 {
   const c = TEAM_RGB[team] ?? TEAM_RGB[Team.Red]
   return Color3.create(c.r, c.g, c.b)
+}
+
+function lightColor(team: number): Color3 {
+  return team === Team.Red ? RED_LIGHT : BLUE_LIGHT
+}
+
+function paintLight(entity: Entity, team: number): void {
+  LightSource.createOrReplace(entity, {
+    type: LightSource.Type.Point({}),
+    color: lightColor(team),
+    intensity: LIGHT_INTENSITY,
+    range: LIGHT_RANGE,
+  })
+}
+
+function paintPlate(entity: Entity, team: number, _id: number): void {
+  const red = team === Team.Red
+  if (teamPlatesHidden()) {
+    AvatarNametag.deleteFrom(entity)
+    return
+  }
+  const bg = rgb(team)
+  AvatarNametag.createOrReplace(entity, {
+    label: red ? 'RED' : 'BLUE',
+    labelColor: Color3.White(),
+    backgroundColor: bg,
+    borderColor: bg,
+  })
 }
 
 /** Red wears red and has blue skin. Blue wears blue and has red skin. */
@@ -163,18 +226,7 @@ function paintAvatar(entity: Entity, team: number, id: number): void {
     wearables: FACE.concat(red ? RED_CLOTHES : BLUE_CLOTHES),
     emotes: [],
   })
-  // Same red/blue plate as players, except in Balloon Battle (no teams).
-  if (teamPlatesHidden()) {
-    AvatarNametag.deleteFrom(entity)
-  } else {
-    const bg = rgb(team)
-    AvatarNametag.createOrReplace(entity, {
-      label: red ? 'RED' : 'BLUE',
-      labelColor: Color3.White(),
-      backgroundColor: bg,
-      borderColor: bg,
-    })
-  }
+  paintPlate(entity, team, id)
 }
 
 /** A finished move tween replaces the NPC's 4 m/s walker. Position stays ours. */
@@ -188,19 +240,59 @@ function holdWalker(entity: Entity, pos: Vector3): void {
   })
 }
 
-function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
+function destroyBot(id: number): void {
+  const rec = bots.get(id)
+  if (!rec) return
+  if (rec.glider) engine.removeEntity(rec.glider)
+  if (rec.light) engine.removeEntity(rec.light)
+  AvatarNametag.deleteFrom(rec.root)
+  AvatarShape.deleteFrom(rec.root)
+  Tween.deleteFrom(rec.root)
+  GltfContainer.deleteFrom(rec.root)
+  LightSource.deleteFrom(rec.root)
+  engine.removeEntity(rec.root)
+  bots.delete(id)
+}
+
+function clearAllBots(): void {
+  for (const id of [...bots.keys()]) destroyBot(id)
+}
+
+function setRoundFormat(format: RoundFormat): void {
+  if (roundFormat === format) return
+  roundFormat = format
+  clearAllBots()
+}
+
+function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKind): BotVisual {
   const root = engine.addEntity()
   Transform.create(root, {
     position: pos,
     rotation: Quaternion.Identity(),
+    scale: kind === 'ghost' ? Vector3.create(GHOST_SCALE, GHOST_SCALE, GHOST_SCALE) : Vector3.One(),
   })
-  paintAvatar(root, team, id)
-  holdWalker(root, pos)
+  let light: Entity | null = null
+  if (kind === 'ghost') {
+    GltfContainer.create(root, { src: GHOST_MODEL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+    light = engine.addEntity()
+    Transform.create(light, { parent: root, position: Vector3.Zero() })
+    paintLight(light, team)
+    paintPlate(root, team, id)
+  } else {
+    paintAvatar(root, team, id)
+    holdWalker(root, pos)
+  }
 
   return {
     root,
     id,
     team,
+    kind,
+    light,
+    glider: null,
+    gliderScale: 0,
+    pose: 0,
+    timeSec: Math.random() * 100,
     lastServerPos: Vector3.clone(pos),
     velocity: Vector3.Zero(),
     renderPos: Vector3.clone(pos),
@@ -213,6 +305,43 @@ function createBotVisual(team: number, pos: Vector3, id: number): BotVisual {
     localKnock: null,
     knockBlend: 0,
     localKnockUntil: 0,
+  }
+}
+
+function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
+  if (rec.kind !== 'ghost') {
+    if (rec.glider) { engine.removeEntity(rec.glider); rec.glider = null; rec.gliderScale = 0 }
+    return
+  }
+  const step = dt / GLIDER_POP_S
+  if (want) {
+    if (!rec.glider) {
+      const wing = engine.addEntity()
+      Transform.create(wing, {
+        parent: rec.root,
+        position: Vector3.Zero(),
+        rotation: Quaternion.Identity(),
+        scale: Vector3.Zero(),
+      })
+      GltfContainer.create(wing, { src: GLIDER_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+      rec.glider = wing
+      rec.gliderScale = 0
+    }
+    rec.gliderScale = Math.min(1, rec.gliderScale + step)
+  } else if (rec.glider) {
+    rec.gliderScale = Math.max(0, rec.gliderScale - step)
+    if (rec.gliderScale <= 0) {
+      engine.removeEntity(rec.glider)
+      rec.glider = null
+      rec.gliderScale = 0
+      return
+    }
+  }
+  if (rec.glider) {
+    const tf = Transform.getMutable(rec.glider)
+    const s = rec.gliderScale
+    tf.scale = Vector3.create(s, s, s)
+    tf.rotation = Quaternion.Identity()
   }
 }
 
@@ -279,6 +408,12 @@ export function initBotVisual(): void {
       return r ? { x: r.renderPos.x, y: r.renderPos.y - FLOAT_HEIGHT, z: r.renderPos.z } : null
     },
   })
+  events.on('round:reset', ({ format }) => {
+    setRoundFormat(format)
+    clearAllBots()
+  })
+  events.on('round:clock', ({ format }) => { setRoundFormat(format) })
+  events.on('lobby:floor', () => { clearAllBots() })
   // While a bot is in the round, tell the server where we stand so it can chase and aim.
   let aimClock = 0
   engine.addSystem((dt: number) => {
@@ -300,22 +435,35 @@ export function initBotVisual(): void {
       if (clockOffset === null || sample < clockOffset || Math.abs(sample - clockOffset) > 5) clockOffset = sample
       else clockOffset += (sample - clockOffset) * 0.05
     }
+    const kind = visualKind()
     for (const b of msg) {
       seen.add(b.id)
-      // Server positions are feet. The avatar origin is the feet.
+      // Server positions are feet. The avatar origin is the feet. The ghost floats at draw time.
       const serverPos = Vector3.create(b.x, b.y + FLOAT_HEIGHT, b.z)
 
       let rec = bots.get(b.id)
+      if (rec && rec.kind !== kind) {
+        destroyBot(b.id)
+        rec = undefined
+      }
       if (!rec) {
-        rec = createBotVisual(b.team, serverPos, b.id)
+        rec = createBotVisual(b.team, serverPos, b.id, kind)
         rec.pktAt = now
         rec.lastSimT = simT ?? 0
+        rec.pose = b.an ?? 0
+        rec.riding = b.st === 2
         bots.set(b.id, rec)
         continue
       }
 
+      rec.pose = b.an ?? 0
       if (rec.team !== b.team) {
-        paintAvatar(rec.root, b.team, rec.id)
+        if (rec.kind === 'ghost') {
+          if (rec.light) paintLight(rec.light, b.team)
+          paintPlate(rec.root, b.team, rec.id)
+        } else {
+          paintAvatar(rec.root, b.team, rec.id)
+        }
         rec.team = b.team
       }
 
@@ -360,18 +508,15 @@ export function initBotVisual(): void {
       // be mid-step; next update will correct.
     }
 
-    // Reap dropped bots. Halo is parented → root removal reaps both.
-    for (const [id, rec] of bots) {
-      if (!seen.has(id)) {
-        engine.removeEntity(rec.root)
-        bots.delete(id)
-      }
+    for (const [id] of bots) {
+      if (!seen.has(id)) destroyBot(id)
     }
   })
 
   // ── Per-frame render: lerp toward the predicted feet position ─
   engine.addSystem((dt: number) => {
     for (const [id, rec] of bots) {
+      rec.timeSec += dt
       // Predicted position = last server position + velocity * lookAhead.
       // Puts us one broadcast ahead of the arriving packets so we stop
       // chasing them.
@@ -410,16 +555,6 @@ export function initBotVisual(): void {
         )
       }
 
-      const tf = Transform.getMutable(rec.root)
-      tf.position = rec.renderPos
-      holdWalker(rec.root, rec.renderPos)
-
-      // Yaw from smoothed VELOCITY, not from renderPos -> lastServerPos.
-      // The old approach flipped 180° the instant renderPos overshot its
-      // target (the delta reversed sign each frame), which produced the
-      // "facing forward then backward" flicker. Velocity is smoothed by
-      // the broadcast cadence and only reverses on a genuine direction
-      // change, so yaw stays stable.
       const vx = rec.velocity.x
       const vz = rec.velocity.z
       const speedSq = vx * vx + vz * vz
@@ -428,7 +563,30 @@ export function initBotVisual(): void {
       if (speedSq > 0.25) {
         rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
       }
+
+      const tf = Transform.getMutable(rec.root)
+      if (rec.kind === 'ghost') {
+        const t = rec.timeSec
+        const bob = Math.sin(t * BOB_HZ * Math.PI * 2) * BOB_AMPLITUDE
+        const drX = Math.sin(t * DRIFT_HZ_X * Math.PI * 2) * DRIFT_AMPLITUDE
+        const drZ = Math.cos(t * DRIFT_HZ_Z * Math.PI * 2) * DRIFT_AMPLITUDE
+        const pulse = 1.0 + Math.sin(t * PULSE_HZ * Math.PI * 2) * PULSE_AMPLITUDE
+        tf.position = Vector3.create(
+          rec.renderPos.x + drX,
+          rec.renderPos.y + GHOST_FLOAT + bob,
+          rec.renderPos.z + drZ,
+        )
+        tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
+      } else {
+        tf.position = rec.renderPos
+        holdWalker(rec.root, rec.renderPos)
+      }
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+
+      // Glider faces the ghost's travel direction via the parent yaw.
+      // Retract on landing, a raw fall, or the Lakitu rescue.
+      const wantWing = rec.kind === 'ghost' && !rec.riding && botShowsGlider(rec.pose)
+      syncGlider(rec, wantWing, dt)
     }
   })
 }

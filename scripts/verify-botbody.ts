@@ -9,7 +9,7 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody, BotBodyEvent } from '../src/shared/botBody'
 import { lungeKnock, burstKnock, spikeKnock, KnockSpec } from '../src/shared/knocks'
 import { rescueTripSeconds } from '../src/shared/rescuePath'
-import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE, BOT_RECOVERY_ENABLED } from '../src/shared/pvp'
+import { LUNGE_DISTANCE, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE } from '../src/shared/pvp'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -28,11 +28,12 @@ const kinds: Array<[string, (dx: number, dz: number) => KnockSpec]> = [
 
 let fellCount = 0
 for (const recover of [false, true]) {
-console.log(recover ? '\n-- rng would recover, gated by BOT_RECOVERY_ENABLED --' : '-- rng refuses recovery --')
+console.log(recover ? '\n-- recoveryEnabled, rng would recover --' : '-- recovery off / rng refuses --')
 for (const [kName, make] of kinds) {
   for (const [dName, dx, dz] of dirs) {
     const body = new BotBody(base)
     body.rng = () => (recover ? 0 : 1)
+    body.recoveryEnabled = recover
     if (!body.knock(make(dx, dz))) { fail(`${kName} ${dName}: knock refused`); continue }
     const log: string[] = []
     let t = 0, fellAt = -1, landedAt = -1, settledAt = -1
@@ -72,6 +73,7 @@ for (const strength of [85, 95, 105, 115]) {
   for (const recover of [false, true]) {
     const body = new BotBody(base)
     body.rng = () => (recover ? 0 : 1)
+    body.recoveryEnabled = recover
     body.knock({ kind: 'lunge', impulse: { x: -strength, y: 8, z: 0 }, forceDir: { x: -1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0.3 })
     let out = 'unresolved'
     let tried = false
@@ -82,8 +84,8 @@ for (const strength of [85, 95, 105, 115]) {
         if (e.type === 'fell') out = 'fell'
       }
     }
-    if (!BOT_RECOVERY_ENABLED && (out !== 'fell' || tried || body.isGliding())) {
-      fail(`recovery off: shove ${strength} ${recover ? 'roll 0' : 'roll 1'} was ${out}${tried ? ' and tried to recover' : ''}`)
+    if (!recover && (out !== 'fell' || tried || body.isGliding())) {
+      fail(`recovery off: shove ${strength} roll 1 was ${out}${tried ? ' and tried to recover' : ''}`)
     }
     res.push(`${recover ? 'roll 0' : 'roll 1'}: ${out}`)
   }

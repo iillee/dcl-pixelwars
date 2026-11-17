@@ -514,14 +514,21 @@ export function botJumpSpeed(heightM: number): number {
 }
 
 /**
- * Edge recovery after a knock. Off: the bot keeps the knock and just falls,
- * then fallTriggerY (the visible sea, or the pre-water line if the sea is off) starts the same cloud rescue a
- * human gets. No jump, double jump, glide, steer-home, or glide dash.
- * The attempt code below stays for when this comes back on.
+ * Edge recovery after a knock. On only in these modes (Classic / `pvp` for now).
+ * Everywhere else the bot keeps the knock and just falls; fallTriggerY (the
+ * visible sea, or the pre-water line if the sea is off) starts the same cloud
+ * rescue a human gets. BotBody.recoveryEnabled is set from this each tick.
  */
+export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp'])
+
+export function botRecoveryEnabled(format: RoundFormat): boolean {
+  return BOT_RECOVERY_MODES.has(format)
+}
+
+/** Default for a body with no mode set (tests, and every non-Classic format). */
 export const BOT_RECOVERY_ENABLED = false
 /**
- * Recovery after a knock, when BOT_RECOVERY_ENABLED. The bot always attempts
+ * Recovery after a knock, when botRecoveryEnabled(format). The bot always attempts
  * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
  * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
  * jump or aim wide. Steering accelerates toward the human glide speed instead

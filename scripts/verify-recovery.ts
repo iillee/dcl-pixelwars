@@ -13,7 +13,7 @@ import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock, KnockSpec } from '../src/shared/knocks'
 import {
-  BOT_GRAVITY, BOT_KNOCK_UNIT, BOT_RECOVERY_ENABLED, botJumpSpeed,
+  BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed, botRecoveryEnabled,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
 } from '../src/shared/pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP } from '../src/shared/botAnim'
@@ -89,11 +89,12 @@ function weakKnock(dx: number, dz: number): KnockSpec {
 }
 
 type Outcome = 'saved' | 'fell' | 'open'
-function run(spot: Spot, spec: KnockSpec, rng: () => number): {
+function run(spot: Spot, spec: KnockSpec, rng: () => number, enabled = false): {
   outcome: Outcome; jump: boolean; doubled: boolean; peak: number
   sawJump: boolean; sawDouble: boolean; sawGlide: boolean; sawFall: boolean
 } {
   const body = new BotBody({ x: spot.x, y: spot.y, z: spot.z }, rng)
+  body.recoveryEnabled = enabled
   body.knock(spec)
   let jump = false, doubled = false, peak = body.pos.y
   let sawJump = false, sawDouble = false, sawGlide = false, sawFall = false
@@ -120,16 +121,22 @@ const stream = (seq: number[]) => { let i = 0; return () => seq[Math.min(i++, se
 const perfect = () => stream([0, 0, 0.99, 0])
 const never = () => stream([1])
 
-if (!BOT_RECOVERY_ENABLED) {
+if (!botRecoveryEnabled('pvp')) fail('Classic (pvp) should allow recovery')
+for (const m of ['pvb', 'bases', 'prototype', 'balloon'] as const) {
+  if (botRecoveryEnabled(m)) fail(`${m} should not allow recovery`)
+}
+console.log('✓ recovery is Classic-only')
+
+{
   let found: Spot | null = null
   let weak: ReturnType<typeof run> | null = null
   let strong: ReturnType<typeof run> | null = null
   for (const s of spots) {
-    const w = run(s, weakKnock(s.dx, s.dz), perfect())
-    const g = run(s, lungeKnock(s.dx, s.dz), perfect())
+    const w = run(s, weakKnock(s.dx, s.dz), perfect(), false)
+    const g = run(s, lungeKnock(s.dx, s.dz), perfect(), false)
     if (w.outcome === 'fell' && g.outcome === 'fell') { found = s; weak = w; strong = g; break }
   }
-  if (!found || !weak || !strong) { console.error('✗ no lip where both knocks fall'); process.exit(1) }
+  if (!found || !weak || !strong) { console.error('✗ no lip where both knocks fall with recovery off'); process.exit(1) }
   console.log(`recovery off: weak ${weak.outcome} lunge ${strong.outcome} at (${found.x.toFixed(1)}, ${found.y.toFixed(1)}, ${found.z.toFixed(1)})`)
   if (weak.jump || weak.doubled || weak.sawGlide || weak.sawDouble || strong.sawGlide || strong.sawDouble) {
     fail('recovery off still jumped or opened the glider')
@@ -137,20 +144,19 @@ if (!BOT_RECOVERY_ENABLED) {
   if (!weak.sawFall || !strong.sawFall) fail('a falling knock should use the fall pose')
   let saved = 0
   for (let i = 0; i < 24; i++) {
-    if (run(found, lungeKnock(found.dx, found.dz), mulberry32(5000 + i)).outcome === 'saved') saved++
+    if (run(found, lungeKnock(found.dx, found.dz), mulberry32(5000 + i), false).outcome === 'saved') saved++
   }
   if (saved > 0) fail(`recovery off saved ${saved}/24 lunges`)
-  if (failed) process.exit(1)
-  console.log('✓ recovery is off: edge knocks fall, no jump or glider')
-  process.exit(0)
+  console.log('✓ recovery off: edge knocks fall, no jump or glider')
 }
+
 
 let spot: Spot | null = null
 let weakPerfect: ReturnType<typeof run> | null = null
 for (const s of spots) {
-  const got = run(s, weakKnock(s.dx, s.dz), perfect())
-  const off = run(s, weakKnock(s.dx, s.dz), never())
-  const lunged = run(s, lungeKnock(s.dx, s.dz), perfect())
+  const got = run(s, weakKnock(s.dx, s.dz), perfect(), true)
+  const off = run(s, weakKnock(s.dx, s.dz), never(), true)
+  const lunged = run(s, lungeKnock(s.dx, s.dz), perfect(), true)
   if (got.outcome === 'saved' && got.jump && off.outcome === 'fell' && lunged.outcome === 'fell') {
     spot = s
     weakPerfect = got
@@ -162,8 +168,8 @@ console.log(`lip approach (${spot.x.toFixed(1)}, ${spot.y.toFixed(1)}, ${spot.z.
 
 const weak = weakKnock(spot.dx, spot.dz)
 const strong = lungeKnock(spot.dx, spot.dz)
-const weakNever = run(spot, weak, never())
-const strongPerfect = run(spot, strong, perfect())
+const weakNever = run(spot, weak, never(), true)
+const strongPerfect = run(spot, strong, perfect(), true)
 console.log(`weak perfect: ${weakPerfect.outcome} jump=${weakPerfect.jump} double=${weakPerfect.doubled} peak +${(weakPerfect.peak - spot.y).toFixed(2)} m (${(WEAK_PUSH * BOT_KNOCK_UNIT).toFixed(1)} m/s)`)
 console.log(`weak never:   ${weakNever.outcome}`)
 console.log(`lunge perfect: ${strongPerfect.outcome}`)
@@ -183,7 +189,7 @@ if (strongPerfect.outcome !== 'fell') fail(`a full lunge should still fall when 
 const TRIALS = 48
 let saved = 0
 for (let i = 0; i < TRIALS; i++) {
-  const r = run(spot, weak, mulberry32(1000 + i))
+  const r = run(spot, weak, mulberry32(1000 + i), true)
   if (r.outcome === 'saved') saved++
   else if (r.outcome === 'open') fail(`trial ${i} did not resolve`)
 }
@@ -193,7 +199,7 @@ if (rate < 0.2 || rate > 0.8) fail(`expected some saves and some falls, got ${(r
 
 let strongSaved = 0
 for (let i = 0; i < 24; i++) {
-  if (run(spot, strong, mulberry32(5000 + i)).outcome === 'saved') strongSaved++
+  if (run(spot, strong, mulberry32(5000 + i), true).outcome === 'saved') strongSaved++
 }
 console.log(`full lunge, 24 seeded bots: ${strongSaved} saved`)
 if (strongSaved > 2) fail(`strong knocks were saved ${strongSaved}/24 times`)

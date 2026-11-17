@@ -38,6 +38,7 @@ import {
   BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount, BOT_LEAP_ROUTES,
+  botRecoveryEnabled, RoundFormat,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
@@ -103,6 +104,8 @@ export interface ManagerDeps {
   rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>, painted?: Array<{ id: string; team: number }>) => V3 | null
   /** One paint snapshot per tick, shared when several bots fall together. */
   paintedCells?: () => Array<{ id: string; team: number }>
+  /** Live round format: Classic (`pvp`) is the only mode that recovers tonight. */
+  format?: () => RoundFormat
 }
 
 let deps: ManagerDeps | null = null
@@ -437,6 +440,8 @@ export function tickBots(dtSec: number): void {
   // neighbors, matching the ~3x3 footprint human players apply via
   // paintTick. Knocked, falling or riding bots don't paint.
   const dtMs = dtSec * 1000
+  const recoverOn = botRecoveryEnabled(deps.format?.() ?? 'bases')
+  for (const b of bots) b.body.recoveryEnabled = recoverOn
   // Only a knocked body can cross the fall line this tick (botBody.ts).
   // Share one paint snapshot if several bots are in the air together.
   let paintedSnap: Array<{ id: string; team: number }> | undefined

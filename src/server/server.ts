@@ -204,6 +204,7 @@ export async function setupServer(): Promise<void> {
     },
     onBotHit: (id, human) => noteHit(`bot:${id}`, human),
     onSpawn: (id, team) => { botTeams.set(`bot:${id}`, team) },
+    format: () => roundFormat,
     economyOn: () => economyOn(),
     economyTank: (painter) => walletOf(painter),
     friendlyDepot: (team, from) => refillAtDepot() ? friendlyDepotCell(team, from) : nearestCuredCell(team, from),

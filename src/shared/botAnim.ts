@@ -13,3 +13,8 @@ export const BOT_ANIM_JUMP = 2
 export const BOT_ANIM_DOUBLE = 3
 export const BOT_ANIM_GLIDE = 4
 export const BOT_ANIM_FALL = 5
+
+/** Jump, double jump, or glide: the recovery glider should be visible. */
+export function botShowsGlider(an: number): boolean {
+  return an === BOT_ANIM_JUMP || an === BOT_ANIM_DOUBLE || an === BOT_ANIM_GLIDE
+}
