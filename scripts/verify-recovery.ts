@@ -49,6 +49,9 @@ const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta
 if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
   fail('Classic ghosts should play jump, double, and glide clips from ghost-recover.glb')
 }
+if (!visualSrc.includes('function syncGhostTag') || !visualSrc.includes('BillboardMode.BM_Y') || !visualSrc.includes("text: red ? 'RED' : 'BLUE'") || visualSrc.includes('paintPlate(root, team, id)')) {
+  fail('Classic ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
+}
 
 generateWithRetry(1)
 const tiles = getPlacedTilesInOrder()

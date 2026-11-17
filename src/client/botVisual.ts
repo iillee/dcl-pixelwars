@@ -31,9 +31,10 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
-  GltfContainer, LightSource, Animator,
+  GltfContainer, LightSource, Animator, TextShape, Billboard, BillboardMode,
+  MeshRenderer, Material,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
 import { registerBotLookup } from './knockback'
@@ -81,6 +82,12 @@ const GHOST_CLIP_DUR_S: Record<GhostClip, number> = {
 }
 const GHOST_SCALE = 1.2
 const GHOST_FLOAT = 1.0
+/** World metres above the ghost root (already floated) for the team plate. */
+const TAG_ABOVE_M = 2.35
+const TAG_W_M = 1.15
+const TAG_H_M = 0.42
+const TAG_D_M = 0.08
+const TAG_FONT = 2.6
 const LIGHT_INTENSITY = 250
 const LIGHT_RANGE = 8
 const RED_LIGHT = Color3.create(1.00, 0.25, 0.28)
@@ -141,6 +148,9 @@ interface BotVisual {
   team: number
   kind: VisualKind
   light: Entity | null
+  tag: Entity | null
+  tagPill: Entity | null
+  tagLabel: Entity | null
   glider: Entity | null
   gliderScale: number
   pose: number
@@ -256,6 +266,7 @@ function destroyBot(id: number): void {
   if (!rec) return
   if (rec.glider) engine.removeEntity(rec.glider)
   if (rec.light) engine.removeEntity(rec.light)
+  destroyGhostTag(rec)
   AvatarNametag.deleteFrom(rec.root)
   AvatarShape.deleteFrom(rec.root)
   Tween.deleteFrom(rec.root)
@@ -298,7 +309,6 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     light = engine.addEntity()
     Transform.create(light, { parent: root, position: Vector3.Zero() })
     paintLight(light, team)
-    paintPlate(root, team, id)
   } else {
     paintAvatar(root, team, id)
     holdWalker(root, pos)
@@ -310,6 +320,9 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     team,
     kind,
     light,
+    tag: null,
+    tagPill: null,
+    tagLabel: null,
     glider: null,
     gliderScale: 0,
     pose: 0,
@@ -353,7 +366,69 @@ function syncGhostAnim(rec: BotVisual): void {
   rec.clipUntil = GHOST_CLIP_LOOP[clip] ? 0 : rec.timeSec + GHOST_CLIP_DUR_S[clip]
 }
 
+function destroyGhostTag(rec: BotVisual): void {
+  if (rec.tagLabel) engine.removeEntity(rec.tagLabel)
+  if (rec.tagPill) engine.removeEntity(rec.tagPill)
+  if (rec.tag) engine.removeEntity(rec.tag)
+  rec.tag = null
+  rec.tagPill = null
+  rec.tagLabel = null
+}
+
+function tagMat(team: number) {
+  const c = rgb(team)
+  return {
+    diffuseColor: Color4.create(c.r, c.g, c.b, 1),
+    alphaTest: 0,
+    castShadows: false,
+  }
+}
+
+/** Billboarded RED/BLUE plate. AvatarNametag does not draw on a GltfContainer. */
+function syncGhostTag(rec: BotVisual, aboveY: number): void {
+  if (rec.kind !== 'ghost' || teamPlatesHidden()) {
+    destroyGhostTag(rec)
+    return
+  }
+  const red = rec.team === Team.Red
+  if (!rec.tag) {
+    const root = engine.addEntity()
+    Transform.create(root, { position: Vector3.create(rec.renderPos.x, aboveY, rec.renderPos.z) })
+    Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
+    const pill = engine.addEntity()
+    Transform.create(pill, { parent: root, position: Vector3.Zero(), scale: Vector3.create(TAG_W_M, TAG_H_M, TAG_D_M) })
+    MeshRenderer.setBox(pill)
+    Material.setBasicMaterial(pill, tagMat(rec.team))
+    const label = engine.addEntity()
+    Transform.create(label, { parent: root, position: Vector3.create(0, 0, TAG_D_M * 0.6) })
+    TextShape.create(label, {
+      text: red ? 'RED' : 'BLUE',
+      fontSize: TAG_FONT,
+      fontSrc: 'Lilita One',
+      textColor: Color4.create(1, 1, 1, 1),
+      outlineWidth: 0,
+      textWrapping: false,
+      width: TAG_W_M,
+      height: TAG_H_M,
+    })
+    rec.tag = root
+    rec.tagPill = pill
+    rec.tagLabel = label
+  }
+  const tf = Transform.getMutable(rec.tag)
+  tf.position = Vector3.create(rec.renderPos.x, aboveY, rec.renderPos.z)
+}
+
+function paintGhostTag(rec: BotVisual): void {
+  if (rec.tagPill) Material.setBasicMaterial(rec.tagPill, tagMat(rec.team))
+  if (rec.tagLabel) {
+    const ts = TextShape.getMutableOrNull(rec.tagLabel)
+    if (ts) ts.text = rec.team === Team.Red ? 'RED' : 'BLUE'
+  }
+}
+
 function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
+
 
   if (rec.kind !== 'ghost') {
     if (rec.glider) { engine.removeEntity(rec.glider); rec.glider = null; rec.gliderScale = 0 }
@@ -506,7 +581,8 @@ export function initBotVisual(): void {
       if (rec.team !== b.team) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
-          paintPlate(rec.root, b.team, rec.id)
+          rec.team = b.team
+          paintGhostTag(rec)
         } else {
           paintAvatar(rec.root, b.team, rec.id)
         }
@@ -625,6 +701,7 @@ export function initBotVisual(): void {
         )
         tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
         syncGhostAnim(rec)
+        syncGhostTag(rec, rec.renderPos.y + GHOST_FLOAT + bob + TAG_ABOVE_M)
       } else {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)
