@@ -57,12 +57,12 @@ export const MODE_PILL_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'ball
   balloon: '#4FD68C',
 }
 
-/** Title and subtitle ink. White on the saturated signs; dark ink on Paint Limit so it stays readable on yellow. */
+/** Title and subtitle ink. White on every sign, including Paint Limit. */
 export const MODE_PILL_TEXT_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', string> = {
   pvp: '#FFFFFF',
   pvb: '#FFFFFF',
   bases: '#FFFFFF',
-  prototype: '#3A2E00',
+  prototype: '#FFFFFF',
   balloon: '#FFFFFF',
 }
 

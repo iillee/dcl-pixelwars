@@ -49,8 +49,8 @@ if (MODE_PILL_HEX.pvp !== expectedHex.pvp || MODE_PILL_HEX.bases !== expectedHex
   console.error(`✗ lobby pill hexes should be Classic #FF7577, Base Charge #6A99FC, Paint Limit #FFE04A, Balloon Battle #4FD68C, got ${JSON.stringify(MODE_PILL_HEX)}`)
   process.exit(1)
 }
-if (MODE_PILL_TEXT_HEX.prototype !== '#3A2E00' || MODE_PILL_TEXT_HEX.pvp !== '#FFFFFF' || MODE_PILL_TEXT_HEX.bases !== '#FFFFFF' || MODE_PILL_TEXT_HEX.balloon !== '#FFFFFF' || MODE_PILL_TEXT_HEX.pvb !== '#FFFFFF') {
-  console.error(`✗ Paint Limit title ink should be #3A2E00 and the other signs white, got ${JSON.stringify(MODE_PILL_TEXT_HEX)}`)
+if (MODE_PILL_TEXT_HEX.prototype !== '#FFFFFF' || MODE_PILL_TEXT_HEX.pvp !== '#FFFFFF' || MODE_PILL_TEXT_HEX.bases !== '#FFFFFF' || MODE_PILL_TEXT_HEX.balloon !== '#FFFFFF' || MODE_PILL_TEXT_HEX.pvb !== '#FFFFFF') {
+  console.error(`✗ all four sign titles should be white, got ${JSON.stringify(MODE_PILL_TEXT_HEX)}`)
   process.exit(1)
 }
 for (const id of ['pvp', 'bases', 'prototype', 'balloon'] as const) {
@@ -504,7 +504,7 @@ if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') |
   process.exit(1)
 }
 if (!lobbySrc.includes('pillTextHex') || !lobbySrc.includes('Color4.fromHexString(pillTextHex(m.id))') || lobbySrc.split('textColor: ink').length - 1 < 2) {
-  console.error('✗ title and subtitle should use the per-mode pill text color, with dark ink on Paint Limit')
+  console.error('✗ title and subtitle should use the per-mode pill text color, white on every sign including Paint Limit')
   process.exit(1)
 }
 if (Math.abs(SIGN_LIP_PAD_W - 1.05) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825) > 1e-6 || !lobbySrc.includes('SIGN_W_M + SIGN_LIP_PAD_W') || !lobbySrc.includes('SIGN_H_M + SIGN_LIP_PAD_H')) {
