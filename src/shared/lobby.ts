@@ -57,6 +57,15 @@ export const MODE_PILL_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'ball
   balloon: '#4FD68C',
 }
 
+/** Title and subtitle ink. White on the saturated signs; dark ink on Paint Limit so it stays readable on yellow. */
+export const MODE_PILL_TEXT_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', string> = {
+  pvp: '#FFFFFF',
+  pvb: '#FFFFFF',
+  bases: '#FFFFFF',
+  prototype: '#3A2E00',
+  balloon: '#FFFFFF',
+}
+
 export const LOBBY_MODES: ModeDef[] = [
   { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
   { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: rgbFromHex(MODE_PILL_HEX.pvb) },
@@ -100,6 +109,9 @@ export const SIGN_PLATE_DEPTH_M = 0.7
  *  at the lip's 55% color — which is why Paint Limit looked mustard. */
 export const SIGN_LIP_Z = 0.18
 export const SIGN_LIP_DEPTH_M = 0.55
+/** Extra width and height of the dark rim vs the colored plate. 1.5× the first rim (0.7 / 0.55). */
+export const SIGN_LIP_PAD_W = 1.05
+export const SIGN_LIP_PAD_H = 0.825
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb` / `bases`. */
 export function modeTitle(id: string): string {
@@ -254,7 +266,7 @@ export function voteTintPose(
 /** Downward caret under the pill. Width is 12% of the pill; height is a short triangle. */
 /** Local Y of the vote-count chip, tucked just under the pill's bottom lip. */
 export function signBadgeY(): number {
-  const lipBottom = -(SIGN_H_M + 0.55) / 2
+  const lipBottom = -(SIGN_H_M + SIGN_LIP_PAD_H) / 2
   const chipH = 3.4
   return lipBottom - 0.5 - chipH / 2
 }

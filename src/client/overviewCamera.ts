@@ -33,6 +33,7 @@ import { isMobile } from '@dcl/sdk/platform'
 import { SCENE_SIZE, BASE_Y } from '../maze/generator'
 import { signZoomScale } from '../shared/lobby'
 import { IS_SKY, LEVEL_Y_OFFSET } from '../maze/level'
+import { isLobbyLayout } from '../maze/rebuild'
 import { playUiClick } from './audio'
 
 // MARK: Tuning
@@ -51,8 +52,9 @@ export const OV_FOV_DEG   = 24
  * lens while that camera stays active, so a step past the clamp switches to a
  * second camera (wideEntity) whose fov is written before it goes live.
  *
- * Mobile starts at the closest. Desktop starts at 29: one plus click reaches 7,
- * minus reaches 60, then 90. The table is latched when overview opens:
+ * Mobile starts at the closest. Desktop starts at 29 in a match: one plus click
+ * reaches 7, minus reaches 60, then 90. In the lobby, both start fully zoomed
+ * out (desktop 90, mobile 40). The table is latched when overview opens:
  * isMobile() resolves async, and a live re-read would compare a desktop scale
  * to the mobile max and disable minus.
  */
@@ -99,6 +101,8 @@ let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
  *  judge a desktop scale against the mobile max of 25 once detection
  *  resolves, and minus would disable with no click. */
 let zoomMobile = false
+/** Previous open was in the lobby, so a later match open should snap back to the game default. */
+let lastLobbyOpen = false
 /** Eased scale. Distance and fov come from this. Pitch stays OV_PITCH_DEG. */
 let viewScale = DESKTOP_DEFAULT_SCALE
 /** Lens used when the wanted throw is longer than the fixed-pitch clamp. */
@@ -237,13 +241,21 @@ function zoomTable(): readonly number[] {
   return zoomMobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
 }
 
-/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 29. */
-function useZoomTable(mobile: boolean, snapDefault: boolean): void {
+/** Opening in the lobby always uses the farthest step. A match uses the existing defaults. */
+function defaultZoomIndex(mobile: boolean, lobby: boolean): number {
+  const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
+  if (lobby) return table.length - 1
+  if (mobile) return 0
+  const i = table.indexOf(DESKTOP_DEFAULT_SCALE)
+  return i >= 0 ? i : 0
+}
+
+/** `snapDefault` on the first open, every lobby open, and every mobile open. Desktop keeps its in-match step. */
+function useZoomTable(mobile: boolean, snapDefault: boolean, lobby: boolean): void {
   zoomMobile = mobile
   const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
   if (snapDefault) {
-    const i = mobile ? 0 : table.indexOf(DESKTOP_DEFAULT_SCALE)
-    zoomIndex = i >= 0 ? i : 0
+    zoomIndex = defaultZoomIndex(mobile, lobby)
   } else if (zoomIndex < 0 || zoomIndex >= table.length) {
     zoomIndex = 0
   }
@@ -274,9 +286,12 @@ function setActive(on: boolean): void {
   active = on
   if (active) {
     const mobile = isMobile()
-    // First open picks the platform default. Mobile re-opens at its closest
-    // level. Desktop stays on the step it already had, which begins at 29.
-    useZoomTable(mobile, !scaleInit || mobile)
+    const lobby = isLobbyLayout()
+    // Lobby always opens fully zoomed out. After a lobby open, the next match
+    // open snaps back to the game default. Mobile re-opens at its closest
+    // in-match level. Desktop keeps its in-match step otherwise.
+    useZoomTable(mobile, lobby || !scaleInit || mobile || lastLobbyOpen, lobby)
+    lastLobbyOpen = lobby
     scaleInit = true
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) { focus.x = p.x; focus.y = Math.max(p.y, BASE_Y - 15); focus.z = p.z }

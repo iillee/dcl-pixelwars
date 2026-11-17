@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, MODE_PILL_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -47,6 +47,10 @@ type LiveMode = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
 
 function pillHex(id: ModeId): string {
   return MODE_PILL_HEX[id as LiveMode]
+}
+
+function pillTextHex(id: ModeId): string {
+  return MODE_PILL_TEXT_HEX[id as LiveMode]
 }
 
 function pillRgb(id: ModeId): Rgb {
@@ -114,16 +118,17 @@ function laySigns(): void {
     // fromHexString is /255 sRGB with alpha 1; same as Color4.create of those channels.
     // A previous 33% mix toward white is what made these look muted and greyish.
     const display = Color4.fromHexString(pillHex(m.id))
+    const ink = Color4.fromHexString(pillTextHex(m.id))
     const slab = plateMat(display)
     const lip = plateMat(Color4.create(display.r * 0.55, display.g * 0.55, display.b * 0.55, 1))
-    pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
+    pill(root, SIGN_W_M + SIGN_LIP_PAD_W, SIGN_H_M + SIGN_LIP_PAD_H, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
       text: modeTitle(m.id),
       fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
-      textColor: Color4.create(1, 1, 1, 1),
+      textColor: ink,
       outlineWidth: 0,
       textWrapping: false,
       width: SIGN_W_M - 4,
@@ -134,7 +139,7 @@ function laySigns(): void {
       text: modeSubtitle(m.id),
       fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
-      textColor: Color4.create(1, 1, 1, 1),
+      textColor: ink,
       outlineWidth: 0,
       textWrapping: false,
       width: 40,
