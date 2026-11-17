@@ -41,7 +41,7 @@ import { BALLOON_STYLE, BALLOON_REST_Y, BALLOON_SLOT_EASE_S, balloonRestSlots, b
 import { gamePhase } from './phase'
 import { isLobbyLayout } from '../maze/rebuild'
 import { isBalloonRound } from '../round'
-import { getBotRenderPositions } from './botVisual'
+import { GHOST_SCALE, getBotRenderPositions } from './botVisual'
 import { playBalloonPopSfx } from './audio'
 import { setMoveLock, getMoveLock } from './moveLock'
 import { isFallRescueActive } from './fallRescue'
@@ -89,6 +89,9 @@ const AIM_TAU = 0.16
  */
 const BACK_Y = 1.68
 const BACK_Z = 0.2
+/** Ghost root is scaled by GHOST_SCALE, so divide the human back offset to land on the upper back. */
+const BOT_BACK_Y = BACK_Y / GHOST_SCALE
+const BOT_BACK_Z = BACK_Z / GHOST_SCALE
 /** AAPT_POSITION - avatar root, not an animated bone. */
 const AAPT_POSITION = 0
 /** Height of the balloon centers above the back knot. ~1.43 m above a 1.8 m head. */
@@ -572,7 +575,7 @@ function attachRig(id: string, pose: Pose): { attach: Entity | null; knot: Entit
     }
     Transform.create(knot, {
       parent: host,
-      position: Vector3.create(0, BACK_Y, -BACK_Z),
+      position: Vector3.create(0, BOT_BACK_Y, -BOT_BACK_Z),
     })
     return { attach: null, knot }
   }

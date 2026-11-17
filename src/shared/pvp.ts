@@ -514,18 +514,19 @@ export function botJumpSpeed(heightM: number): number {
 }
 
 /**
- * Edge recovery after a knock. On only in these modes (Classic / `pvp` for now).
- * Everywhere else the bot keeps the knock and just falls; fallTriggerY (the
- * visible sea, or the pre-water line if the sea is off) starts the same cloud
- * rescue a human gets. BotBody.recoveryEnabled is set from this each tick.
+ * Edge recovery after a knock. On in every live mode (Classic, Base Charge,
+ * Paint Limit, Balloon Battle, and Bot Invasion). A bot that makes it back
+ * never starts the cloud trip; one that still crosses fallTriggerY gets the
+ * same cloud rescue a human does. BotBody.recoveryEnabled is set from this
+ * each tick.
  */
-export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp'])
+export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp', 'pvb', 'bases', 'prototype', 'balloon'])
 
 export function botRecoveryEnabled(format: RoundFormat): boolean {
   return BOT_RECOVERY_MODES.has(format)
 }
 
-/** Default for a body with no mode set (tests, and every non-Classic format). */
+/** Default for a body with no mode set (unit tests that do not pass a format). */
 export const BOT_RECOVERY_ENABLED = false
 /**
  * Recovery after a knock, when botRecoveryEnabled(format). The bot always attempts

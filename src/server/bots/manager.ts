@@ -104,7 +104,7 @@ export interface ManagerDeps {
   rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>, painted?: Array<{ id: string; team: number }>) => V3 | null
   /** One paint snapshot per tick, shared when several bots fall together. */
   paintedCells?: () => Array<{ id: string; team: number }>
-  /** Live round format: Classic (`pvp`) is the only mode that recovers tonight. */
+  /** Live round format: recovery (jump / double / glide-home) is on in every mode. */
   format?: () => RoundFormat
 }
 

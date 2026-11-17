@@ -48,10 +48,13 @@ if (botShowsGlider(BOT_ANIM_JUMP) || botShowsGlider(BOT_ANIM_DOUBLE) || botShows
 
 const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
 if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
-  fail('Classic ghosts should play jump, double, and glide clips from ghost-recover.glb')
+  fail('ghosts should play jump, double, and glide clips from ghost-recover.glb')
 }
 if (!visualSrc.includes('function syncGhostTag') || !visualSrc.includes('BillboardMode.BM_Y') || !visualSrc.includes("text: red ? 'RED' : 'BLUE'") || visualSrc.includes('paintPlate(root, team, id)')) {
-  fail('Classic ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
+  fail('team-mode ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
+}
+if (!visualSrc.includes('hideGhostPlates') || !visualSrc.includes("roundFormat === 'balloon'") || !visualSrc.includes('NEUTRAL_LIGHT')) {
+  fail('Balloon Battle ghosts should hide the team plate and use a neutral light')
 }
 if (!visualSrc.includes('rescueAllowsSnapshotInterp') || !visualSrc.includes('snapsAfterRescueRelease') || !visualSrc.includes('else if (rec.riding)')) {
   fail('a released rescue should not replay delayed descent snapshots')
@@ -150,11 +153,10 @@ const stream = (seq: number[]) => { let i = 0; return () => seq[Math.min(i++, se
 const perfect = () => stream([0, 0, 0.99, 0])
 const never = () => stream([1])
 
-if (!botRecoveryEnabled('pvp')) fail('Classic (pvp) should allow recovery')
-for (const m of ['pvb', 'bases', 'prototype', 'balloon'] as const) {
-  if (botRecoveryEnabled(m)) fail(`${m} should not allow recovery`)
+for (const m of ['pvp', 'pvb', 'bases', 'prototype', 'balloon'] as const) {
+  if (!botRecoveryEnabled(m)) fail(`${m} should allow recovery`)
 }
-console.log('✓ recovery is Classic-only')
+console.log('✓ recovery is on in every live mode')
 
 {
   let found: Spot | null = null

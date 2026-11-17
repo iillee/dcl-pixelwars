@@ -208,8 +208,11 @@ const bots = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url)
 if (!nametags.includes("format === 'balloon'") || !nametags.includes('balloonMode') || !nametags.includes("events.on('round:reset'") || !nametags.includes("events.on('round:clock'")) {
   fail('Balloon Battle should clear team nametags at round start, including a late join')
 }
-if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('AvatarNametag.deleteFrom')) {
+if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('AvatarNametag.deleteFrom') || !bots.includes('hideGhostPlates') || !bots.includes("roundFormat === 'balloon'")) {
   fail('Balloon Battle should not put RED/BLUE nametag plates on players or bots')
+}
+if (!client.includes('BOT_BACK_Y') || !client.includes('BOT_BACK_Z') || !client.includes('GHOST_SCALE') || !client.includes('parent: host')) {
+  fail('bot balloons should parent to the ghost visual and sit on its upper back after scale')
 }
 
 

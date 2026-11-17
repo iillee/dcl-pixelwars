@@ -1,13 +1,15 @@
 /**
  * botVisual.ts — client-side bot renderer.
  *
- * Classic (`pvp`) draws the original Aug 2026 ghost mesh (d86d6fe) as a
- * GltfContainer, team-lit, with official DCL jump / double-jump / glide
- * clips baked into ghost-recover.glb. The glider pops out only while gliding,
- * and the ghost raises its arms only in that glide clip.
- * Every other mode keeps the humanoid AvatarShape. botPositions is smoothed
- * with per-frame lerp, velocity dead-reckoning, and snapshot interpolation
- * (long enough to cover a hosted ~530 ms tick).
+ * Every live mode draws the original Aug 2026 ghost mesh (d86d6fe) as a
+ * GltfContainer, with official DCL jump / double-jump / glide clips baked
+ * into ghost-recover.glb. The glider pops out only while gliding, and the
+ * ghost raises its arms only in that glide clip. Classic, Base Charge, and
+ * Paint Limit get a team light and a billboarded RED/BLUE plate; Balloon
+ * Battle is FFA so the light is neutral and the plate stays hidden.
+ * The AvatarShape path remains as a fallback if recovery is off for a format.
+ * botPositions is smoothed with per-frame lerp, velocity dead-reckoning, and
+ * snapshot interpolation (long enough to cover a hosted ~530 ms tick).
  *
  * The lerp target is the feet. A same-point Tween.Move is refreshed every
  * frame on humanoid bots so the NPC's built-in walker (about 4 m/s toward
@@ -81,7 +83,8 @@ const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
 const GHOST_CLIP_DUR_S: Record<GhostClip, number> = {
   idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667,
 }
-const GHOST_SCALE = 1.2
+/** Uniform scale of the ghost mesh. Balloon knots divide by this so the tie stays on the upper back. */
+export const GHOST_SCALE = 1.2
 const GHOST_FLOAT = 1.0
 /** World metres above the ghost root (already floated) for the team plate. */
 const TAG_ABOVE_M = 2.35
@@ -93,6 +96,8 @@ const LIGHT_INTENSITY = 250
 const LIGHT_RANGE = 8
 const RED_LIGHT = Color3.create(1.00, 0.25, 0.28)
 const BLUE_LIGHT = Color3.create(0.30, 0.55, 1.00)
+/** Soft white point light in Balloon Battle, where there are no teams. */
+const NEUTRAL_LIGHT = Color3.create(0.92, 0.94, 1.00)
 const BOB_AMPLITUDE = 0.25
 const BOB_HZ = 0.5
 const DRIFT_AMPLITUDE = 0.15
@@ -206,7 +211,12 @@ function rgb(team: number): Color3 {
   return Color3.create(c.r, c.g, c.b)
 }
 
+function hideGhostPlates(): boolean {
+  return roundFormat === 'balloon' || teamPlatesHidden()
+}
+
 function lightColor(team: number): Color3 {
+  if (hideGhostPlates()) return NEUTRAL_LIGHT
   return team === Team.Red ? RED_LIGHT : BLUE_LIGHT
 }
 
@@ -387,7 +397,7 @@ function tagMat(team: number) {
 
 /** Billboarded RED/BLUE plate. AvatarNametag does not draw on a GltfContainer. */
 function syncGhostTag(rec: BotVisual, aboveY: number): void {
-  if (rec.kind !== 'ghost' || teamPlatesHidden()) {
+  if (rec.kind !== 'ghost' || hideGhostPlates()) {
     destroyGhostTag(rec)
     return
   }
