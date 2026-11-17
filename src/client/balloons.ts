@@ -36,7 +36,7 @@ import {
 import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { getPlayer } from '@dcl/sdk/players'
 import { events } from '../shared/events'
-import { BALLOON_STYLE, balloonsLive } from '../shared/balloon'
+import { BALLOON_STYLE, BALLOON_REST_Y, BALLOON_SLOT_EASE_S, balloonRestSlots, balloonsLive } from '../shared/balloon'
 import { gamePhase } from './phase'
 import { isLobbyLayout } from '../maze/rebuild'
 import { isBalloonRound } from '../round'
@@ -89,7 +89,7 @@ const BACK_Z = 0.2
 /** AAPT_POSITION - avatar root, not an animated bone. */
 const AAPT_POSITION = 0
 /** Height of the balloon centers above the back knot. ~1.43 m above a 1.8 m head. */
-const REST_Y = 1.85
+const REST_Y = BALLOON_REST_Y
 /** Slow idle bob: period 3.2 s, small amplitude. */
 const BOB_PERIOD = 3.2
 const BOB_OMEGA = (Math.PI * 2) / BOB_PERIOD
@@ -116,12 +116,6 @@ const STRING_SAG = 0.14
 /** Midpoint trails the balloon so the string bends as it moves. */
 const STRING_LAG_TAU = 0.16
 
-/** Rest slots in knot-local space, fanned up and slightly back so the larger spheres do not overlap. */
-const SLOTS: Vec[] = [
-  { x: -0.58, y: REST_Y, z: -0.16 },
-  { x: 0, y: REST_Y, z: -0.5 },
-  { x: 0.58, y: REST_Y, z: -0.16 },
-]
 
 type Balloon = {
   i: number
@@ -130,6 +124,11 @@ type Balloon = {
   segs: Entity[]
   pos: Vec
   vel: Vec
+  /** Eased knot-local rest, before idle bob and sway. */
+  home: Vec
+  fromHome: Vec
+  toHome: Vec
+  ease: number
   /** Lagged catenary mid. Reused every frame; no per-tick allocations. */
   lagMid: Vec
   lagReady: boolean
@@ -217,8 +216,45 @@ function backAnchor(pose: Pose): Vec {
   return v(pose.feet.x - f.x * BACK_Z, pose.feet.y + BACK_Y, pose.feet.z - f.z * BACK_Z)
 }
 
-function restLocal(i: number, t: number, sway: number): Vec {
-  const s = SLOTS[i % SLOTS.length]
+function lerpHome(a: Vec, b: Vec, t: number): Vec {
+  return v(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t)
+}
+
+function slotAt(i: number, n: number): Vec {
+  const slots = balloonRestSlots(n)
+  return slots[Math.min(i, Math.max(slots.length - 1, 0))] ?? { x: 0, y: REST_Y, z: -0.33 }
+}
+
+/** After a count change, aim each leftover balloon at a balanced slot for the new count. */
+function rehome(c: Cluster, instant: boolean): void {
+  const slots = balloonRestSlots(c.balloons.length)
+  for (let i = 0; i < c.balloons.length; i++) {
+    const b = c.balloons[i]
+    const to = slots[i]
+    b.i = i
+    if (instant) {
+      b.home = { ...to }
+      b.fromHome = { ...to }
+      b.toHome = { ...to }
+      b.ease = 1
+    } else {
+      b.fromHome = { ...b.home }
+      b.toHome = { ...to }
+      b.ease = 0
+    }
+  }
+}
+
+function tickHome(b: Balloon, dt: number): void {
+  if (b.ease >= 1) return
+  b.ease = Math.min(1, b.ease + dt / BALLOON_SLOT_EASE_S)
+  const t = b.ease * b.ease * (3 - 2 * b.ease)
+  b.home = lerpHome(b.fromHome, b.toHome, t)
+}
+
+function restLocal(b: Balloon, t: number, sway: number): Vec {
+  const s = b.home
+  const i = b.i
   return v(
     s.x + Math.sin(t * SWAY_OMEGA + i * 1.9) * sway,
     s.y + Math.sin(t * BOB_OMEGA + i * 1.7) * BOB,
@@ -469,8 +505,10 @@ function makeStringSegs(parent: Entity | null): Entity[] {
 function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
   const root = makeBalloon(parent, at)
   const segs = makeStringSegs(parent)
+  const home = slotAt(i, i + 1)
   return {
     i, root, ball: root, segs, pos: { ...at }, vel: v(0, 0, 0),
+    home: { ...home }, fromHome: { ...home }, toHome: { ...home }, ease: 1,
     lagMid: { x: at.x * 0.5, y: at.y * 0.5 - STRING_SAG, z: at.z * 0.5 },
     lagReady: false,
     aim: { x: 0, y: -1, z: 0 },
@@ -797,6 +835,7 @@ function applyPop(id: string, n: number): void {
       removeEntityWithChildren(engine, gone.root)
       dropSegs(gone)
     }
+    if (c.balloons.length > 0) rehome(c, false)
   }
   if (n <= 0) dropCluster(key)
   if (key === localId() && n <= 0 && was > 0) localOut = true
@@ -819,9 +858,11 @@ function syncClusters(dt: number): void {
     const c = ensureCluster(id, raw)
     if (!c) continue
     if (c.style === 'attached' && !c.knot) continue
+    const before = c.balloons.length
     while (c.balloons.length < n) {
       const i = c.balloons.length
-      const rest = restLocal(i, clock, c.style === 'trail' ? TRAIL_SWAY : SWAY)
+      const home = slotAt(i, n)
+      const rest = v(home.x, home.y, home.z)
       const at = c.style === 'trail' ? (() => {
         const knot = backAnchor(raw)
         const w = rotateYaw(rest, raw.yawDeg)
@@ -837,17 +878,20 @@ function syncClusters(dt: number): void {
       }
     }
     c.n = n
+    if (c.balloons.length !== before) rehome(c, c.balloons.length > before)
     if (c.style === 'attached') {
       // The attach/parent drives the knot. Do not rewrite its offset.
       const mot = stepMotion(c, raw, step)
       for (const b of c.balloons) {
-        jiggle(b, restLocal(b.i, clock, SWAY), mot.acc, mot.dYaw, raw.yawDeg, step)
+        tickHome(b, step)
+        jiggle(b, restLocal(b, clock, SWAY), mot.acc, mot.dYaw, raw.yawDeg, step)
         placeAttachedBalloon(b, step)
       }
     } else {
       const knot = backAnchor(raw)
       for (const b of c.balloons) {
-        const rest = restLocal(b.i, clock, TRAIL_SWAY)
+        tickHome(b, step)
+        const rest = restLocal(b, clock, TRAIL_SWAY)
         const w = rotateYaw(rest, raw.yawDeg)
         placeTrailBalloon(b, v(knot.x + w.x, knot.y + w.y, knot.z + w.z), knot, step)
       }

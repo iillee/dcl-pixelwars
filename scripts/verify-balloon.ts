@@ -3,7 +3,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  BALLOON_START, balloonOf, balloonTimeout, dropParticipant, lastStanding,
+  BALLOON_REST_Y, BALLOON_SLOT_EASE_S, BALLOON_START, balloonOf, balloonRestSlots, balloonTimeout, dropParticipant, lastStanding,
   balloonsLive, livingIds, paintAllowed, popBalloon, startingBalloons,
 } from '../src/shared/balloon'
 
@@ -107,7 +107,37 @@ if (balloonsLive('match', 'pvp') !== false || balloonsLive('match', 'pvb') !== f
   fail('other modes must not spawn Balloon Battle rigs')
 }
 
+
+const three = balloonRestSlots(3)
+if (three.length !== 3 || three[0].x !== -0.58 || three[1].x !== 0 || three[2].x !== 0.58 || three[0].z !== -0.16 || three[1].z !== -0.5 || three[2].z !== -0.16) {
+  fail(`3 balloons should keep the original fan, got ${JSON.stringify(three)}`)
+}
+if (three.some(s => s.y !== BALLOON_REST_Y)) fail('rest slots should sit at BALLOON_REST_Y')
+const pair = balloonRestSlots(2)
+if (pair.length !== 2 || pair[0].x !== -pair[1].x || pair[0].x >= 0 || pair[0].z !== pair[1].z || pair[0].x === 0) {
+  fail(`2 balloons should be a symmetric pair around the midline, got ${JSON.stringify(pair)}`)
+}
+const one = balloonRestSlots(1)
+if (one.length !== 1 || one[0].x !== 0 || one[0].z >= 0) {
+  fail(`1 balloon should sit centered behind the player, got ${JSON.stringify(one)}`)
+}
+if (balloonRestSlots(0).length !== 0) fail('0 balloons should have no rest slots')
+if (BALLOON_SLOT_EASE_S < 0.3 || BALLOON_SLOT_EASE_S > 0.5) {
+  fail(`leftover balloons should ease into new slots in 0.3–0.5 s, got ${BALLOON_SLOT_EASE_S}`)
+}
+
 const client = readFileSync(new URL('../src/client/balloons.ts', import.meta.url), 'utf8')
+
+if (!client.includes('balloonRestSlots') || !client.includes('function rehome') || !client.includes('tickHome') || !client.includes('BALLOON_SLOT_EASE_S')) {
+  fail('leftover balloons must ease into balloonRestSlots for the live count, not keep their original fan slots')
+}
+if (client.includes('const SLOTS:') || client.includes('SLOTS[i')) {
+  fail('client rest positions must come from the live count, not a fixed 3-slot fan')
+}
+if (!client.includes('rehome(c, false)') || !client.includes('tickHome(b, step)')) {
+  fail('pops must re-center the leftover balloons, and the ease must run every tick')
+}
+
 if (!client.includes('balloonsLive') || !client.includes('teardownBalloons')) {
   fail('the client must use balloonsLive and teardownBalloons to drop rigs when the match ends')
 }
@@ -182,4 +212,4 @@ if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden')
   fail('Balloon Battle should not put RED/BLUE nametag plates on players or bots')
 }
 
-console.log('✓ balloon start, pop, eliminate, last standing, and no paint')
+console.log('✓ balloon start, pop, eliminate, last standing, re-center slots, and no paint')

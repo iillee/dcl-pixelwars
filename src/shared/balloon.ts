@@ -109,3 +109,31 @@ export function dropParticipant(counts: BalloonCounts, id: string): BalloonCount
   next[key] = 0
   return next
 }
+
+/** Height of a balloon's rest center above the back knot. */
+export const BALLOON_REST_Y = 1.85
+/** Seconds for leftover balloons to ease into their new rest slots after a pop. */
+export const BALLOON_SLOT_EASE_S = 0.4
+
+/**
+ * Knot-local rest positions for the live balloon count.
+ * 3 keeps the original fanned cluster; 2 is a centered side-by-side pair;
+ * 1 sits on the midline. Every client uses this so the cluster stays balanced.
+ */
+export function balloonRestSlots(n: number): { x: number; y: number; z: number }[] {
+  const y = BALLOON_REST_Y
+  if (n <= 0) return []
+  if (n === 1) return [{ x: 0, y, z: -0.33 }]
+  if (n === 2) {
+    return [
+      { x: -0.4, y, z: -0.28 },
+      { x: 0.4, y, z: -0.28 },
+    ]
+  }
+  return [
+    { x: -0.58, y, z: -0.16 },
+    { x: 0, y, z: -0.5 },
+    { x: 0.58, y, z: -0.16 },
+  ]
+}
+
