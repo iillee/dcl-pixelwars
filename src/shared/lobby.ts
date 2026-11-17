@@ -239,8 +239,9 @@ export function signBadgeY(): number {
   return lipBottom - 0.5 - chipH / 2
 }
 
-/** Top HUD line. Seconds live in the big number under the pill, not in this text. */
-export function hudVoteHeadline(hasVote: boolean): string {
+/** Top HUD line. When the vote countdown is running, this is STARTING IN N. */
+export function hudVoteHeadline(hasVote: boolean, leftSecs = 0): string {
+  if (leftSecs > 0) return `STARTING IN ${leftSecs}`
   return hasVote ? 'STARTING SOON' : 'CHOOSE A GAME MODE'
 }
 

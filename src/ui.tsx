@@ -4,7 +4,7 @@ import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
 import { PAINT_CAPACITY, PAINT_REFILL_MODE } from "./shared/territory"
-import { hudClockText, hudVoteCountdown } from "./client/lobby"
+import { hudClockText } from "./client/lobby"
 import { lagHudLine, lagHudOn } from "./client/lagHud"
 import { inLobby } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, getFormatSplash, nextRoundBlurb, isBalloonRound, isBasesRound } from "./round"
@@ -562,7 +562,6 @@ export const uiMenu = () => (
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
-      const voteSecs = hudVoteCountdown()
       const lobbyPillW = 520
       return (
         <UiEntity
@@ -680,7 +679,6 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             )}
-            {voteSecs !== '' ? <Label value={voteSecs} fontSize={78} color={Color4.create(0.08, 0.09, 0.12, 1)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 200, height: 86, margin: { top: 2 } }} /> : null}
             {/* Territory bar: red from the left, blue from the right, white = unpainted. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
             {lobby || isBalloonRound() ? null : isBasesRound() ? (
               getSummaryProgress() >= 0 ? <UiEntity uiTransform={{ width: chargeHudW(), height: isMobile() ? 58 : 66, margin: { top: 6 } }} /> : <BasesChargeHud />

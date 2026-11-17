@@ -350,14 +350,10 @@ export function hudClockText(matchSecs: number): string {
     return `${m}:${String(s).padStart(2, '0')}`
   }
   if (phase === 'summary') return 'END'
-  if (phase === 'lobby' || phase === 'idle') return hudVoteHeadline(myVote() !== '')
+  if (phase === 'lobby' || phase === 'idle') {
+    const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteRemainingMs() / 1000)) : 0
+    return hudVoteHeadline(myVote() !== '', left)
+  }
   return 'VOTE'
-}
-
-/** Big seconds under the vote pill. Empty unless a vote countdown is running. */
-export function hudVoteCountdown(): string {
-  if (gamePhase() !== 'lobby') return ''
-  const left = Math.max(0, Math.ceil(voteRemainingMs() / 1000))
-  return left > 0 ? String(left) : ''
 }
 

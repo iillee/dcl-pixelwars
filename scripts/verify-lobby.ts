@@ -261,8 +261,8 @@ if (LOBBY_VOTE_MS !== 10_000) {
   console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
-if (hudVoteHeadline(false) !== 'CHOOSE A GAME MODE' || hudVoteHeadline(true) !== 'STARTING SOON' || /\d/.test(hudVoteHeadline(true))) {
-  console.error(`✗ vote pill copy should instruct, without repeating the seconds (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)})`)
+if (hudVoteHeadline(false) !== 'CHOOSE A GAME MODE' || hudVoteHeadline(true) !== 'STARTING SOON' || hudVoteHeadline(false, 5) !== 'STARTING IN 5' || hudVoteHeadline(true, 10) !== 'STARTING IN 10') {
+  console.error(`✗ the top lobby line should read CHOOSE A GAME MODE, then STARTING IN N when the countdown is running (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)} / ${hudVoteHeadline(true, 5)})`)
   process.exit(1)
 }
 if (PVB_RATIO !== 2 || pvbBotCount(1) !== 2 || pvbBotCount(2) !== 4 || pvbBotCount(7) !== 14 || pvbBotCount(8) !== PVB_BOT_MAX || pvbBotCount(0) !== 0) {
@@ -411,8 +411,12 @@ if (lobbySrc.includes('SECS_FONT') || lobbySrc.includes('`${left}s`')) {
   process.exit(1)
 }
 const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
-if (!uiSrc.includes('hudVoteCountdown()')) {
-  console.error('✗ the countdown seconds should sit under the vote pill')
+if (uiSrc.includes('hudVoteCountdown') || uiSrc.includes('voteSecs') || uiSrc.includes('fontSize={78}')) {
+  console.error('✗ the lobby countdown should live in the top headline, not as a second line under the pill')
+  process.exit(1)
+}
+if (!lobbySrc.includes('STARTING IN') && !readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('STARTING IN')) {
+  console.error('✗ the top lobby line should show STARTING IN N during the vote countdown')
   process.exit(1)
 }
 if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
