@@ -476,6 +476,12 @@ if (
   console.error('✗ every activation tile should have an unlit black frame on all four sides')
   process.exit(1)
 }
+const frameW = Number((lobbySrc.match(/const TILE_FRAME_M = ([0-9.]+)/) || [])[1])
+const frameH = Number((lobbySrc.match(/const TILE_FRAME_H = ([0-9.]+)/) || [])[1])
+if (!(frameW > 0) || frameW > 0.1 || !(frameH > 0) || frameH > 0.04) {
+  console.error(`✗ tile frames should be a thin low bar (about 0.07 × 0.024), got ${frameW} × ${frameH}`)
+  process.exit(1)
+}
 const tickTintsFn = (lobbySrc.match(/function tickTints[\s\S]*?^function /m) || [''])[0]
 if (tickTintsFn.includes('layTileFrame') || tickTintsFn.includes('TILE_FRAME') || tickTintsFn.includes('frameRoot')) {
   console.error('✗ the tile frame should stay visible, not be scaled away with the vote tint')
@@ -510,6 +516,10 @@ if (signZoomScale(500) > SIGN_ZOOM_MAX + 1e-6 || signZoomScale(500) < SIGN_ZOOM_
 const face = signFaceZ()
 const plateNear = SIGN_CAMERA_AXIS * (SIGN_PLATE_DEPTH_M / 2)
 const lipNear = SIGN_LIP_Z + SIGN_CAMERA_AXIS * (SIGN_LIP_DEPTH_M / 2)
+if ((lipNear - plateNear) * SIGN_CAMERA_AXIS >= -1e-6) {
+  console.error('✗ the dark lip covers the colored plate; it must sit behind so the true hex shows')
+  process.exit(1)
+}
 const slabNear = SIGN_CAMERA_AXIS < 0 ? Math.min(plateNear, lipNear) : Math.max(plateNear, lipNear)
 const inFront = (face - slabNear) * SIGN_CAMERA_AXIS
 if (inFront < 0.1) {

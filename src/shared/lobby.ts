@@ -94,8 +94,11 @@ export const SIGN_ZOOM_MAX = 1
  */
 export const SIGN_CAMERA_AXIS = -1
 export const SIGN_PLATE_DEPTH_M = 0.7
-/** Darker lip, shifted toward the camera so it reads as a rim. */
-export const SIGN_LIP_Z = -0.18
+/** Darker lip, shifted behind the plate so only a rim shows.
+ *  The lip is a full solid pill, slightly larger than the plate. If it sits
+ *  toward the camera (negative Z), it covers the plate and the sign renders
+ *  at the lip's 55% color — which is why Paint Limit looked mustard. */
+export const SIGN_LIP_Z = 0.18
 export const SIGN_LIP_DEPTH_M = 0.55
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb` / `bases`. */
