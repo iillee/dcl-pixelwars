@@ -1,7 +1,7 @@
 /**
  * BASES connected-territory rules. Run: npx tsx scripts/verify-bases.ts
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   accrueProgress, adoptConnected, baseThresholdVerdict, baseTimeoutVerdict, basesOn,
   connectedCells, GROWTH_PER_CELL_PER_SEC, VICTORY_PROGRESS,
@@ -221,6 +221,21 @@ if (!paint.includes('setPaintConnect') || !paint.includes('paintConnect?.(')) {
 const beams = readFileSync(new URL('../src/client/baseBeams.ts', import.meta.url), 'utf8')
 if (!beams.includes('adoptConnected') || !beams.includes('noteBasePaint') || !beams.includes('setPaintConnect(noteBasePaint)')) {
   fail('the client should incrementally attach paint that touches the connected network')
+}
+if (!existsSync(new URL('../assets/images/beacon-gradient.png', import.meta.url)) || !existsSync(new URL('../assets/images/beacon-alpha.png', import.meta.url))) {
+  fail('BASES should ship the Flagtag beacon gradient and alpha textures')
+}
+if (!beams.includes('assets/images/beacon-gradient.png') || !beams.includes('assets/images/beacon-alpha.png') || !beams.includes('BillboardMode.BM_Y') || !beams.includes('MeshRenderer.setPlane') || !beams.includes('INNER_WIDTH') || !beams.includes('OUTER_WIDTH')) {
+  fail('BASES charge pillars should be Flagtag-style inner/outer Y-billboard beacons')
+}
+if (!beams.includes('SIZE_EASE_S') || !beams.includes('progress / charge.threshold') || !beams.includes('MAX_H = 110') || !beams.includes('MIN_H = 8')) {
+  fail('beacon height and size should ease with charge from a short stub up to Flagtag height')
+}
+if (!beams.includes("events.on('base:win'") || !beams.includes('startWave') || !beams.includes('tickWave')) {
+  fail('the victory shockwave should still play when a team fills its base')
+}
+if (!beams.includes('TEAM_RGB[team]') || !beams.includes('TEAM_RGB[wave.team]')) {
+  fail('beacons and the shockwave should use the team colors (red #FF7577, blue #6A99FC)')
 }
 const ui = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
 if (!ui.includes('function BasesChargeHud') || !ui.includes('FILL THE BASE') || !ui.includes('+${rate}/s')) {

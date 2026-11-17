@@ -1,9 +1,10 @@
 /**
- * BASES visuals: a team-colored charge beam at each base, a muted look
- * for disconnected paint, and a victory shockwave. No collision.
+ * BASES visuals: Flagtag-style team beacons at each base (inner/outer
+ * Y-billboard planes, gradient + alpha textures), a muted look for
+ * disconnected paint, and a victory shockwave. No collision.
  */
-import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
-import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
+import { Billboard, BillboardMode, engine, Entity, Material, MaterialTransparencyMode, MeshRenderer, Transform } from '@dcl/sdk/ecs'
+import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { adoptConnected, basesOn, connectedCells, GROWTH_PER_CELL_PER_SEC, VICTORY_PROGRESS } from '../shared/bases'
 import { baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder } from '../maze/generator'
@@ -30,14 +31,28 @@ const emptyCharge = (): Charge => ({
 let charge = emptyCharge()
 let live = false
 let graph: WalkableGraph | null = null
-const beams: { 1: Entity | null; 2: Entity | null } = { 1: null, 2: null }
+type Beacon = { inner: Entity; outer: Entity; shown: number }
+const beams: { 1: Beacon | null; 2: Beacon | null } = { 1: null, 2: null }
 let wave: { ent: Entity; t: number; team: 1 | 2 } | null = null
+let pulseTime = 0
 const WAVE_S = 1.2
 const WAVE_R = 420
+/** Height eases from a short stub to Flagtag's 110 m pillar as charge fills. */
 const MIN_H = 8
-const MAX_H = 70
-const MIN_W = 1.8
-const MAX_W = 3.4
+const MAX_H = 110
+const INNER_WIDTH = 0.5
+const OUTER_WIDTH = 2.0
+const MIN_SIZE = 0.75
+const MAX_SIZE = 1.0
+const INNER_ALPHA = 0.7
+const OUTER_ALPHA = 0.35
+const EMISSIVE_INNER = 3.0
+const EMISSIVE_OUTER = 2.0
+const PULSE_SPEED = 2.5
+const PULSE_RANGE = 0.15
+const SIZE_EASE_S = 0.28
+const GRADIENT_TEX = 'assets/images/beacon-gradient.png'
+const ALPHA_TEX = 'assets/images/beacon-alpha.png'
 
 export function baseCharge(): Charge { return charge }
 const cached: { 1: Set<string>; 2: Set<string> } = { 1: new Set(), 2: new Set() }
@@ -108,52 +123,72 @@ function applyState(next: Partial<Charge>): void {
 
 function dropBeams(): void {
   for (const team of [1, 2] as const) {
-    if (beams[team]) { engine.removeEntity(beams[team]!); beams[team] = null }
+    const rec = beams[team]
+    if (!rec) continue
+    engine.removeEntity(rec.inner)
+    engine.removeEntity(rec.outer)
+    beams[team] = null
   }
 }
 
-function beamMat(team: 1 | 2, pulse: number) {
+function beaconMat(team: 1 | 2, inner: boolean) {
   const c = TEAM_RGB[team]
-  const glow = 0.35 + 0.3 * pulse
+  const a = inner ? INNER_ALPHA : OUTER_ALPHA
   return {
-    albedoColor: Color4.create(c.r, c.g, c.b, 0.55),
-    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: glow,
-    roughness: 1,
-    metallic: 0,
-    specularIntensity: 0,
+    texture: Material.Texture.Common({ src: GRADIENT_TEX }),
+    alphaTexture: Material.Texture.Common({ src: ALPHA_TEX }),
+    albedoColor: Color4.create(c.r, c.g, c.b, a),
+    emissiveColor: Color3.create(c.r, c.g, c.b),
+    emissiveIntensity: inner ? EMISSIVE_INNER : EMISSIVE_OUTER,
+    transparencyMode: MaterialTransparencyMode.MTM_AUTO,
+    castShadows: false,
   }
 }
 
-function ensureBeam(team: 1 | 2): Entity {
-  if (beams[team]) return beams[team]!
+function makePlane(team: 1 | 2, inner: boolean): Entity {
   const ent = engine.addEntity()
   const spawn = baseSpawn(team)
   Transform.create(ent, {
-    position: Vector3.create(spawn.pos.x, spawn.pos.y, spawn.pos.z),
-    scale: Vector3.create(MIN_W, MIN_H, MIN_W),
+    position: Vector3.create(spawn.pos.x, spawn.pos.y + MIN_H / 2, spawn.pos.z),
+    scale: Vector3.create(inner ? INNER_WIDTH : OUTER_WIDTH, MIN_H, 1),
   })
-  MeshRenderer.setCylinder(ent)
-  Material.setPbrMaterial(ent, beamMat(team, 0))
-  beams[team] = ent
+  MeshRenderer.setPlane(ent)
+  Billboard.create(ent, { billboardMode: BillboardMode.BM_Y })
+  Material.setPbrMaterial(ent, beaconMat(team, inner))
   return ent
 }
 
-function placeBeam(team: 1 | 2, progress: number, growing: boolean, now: number): void {
-  const ent = ensureBeam(team)
-  const tf = Transform.getMutable(ent)
+function ensureBeam(team: 1 | 2): Beacon {
+  if (beams[team]) return beams[team]!
+  const rec: Beacon = { inner: makePlane(team, true), outer: makePlane(team, false), shown: 0 }
+  beams[team] = rec
+  return rec
+}
+
+function placeBeam(team: 1 | 2, progress: number, dt: number): void {
+  const rec = ensureBeam(team)
   const u = charge.threshold > 0 ? Math.max(0, Math.min(1, progress / charge.threshold)) : 0
-  const h = MIN_H + (MAX_H - MIN_H) * u
-  const w = MIN_W + (MAX_W - MIN_W) * u
+  const k = 1 - Math.exp(-dt / SIZE_EASE_S)
+  rec.shown += (u - rec.shown) * k
+  const h = MIN_H + (MAX_H - MIN_H) * rec.shown
+  const size = MIN_SIZE + (MAX_SIZE - MIN_SIZE) * rec.shown
+  const pulse = 1 + PULSE_RANGE * Math.sin(pulseTime * PULSE_SPEED)
   const spawn = baseSpawn(team)
-  tf.position.x = spawn.pos.x
-  tf.position.y = spawn.pos.y + h / 2
-  tf.position.z = spawn.pos.z
-  tf.scale.x = w
-  tf.scale.y = h
-  tf.scale.z = w
-  const pulse = growing ? 0.5 + 0.5 * Math.sin(now / 180) : 0
-  Material.setPbrMaterial(ent, beamMat(team, pulse))
+  const y = spawn.pos.y + h / 2
+  const innerT = Transform.getMutable(rec.inner)
+  innerT.position.x = spawn.pos.x
+  innerT.position.y = y
+  innerT.position.z = spawn.pos.z
+  innerT.scale.x = INNER_WIDTH * size * pulse
+  innerT.scale.y = h
+  innerT.scale.z = 1
+  const outerT = Transform.getMutable(rec.outer)
+  outerT.position.x = spawn.pos.x
+  outerT.position.y = y
+  outerT.position.z = spawn.pos.z
+  outerT.scale.x = OUTER_WIDTH * size * (2 - pulse)
+  outerT.scale.y = h
+  outerT.scale.z = 1
 }
 
 function dropWave(): void {
@@ -259,10 +294,10 @@ export function initBaseBeams(): void {
     if (live) {
       if (charge.redGrowing) charge.redProgress = Math.min(charge.threshold, charge.redProgress + charge.redConnected * GROWTH_PER_CELL_PER_SEC * dt)
       if (charge.blueGrowing) charge.blueProgress = Math.min(charge.threshold, charge.blueProgress + charge.blueConnected * GROWTH_PER_CELL_PER_SEC * dt)
-      const now = Date.now()
+      pulseTime += dt
       if (!isLobbyLayout()) {
-        placeBeam(1, charge.redProgress, charge.redGrowing, now)
-        placeBeam(2, charge.blueProgress, charge.blueGrowing, now)
+        placeBeam(1, charge.redProgress, dt)
+        placeBeam(2, charge.blueProgress, dt)
       }
     }
     tickWave(dt)
