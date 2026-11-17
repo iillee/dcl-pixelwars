@@ -47,13 +47,13 @@ export function rgbFromHex(hex: string): { r: number; g: number; b: number } {
 }
 
 /** Billboard pill colours, used as unlit BasicMaterial so they render at the true hex.
- *  Classic and Base Charge are Luke's swatches; Paint Limit and Balloon Battle are
- *  complementary at similar saturation and brightness. */
+ *  Classic and Base Charge are Luke's swatches. Paint Limit is a brighter, purer
+ *  yellow so it does not read brown; Balloon Battle is a matching saturated green. */
 export const MODE_PILL_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', string> = {
   pvp: '#FF7577',
   pvb: '#6A99FC',
   bases: '#6A99FC',
-  prototype: '#FFC54D',
+  prototype: '#FFE04A',
   balloon: '#4FD68C',
 }
 

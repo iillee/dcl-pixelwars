@@ -167,6 +167,7 @@ function laySigns(): void {
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
+    layTileFrame(tint)
   }
   syncSignFacing()
 }
@@ -218,6 +219,44 @@ function refreshSigns(): void {
     const count = TextShape.getMutableOrNull(boards[i].count)
     if (count) count.text = String(voteCount(modes[i].id))
   }
+}
+
+/** Unlit black frame around each activation tile. Raised above the tint so all
+ *  four sides stay visible from the ground, and wide enough to cover the white
+ *  floor seam that showed in the inset around the pad. */
+const TILE_FRAME_M = 0.22
+const TILE_FRAME_H = 0.06
+function frameMat() {
+  return { diffuseColor: Color4.create(0, 0, 0, 1), castShadows: false }
+}
+
+function layTileFrame(tint: { x: number; z: number; yawDeg: number; width: number; length: number }): void {
+  // Tint box center is BASE_Y+0.58, height 0.08, so its top is +0.04.
+  const y = BASE_Y + 0.58 + 0.04 + TILE_FRAME_H / 2 + 0.01
+  const root = engine.addEntity()
+  Transform.create(root, {
+    position: Vector3.create(tint.x, y, tint.z),
+    rotation: Quaternion.fromEulerDegrees(0, tint.yawDeg, 0),
+  })
+  spawned.push(root)
+  const w = tint.width
+  const l = tint.length
+  const bw = TILE_FRAME_M
+  const addBar = (lx: number, lz: number, sx: number, sz: number) => {
+    const e = engine.addEntity()
+    Transform.create(e, {
+      parent: root,
+      position: Vector3.create(lx, 0, lz),
+      scale: Vector3.create(sx, TILE_FRAME_H, sz),
+    })
+    MeshRenderer.setBox(e)
+    Material.setBasicMaterial(e, frameMat())
+    spawned.push(e)
+  }
+  addBar(0, (l + bw) / 2, w + 2 * bw, bw)
+  addBar(0, -(l + bw) / 2, w + 2 * bw, bw)
+  addBar((w + bw) / 2, 0, bw, l)
+  addBar(-(w + bw) / 2, 0, bw, l)
 }
 
 /** Opaque matte slab in the pill colour. Alpha blend over the white floor was washing it out. */

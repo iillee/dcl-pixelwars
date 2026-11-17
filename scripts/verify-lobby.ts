@@ -42,11 +42,11 @@ if (!balloonMode.live || !balloonMode.placed || balloonMode.economy || balloonMo
 const expectedHex: Record<'pvp' | 'bases' | 'prototype' | 'balloon', string> = {
   pvp: '#FF7577',
   bases: '#6A99FC',
-  prototype: '#FFC54D',
+  prototype: '#FFE04A',
   balloon: '#4FD68C',
 }
 if (MODE_PILL_HEX.pvp !== expectedHex.pvp || MODE_PILL_HEX.bases !== expectedHex.bases || MODE_PILL_HEX.pvb !== expectedHex.bases || MODE_PILL_HEX.prototype !== expectedHex.prototype || MODE_PILL_HEX.balloon !== expectedHex.balloon) {
-  console.error(`✗ lobby pill hexes should be Classic #FF7577, Base Charge #6A99FC, Paint Limit #FFC54D, Balloon Battle #4FD68C, got ${JSON.stringify(MODE_PILL_HEX)}`)
+  console.error(`✗ lobby pill hexes should be Classic #FF7577, Base Charge #6A99FC, Paint Limit #FFE04A, Balloon Battle #4FD68C, got ${JSON.stringify(MODE_PILL_HEX)}`)
   process.exit(1)
 }
 for (const id of ['pvp', 'bases', 'prototype', 'balloon'] as const) {
@@ -463,6 +463,22 @@ if (!lobbySrc.includes('BillboardMode.BM_Y') || !lobbySrc.includes('BillboardMod
 }
 if (!lobbySrc.includes('roughness: 1') || !lobbySrc.includes('specularIntensity: 0') || !lobbySrc.includes('metallic: 0')) {
   console.error('✗ vote floor tints should stay matte PBR')
+  process.exit(1)
+}
+if (
+  !lobbySrc.includes('TILE_FRAME_M') ||
+  !lobbySrc.includes('function layTileFrame') ||
+  !lobbySrc.includes('layTileFrame(tint)') ||
+  !lobbySrc.includes('Material.setBasicMaterial(e, frameMat())') ||
+  lobbySrc.split('addBar(').length - 1 < 4 ||
+  !lobbySrc.includes('Color4.create(0, 0, 0, 1)')
+) {
+  console.error('✗ every activation tile should have an unlit black frame on all four sides')
+  process.exit(1)
+}
+const tickTintsFn = (lobbySrc.match(/function tickTints[\s\S]*?^function /m) || [''])[0]
+if (tickTintsFn.includes('layTileFrame') || tickTintsFn.includes('TILE_FRAME') || tickTintsFn.includes('frameRoot')) {
+  console.error('✗ the tile frame should stay visible, not be scaled away with the vote tint')
   process.exit(1)
 }
 if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || lobbySrc.includes('outlineColor:') || !lobbySrc.includes('outlineWidth: 0') || lobbySrc.includes('outlineWidth: 0.2') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
