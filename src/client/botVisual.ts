@@ -1,8 +1,10 @@
 /**
  * botVisual.ts — client-side bot renderer.
  *
- * Classic (`pvp`) draws the original Aug 2026 ghost.glb (d86d6fe) as a
- * GltfContainer, team-lit, with a glider that pops out during recovery.
+ * Classic (`pvp`) draws the original Aug 2026 ghost mesh (d86d6fe) as a
+ * GltfContainer, team-lit, with official DCL jump / double-jump / glide
+ * clips baked into ghost-recover.glb. The glider pops out only while gliding,
+ * and the ghost raises its arms only in that glide clip.
  * Every other mode keeps the humanoid AvatarShape. botPositions is smoothed
  * with per-frame lerp, velocity dead-reckoning, and snapshot interpolation
  * (long enough to cover a hosted ~530 ms tick).
@@ -29,7 +31,7 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
-  GltfContainer, LightSource,
+  GltfContainer, LightSource, Animator,
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
@@ -40,7 +42,7 @@ import {
   BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
   RoundFormat, botRecoveryEnabled,
 } from '../shared/pvp'
-import { botShowsGlider } from '../shared/botAnim'
+import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botAnim'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { teamPlatesHidden } from './nametags'
@@ -67,9 +69,16 @@ const BLUE_CLOTHES = [
 /** Avatar origin is the feet, same as a player. Hit tests subtract this. Ghost float is applied only when drawing. */
 export const FLOAT_HEIGHT = 0
 
-/** Original solo-bot ghost from d86d6fe, not the Nov 2 Pac-Man meshes or the PR #15 mannequin. */
-const GHOST_MODEL_SRC = 'assets/models/bots/ghost.glb'
+/** Original Aug 2026 ghost mesh (d86d6fe) plus official DCL locomotion clips. */
+const GHOST_MODEL_SRC = 'assets/models/bots/ghost-recover.glb'
 const GLIDER_SRC = 'assets/models/glider.glb'
+/** Seconds, matching scripts/build-ghost-anims.py. */
+const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
+  idle: true, jump: false, double: false, glide: true, fall: true, slide: true,
+}
+const GHOST_CLIP_DUR_S: Record<GhostClip, number> = {
+  idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667,
+}
 const GHOST_SCALE = 1.2
 const GHOST_FLOAT = 1.0
 const LIGHT_INTENSITY = 250
@@ -135,6 +144,8 @@ interface BotVisual {
   glider: Entity | null
   gliderScale: number
   pose: number
+  clip: GhostClip | null
+  clipUntil: number
   timeSec: number
   lastServerPos: Vector3
   velocity: Vector3     // metres/sec, estimated from server updates
@@ -248,6 +259,7 @@ function destroyBot(id: number): void {
   AvatarNametag.deleteFrom(rec.root)
   AvatarShape.deleteFrom(rec.root)
   Tween.deleteFrom(rec.root)
+  Animator.deleteFrom(rec.root)
   GltfContainer.deleteFrom(rec.root)
   LightSource.deleteFrom(rec.root)
   engine.removeEntity(rec.root)
@@ -274,6 +286,15 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
   let light: Entity | null = null
   if (kind === 'ghost') {
     GltfContainer.create(root, { src: GHOST_MODEL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+    Animator.create(root, {
+      states: (['idle', 'jump', 'double', 'glide', 'fall', 'slide'] as GhostClip[]).map(clip => ({
+        clip,
+        playing: clip === 'idle',
+        loop: GHOST_CLIP_LOOP[clip],
+        speed: 1,
+        weight: 1,
+      })),
+    })
     light = engine.addEntity()
     Transform.create(light, { parent: root, position: Vector3.Zero() })
     paintLight(light, team)
@@ -292,6 +313,8 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     glider: null,
     gliderScale: 0,
     pose: 0,
+    clip: 'idle',
+    clipUntil: 0,
     timeSec: Math.random() * 100,
     lastServerPos: Vector3.clone(pos),
     velocity: Vector3.Zero(),
@@ -308,7 +331,30 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
   }
 }
 
+function pickGhostClip(rec: BotVisual): GhostClip {
+  if (rec.riding) return 'idle'
+  const next = ghostClipForPose(rec.pose)
+  // Let a one-shot jump or double jump finish so a short (or 2 Hz) pose
+  // window still reads, unless a double jump or a landing cuts it short.
+  if (rec.clip && rec.timeSec < rec.clipUntil && !GHOST_CLIP_LOOP[rec.clip]) {
+    if (next === 'double' && rec.clip === 'jump') return 'double'
+    if (next === 'idle' || next === 'slide') return next
+    return rec.clip
+  }
+  return next
+}
+
+function syncGhostAnim(rec: BotVisual): void {
+  if (rec.kind !== 'ghost') return
+  const clip = pickGhostClip(rec)
+  if (clip === rec.clip) return
+  Animator.playSingleAnimation(rec.root, clip, true)
+  rec.clip = clip
+  rec.clipUntil = GHOST_CLIP_LOOP[clip] ? 0 : rec.timeSec + GHOST_CLIP_DUR_S[clip]
+}
+
 function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
+
   if (rec.kind !== 'ghost') {
     if (rec.glider) { engine.removeEntity(rec.glider); rec.glider = null; rec.gliderScale = 0 }
     return
@@ -567,16 +613,18 @@ export function initBotVisual(): void {
       const tf = Transform.getMutable(rec.root)
       if (rec.kind === 'ghost') {
         const t = rec.timeSec
-        const bob = Math.sin(t * BOB_HZ * Math.PI * 2) * BOB_AMPLITUDE
-        const drX = Math.sin(t * DRIFT_HZ_X * Math.PI * 2) * DRIFT_AMPLITUDE
-        const drZ = Math.cos(t * DRIFT_HZ_Z * Math.PI * 2) * DRIFT_AMPLITUDE
-        const pulse = 1.0 + Math.sin(t * PULSE_HZ * Math.PI * 2) * PULSE_AMPLITUDE
+        const air = rec.clip === 'jump' || rec.clip === 'double' || rec.clip === 'glide' || rec.clip === 'fall'
+        const bob = air ? 0 : Math.sin(t * BOB_HZ * Math.PI * 2) * BOB_AMPLITUDE
+        const drX = air ? 0 : Math.sin(t * DRIFT_HZ_X * Math.PI * 2) * DRIFT_AMPLITUDE
+        const drZ = air ? 0 : Math.cos(t * DRIFT_HZ_Z * Math.PI * 2) * DRIFT_AMPLITUDE
+        const pulse = air ? 1 : 1.0 + Math.sin(t * PULSE_HZ * Math.PI * 2) * PULSE_AMPLITUDE
         tf.position = Vector3.create(
           rec.renderPos.x + drX,
           rec.renderPos.y + GHOST_FLOAT + bob,
           rec.renderPos.z + drZ,
         )
         tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
+        syncGhostAnim(rec)
       } else {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)

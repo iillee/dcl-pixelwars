@@ -14,7 +14,19 @@ export const BOT_ANIM_DOUBLE = 3
 export const BOT_ANIM_GLIDE = 4
 export const BOT_ANIM_FALL = 5
 
-/** Jump, double jump, or glide: the recovery glider should be visible. */
+/** The recovery glider pops out only while the bot is actually gliding. */
 export function botShowsGlider(an: number): boolean {
-  return an === BOT_ANIM_JUMP || an === BOT_ANIM_DOUBLE || an === BOT_ANIM_GLIDE
+  return an === BOT_ANIM_GLIDE
+}
+
+export type GhostClip = 'idle' | 'jump' | 'double' | 'glide' | 'fall' | 'slide'
+
+/** Clip baked into ghost-recover.glb for this pose code. */
+export function ghostClipForPose(an: number): GhostClip {
+  if (an === BOT_ANIM_JUMP) return 'jump'
+  if (an === BOT_ANIM_DOUBLE) return 'double'
+  if (an === BOT_ANIM_GLIDE) return 'glide'
+  if (an === BOT_ANIM_FALL) return 'fall'
+  if (an === BOT_ANIM_SLIDE) return 'slide'
+  return 'idle'
 }

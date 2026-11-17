@@ -7,6 +7,7 @@
  * double-jump lands in between. A full lunge still falls even when the attempt is perfect.
  * Jump apexes match the human heights in shared/pvp.ts.
  */
+import { readFileSync } from 'node:fs'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, MAZE_ORIGIN } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
@@ -16,7 +17,7 @@ import {
   BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed, botRecoveryEnabled,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
 } from '../src/shared/pvp'
-import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP } from '../src/shared/botAnim'
+import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE, botShowsGlider } from '../src/shared/botAnim'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -37,6 +38,17 @@ for (const [name, h] of [['standing', HUMAN_JUMP_HEIGHT], ['run', HUMAN_RUN_JUMP
   if (Math.abs(apex - h) > 0.02) fail(`${name} jump apex ${apex.toFixed(3)} m, human height is ${h} m`)
 }
 console.log(`✓ jump apexes match human heights (stand ${HUMAN_JUMP_HEIGHT}, run ${HUMAN_RUN_JUMP_HEIGHT}, double ${HUMAN_DOUBLE_JUMP_HEIGHT}) under BOT_GRAVITY ${BOT_GRAVITY}`)
+
+if (botShowsGlider(BOT_ANIM_JUMP) || botShowsGlider(BOT_ANIM_DOUBLE) || botShowsGlider(BOT_ANIM_FALL) || botShowsGlider(BOT_ANIM_LOCO) || botShowsGlider(BOT_ANIM_SLIDE) || !botShowsGlider(BOT_ANIM_GLIDE)) {
+  fail('the glider should pop only during the glide, not the jump or double jump')
+} else {
+  console.log('✓ the glider stays down through the jump and double jump, and opens on the glide')
+}
+
+const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
+  fail('Classic ghosts should play jump, double, and glide clips from ghost-recover.glb')
+}
 
 generateWithRetry(1)
 const tiles = getPlacedTilesInOrder()
