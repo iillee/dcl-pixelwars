@@ -26,6 +26,7 @@ import {
   engine,
   Entity,
   Material,
+  MaterialTransparencyMode,
   MeshRenderer,
   Transform,
   PlayerIdentityData,
@@ -52,6 +53,8 @@ type Pose = { feet: Vec; yawDeg: number; entity?: Entity }
 
 /** Deep red #B3121E, matte with a little gloss. */
 const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
+/** Body, neck, and nub. Strings stay opaque. */
+const BALLOON_ALPHA = 0.8
 /** Slight egg: about 1.15× taller than wide, close to the current size. */
 const BODY_XZ = 0.54
 const BODY_Y = 0.62
@@ -262,7 +265,7 @@ function restLocal(b: Balloon, t: number, sway: number): Vec {
   )
 }
 
-function balloonMat(a = 1) {
+function balloonMat(a = BALLOON_ALPHA) {
   return {
     albedoColor: Color4.create(COLOR.r, COLOR.g, COLOR.b, a),
     emissiveColor: Color4.create(COLOR.r, COLOR.g, COLOR.b, 1),
@@ -270,6 +273,8 @@ function balloonMat(a = 1) {
     roughness: 0.42,
     metallic: 0.05,
     specularIntensity: 0.35,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    castShadows: false,
   }
 }
 
@@ -278,6 +283,8 @@ function stringMat() {
     albedoColor: Color4.create(0.85, 0.85, 0.82, 1),
     roughness: 1,
     metallic: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false,
   }
 }
 
@@ -437,7 +444,7 @@ function placeString(segs: Entity[], lag: Vec, ready: { lagReady: boolean }, fro
   }
 }
 
-function paintBalloon(ent: Entity, a = 1): void {
+function paintBalloon(ent: Entity, a = BALLOON_ALPHA): void {
   Material.setPbrMaterial(ent, balloonMat(a))
 }
 
@@ -813,7 +820,7 @@ function popAt(pos: Vec): void {
     scale: Vector3.create(BODY_XZ, BODY_XZ, BODY_XZ),
   })
   MeshRenderer.setSphere(ent)
-  paintBalloon(ent, 1)
+  paintBalloon(ent)
   pops.push({ ent, t: 0, x: pos.x, y: pos.y, z: pos.z })
   playBalloonPopSfx()
 }
@@ -916,7 +923,7 @@ function tickPops(dt: number): void {
     const s = BODY_XZ + u * 0.55
     const tf = Transform.getMutableOrNull(p.ent)
     if (tf) tf.scale = Vector3.create(s, s, s)
-    paintBalloon(p.ent, 1 - u)
+    paintBalloon(p.ent, BALLOON_ALPHA * (1 - u))
     if (p.t >= POP_S) {
       engine.removeEntity(p.ent)
       pops.splice(i, 1)

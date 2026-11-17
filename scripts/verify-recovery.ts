@@ -18,6 +18,7 @@ import {
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
 } from '../src/shared/pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE, botShowsGlider } from '../src/shared/botAnim'
+import { rescueAllowsSnapshotInterp, snapsAfterRescueRelease } from '../src/shared/rescuePath'
 
 let failed = false
 const fail = (m: string) => { console.error('✗ ' + m); failed = true }
@@ -51,6 +52,19 @@ if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.pl
 }
 if (!visualSrc.includes('function syncGhostTag') || !visualSrc.includes('BillboardMode.BM_Y') || !visualSrc.includes("text: red ? 'RED' : 'BLUE'") || visualSrc.includes('paintPlate(root, team, id)')) {
   fail('Classic ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
+}
+if (!visualSrc.includes('rescueAllowsSnapshotInterp') || !visualSrc.includes('snapsAfterRescueRelease') || !visualSrc.includes('else if (rec.riding)')) {
+  fail('a released rescue should not replay delayed descent snapshots')
+}
+if (rescueAllowsSnapshotInterp(true) || !rescueAllowsSnapshotInterp(false)) {
+  fail('snapshot interpolation should be off while the bot is riding or dropping')
+}
+{
+  const land = { x: 4, y: 2, z: -1 }
+  const kept = snapsAfterRescueRelease(12, land)
+  if (kept.length !== 1 || kept[0].t !== 12 || kept[0].pos !== land || kept[0].pos.y !== 2) {
+    fail('snapsAfterRescueRelease should keep only the landing pose')
+  }
 }
 
 generateWithRetry(1)

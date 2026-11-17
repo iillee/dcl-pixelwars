@@ -37,6 +37,7 @@ import {
 import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
+import { rescueAllowsSnapshotInterp, snapsAfterRescueRelease } from '../shared/rescuePath'
 import { registerBotLookup } from './knockback'
 import { room } from '../shared/messages'
 import {
@@ -600,8 +601,18 @@ export function initBotVisual(): void {
         if (rec.snaps.length > SNAP_KEEP) rec.snaps.shift()
       }
       const wasFast = now < rec.fastUntil
+      const wasRiding = rec.riding
       rec.riding = b.st === 2
-      if ((b.st ?? 0) !== 0 && simT !== null) rec.fastUntil = now + FAST_HOLD_S * 1000
+      if (wasRiding && !rec.riding) {
+        // The local cloud already lowered them. Delayed ride snapshots would
+        // put them back up the descent, so forget that path and stop interpolating it.
+        const landT = simT ?? rec.lastSimT
+        rec.snaps = snapsAfterRescueRelease(landT, Vector3.clone(serverPos))
+        rec.fastUntil = 0
+        rec.localKnock = null
+      } else if ((b.st ?? 0) !== 0 && simT !== null) {
+        rec.fastUntil = now + FAST_HOLD_S * 1000
+      }
       const interval = (simT !== null && rec.lastSimT > 0)
         ? Math.max(0.08, simT - rec.lastSimT)
         : rec.pktAt > 0 ? Math.max(0.08, (now - rec.pktAt) / 1000)
@@ -646,13 +657,23 @@ export function initBotVisual(): void {
       // On the cloud: hang from the cloud this client draws (it runs on local
       // time, so a past-time interpolation would trail it by metres on the rise).
       const ride = rec.riding ? remoteRiderFeet(`bot:${id}`) : null
-      const interp = ride ? null : now < rec.fastUntil && clockOffset !== null && rec.snaps.length >= 2
+      const interp = !ride && rescueAllowsSnapshotInterp(rec.riding) && now < rec.fastUntil && clockOffset !== null && rec.snaps.length >= 2
         ? interpolate(rec.snaps, now / 1000 - clockOffset - interpDelay(rec.snaps))
         : null
       if (rec.localKnock && now > rec.localKnockUntil) rec.localKnock = null
       if (ride) {
         rec.localKnock = null
         rec.renderPos = Vector3.create(ride.x, ride.y + FLOAT_HEIGHT, ride.z)
+      } else if (rec.riding) {
+        // Cloud path finished or not drawn yet: follow live server feet (the
+        // short drop), never delayed mid-descent snapshots.
+        rec.localKnock = null
+        const k = Math.min(1, LERP_SPEED_PER_SEC * dt)
+        rec.renderPos = Vector3.create(
+          rec.renderPos.x + (rec.lastServerPos.x - rec.renderPos.x) * k,
+          rec.renderPos.y + (rec.lastServerPos.y - rec.renderPos.y) * k,
+          rec.renderPos.z + (rec.lastServerPos.z - rec.renderPos.z) * k,
+        )
       } else if (rec.localKnock) {
         stepLocalKnock(rec, dt)
         if (interp) {
@@ -689,7 +710,7 @@ export function initBotVisual(): void {
       const tf = Transform.getMutable(rec.root)
       if (rec.kind === 'ghost') {
         const t = rec.timeSec
-        const air = rec.clip === 'jump' || rec.clip === 'double' || rec.clip === 'glide' || rec.clip === 'fall'
+        const air = rec.riding || rec.clip === 'jump' || rec.clip === 'double' || rec.clip === 'glide' || rec.clip === 'fall'
         const bob = air ? 0 : Math.sin(t * BOB_HZ * Math.PI * 2) * BOB_AMPLITUDE
         const drX = air ? 0 : Math.sin(t * DRIFT_HZ_X * Math.PI * 2) * DRIFT_AMPLITUDE
         const drZ = air ? 0 : Math.cos(t * DRIFT_HZ_Z * Math.PI * 2) * DRIFT_AMPLITUDE

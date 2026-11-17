@@ -79,3 +79,18 @@ export function rescueCloudPose(catchP: RescueVec, base: RescueVec, age: number,
   }
   return { pos: landTo, scale: 1, done: true }
 }
+
+/**
+ * Delayed snapshot interpolation must not run while the bot is still riding
+ * or dropping from the cloud. Those snapshots lag the local cloud, and when
+ * the visual drop finishes they replay the descent — the bot pops back up
+ * and is lowered a second time.
+ */
+export function rescueAllowsSnapshotInterp(riding: boolean): boolean {
+  return !riding
+}
+
+/** Keep only the landing pose so a post-ride interpolator cannot climb the ride path. */
+export function snapsAfterRescueRelease<P>(landT: number, landPos: P): Array<{ t: number; pos: P }> {
+  return [{ t: landT, pos: landPos }]
+}
