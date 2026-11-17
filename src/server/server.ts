@@ -424,7 +424,7 @@ export async function setupServer(): Promise<void> {
   function resolveVote(): void {
     const now = Date.now()
     const { counts } = tallyVotes(presentIds(), now)
-    const winner = pickWinner(counts, roundFormat)
+    const winner = pickWinner(counts, worldSeq)
     countdownEnds = 0
     hadVotes = false
     wantFull = false

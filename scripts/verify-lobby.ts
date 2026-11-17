@@ -8,7 +8,7 @@ import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone, rgbFromHex,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -278,8 +278,16 @@ if (LOBBY_VOTE_MS !== 10_000) {
   console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
-if (hudVoteHeadline(false) !== 'CHOOSE A GAME MODE' || hudVoteHeadline(true) !== 'STARTING SOON' || hudVoteHeadline(false, 5) !== 'STARTING IN 5' || hudVoteHeadline(true, 10) !== 'STARTING IN 10') {
-  console.error(`✗ the top lobby line should read CHOOSE A GAME MODE, then STARTING IN N when the countdown is running (${hudVoteHeadline(false)} / ${hudVoteHeadline(true)} / ${hudVoteHeadline(true, 5)})`)
+if (hudVoteHeadline() !== 'CHOOSE A GAME MODE' || hudVoteHeadline(0, 'pvp') !== 'CHOOSE A GAME MODE') {
+  console.error(`✗ the top lobby line should stay CHOOSE A GAME MODE when no countdown is running (${hudVoteHeadline()})`)
+  process.exit(1)
+}
+if (hudVoteHeadline(5, 'pvp') !== 'PIXELWARS IS STARTING IN 5' || hudVoteHeadline(10, 'bases') !== 'BASE CHARGE IS STARTING IN 10' || hudVoteHeadline(3, 'prototype') !== 'PAINT LIMIT IS STARTING IN 3' || hudVoteHeadline(1, 'balloon') !== 'BALLOON BATTLE IS STARTING IN 1') {
+  console.error(`✗ a unique lead should name the mode on the countdown (${hudVoteHeadline(5, 'pvp')})`)
+  process.exit(1)
+}
+if (hudVoteHeadline(5, 'tie') !== '???? IS STARTING IN 5' || hudVoteHeadline(8, '') !== '???? IS STARTING IN 8') {
+  console.error(`✗ a tied or empty lead should read ???? IS STARTING IN N (${hudVoteHeadline(5, 'tie')})`)
   process.exit(1)
 }
 if (PVB_RATIO !== 2 || pvbBotCount(1) !== 2 || pvbBotCount(2) !== 4 || pvbBotCount(7) !== 14 || pvbBotCount(8) !== PVB_BOT_MAX || pvbBotCount(0) !== 0) {
@@ -329,7 +337,7 @@ if (protoTallied.counts.prototype !== 1 || protoTallied.counts.pvp !== 0 || prot
   process.exit(1)
 }
 const protoDone = stepLobby(protoStep.next, ['proto'], aged + LOBBY_VOTE_MS)
-if (protoDone.log !== 'resolve' || pickWinner(protoTallied.counts, 'pvp') !== 'prototype') {
+if (protoDone.log !== 'resolve' || pickWinner(protoTallied.counts, 0) !== 'prototype') {
   console.error(`✗ a Prototype vote did not launch a Prototype round (${protoDone.log})`)
   process.exit(1)
 }
@@ -360,7 +368,7 @@ if (balloonTallied.counts.balloon !== 1 || balloonTallied.counts.pvp !== 0 || ba
   process.exit(1)
 }
 const balloonDone = stepLobby(balloonStep.next, ['balloon'], aged + LOBBY_VOTE_MS)
-if (balloonDone.log !== 'resolve' || pickWinner(balloonTallied.counts, 'pvp') !== 'balloon') {
+if (balloonDone.log !== 'resolve' || pickWinner(balloonTallied.counts, 0) !== 'balloon') {
   console.error(`✗ a Balloon Battle vote did not launch a Balloon Battle round (${balloonDone.log})`)
   process.exit(1)
 }
@@ -432,8 +440,8 @@ if (uiSrc.includes('hudVoteCountdown') || uiSrc.includes('voteSecs') || uiSrc.in
   console.error('✗ the lobby countdown should live in the top headline, not as a second line under the pill')
   process.exit(1)
 }
-if (!lobbySrc.includes('STARTING IN') && !readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('STARTING IN')) {
-  console.error('✗ the top lobby line should show STARTING IN N during the vote countdown')
+if (!readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('IS STARTING IN') || !lobbySrc.includes('voteLead')) {
+  console.error('✗ the top lobby line should show MODE IS STARTING IN N during the vote countdown')
   process.exit(1)
 }
 if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
@@ -615,30 +623,47 @@ if (!onFork) {
 const tied = emptyCounts()
 tied.pvp = 2
 tied.bases = 2
-if (pickWinner(tied, 'bases') !== 'bases') {
-  console.error('✗ a tie should keep the previous mode')
+if (voteLead(tied) !== 'tie' || leadingModes(tied).join() !== 'pvp,bases') {
+  console.error(`✗ a pvp/bases lead tie should list both modes, got ${leadingModes(tied).join()}`)
   process.exit(1)
 }
-if (pickWinner(tied, 'garden') !== 'pvp') {
-  console.error('✗ a tie with a previous mode that is not tied should fall back to PvP')
+if (pickWinner(tied, 0) !== 'pvp' || pickWinner(tied, 1) !== 'bases' || pickWinner(tied, 2) !== 'pvp') {
+  console.error('✗ a tie should pick among the tied modes from the world-sync seq')
+  process.exit(1)
+}
+if (pickWinner(tied, 1) !== pickWinner(tied, 1)) {
+  console.error('✗ the same seq must pick the same tied mode')
+  process.exit(1)
+}
+const seen = new Set<string>()
+for (let s = 0; s < 8; s++) {
+  const w = pickWinner(tied, s)
+  if (w !== 'pvp' && w !== 'bases') {
+    console.error(`✗ a tie must not pick a mode that is not tied, got ${w}`)
+    process.exit(1)
+  }
+  if (w) seen.add(w)
+}
+if (seen.size !== 2) {
+  console.error(`✗ a tie should be able to pick either tied mode, got ${[...seen].join()}`)
   process.exit(1)
 }
 const none = emptyCounts()
-if (pickWinner(none, 'bases') !== null) {
+if (pickWinner(none, 3) !== null || voteLead(none) !== '') {
   console.error('✗ zero votes should not pick a winner')
   process.exit(1)
 }
 const lead = emptyCounts()
 lead.bases = 3
 lead.pvp = 1
-if (pickWinner(lead, 'pvp') !== 'bases') {
+if (pickWinner(lead, 99) !== 'bases' || voteLead(lead) !== 'bases') {
   console.error('✗ the higher count should win')
   process.exit(1)
 }
 const parked = emptyCounts()
 parked.pvb = 5
 parked.pvp = 1
-if (pickWinner(parked, 'pvp') !== 'pvp') {
+if (pickWinner(parked, 0) !== 'pvp') {
   console.error('✗ parked Bot Invasion votes must not win')
   process.exit(1)
 }
@@ -646,7 +671,7 @@ const protoLead = emptyCounts()
 protoLead.prototype = 4
 protoLead.pvp = 1
 protoLead.bases = 2
-if (pickWinner(protoLead, 'pvp') !== 'prototype') {
+if (pickWinner(protoLead, 0) !== 'prototype') {
   console.error('✗ a Prototype lead should win the vote')
   process.exit(1)
 }
@@ -654,19 +679,23 @@ const balloonLead = emptyCounts()
 balloonLead.balloon = 3
 balloonLead.pvp = 2
 balloonLead.prototype = 2
-if (pickWinner(balloonLead, 'pvp') !== 'balloon') {
+if (pickWinner(balloonLead, 0) !== 'balloon') {
   console.error('✗ a Balloon Battle lead should win the vote')
   process.exit(1)
 }
 const balloonTie = emptyCounts()
 balloonTie.balloon = 2
 balloonTie.pvp = 2
-if (pickWinner(balloonTie, 'balloon') !== 'balloon') {
-  console.error('✗ a tie should keep Balloon Battle when it was the previous mode')
+if (leadingModes(balloonTie).join() !== 'pvp,balloon') {
+  console.error(`✗ a balloon/pvp tie should list both, got ${leadingModes(balloonTie).join()}`)
   process.exit(1)
 }
-if (pickWinner(balloonTie, 'pvb') !== 'pvp') {
-  console.error('✗ a balloon/pvp tie with a different previous mode should fall back to PvP')
+if (pickWinner(balloonTie, 0) !== 'pvp' || pickWinner(balloonTie, 1) !== 'balloon') {
+  console.error('✗ a balloon/pvp tie should pick from the world-sync seq, not the previous mode')
+  process.exit(1)
+}
+if (hudVoteHeadline(4, voteLead(balloonTie)) !== '???? IS STARTING IN 4') {
+  console.error('✗ a tied countdown should read ???? IS STARTING IN N')
   process.exit(1)
 }
 if (!stillAfk(0, LOBBY_AFK_MS) || stillAfk(0, LOBBY_AFK_MS - 1)) {

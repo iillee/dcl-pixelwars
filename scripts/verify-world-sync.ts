@@ -11,6 +11,7 @@
 import {
   ServerWorld, isStaleWorld, shouldRebuildWorld, tilesForWorld, layoutFingerprint,
 } from '../src/shared/worldState'
+import { emptyCounts, pickWinner } from '../src/shared/lobby'
 
 class Client {
   have: ServerWorld | null = null
@@ -114,5 +115,22 @@ if (reconnect.have?.layout !== 'lobby') {
 }
 reconnect.apply(mid)
 assertSame('reconnect mid BASE CHARGE', mid, a, reconnect)
+
+// A lobby vote tie is broken with the world-sync seq so every client agrees.
+const tieVotes = emptyCounts()
+tieVotes.pvp = 2
+tieVotes.balloon = 2
+const tieSeq = 7
+const serverPick = pickWinner(tieVotes, tieSeq)
+const clientA = pickWinner(tieVotes, tieSeq)
+const clientB = pickWinner(tieVotes, tieSeq)
+if (serverPick !== 'balloon' || clientA !== serverPick || clientB !== serverPick) {
+  console.error(`✗ a tied vote must pick the same mode from the world seq on every client, got server=${serverPick} a=${clientA} b=${clientB}`)
+  process.exit(1)
+}
+if (pickWinner(tieVotes, tieSeq + 1) !== 'pvp') {
+  console.error('✗ a different world seq should be able to pick the other tied mode')
+  process.exit(1)
+}
 
 console.log('✓ two clients, late join, stale clocks, and mode cycles stay on the server floor')

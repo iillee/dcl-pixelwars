@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, emptyCounts, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteLead, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -386,7 +386,9 @@ export function hudClockText(matchSecs: number): string {
   if (phase === 'summary') return 'END'
   if (phase === 'lobby' || phase === 'idle') {
     const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteRemainingMs() / 1000)) : 0
-    return hudVoteHeadline(myVote() !== '', left)
+    const counts = emptyCounts()
+    for (const m of LOBBY_MODES) counts[m.id] = voteCount(m.id)
+    return hudVoteHeadline(left, voteLead(counts))
   }
   return 'VOTE'
 }

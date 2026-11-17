@@ -272,9 +272,18 @@ export function signBadgeY(): number {
 }
 
 /** Top HUD line. When the vote countdown is running, this is STARTING IN N. */
-export function hudVoteHeadline(hasVote: boolean, leftSecs = 0): string {
-  if (leftSecs > 0) return `STARTING IN ${leftSecs}`
-  return hasVote ? 'STARTING SOON' : 'CHOOSE A GAME MODE'
+/** Top HUD line. Countdown names the unique leader, or ???? on a tie. No countdown stays CHOOSE A GAME MODE. */
+export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
+  const tied = leadingModes(counts)
+  if (tied.length === 0) return ''
+  if (tied.length > 1) return 'tie'
+  return tied[0]
+}
+
+export function hudVoteHeadline(leftSecs = 0, lead: ModeId | 'tie' | '' = ''): string {
+  if (!(leftSecs > 0)) return 'CHOOSE A GAME MODE'
+  const name = !lead || lead === 'tie' ? '????' : (modeTitle(lead) || '????')
+  return `${name} IS STARTING IN ${leftSecs}`
 }
 
 
@@ -371,19 +380,26 @@ export function emptyCounts(): VoteCounts {
   return { pvp: 0, pvb: 0, bases: 0, prototype: 0, balloon: 0, garden: 0, pots: 0 }
 }
 
-/**
- * Highest live count wins. A tie keeps `previous` when that mode is part of
- * the tie, otherwise PvP. No live votes returns null.
- */
-export function pickWinner(counts: VoteCounts, previous: string): ModeId | null {
+/** Live modes sharing the highest count, in registry order. Empty when nobody voted. */
+export function leadingModes(counts: VoteCounts): ModeId[] {
   const live = liveModes()
   let best = 0
   for (const m of live) best = Math.max(best, counts[m.id] ?? 0)
-  if (best <= 0) return null
-  const tied = live.filter(m => (counts[m.id] ?? 0) === best)
-  if (tied.length === 1) return tied[0].id
-  if (tied.some(m => m.id === previous)) return previous as ModeId
-  return 'pvp'
+  if (best <= 0) return []
+  return live.filter(m => (counts[m.id] ?? 0) === best).map(m => m.id)
+}
+
+/**
+ * Highest live count wins. A tie is broken with the world-sync `seq` so the
+ * server and every client pick the same mode from the tied set. No live votes
+ * returns null.
+ */
+export function pickWinner(counts: VoteCounts, seq: number): ModeId | null {
+  const tied = leadingModes(counts)
+  if (tied.length === 0) return null
+  if (tied.length === 1) return tied[0]
+  const i = Math.abs(Math.trunc(seq)) % tied.length
+  return tied[i]
 }
 
 export function stillAfk(movedAt: number, now: number): boolean {
