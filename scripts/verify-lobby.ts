@@ -7,7 +7,7 @@ import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPl
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_VOTE_MS, MODE_PILL_HEX, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, emptyCounts, everyPresentInZone, rgbFromHex,
   billboardAnchor, earlySpawnPads, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, toSceneFeet, voteLocalToWorld, voteModeAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
@@ -39,10 +39,23 @@ if (!balloonMode.live || !balloonMode.placed || balloonMode.economy || balloonMo
   console.error('✗ Balloon Battle should be a live south end with team balance and no paint economy')
   process.exit(1)
 }
-const green = balloonMode.color
-if (Math.abs(green.r - 0x6F / 255) > 0.002 || Math.abs(green.g - 0xD0 / 255) > 0.002 || Math.abs(green.b - 0x8C / 255) > 0.002) {
-  console.error(`✗ Balloon Battle should use soft green #6FD08C, got ${green.r},${green.g},${green.b}`)
+const expectedHex: Record<'pvp' | 'bases' | 'prototype' | 'balloon', string> = {
+  pvp: '#FF7577',
+  bases: '#6A99FC',
+  prototype: '#FFC54D',
+  balloon: '#4FD68C',
+}
+if (MODE_PILL_HEX.pvp !== expectedHex.pvp || MODE_PILL_HEX.bases !== expectedHex.bases || MODE_PILL_HEX.pvb !== expectedHex.bases || MODE_PILL_HEX.prototype !== expectedHex.prototype || MODE_PILL_HEX.balloon !== expectedHex.balloon) {
+  console.error(`✗ lobby pill hexes should be Classic #FF7577, Base Charge #6A99FC, Paint Limit #FFC54D, Balloon Battle #4FD68C, got ${JSON.stringify(MODE_PILL_HEX)}`)
   process.exit(1)
+}
+for (const id of ['pvp', 'bases', 'prototype', 'balloon'] as const) {
+  const got = LOBBY_MODES.find(m => m.id === id)!.color
+  const want = rgbFromHex(expectedHex[id])
+  if (Math.abs(got.r - want.r) > 1e-9 || Math.abs(got.g - want.g) > 1e-9 || Math.abs(got.b - want.b) > 1e-9) {
+    console.error(`✗ ${id} should use ${expectedHex[id]}, got ${got.r},${got.g},${got.b}`)
+    process.exit(1)
+  }
 }
 if (!validate()) {
   console.error('✗ lobby openings do not connect')
@@ -428,19 +441,16 @@ if (lobbySrc.includes('emissiveIntensity: glow') || !/emissiveIntensity: 0,/.tes
   process.exit(1)
 }
 if (
-  !lobbySrc.includes('const FLOOR_LIT_LIFT') ||
-  !lobbySrc.includes('function litPlate') ||
+  lobbySrc.includes('const FLOOR_LIT_LIFT') ||
+  lobbySrc.includes('function litPlate') ||
+  lobbySrc.includes('litPlate(copy.plate)') ||
   !lobbySrc.includes('Material.setBasicMaterial') ||
+  !lobbySrc.includes('Color4.fromHexString') ||
   !/function plateMat[\s\S]{0,250}diffuseColor/.test(lobbySrc) ||
   /function plateMat[\s\S]{0,250}emissiveIntensity/.test(lobbySrc) ||
-  !lobbySrc.includes('const display = litPlate(copy.plate)')
+  !/function plateMat[\s\S]{0,250}, 1\)/.test(lobbySrc)
 ) {
-  console.error('✗ lobby billboard plates should be unlit and use the apparent lit floor colour')
-  process.exit(1)
-}
-const liftMatch = lobbySrc.match(/FLOOR_LIT_LIFT\s*=\s*([0-9.]+)/)
-if (!liftMatch || Number(liftMatch[1]) < 0.25 || Number(liftMatch[1]) > 0.4) {
-  console.error(`✗ FLOOR_LIT_LIFT should stay near the measured occupied-floor lift (~0.33), got ${liftMatch && liftMatch[1]}`)
+  console.error('✗ lobby billboard plates should be unlit, fully opaque, and use the exact pill hex with no floor-light lift')
   process.exit(1)
 }
 if (lobbySrc.includes('setBox(tail)') || lobbySrc.includes('signCaretSize') || lobbySrc.includes('orthoSignPoses')) {

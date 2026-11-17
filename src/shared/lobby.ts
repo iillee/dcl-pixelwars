@@ -40,12 +40,29 @@ export const EAST_SLOT_MODE: 'pvb' | 'bases' = 'bases'
 const eastCell = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id ? EAST_LOBBY_CELL : EAST_PARK_CELL
 const eastLive = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id
 
+/** Parse #RRGGBB to 0–1 sRGB channels. Color4.fromHexString does the same /255; it does not convert to linear. */
+export function rgbFromHex(hex: string): { r: number; g: number; b: number } {
+  const n = parseInt(hex.slice(1), 16)
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 }
+}
+
+/** Billboard pill colours, used as unlit BasicMaterial so they render at the true hex.
+ *  Classic and Base Charge are Luke's swatches; Paint Limit and Balloon Battle are
+ *  complementary at similar saturation and brightness. */
+export const MODE_PILL_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', string> = {
+  pvp: '#FF7577',
+  pvb: '#6A99FC',
+  bases: '#6A99FC',
+  prototype: '#FFC54D',
+  balloon: '#4FD68C',
+}
+
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 1, g: 0.459, b: 0.467 } },
-  { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
-  { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: { r: 0.416, g: 0.6, b: 0.988 } },
-  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: { r: 1, g: 0.796, b: 0.42 } },
-  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: { r: 0.435, g: 0.816, b: 0.549 } },
+  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
+  { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: rgbFromHex(MODE_PILL_HEX.pvb) },
+  { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: rgbFromHex(MODE_PILL_HEX.bases) },
+  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: rgbFromHex(MODE_PILL_HEX.prototype) },
+  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: rgbFromHex(MODE_PILL_HEX.balloon) },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]

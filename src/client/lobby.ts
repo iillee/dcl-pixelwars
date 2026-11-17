@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_MODES, MODE_PILL_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_Z, SIGN_W_M, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteModeAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -43,12 +43,15 @@ const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-const SIGN_COPY: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon', { plate: Rgb; ink: Rgb }> = {
-  pvp: { plate: { r: 1, g: 0.459, b: 0.467 }, ink: { r: 0.45, g: 0.12, b: 0.13 } },
-  pvb: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
-  bases: { plate: { r: 0.416, g: 0.6, b: 0.988 }, ink: { r: 0.1, g: 0.18, b: 0.42 } },
-  prototype: { plate: { r: 1, g: 0.796, b: 0.42 }, ink: { r: 0.42, g: 0.27, b: 0.06 } },
-  balloon: { plate: { r: 0.435, g: 0.816, b: 0.549 }, ink: { r: 0.08, g: 0.32, b: 0.16 } },
+type LiveMode = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
+
+function pillHex(id: ModeId): string {
+  return MODE_PILL_HEX[id as LiveMode]
+}
+
+function pillRgb(id: ModeId): Rgb {
+  const c = Color4.fromHexString(pillHex(id))
+  return { r: c.r, g: c.g, b: c.b }
 }
 
 function clearSigns(): void {
@@ -69,25 +72,11 @@ function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Iden
   return e
 }
 
-/**
- * Occupied floors are sunlit and read lighter than their plate RGB.
- * Vertical billboards skip scene lighting, so they use this lifted colour
- * as an unlit diffuse and match the apparent floor. 0.33 was measured from
- * the Balloon Battle floor (#A3DCB8) vs its plate (#6FD08C).
- * Display hexes at this lift: Classic #FFA3A4, Paint Limit #FFDC9C,
- * Base Charge #9BBBFD, Balloon Battle #9EE0B2.
- */
-const FLOOR_LIT_LIFT = 0.33
-
-function litPlate(c: Rgb): Rgb {
-  const mix = (v: number) => v + (1 - v) * FLOOR_LIT_LIFT
-  return { r: mix(c.r), g: mix(c.g), b: mix(c.b) }
-}
-
-/** Unlit so scene light cannot darken or re-tint the plate. */
-function plateMat(c: Rgb) {
+/** Unlit, fully opaque BasicMaterial so the pill renders at the true hex, not a lit or blended pastel. */
+function plateMat(c: Color4) {
   return {
     diffuseColor: Color4.create(c.r, c.g, c.b, 1),
+    alphaTest: 0,
     castShadows: false,
   }
 }
@@ -110,7 +99,6 @@ function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, 
 function laySigns(): void {
   clearSigns()
   for (const m of placedModes()) {
-    const copy = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon']
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
     // Letters sit on local −Z, the side a yaw billboard turns toward the camera.
@@ -123,9 +111,11 @@ function laySigns(): void {
     signRoots.push(root)
     signBaseY.push(pose.y)
     const face = signFaceZ()
-    const display = litPlate(copy.plate)
+    // fromHexString is /255 sRGB with alpha 1; same as Color4.create of those channels.
+    // A previous 33% mix toward white is what made these look muted and greyish.
+    const display = Color4.fromHexString(pillHex(m.id))
     const slab = plateMat(display)
-    const lip = plateMat({ r: display.r * 0.55, g: display.g * 0.55, b: display.b * 0.55 })
+    const lip = plateMat(Color4.create(display.r * 0.55, display.g * 0.55, display.b * 0.55, 1))
     pill(root, SIGN_W_M + 0.7, SIGN_H_M + 0.55, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
@@ -151,7 +141,7 @@ function laySigns(): void {
       height: 2,
     })
     const badgeY = signBadgeY()
-    pill(root, 6.4, 3.4, 0.45, Vector3.create(0, badgeY, face + 0.35), plateMat({ r: 0.98, g: 0.97, b: 0.94 }))
+    pill(root, 6.4, 3.4, 0.45, Vector3.create(0, badgeY, face + 0.35), plateMat(Color4.create(0.98, 0.97, 0.94, 1)))
     const count = add(root, Vector3.create(0, badgeY, face), Vector3.One())
     TextShape.create(count, {
       text: '0',
@@ -173,7 +163,7 @@ function laySigns(): void {
       scale: Vector3.Zero(),
     })
     MeshRenderer.setBox(pad)
-    Material.setPbrMaterial(pad, zoneMat(copy.plate, false))
+    Material.setPbrMaterial(pad, zoneMat(pillRgb(m.id), false))
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
@@ -273,8 +263,7 @@ function tickTints(_dt: number, local: ModeId | ''): void {
     const show = here || others
     if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    const plate = SIGN_COPY[m.id as 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'].plate
-    Material.setPbrMaterial(tints[i], zoneMat(plate, here || confirmed))
+    Material.setPbrMaterial(tints[i], zoneMat(pillRgb(m.id), here || confirmed))
   }
 }
 
