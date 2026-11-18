@@ -13,6 +13,11 @@ import { GROWTH_PER_CELL_PER_SEC } from "./shared/bases"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_NAME, TEAM_RGB, PLAYING_TEAMS, isPlayingTeam, leadingTeams, rankedTeams, type TeamCoverage } from "./shared/team"
+import {
+  rosterLayout, sortTeamRows, tablesLayout, tablesW, textW, textWSafe, titleFontFor,
+  SUMMARY_BOLD_PX, SUMMARY_CARD_BODY_H, SUMMARY_CARD_GAP, SUMMARY_CARD_H, SUMMARY_CARD_HEAD_H, SUMMARY_CARD_W, SUMMARY_FIT, SUMMARY_FONT_MIN, SUMMARY_GAP, SUMMARY_HEAD_FONT, SUMMARY_HEAD_H, SUMMARY_PILL_FONT, SUMMARY_PILL_H, SUMMARY_PILL_W, SUMMARY_ROW_FONT, SUMMARY_ROW_H, SUMMARY_SUB_FONT, SUMMARY_TITLE_FONT, TITLE_WORD_GAP,
+  type SummaryRow,
+} from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { getPlayer } from "@dcl/sdk/players"
@@ -113,33 +118,20 @@ function onTeamInk(team: number): Color4 {
 }
 
 // ─── Round-end summary: title, four-team territory pill, ranked team cards, stats row ───
-// Sizes are at a 1280-wide reference and scale with the canvas (k), never below SUMMARY_K_MIN.
+// Sizes are at a 1280-wide reference and scale with the canvas (k). Card height is fixed;
+// every player is shown, with rows compacting (and two columns past six) so they stay inside the box.
 const BAR_TOP_PX = 10 + 68 + 6 // the score bar's top edge: the pill grows out of it
-const SUMMARY_K_MAX = 1.6
-const SUMMARY_PILL_W = 720
-const SUMMARY_PILL_H = 48
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
-const SUMMARY_TITLE_FONT = 72 // older build's title size
-const SUMMARY_HEAD_H = 184 // title + subtitle + "Next round" line above the territory bar
-const SUMMARY_GAP = 32 // territory bar → tables
-const SUMMARY_SUB_FONT = 18
-const SUMMARY_PILL_FONT = 30
-const SUMMARY_CARD_W = 580
-const SUMMARY_CARD_GAP = 40
-const SUMMARY_ROW_H = 44
-const SUMMARY_ROW_FONT = 22
-const SUMMARY_HEAD_FONT = 15
-const SUMMARY_CARD_ROWS = 10 // per team (side by side); the rest fold into "+N more"
-const SUMMARY_CARD_ROWS_SMALL = 4 // stacked / short screens
-const SUMMARY_FONT_MIN = 12 // readable floor for any summary text
-const SUMMARY_FIT = 0.94 // fraction of the canvas the layout may use
 // Style of the LUNGE/BURST hotbar: light-grey rounded pills, thick dark rounded-square outlines, dark caps text.
 const SUMMARY_CARD_BG = PANEL_LIGHT // same light panel as the hotbar
 const SUMMARY_INK = Color4.create(0.13, 0.13, 0.15, 1)        // dark text + thick outlines
 const SUMMARY_DIM = Color4.create(0.4, 0.4, 0.44, 1)          // secondary dark-grey text
 const SUMMARY_R = HOTBAR_RADIUS
 const SUMMARY_OUTLINE = HOTBAR_BORDER_W
+/** Solid dark strip behind the title so white / team-colored words stay opaque over a bright sky. */
+const SUMMARY_TITLE_BG = Color4.create(0.07, 0.07, 0.09, 1)
+const SUMMARY_TITLE_FG = Color4.create(1, 1, 1, 1)
 /** Team accent readable on the light-grey panel. */
 const inkTeam = (team: number) => mix(barColor(team), Color4.Black(), 0.25)
 const SUMMARY_UNPAINTED = PANEL_LIGHT
@@ -156,21 +148,8 @@ function canvasSize(): { w: number; h: number } {
   return { w: c.width / dpr, h: c.height / dpr }
 }
 
-type SummaryRow = { id: string; name: string; team: number; cells: number; kos: number; deaths: number; painted: number }
-
-const cardH = (n: number, more: boolean) => 24 + 40 + n * (SUMMARY_ROW_H + 6) + (more ? 28 : 0)
 const fnt = (f: number, k: number) => Math.max(SUMMARY_FONT_MIN, f * k)
-const SUMMARY_BOLD_PX = 0.035 // fake-bold offset as a fraction of the font size (DCL text has no weight)
-/** Rough single-line width of caps text (≈ 0.62 em per glyph). */
-const textW = (t: string, f: number) => t.length * f * 0.62
-/** Conservative width (wide caps + bold) used where overflow must never wrap. */
-const textWSafe = (t: string, f: number) => t.length * f * 0.8
-const TITLE_WORD_GAP = 0.3 // gap between title words, in em
-/** Round-end title font: the older 72 px look, shrunk so team word + gap + WINS! fits the given width on one line. */
-export function titleFontFor(words: string[], k: number, availW: number): number {
-  const em = words.reduce((s, w) => s + textWSafe(w, 1), 0) + (words.length - 1) * TITLE_WORD_GAP
-  return Math.min(SUMMARY_TITLE_FONT * k, availW / em)
-}
+export { titleFontFor }
 
 /** Fake bold: the same label drawn 5× (centre + 4 offsets of ~3.5% of the font size) in one fixed box. */
 function BoldLabel(props: { value: string; fontSize: number; color: Color4; w: number; h: number; align: 'middle-left' | 'middle-center' | 'middle-right'; margin?: any }) {
@@ -186,29 +165,6 @@ function BoldLabel(props: { value: string; fontSize: number; color: Color4; w: n
   )
 }
 
-/** Scale + arrangement for the four ranked team cards under `top` px (unscaled) of other content.
- *  Desktop is a 2×2 grid (up to 10 rows/team, dropping to 8/6/4 until scale stays ≥ SUMMARY_K_READ);
- *  phones stack all four (4 rows/team). Overflow folds into "+N more". Fits 94% of width AND height. */
-const SUMMARY_K_READ = 0.75
-function tablesLayout(all: SummaryRow[], cv: { w: number; h: number }, top: number): { k: number; stacked: boolean; rowCap: number } {
-  const ns = PLAYING_TEAMS.map(t => all.filter(r => r.team === t).length)
-  const hOf = (cap: number, n: number) => cardH(Math.max(1, Math.min(cap, n)), n > cap)
-  const rowH = (cap: number, a: number, b: number) => Math.max(hOf(cap, a), hOf(cap, b))
-  const gridH = (cap: number) => rowH(cap, ns[0], ns[1]) + rowH(cap, ns[2], ns[3]) + SUMMARY_GAP * 0.6
-  const gridW = Math.max(SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP, SUMMARY_PILL_W)
-  const kGridAt = (cap: number) => Math.min(cv.w * SUMMARY_FIT / gridW, cv.h * SUMMARY_FIT / (top + gridH(cap)))
-  let gridCap = SUMMARY_CARD_ROWS_SMALL
-  for (const c of [10, 8, 6]) if (kGridAt(c) >= SUMMARY_K_READ) { gridCap = c; break }
-  const kGrid = kGridAt(gridCap)
-  const stackH = top + ns.reduce((s, n) => s + hOf(SUMMARY_CARD_ROWS_SMALL, n), 0) + SUMMARY_GAP * 0.6 * 3
-  const kStack = Math.min(cv.w * SUMMARY_FIT / Math.max(SUMMARY_CARD_W, SUMMARY_PILL_W), cv.h * SUMMARY_FIT / stackH)
-  const stacked = kStack > kGrid * 1.15
-  return { k: Math.min(SUMMARY_K_MAX, stacked ? kStack : kGrid), stacked, rowCap: stacked ? SUMMARY_CARD_ROWS_SMALL : gridCap }
-}
-
-
-/** Unscaled width of the team tables: one card when stacked, two + gap in a 2×2 grid (the pill matches it). */
-const tablesW = (stacked: boolean) => stacked ? SUMMARY_CARD_W : SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP
 
 /** Keep a sliver for 0% teams so all four colours stay visible. */
 function segmentFracs(pcts: number[]): number[] {
@@ -302,14 +258,13 @@ function TeamCardGrid(props: {
   me: string
   k: number
   a: number
-  cap: number
   stacked: boolean
   order: number[]
   leaders: number[]
 }) {
-  const { rows, total, mvp, me, k, a, cap, stacked, order, leaders } = props
+  const { rows, total, mvp, me, k, a, stacked, order, leaders } = props
   const card = (team: number, i: number) => (
-    <TeamCard team={team} rows={rows.filter(r => r.team === team)} total={total} mvp={mvp} me={me} k={k} a={a} cap={cap} leader={leaders.includes(team)} rank={i + 1} />
+    <TeamCard team={team} rows={rows.filter(r => r.team === team)} total={total} mvp={mvp} me={me} k={k} a={a} leader={leaders.includes(team)} rank={i + 1} />
   )
   const gap = SUMMARY_CARD_GAP * k
   const vgap = SUMMARY_GAP * 0.6 * k
@@ -340,68 +295,109 @@ function TeamCardGrid(props: {
   )
 }
 
-function HeadlineRow(props: { text: string; font: number; a: number }) {
-  const words = props.text.split(/(\s+)/)
+function HeadlineRow(props: { text: string; font: number }) {
+  const words = props.text.trim().split(/\s+/).filter(Boolean)
+  const gap = Math.max(4, props.font * TITLE_WORD_GAP)
   return (
-    <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: props.font * 1.2, flexShrink: 0 }}>
-      {words.map((w) => {
+    <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: props.font * 1.15, flexShrink: 0 }}>
+      {words.map((w, i) => {
         const tok = w.replace(/!$/, '')
-        const col = tok === 'RED' ? BAR_RED : tok === 'BLUE' ? BAR_BLUE : tok === 'GREEN' ? BAR_GREEN : tok === 'YELLOW' ? BAR_YELLOW : Color4.White()
-        return <Label value={w} fontSize={props.font} color={withA(col, props.a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: Math.max(textWSafe(w, props.font), 4), height: props.font * 1.2, flexShrink: 0 }} />
+        const col = tok === 'RED' ? BAR_RED : tok === 'BLUE' ? BAR_BLUE : tok === 'GREEN' ? BAR_GREEN : tok === 'YELLOW' ? BAR_YELLOW : SUMMARY_TITLE_FG
+        return <Label value={w} fontSize={props.font} color={col} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: Math.max(textWSafe(w, props.font), 4), height: props.font * 1.15, flexShrink: 0, margin: { left: i === 0 ? 0 : gap } }} />
       })}
     </UiEntity>
   )
 }
 /** Hotbar style: light-grey panel, thick dark outline, dark caps; colour only on the team name and dots. */
-function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; cap: number; leader?: boolean; rank?: number }) {
-  const { team, rows, total, mvp, me, k, a, cap, leader, rank } = props
+function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; leader?: boolean; rank?: number }) {
+  const { team, rows, total, mvp, me, k, a, leader, rank } = props
   const col = barColor(team)
-  const shown = rows.slice(0, cap)
-  const more = rows.length - shown.length
+  const shown = sortTeamRows(rows)
+  const lay = rosterLayout(shown.length)
   const cw = SUMMARY_CARD_W * k
+  const ch = SUMMARY_CARD_H * k
+  const bodyH = SUMMARY_CARD_BODY_H * k
+  const rowH = lay.rowH * k
+  const font = fnt(lay.font, k)
   const headF = fnt(SUMMARY_HEAD_FONT, k)
-  // Full headers unless they'd squeeze the name column under ~40% of the card (phones): then short ones.
+  const twoCol = lay.columns === 2
   const wide = Math.max(86 * k, textW('TERRITORY', headF) + 12 * k)
-  const compact = wide * 4 > cw * 0.6
-  const H = compact ? ['AREA', 'TILES', 'KO', 'DEATHS'] : ['TERRITORY', 'TILES', 'KOS', 'DEATHS']
-  const numW = compact ? Math.max(56 * k, textW('DEATHS', headF) + 8 * k) : wide, nameW = cw - numW * 4 - 24 * k
+  const tightHead = wide * 4 > cw * 0.6
+  const H = twoCol ? ['TILES', 'TILES'] : (tightHead ? ['AREA', 'TILES', 'KO', 'DEATHS'] : ['TERRITORY', 'TILES', 'KOS', 'DEATHS'])
+  const numW = twoCol
+    ? Math.max(52 * k, textW('TILES', headF) + 8 * k)
+    : (tightHead ? Math.max(56 * k, textW('DEATHS', headF) + 8 * k) : wide)
+  const nameW = twoCol ? (cw - 24 * k) / 2 - numW : cw - numW * 4 - 24 * k
   const cell = (v: string, c: Color4, f: number, w: number) =>
     <Label value={v} fontSize={f} color={withA(c, a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />
-  return (
-    <UiEntity uiTransform={{ width: cw, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k, borderWidth: (leader ? SUMMARY_OUTLINE * 1.35 : SUMMARY_OUTLINE) * k, borderColor: withA(leader ? SUMMARY_MVP : SUMMARY_INK, a) }}
-      uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
-      <UiEntity uiTransform={{ width: '100%', height: 40 * k, flexDirection: 'row', alignItems: 'center' }}>
-        {isMobile()
-          ? <BoldLabel value={`${rank ? `#${rank} ` : ''}${isPlayingTeam(team) ? TEAM_NAME[team] : 'TEAM'} TEAM`} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={nameW - 10 * k} h={40 * k} margin={{ left: 10 * k }} />
-          : <Label value={`${rank ? `#${rank} ` : ''}${isPlayingTeam(team) ? TEAM_NAME[team] : 'TEAM'} TEAM`} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: nameW - 10 * k, height: 40 * k, flexShrink: 0, margin: { left: 10 * k } }} />}
-        {cell(H[0], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell(H[1], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell(H[2], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
-        {cell(H[3], SUMMARY_DIM, fnt(SUMMARY_HEAD_FONT, k), numW)}
+  const selfOf = (r: SummaryRow) => r.id.toLowerCase() === me
+  const nameCell = (r: SummaryRow, w: number) => (
+    <UiEntity uiTransform={{ width: w, height: '100%', flexDirection: 'row', alignItems: 'center', padding: { left: 8 * k } }}>
+      <UiEntity uiTransform={{ width: Math.max(8, 10 * k), height: Math.max(8, 10 * k), borderRadius: Math.max(4, 5 * k), margin: { right: 8 * k }, borderWidth: Math.max(1, 1.5 * k), borderColor: withA(SUMMARY_INK, a) }} uiBackground={{ color: withA(col, a) }} />
+      <Label value={r.name} fontSize={font} color={withA(SUMMARY_INK, a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: '100%' }} />
+      {r.id === mvp && !twoCol && (
+        <UiEntity uiTransform={{ width: 56 * k, height: Math.min(26 * k, rowH - 4), margin: { left: 8 * k }, borderRadius: 7 * k, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a), justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: withA(SUMMARY_MVP, a) }}>
+          <Label value="MVP" fontSize={fnt(14, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
+        </UiEntity>
+      )}
+    </UiEntity>
+  )
+  const rowBg = (r: SummaryRow) => selfOf(r) ? withA(Color4.White(), 0.92 * a) : Color4.create(0, 0, 0, 0.05 * a)
+  const rowBorder = (r: SummaryRow) => selfOf(r) ? { borderWidth: SUMMARY_OUTLINE * k * 0.75, borderColor: withA(SUMMARY_INK, a) } : {}
+  const fullRow = (r: SummaryRow) => (
+    <UiEntity uiTransform={{ width: '100%', height: rowH, flexDirection: 'row', alignItems: 'center', flexShrink: 0, borderRadius: 8 * k, ...rowBorder(r) }}
+      uiBackground={{ color: rowBg(r) }}>
+      {nameCell(r, nameW)}
+      {cell(`${total > 0 ? Math.round(r.cells / total * 100) : 0}%`, SUMMARY_INK, font, numW)}
+      {cell(`${r.painted}`, SUMMARY_INK, font, numW)}
+      {cell(`${r.kos}`, SUMMARY_INK, font, numW)}
+      {cell(`${r.deaths}`, SUMMARY_INK, font, numW)}
+    </UiEntity>
+  )
+  const compactPair = (left: SummaryRow, right?: SummaryRow) => (
+    <UiEntity uiTransform={{ width: '100%', height: rowH, flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
+      <UiEntity uiTransform={{ width: '50%', height: '100%', flexDirection: 'row', alignItems: 'center', borderRadius: 6 * k, ...rowBorder(left) }} uiBackground={{ color: rowBg(left) }}>
+        {nameCell(left, nameW)}
+        {cell(`${left.painted}`, SUMMARY_INK, font, numW)}
       </UiEntity>
-      {shown.length === 0 && <Label value="NO PLAYERS" fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: SUMMARY_ROW_H * k, margin: { left: 12 * k } }} />}
-      {shown.map(r => {
-        const self = r.id.toLowerCase() === me
-        return (
-          <UiEntity uiTransform={{ width: '100%', height: SUMMARY_ROW_H * k, flexDirection: 'row', alignItems: 'center', margin: { top: 6 * k }, borderRadius: 10 * k, ...(self ? { borderWidth: SUMMARY_OUTLINE * k * 0.75, borderColor: withA(SUMMARY_INK, a) } : {}) }}
-            uiBackground={{ color: self ? withA(Color4.White(), 0.9 * a) : Color4.create(0, 0, 0, 0.05 * a) }}>
-            <UiEntity uiTransform={{ width: nameW, height: '100%', flexDirection: 'row', alignItems: 'center', padding: { left: 10 * k } }}>
-              <UiEntity uiTransform={{ width: 14 * k, height: 14 * k, borderRadius: 7 * k, margin: { right: 10 * k }, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a) }} uiBackground={{ color: withA(col, a) }} />
-              <Label value={r.name} fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: '100%' }} />
-              {r.id === mvp && (
-                <UiEntity uiTransform={{ width: 56 * k, height: 26 * k, margin: { left: 10 * k }, borderRadius: 7 * k, borderWidth: 2 * k, borderColor: withA(SUMMARY_INK, a), justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: withA(SUMMARY_MVP, a) }}>
-                  <Label value="MVP" fontSize={fnt(14, k)} color={withA(SUMMARY_INK, a)} textAlign="middle-center" />
-                </UiEntity>
-              )}
-            </UiEntity>
-            {cell(`${total > 0 ? Math.round(r.cells / total * 100) : 0}%`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
-            {cell(`${r.painted}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
-            {cell(`${r.kos}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
-            {cell(`${r.deaths}`, SUMMARY_INK, fnt(SUMMARY_ROW_FONT, k), numW)}
+      {right ? (
+        <UiEntity uiTransform={{ width: '50%', height: '100%', flexDirection: 'row', alignItems: 'center', borderRadius: 6 * k, ...rowBorder(right) }} uiBackground={{ color: rowBg(right) }}>
+          {nameCell(right, nameW)}
+          {cell(`${right.painted}`, SUMMARY_INK, font, numW)}
+        </UiEntity>
+      ) : <UiEntity uiTransform={{ width: '50%', height: '100%' }} />}
+    </UiEntity>
+  )
+  const pairs: Array<{ left: SummaryRow; right?: SummaryRow }> = []
+  if (twoCol) {
+    for (let i = 0; i < shown.length; i += 2) pairs.push({ left: shown[i], right: shown[i + 1] })
+  }
+  return (
+    <UiEntity uiTransform={{ width: cw, height: ch, flexShrink: 0, flexDirection: 'column', padding: { top: 8 * k, bottom: 12 * k, left: 8 * k, right: 8 * k }, borderRadius: SUMMARY_R * k, borderWidth: (leader ? SUMMARY_OUTLINE * 1.35 : SUMMARY_OUTLINE) * k, borderColor: withA(leader ? SUMMARY_MVP : SUMMARY_INK, a) }}
+      uiBackground={{ color: withA(SUMMARY_CARD_BG, a) }}>
+      <UiEntity uiTransform={{ width: '100%', height: SUMMARY_CARD_HEAD_H * k, flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
+        {isMobile()
+          ? <BoldLabel value={`${rank ? `#${rank} ` : ''}${isPlayingTeam(team) ? TEAM_NAME[team] : 'TEAM'} TEAM`} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} align="middle-left" w={twoCol ? cw * 0.5 : nameW - 10 * k} h={SUMMARY_CARD_HEAD_H * k} margin={{ left: 10 * k }} />
+          : <Label value={`${rank ? `#${rank} ` : ''}${isPlayingTeam(team) ? TEAM_NAME[team] : 'TEAM'} TEAM`} fontSize={fnt(28, k)} color={withA(inkTeam(team), a)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: twoCol ? cw * 0.5 : nameW - 10 * k, height: SUMMARY_CARD_HEAD_H * k, flexShrink: 0, margin: { left: 10 * k } }} />}
+        {twoCol ? (
+          <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', height: '100%' }}>
+            {cell('TILES', SUMMARY_DIM, headF, numW)}
+            <UiEntity uiTransform={{ width: nameW, height: '100%' }} />
+            {cell('TILES', SUMMARY_DIM, headF, numW)}
           </UiEntity>
-        )
-      })}
-      {more > 0 && <Label value={`+${more} MORE`} fontSize={fnt(16, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: 26 * k, margin: { left: 12 * k, top: 2 * k } }} />}
+        ) : (
+          <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', height: '100%' }}>
+            {cell(H[0], SUMMARY_DIM, headF, numW)}
+            {cell(H[1], SUMMARY_DIM, headF, numW)}
+            {cell(H[2], SUMMARY_DIM, headF, numW)}
+            {cell(H[3], SUMMARY_DIM, headF, numW)}
+          </UiEntity>
+        )}
+      </UiEntity>
+      <UiEntity uiTransform={{ width: '100%', height: bodyH, flexDirection: 'column', flexShrink: 0, overflow: lay.scroll ? 'scroll' : 'hidden' }}>
+        {shown.length === 0 && <Label value="NO PLAYERS" fontSize={fnt(SUMMARY_ROW_FONT, k)} color={withA(SUMMARY_DIM, a)} textAlign="middle-left" uiTransform={{ height: SUMMARY_ROW_H * k, margin: { left: 12 * k } }} />}
+        {twoCol ? pairs.map(p => compactPair(p.left, p.right)) : shown.map(r => fullRow(r))}
+      </UiEntity>
     </UiEntity>
   )
 }
@@ -429,7 +425,7 @@ function StandingsPopup() {
   if (now - standingsReqAt > STANDINGS_REFRESH_MS) { standingsReqAt = now; room.send('requestStandings', {}) }
   const cv = canvasSize()
   const rows = standingsRows.slice().sort((x, y) => y.cells - x.cells)
-  const { k, stacked, rowCap } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, SUMMARY_PILL_H + SUMMARY_GAP)
+  const { k, stacked } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, SUMMARY_PILL_H + SUMMARY_GAP)
   const pct = coveragePct()
   const pw = tablesW(stacked) * k, ph = SUMMARY_PILL_H * k, border = SUMMARY_OUTLINE * k
   const cov = coverage()
@@ -447,7 +443,7 @@ function StandingsPopup() {
         <TeamScorePill pcts={[pct.red, pct.blue, pct.green, pct.yellow]} width={pw} height={ph} border={border} track={SUMMARY_INK} innerBg={SUMMARY_UNPAINTED} showLabels={true} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} />
       </UiEntity>
       )}
-      <TeamCardGrid rows={rows} total={total} mvp={mvp} me={me} k={k} a={1} cap={rowCap} stacked={stacked} order={order} leaders={leaders} />
+      <TeamCardGrid rows={rows} total={total} mvp={mvp} me={me} k={k} a={1} stacked={stacked} order={order} leaders={leaders} />
       </UiEntity>
     </UiEntity>
   )
@@ -477,7 +473,7 @@ function PctOverlay(props: { red: number; blue: number; k: number; color: Color4
 function RoundSummary(p: number) {
   const b = getBanner()
   const cv = canvasSize()
-  const { k, stacked, rowCap } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
+  const { k, stacked } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
   const pw = lerp(barW(), tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
@@ -490,8 +486,8 @@ function RoundSummary(p: number) {
   const order = b.kind === 'balloon' ? [...PLAYING_TEAMS] : rankedTeams(endCov)
   const show = a > 0
   const headline = b.headline || (b.winner === 'TIE' || b.winner === '' ? "IT'S A TIE!" : b.winner === 'PLAYER' ? ((b.victorName || 'SOMEONE').toUpperCase() + ' WINS!') : (b.winner + ' WINS!'))
-  const titleWords = [headline]
-  const titleF = titleFontFor(titleWords, k, cv.w * 0.9)
+  const titleWords = headline.trim().split(/\s+/).filter(Boolean)
+  const titleF = titleFontFor(titleWords, k, cv.w * 0.86)
   // Letter-spaced subtitle; on narrow phones where it would drop under the 12 px floor, the plain words.
   const SUB_WIDE = b.kind === 'balloon' ? 'L A S T     P L A Y E R     S T A N D I N G' : b.kind === 'bases' ? 'F I N A L     B A S E     C H A R G E' : 'F I N A L     T E R R I T O R Y     C O N T R O L'
   const SUB = cv.w * 0.9 / textWSafe(SUB_WIDE, 1) >= SUMMARY_FONT_MIN ? SUB_WIDE : (b.kind === 'balloon' ? 'LAST PLAYER STANDING' : b.kind === 'bases' ? 'FINAL BASE CHARGE' : 'FINAL TERRITORY CONTROL')
@@ -501,13 +497,14 @@ function RoundSummary(p: number) {
       onMouseDown={() => dismissSummary()}>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
       <UiEntity uiTransform={{ width: 1, height: BAR_TOP_PX * (1 - p), flexShrink: 0 }} />
-      {/* Title + subtitle: light text floating over the scene (fold to nothing while the pill is still a bar) */}
+      {/* Title + subtitle sit on an opaque dark strip so they stay crisp over a bright sky. */}
       <UiEntity uiTransform={{ width: '100%', height: SUMMARY_HEAD_H * k * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
         {show && (
-          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k } }}>
-            <HeadlineRow text={headline} font={titleF} a={a} />
-            <Label value={SUB} fontSize={subF} color={withA(Color4.create(0.92, 0.92, 0.94, 1), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
-            <Label value={nextRoundBlurb()} fontSize={Math.max(SUMMARY_FONT_MIN, subF * 0.9)} color={withA(Color4.White(), a)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(nextRoundBlurb(), Math.max(SUMMARY_FONT_MIN, subF * 0.9)), height: subF * 1.4, flexShrink: 0, margin: { top: 4 * k } }} />
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 14 * k }, padding: { top: 10 * k, bottom: 12 * k, left: 28 * k, right: 28 * k }, borderRadius: 16 * k }}
+            uiBackground={{ color: SUMMARY_TITLE_BG }}>
+            <HeadlineRow text={headline} font={titleF} />
+            <Label value={SUB} fontSize={subF} color={SUMMARY_TITLE_FG} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(SUB, subF), height: subF * 1.45, flexShrink: 0 }} />
+            <Label value={nextRoundBlurb()} fontSize={Math.max(SUMMARY_FONT_MIN, subF * 0.9)} color={SUMMARY_TITLE_FG} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: textWSafe(nextRoundBlurb(), Math.max(SUMMARY_FONT_MIN, subF * 0.9)), height: subF * 1.4, flexShrink: 0, margin: { top: 4 * k } }} />
           </UiEntity>
         )}
       </UiEntity>
@@ -516,7 +513,7 @@ function RoundSummary(p: number) {
       <TeamScorePill pcts={[b.redPct, b.bluePct, b.greenPct, b.yellowPct]} width={pw} height={ph} border={border} track={p > 0.5 ? SUMMARY_INK : BAR_TRACK} innerBg={p > 0.5 ? SUMMARY_UNPAINTED : Color4.White()} showLabels={show} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} />
       {show && (
         <UiEntity uiTransform={{ margin: { top: SUMMARY_GAP * k } }}>
-          <TeamCardGrid rows={rows} total={b.total} mvp={mvp} me={me} k={k} a={a} cap={rowCap} stacked={stacked} order={order} leaders={leaders} />
+          <TeamCardGrid rows={rows} total={b.total} mvp={mvp} me={me} k={k} a={a} stacked={stacked} order={order} leaders={leaders} />
         </UiEntity>
       )}
       </UiEntity>
