@@ -125,9 +125,11 @@ export const LOBBY_VOTE_MS = 10_000
 export const VOTE_FLOOR_WIDTH = 20 / 32
 export const VOTE_FLOOR_CLOSED = 6 / 32
 export const VOTE_TINT_INSET_M = 0.15
-/** How far past the cell edge the mode sign sits, on the outer side.
- *  Far enough that a sign at the default overview scale stays off the lobby tiles. */
-export const SIGN_CLEAR_M = 10
+/** How far past the cell edge the team sign sits, on the outer side.
+ *  Kept short so the pills sit a little closer in toward the lobby cross. */
+export const SIGN_CLEAR_M = 6
+/** World Y of a sign root, metres above the tile floor. */
+export const SIGN_LIFT_M = 17
 /** Reference width used only to keep the short 58×8.6 pill height after the earlier shrink. */
 export const SIGN_REF_W_M = 32
 /** Shared height of every team pill. Width now follows the word, not this height's old aspect. */
@@ -143,6 +145,19 @@ export function signPlateWidth(label: string): number {
   const fontM = SIGN_TITLE_FONT / 10
   const textW = Math.max(1, label.length) * fontM * SIGN_TITLE_CHAR
   return textW + SIGN_TITLE_PAD_M * 2
+}
+/** Shared plate width: the longest team word (YELLOW) plus the same modest padding. */
+export const SIGN_W_M = signPlateWidth('YELLOW')
+/** Unlit title plates, baked in Lilita One so the letters stay crisp white with no outline. */
+export type SignTitlePlane = { src: string; w: number; h: number }
+const SIGN_TITLE_PLANES: Record<string, SignTitlePlane> = {
+  RED: { src: 'assets/textures/sign-title-red.png', w: 9.8154, h: 4.4383 },
+  BLUE: { src: 'assets/textures/sign-title-blue.png', w: 12.2572, h: 4.4717 },
+  GREEN: { src: 'assets/textures/sign-title-green.png', w: 16.0238, h: 4.5051 },
+  YELLOW: { src: 'assets/textures/sign-title-yellow.png', w: 20.3396, h: 4.5051 },
+}
+export function signTitlePlane(label: string): SignTitlePlane {
+  return SIGN_TITLE_PLANES[label] ?? SIGN_TITLE_PLANES.YELLOW
 }
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
@@ -354,7 +369,7 @@ export function billboardAnchor(
   const out = cell / 2 + SIGN_CLEAR_M
   return {
     x: modeCell.x * cell + cell / 2 + origin + dx * out,
-    y: baseY + 22,
+    y: baseY + SIGN_LIFT_M,
     z: modeCell.z * cell + cell / 2 + origin + dz * out,
     yawDeg: endYawQuarter(modeCell) * 90,
   }
