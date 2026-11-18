@@ -84,7 +84,7 @@ import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
-import { RESCUE_PATH, rescueCloudPose } from '../shared/rescuePath'
+import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -857,7 +857,7 @@ export function remoteRiderFeet(who: string): Vec | null {
   const age = (Date.now() - c.started) / 1000
   if (age < c.grab || age > c.grab + c.rise + c.cruise + c.descend) return null
   const p = Transform.getOrNull(c.root)?.position
-  return p ? { x: p.x, y: p.y - FALL_RESCUE.HANG_Y, z: p.z } : null
+  return p ? { x: p.x, y: p.y - rescueHangY(c.who), z: p.z } : null
 }
 
 function remoteFeet(who: string): Vec | null {
@@ -869,13 +869,13 @@ function remoteFeet(who: string): Vec | null {
   return null
 }
 
-function hangAt(p: Vec, extraY = 0): Vec {
-  return { x: p.x, y: p.y + FALL_RESCUE.HANG_Y + extraY, z: p.z }
+function hangAt(p: Vec, extraY = 0, hangY = FALL_RESCUE.HANG_Y): Vec {
+  return { x: p.x, y: p.y + hangY + extraY, z: p.z }
 }
 
 /** Mobile riders and bots: the cloud flies the three legs (the server moves a bot along the same path). */
 function mobileCloudPose(c: RemoteCloud, age: number): { pos: Vec; scale: number } {
-  return rescueCloudPose(c.catch, c.base, age, c)
+  return rescueCloudPose(c.catch, c.base, age, c, rescueHangY(c.who))
 }
 
 function placeRemote(c: RemoteCloud, pos: Vec, scale: number): void {
@@ -922,7 +922,7 @@ function onRemoteStart(m: {
   if (![m.x, m.y, m.z, m.bx, m.by, m.bz, m.grab, m.rise, m.cruise, m.descend].every(n => Number.isFinite(n))) return
   clearRemote(who)
   const root = engine.addEntity()
-  const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y)
+  const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y, rescueHangY(who))
   Transform.create(root, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(0.2, 0.2, 0.2) })
   remotes.set(who, {
     who, root, ents: cloudParts(root), mobile: m.mobile !== 0,

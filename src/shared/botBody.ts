@@ -30,7 +30,7 @@ import {
 } from './pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE } from './botAnim'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
-import { RESCUE_PATH, rescueCloudPose, RescueVec } from './rescuePath'
+import { RESCUE_PATH, RESCUE_TIMES, rescueCloudPose, RescueVec } from './rescuePath'
 
 type V3 = RescueVec
 export type BotBodyMode = 'walk' | 'knock' | 'rescue' | 'drop'
@@ -281,8 +281,8 @@ export class BotBody {
         return
       case 'rescue': {
         this.rescueAge += dt
-        const pose = rescueCloudPose(this.catchP, this.base, this.rescueAge)
-        if (this.rescueAge >= RESCUE_PATH.GRAB_S) this.pos = { x: pose.pos.x, y: pose.pos.y - RESCUE_PATH.HANG_Y, z: pose.pos.z }
+        const pose = rescueCloudPose(this.catchP, this.base, this.rescueAge, RESCUE_TIMES, RESCUE_PATH.BOT_HANG_Y)
+        if (this.rescueAge >= RESCUE_PATH.GRAB_S) this.pos = { x: pose.pos.x, y: pose.pos.y - RESCUE_PATH.BOT_HANG_Y, z: pose.pos.z }
         if (pose.done) {
           this.mode = 'drop'
           this.vel = { x: 0, y: 0, z: 0 }
