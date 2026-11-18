@@ -211,8 +211,8 @@ if (!nametags.includes("format === 'balloon'") || !nametags.includes('balloonMod
 if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('AvatarNametag.deleteFrom') || !bots.includes('hideGhostPlates') || !bots.includes("roundFormat === 'balloon'")) {
   fail('Balloon Battle should not put RED/BLUE nametag plates on players or bots')
 }
-if (!client.includes('BOT_BACK_Y') || !client.includes('BOT_BACK_Z') || !client.includes('GHOST_SCALE') || !client.includes('parent: host')) {
-  fail('bot balloons should parent to the ghost visual and sit on its upper back after scale')
+if (!client.includes('BOT_BACK_Y') || !client.includes('BOT_BACK_Z') || !client.includes('BOT_KNOT_LOCAL_Y') || !client.includes('BOT_KNOT_LOCAL_Z') || !client.includes('parent: host')) {
+  fail('bot balloons should parent to the bot visual and sit on its upper back')
 }
 
 

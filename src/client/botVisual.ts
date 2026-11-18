@@ -1,15 +1,16 @@
 /**
  * botVisual.ts — client-side bot renderer.
  *
- * Every live mode draws the original Aug 2026 ghost mesh (d86d6fe) as a
- * GltfContainer, with official DCL jump / double-jump / glide clips baked
- * into ghost-recover.glb. The glider pops out only while gliding, and the
- * ghost raises its arms only in that glide clip. Classic, Base Charge, and
- * Paint Limit get a team light and a billboarded RED/BLUE plate; Balloon
- * Battle is FFA so the light is neutral and the plate stays hidden.
- * The visual is always the ghost (not gated on the current format), so a late
- * mode sync cannot leave an AvatarShape standing. The AvatarShape path remains
- * as a gated fallback only.
+ * Every live mode draws a GltfContainer bot. Flip BOT_MODEL between
+ * 'custom' (Luke's Tripo mesh with a small arm rig; arms raise only in
+ * the glide clip) and 'ghost' (the original Aug 2026 mesh in
+ * ghost-recover.glb, with official DCL locomotion clips). The glider
+ * pops out only while gliding. Classic, Base Charge, and Paint Limit get
+ * a team light and a billboarded RED/BLUE plate; Balloon Battle is FFA
+ * so the light is neutral and the plate stays hidden.
+ * The visual is always this mesh (not gated on the current format), so a
+ * late mode sync cannot leave an AvatarShape standing. The AvatarShape
+ * path remains as a gated fallback only.
  * botPositions is smoothed with per-frame lerp, velocity dead-reckoning, and
  * snapshot interpolation (long enough to cover a hosted ~530 ms tick).
  *
@@ -75,21 +76,63 @@ const BLUE_CLOTHES = [
 /** Avatar origin is the feet, same as a player. Hit tests subtract this. Ghost float is applied only when drawing. */
 export const FLOAT_HEIGHT = 0
 
-/** Original Aug 2026 ghost mesh (d86d6fe) plus official DCL locomotion clips. */
-const GHOST_MODEL_SRC = 'assets/models/bots/ghost-recover.glb'
+/** Flip to `'ghost'` to restore the official DCL ghost mesh. */
+export const BOT_MODEL: 'ghost' | 'custom' = 'custom'
+
+type BotModelProfile = {
+  src: string
+  scale: number
+  /** World metres above the (already floated) root for the team plate. */
+  tagAboveM: number
+  /** Local-space Y of the glider on the scaled root. */
+  gliderLocalY: number
+  /** Local-space Y of the team point light on the scaled root. */
+  lightLocalY: number
+  /** Balloon knot in unscaled model space, parented to the scaled root. */
+  knotLocalY: number
+  knotLocalZ: number
+  clipDurS: Record<GhostClip, number>
+}
+
+const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
+  ghost: {
+    src: 'assets/models/bots/ghost-recover.glb',
+    scale: 1.2,
+    tagAboveM: 2.35,
+    gliderLocalY: 0,
+    lightLocalY: 0,
+    knotLocalY: 1.68 / 1.2,
+    knotLocalZ: 0.2 / 1.2,
+    clipDurS: { idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667 },
+  },
+  custom: {
+    src: 'assets/models/bots/bot-custom.glb',
+    scale: 1.2,
+    tagAboveM: 2.35,
+    gliderLocalY: 0,
+    lightLocalY: 1.35,
+    knotLocalY: 1.48,
+    knotLocalZ: 0.42,
+    clipDurS: { idle: 2, jump: 0.667, double: 0.667, glide: 0.333, fall: 0.667, slide: 0.667 },
+  },
+}
+
+const profile = BOT_PROFILES[BOT_MODEL]
+const GHOST_MODEL_SRC = profile.src
 const GLIDER_SRC = 'assets/models/glider.glb'
-/** Seconds, matching scripts/build-ghost-anims.py. */
+/** Seconds. Official ghost clips match scripts/build-ghost-anims.py; custom clips are 24 fps. */
 const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
   idle: true, jump: false, double: false, glide: true, fall: true, slide: true,
 }
-const GHOST_CLIP_DUR_S: Record<GhostClip, number> = {
-  idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667,
-}
-/** Uniform scale of the ghost mesh. Balloon knots divide by this so the tie stays on the upper back. */
-export const GHOST_SCALE = 1.2
+const GHOST_CLIP_DUR_S: Record<GhostClip, number> = profile.clipDurS
+/** Uniform scale of the bot mesh. Balloon knots use BOT_KNOT_LOCAL_* so the tie stays on the upper back. */
+export const GHOST_SCALE = profile.scale
+/** Balloon string tie-off, in the unscaled model local space of the bot root. */
+export const BOT_KNOT_LOCAL_Y = profile.knotLocalY
+export const BOT_KNOT_LOCAL_Z = profile.knotLocalZ
 const GHOST_FLOAT = 1.0
 /** World metres above the ghost root (already floated) for the team plate. */
-const TAG_ABOVE_M = 2.35
+const TAG_ABOVE_M = profile.tagAboveM
 const TAG_W_M = 1.15
 const TAG_H_M = 0.42
 const TAG_D_M = 0.08
@@ -324,7 +367,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
       })),
     })
     light = engine.addEntity()
-    Transform.create(light, { parent: root, position: Vector3.Zero() })
+    Transform.create(light, { parent: root, position: Vector3.create(0, profile.lightLocalY, 0) })
     paintLight(light, team)
   } else {
     paintAvatar(root, team, id)
@@ -457,7 +500,7 @@ function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
       const wing = engine.addEntity()
       Transform.create(wing, {
         parent: rec.root,
-        position: Vector3.Zero(),
+        position: Vector3.create(0, profile.gliderLocalY, 0),
         rotation: Quaternion.Identity(),
         scale: Vector3.Zero(),
       })
