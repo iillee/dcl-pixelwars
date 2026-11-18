@@ -31,11 +31,12 @@ import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { graphFloorAt } from '../../shared/anvilSim'
+import { planBotLungeAim } from '../../shared/botDash'
 import { KnockSpec } from '../../shared/knocks'
 import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
 import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
-  BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
+  BOT_BURST_CHANCE, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
   BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount, BOT_LEAP_ROUTES,
   botRecoveryEnabled, RoundFormat,
@@ -697,14 +698,12 @@ function fight(b: LiveBot, dt: number): void {
     }
   }
   if (can.lunge && c.lungeCd <= 0 && best <= BOT_LUNGE_RANGE && Math.random() < BOT_LUNGE_CHANCE) {
-    const err = (Math.random() * 2 - 1) * BOT_AIM_ERROR_DEG * Math.PI / 180
-    const ax = (tgt.x - p.x) / Math.max(best, 1e-3), az = (tgt.z - p.z) / Math.max(best, 1e-3)
-    const dx = ax * Math.cos(err) - az * Math.sin(err), dz = ax * Math.sin(err) + az * Math.cos(err)
+    const aim = planBotLungeAim(p, tgt, graph, rampTiles, Math.random)
     c.lungeCd = LUNGE_COOLDOWN_S
-    c.windup = { left: BOT_LUNGE_WINDUP_S, dx, dz, target: tgt.id, at: { ...p } }
+    c.windup = { left: BOT_LUNGE_WINDUP_S, dx: aim.dx, dz: aim.dz, target: tgt.id, at: { ...p } }
     b.stun(BOT_LUNGE_WINDUP_S * 1000)
     b.clearPath()
-    console.log(`[Bots] ghost ${b.botId} winds up a lunge at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
+    console.log(`[Bots] ghost ${b.botId} winds up a lunge at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m${aim.slipped ? ', edge slip' : ''})`)
     return
   }
   if (can.burst && c.burstCd <= 0 && inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC) && Math.random() < BOT_BURST_CHANCE) {

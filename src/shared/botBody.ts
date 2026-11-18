@@ -473,11 +473,11 @@ export class BotBody {
   }
 
   /** Inbound glide within this many metres of a walkable cell: keep going (m). */
-  static readonly FINAL_APPROACH_M = 4
+  static readonly FINAL_APPROACH_M = 4.5
   /** How far below that floor a last stretch may still climb into the mantle (m). */
-  static readonly FINAL_STRETCH_M = 1.6
+  static readonly FINAL_STRETCH_M = 1.85
   /** Extra glide time allowed once already in the final approach (s). */
-  static readonly FINAL_EXTRA_S = 1.25
+  static readonly FINAL_EXTRA_S = 1.5
 
   /** Nearest walkable cell within `range` of the feet, on a nearby deck. */
   private nearbyFloor(world: BotWorld, range: number): V3 | null {

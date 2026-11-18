@@ -9,20 +9,22 @@
  *
  * The world includes tiles so lip faces are real, matching live play. A returning
  * glide that arrives a little under the lip must mantle on, and a knocked body
- * at the same height must still fall off. Weak-knock saves stay in the 20–80% band.
+ * at the same height must still fall off. Weak-knock saves stay in the 70–80% band, with a human-like miss now and then.
  */
 import { readFileSync } from 'node:fs'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, MAZE_ORIGIN } from '../src/maze/generator'
 import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
+import { planBotLungeAim, lipInAimCone } from '../src/shared/botDash'
 import { lungeKnock, KnockSpec } from '../src/shared/knocks'
 import { graphFloorAt } from '../src/shared/anvilSim'
 import { inAirSpike } from '../src/shared/burst'
 import {
   BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed, botRecoveryEnabled,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
-  LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S, AIR_SPIKE_MIN_ABOVE,
+  LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S, BOT_LUNGE_BRAKE, AIR_SPIKE_MIN_ABOVE,
+  BOT_DASH_SLIP_CHANCE,
 } from '../src/shared/pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE, botShowsGlider } from '../src/shared/botAnim'
 import { rescueAllowsSnapshotInterp, snapsAfterRescueRelease } from '../src/shared/rescuePath'
@@ -237,7 +239,7 @@ for (let i = 0; i < TRIALS; i++) {
 }
 const rate = saved / TRIALS
 console.log(`weak knock, ${TRIALS} seeded bots: ${(rate * 100).toFixed(0)}% saved`)
-if (rate < 0.2 || rate > 0.8) fail(`expected some saves and some falls, got ${(rate * 100).toFixed(0)}%`)
+if (rate < 0.68 || rate > 0.85) fail(`expected about 70–80% weak saves, got ${(rate * 100).toFixed(0)}%`)
 
 let strongSaved = 0
 for (let i = 0; i < 24; i++) {
@@ -351,7 +353,7 @@ if (strongSaved > 2) fail(`strong knocks were saved ${strongSaved}/24 times`)
     const to = { x: s.x, y: floorY, z: s.z }
     const start = { x: outX, y: floorY - 1.2, z: outZ }
     const late = new BotBody(start)
-    late.startGlideApproach(start, { x: -s.dx * 5, y: 0, z: -s.dz * 5 }, to, 3.4)
+    late.startGlideApproach(start, { x: -s.dx * 5, y: 0, z: -s.dz * 5 }, to, 3.8)
     let gotOn = false
     let gaveUp = false
     for (let t = 0; t < 3; t += 0.05) {
@@ -367,6 +369,109 @@ if (strongSaved > 2) fail(`strong knocks were saved ${strongSaved}/24 times`)
       console.log(`✓ late inbound glide kept going and reached the lip (y ${late.pos.y.toFixed(2)})`)
     }
   }
+}
+
+
+{
+  const dashSrc = readFileSync(new URL('../src/shared/botDash.ts', import.meta.url), 'utf8')
+  const mgrSrc = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
+  if (!dashSrc.includes('Never shortens or refuses a dash that would leave the floor') || !mgrSrc.includes('planBotLungeAim')) {
+    fail('combat lunges should use planBotLungeAim and must not clamp the dash onto the floor')
+  }
+
+  const dashToward = (sp: Spot, enabled: boolean, rng: () => number) => {
+    const body = new BotBody({ x: sp.x, y: sp.y, z: sp.z }, rng)
+    body.recoveryEnabled = enabled
+    body.dash(sp.dx, sp.dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)
+    let jump = false, outcome: Outcome = 'open'
+    for (let t = 0; t < 8 && outcome === 'open'; t += 0.05) {
+      for (const e of body.tick(0.05, world)) {
+        if (e.type === 'recover' && e.how === 'jump') jump = true
+        if (e.type === 'settled') outcome = 'saved'
+        if (e.type === 'fell') outcome = 'fell'
+      }
+    }
+    return { outcome, jump }
+  }
+
+  let voidFell = 0
+  const voidN = Math.min(12, spots.length)
+  for (const sp of spots.slice(0, voidN)) {
+    if (dashToward(sp, false, () => 0.5).outcome === 'fell') voidFell++
+    else fail(`a dash toward the void was held at the lip at (${sp.x.toFixed(1)}, ${sp.z.toFixed(1)})`)
+  }
+  if (voidFell === voidN) {
+    console.log(`✓ a dash toward the void leaves the lip (${voidFell}/${voidN}), not a wall or snap-up catch`)
+  }
+
+  const inland: Spot[] = []
+  for (const p of graph.worldPos.values()) {
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>
+    if (!dirs.every(([dx, dz]) => {
+      const x = p[0] + dx * 12, z = p[2] + dz * 12
+      return graphFloorAt(graph, world.rampTiles, x, z, p[1], 1.2, 2.5) !== null
+    })) continue
+    inland.push({ x: p[0], y: p[1], z: p[2], dx: 1, dz: 0 })
+    if (inland.length >= 4) break
+  }
+  if (inland.length === 0) fail('no inland floor far from a lip')
+  else {
+    let slippedOff = 0
+    for (let i = 0; i < 40; i++) {
+      const sp = inland[i % inland.length]
+      const aim = planBotLungeAim(sp, { x: sp.x + 5, z: sp.z }, graph, world.rampTiles, mulberry32(9000 + i))
+      const lx = sp.x + aim.dx * LUNGE_DISTANCE, lz = sp.z + aim.dz * LUNGE_DISTANCE
+      if (graphFloorAt(graph, world.rampTiles, lx, lz, sp.y, 1.2, 2.5) === null) slippedOff++
+    }
+    if (slippedOff > 0) fail(`inland lunges left the floor ${slippedOff}/40 times`)
+    else console.log('✓ inland lunges stay on the floor (no edge clamp needed)')
+  }
+
+  // Stand ~4 m from a lip, dash at a target along the edge: a nearby drop sits in the cone.
+  const edge = spots[0]
+  const px = -edge.dz, pz = edge.dx
+  const along = { x: edge.x + px * 4.5, z: edge.z + pz * 4.5 }
+  const cone = lipInAimCone(graph, world.rampTiles, edge, px, pz)
+  if (!cone) fail('a dash along a near-edge corridor should see the lip in the aim cone')
+  else {
+    let slips = 0
+    for (let i = 0; i < 80; i++) {
+      if (planBotLungeAim(edge, along, graph, world.rampTiles, mulberry32(11000 + i)).slipped) slips++
+    }
+    const frac = slips / 80
+    if (slips < 3 || frac > 0.28) fail(`near-edge slips should be occasional, got ${slips}/80 (${(frac * 100).toFixed(0)}%, chance ${BOT_DASH_SLIP_CHANCE})`)
+    else console.log(`✓ near-edge lunges slip off occasionally (${slips}/80)`)
+  }
+
+  const forceSlip = (() => {
+    let i = 0
+    return () => { i++; return i === 2 ? 0 : 0.5 }
+  })()
+  const slippedAim = planBotLungeAim(edge, along, graph, world.rampTiles, forceSlip)
+  if (!slippedAim.slipped) fail('forced slip rng should yaw the dash toward the lip')
+  else {
+    const body = new BotBody({ x: edge.x, y: edge.y, z: edge.z }, perfect())
+    body.recoveryEnabled = true
+    body.dash(slippedAim.dx, slippedAim.dz, LUNGE_DISTANCE / LUNGE_ACTIVE_S, LUNGE_ACTIVE_S, BOT_LUNGE_BRAKE)
+    let jump = false, outcome: Outcome = 'open'
+    for (let t = 0; t < 8 && outcome === 'open'; t += 0.05) {
+      for (const e of body.tick(0.05, world)) {
+        if (e.type === 'recover' && e.how === 'jump') jump = true
+        if (e.type === 'settled') outcome = 'saved'
+        if (e.type === 'fell') outcome = 'fell'
+      }
+    }
+    const landX = edge.x + slippedAim.dx * LUNGE_DISTANCE, landZ = edge.z + slippedAim.dz * LUNGE_DISTANCE
+    const leftFloor = graphFloorAt(graph, world.rampTiles, landX, landZ, edge.y, 1.2, 2.5) === null
+    if (!leftFloor) fail('a slipped dash should land past the floor')
+    if (outcome === 'open') fail('a slipped dash-off did not resolve')
+    if (!jump) fail(`a self-dash-off should attempt recovery, outcome ${outcome}`)
+    else console.log(`✓ self-dash-off attempts recovery as normal (${outcome}, jumped)`)
+  }
+
+  const offDash = dashToward(edge, true, perfect())
+  if (!offDash.jump) fail(`a void-aimed dash should still try to recover, got ${offDash.outcome}`)
+  else console.log(`✓ void-aimed self-dash tries to recover (${offDash.outcome})`)
 }
 
 if (failed) process.exit(1)

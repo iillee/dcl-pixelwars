@@ -532,9 +532,10 @@ export const BOT_RECOVERY_ENABLED = false
  * Recovery after a knock, when botRecoveryEnabled(format). The bot always attempts
  * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
  * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
- * jump or aim wide. Steering accelerates toward the human glide speed instead
- * of clamping the knock velocity away, so a hard hit still carries them past
- * the floor. Tune only these.
+ * jump or aim wide — often enough that a weak shove is saved most of the time,
+ * with a human-like miss now and then. Steering accelerates toward the human
+ * glide speed instead of clamping the knock velocity away, so a hard hit still
+ * carries them past the floor. Tune only these.
  */
 /** 0 = never attempts, 1 = always attempts. Execution error is the other knobs. */
 export const BOT_RECOVER_CHANCE = 1
@@ -542,11 +543,11 @@ export const BOT_RECOVER_CHANCE = 1
 export const BOT_RECOVER_REACT_MIN_S = 0.15
 export const BOT_RECOVER_REACT_MAX_S = 0.45
 /** Chance this knock skips the double jump even when the first jump comes up short. */
-export const BOT_RECOVER_SKIP_DOUBLE_CHANCE = 0.34
+export const BOT_RECOVER_SKIP_DOUBLE_CHANCE = 0.22
 /** Chance this knock aims beside the floor it wanted. */
-export const BOT_RECOVER_MISJUDGE_CHANCE = 0.30
+export const BOT_RECOVER_MISJUDGE_CHANCE = 0.17
 /** Sideways miss when they misjudge (m). */
-export const BOT_RECOVER_MISJUDGE_M = 3.5
+export const BOT_RECOVER_MISJUDGE_M = 2.8
 /**
  * Air steering (m/s²) toward a glide of HUMAN_GLIDE_SPEED. The human glider also clamps
  * horizontal speed to that number, which would erase a knock; this accel does not.
@@ -559,9 +560,9 @@ export const BOT_RECOVER_EDGE_SPEED = 2.5
 /** At or above this horizontal speed the first jump is the run jump; below it, the standing jump. */
 export const BOT_RECOVER_RUN_JUMP_AT = 4
 /** Give up once this far below the floor they were aiming at (m). */
-export const BOT_RECOVER_GIVE_UP_M = 2.2
+export const BOT_RECOVER_GIVE_UP_M = 2.5
 /** Stop steering after this long in the glide and just fall (s). */
-export const BOT_RECOVER_MAX_S = 3.5
+export const BOT_RECOVER_MAX_S = 3.9
 /** Ignore floors farther than this when picking a landing (m). */
 export const BOT_RECOVER_MAX_SEEK_M = 36
 /** Ground hop: up a low ledge, or the jump that starts a spike (m/s). Apex ≈ 1.6 m at BOT_GRAVITY — a player hop, not a whole level. */
@@ -617,6 +618,13 @@ export const BOT_BURST_PAINT_MIN_CELLS = 20
 export const BOT_BURST_PAINT_CHANCE = 0.5
 /** Aim error on a lunge, ± degrees (uniform). */
 export const BOT_AIM_ERROR_DEG = 12
+/** Near a lip, chance a combat dash yaws toward the drop and goes off (human-like slip).
+ *  There is no clamp that keeps a dash on the arena; a landing past the floor is allowed. */
+export const BOT_DASH_SLIP_CHANCE = 0.12
+/** Look this far along the aim for a drop when deciding a slip (m). */
+export const BOT_DASH_SLIP_LOOK_M = 10
+/** Half-angle of the cone around the aim that can catch a nearby lip (deg). */
+export const BOT_DASH_SLIP_CONE_DEG = 50
 /** Bot dash speed and length for its lunge (m/s, s): LUNGE_DISTANCE over LUNGE_ACTIVE_S, then it brakes. */
 export const BOT_LUNGE_BRAKE = 0.15 // fraction of the dash speed kept after the active window
 
