@@ -66,6 +66,10 @@ const RECOVER_UP = 2.5
 const WALL_OVER = 0.4
 /** A walkable node covers its own 2 m cell (centre to edge is 1 m). Past that is the wall margin. */
 const WALL_REACH = 1.05
+/** How close to a node still counts as on the cell for a drop lip. WALL_REACH
+ *  (1.05) left a 5 cm shelf past the edge where a slow slide stayed grounded
+ *  and parked, which looked like the anvil was stuck on the lip. */
+const LIP_REACH = 0.99
 /** Subdivide a long XZ step so a fast glide, jump, or knock cannot skip a tile face. */
 const SWEEP_STEP = 0.45
 /** Snap up onto a slab only when already this close to the top. Mid-fall from well below must not be pulled back. */
@@ -150,7 +154,7 @@ function neighborSolid(tiles: Placed[], gx: number, gz: number, floorY: number):
  */
 function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): boolean {
   if (!tiles.length) return false
-  if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return false
+  if (graphFloorAt(graph, rampTiles, x, z, y, LIP_REACH, RECOVER_UP) !== null) return false
   const node = nearestFloorNode(graph, x, z, y, 12)
   if (!node) return true
   const home = tileAtFeet(tiles, node.x, node.z, node.y)

@@ -185,6 +185,102 @@ for (let r = 0; r < 4; r++) {
     }
     check(`rebinding to the arena graph keeps the anvil with the server (fresh drop ${freshDrop.toFixed(2)} m, server ${srvDrop.toFixed(2)} m)`, Math.abs(freshDrop - srvDrop) < 1 && fresh.anvils[0].alive === srv.anvils[0].alive)
   }
+
+  {
+    // A slow slide used to park on a 5 cm shelf past the last walkable cell.
+    // Knocks that reach the lip, at several speeds and angles, must fall, not hang.
+    const graph = buildWalkableGraph(tiles)
+    const cover = (x: number, z: number) => tiles.some(t => {
+      const x0 = t.x * CELL + MAZE_ORIGIN, z0 = t.z * CELL + MAZE_ORIGIN
+      return x >= x0 && x < x0 + CELL && z >= z0 && z < z0 + CELL
+    })
+    const beyond = (p: [number, number, number], dx: number, dz: number) => {
+      for (const dist of [3, 8]) {
+        const x = p[0] + dx * dist, z = p[2] + dz * dist
+        const near = [...graph.worldPos.values()].some(q => Math.abs(q[1] - p[1]) < 1.5 && Math.hypot(q[0] - x, q[2] - z) < 1.5)
+        if (near) return false
+        if (!cover(x, z)) return true
+      }
+      return false
+    }
+    const lips: Array<{ x: number; y: number; z: number; dx: number; dz: number }> = []
+    for (const p of graph.worldPos.values()) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>) {
+        if (!beyond(p, dx, dz)) continue
+        lips.push({ x: p[0], y: p[1] - 0.05, z: p[2], dx, dz })
+      }
+      if (lips.length >= 8) break
+    }
+    check('found real lips to shove anvils off', lips.length >= 4)
+    const lip = lips[0]
+    const settle = (pos: { x: number; y: number; z: number }, vx: number, vz: number, seconds = 5) => {
+      const world = new AnvilWorld(1)
+      world.setMaze(graph, tiles, [], false)
+      const a = world.anvils[0]
+      Object.assign(a, {
+        pos: { ...pos }, vel: { x: vx, y: 0, z: vz }, alive: true, tracking: true,
+        forceLeft: 0, respawnIn: -1, hitFrom: { x: pos.x, z: pos.z }, push: { x: 0, z: 0, left: 0 },
+      })
+      for (let t = 0; t < seconds && (a.alive && (world.isMoving(a) || t < 0.1)); t += 1 / 60) world.tick(1 / 60)
+      return a
+    }
+    const atOut = (out: number) => ({ x: lip.x + lip.dx * out, y: lip.y, z: lip.z + lip.dz * out })
+    const still = settle(atOut(0.5), 0, 0)
+    check('an anvil at rest mid-cell stays on the floor', still.alive && Math.abs(still.pos.y - lip.y) < 0.2 && still.vel.y === 0)
+    const shelf = settle(atOut(0.8), lip.dx * 3, lip.dz * 3)
+    check(`a slow slide over the lip falls, it does not park on the edge (y ${shelf.pos.y.toFixed(2)}, alive ${shelf.alive})`, !shelf.alive || shelf.pos.y < lip.y - 8)
+    const parked = settle(atOut(1.02), lip.dx * 0.5, lip.dz * 0.5)
+    check(`an anvil already on the lip with a little outward speed falls (y ${parked.pos.y.toFixed(2)}, alive ${parked.alive})`, !parked.alive || parked.pos.y < lip.y - 8)
+    const restLip = settle(atOut(1.02), 0, 0)
+    check(`an anvil left sitting on the lip slides off (y ${restLip.pos.y.toFixed(2)}, alive ${restLip.alive})`, !restLip.alive || restLip.pos.y < lip.y - 8)
+    {
+      const srv = new AnvilWorld(1), cli = new AnvilWorld(1)
+      srv.setMaze(graph, tiles, [], false)
+      cli.setMaze(graph, tiles, [], false)
+      const start = atOut(0.8)
+      for (const w of [srv, cli]) {
+        Object.assign(w.anvils[0], {
+          pos: { ...start }, vel: { x: lip.dx * 3, y: 0, z: lip.dz * 3 }, alive: true, tracking: true,
+          forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 },
+        })
+      }
+      let maxErr = 0, srvFell = false, cliFell = false
+      const off = (a: { alive: boolean; pos: { y: number } }) => !a.alive || a.pos.y < lip.y - 8
+      for (let t = 0; t < 5; t += 1 / 30) {
+        srv.tick(1 / 60); srv.tick(1 / 60)
+        cli.tick(1 / 30)
+        if (off(srv.anvils[0])) srvFell = true
+        if (off(cli.anvils[0])) cliFell = true
+        if (srv.anvils[0].alive && cli.anvils[0].alive && !srvFell && !cliFell) {
+          maxErr = Math.max(maxErr, Math.hypot(srv.anvils[0].pos.x - cli.anvils[0].pos.x, srv.anvils[0].pos.z - cli.anvils[0].pos.z))
+        }
+        if (srvFell && cliFell) break
+      }
+      check(`client prediction also falls off the lip with the server (max xz ${maxErr.toFixed(3)} m, srvFell ${srvFell}, cliFell ${cliFell})`, srvFell && cliFell && maxErr <= 0.2)
+    }
+    let hung = 0, trials = 0
+    for (const s of lips.slice(0, 6)) {
+      for (const ang of [0, 20, 45, 70]) {
+        for (const mult of [0.5, 1]) {
+          trials++
+          const rad = ang * Math.PI / 180
+          const ax = s.dx * Math.cos(rad) - s.dz * Math.sin(rad)
+          const az = s.dx * Math.sin(rad) + s.dz * Math.cos(rad)
+          const world = new AnvilWorld(1)
+          world.setMaze(graph, tiles, [], false)
+          const a = world.anvils[0]
+          const start = { x: s.x - s.dx * 2, y: s.y, z: s.z - s.dz * 2 }
+          Object.assign(a, { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 } })
+          world.hit(0, ax, az, mult)
+          for (let t = 0; t < 6 && world.isMoving(a); t += 1 / 60) world.tick(1 / 60)
+          const out = (a.pos.x - s.x) * s.dx + (a.pos.z - s.z) * s.dz
+          const onLip = a.alive && Math.abs(a.pos.y - s.y) < 0.4 && out >= 0.98
+          if (onLip) hung++
+        }
+      }
+    }
+    check(`knocks that reach a lip fall at several speeds and angles (hung ${hung}/${trials})`, hung === 0 && trials >= 20)
+  }
 }
 
 if (fails) { console.log(`✗ ${fails} lunge check(s) failed`); process.exit(1) }
