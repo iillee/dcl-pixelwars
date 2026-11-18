@@ -70,3 +70,47 @@ export function jumpPop(elapsedS: number): JumpPop {
   }
   return rest
 }
+
+/** Hold pre-hit facing this long after a knock before turning toward recovery. */
+export const KNOCK_FACE_HOLD_S = 1.25
+/** Smooth turn onto the recovery heading after the hold (deg/s). */
+export const KNOCK_FACE_TURN_DEG_S = 240
+/** Below this horizontal speed the knock has decayed enough to allow a turn (m/s). */
+export const KNOCK_FACE_DECAY_SPEED = 3
+
+/** Shortest signed yaw delta in (-180, 180]. */
+export function shortestYawDelta(fromDeg: number, toDeg: number): number {
+  return ((toDeg - fromDeg) % 360 + 540) % 360 - 180
+}
+
+/** Step `fromDeg` toward `toDeg` by at most `maxStep` degrees. */
+export function turnYawDeg(fromDeg: number, toDeg: number, maxStep: number): number {
+  const d = shortestYawDelta(fromDeg, toDeg)
+  const step = Math.max(-maxStep, Math.min(maxStep, d))
+  return fromDeg + step
+}
+
+/**
+ * Facing during and after a knock. Never follows the knock velocity.
+ * Until `holdUntil`, returns the pre-hit yaw. After that, eases toward
+ * `moveYawDeg` only once recovery has started or the knock speed has
+ * decayed, and only if that heading is not still the knock direction
+ * (`alongKnock`).
+ */
+export function knockFaceYaw(opts: {
+  now: number
+  holdUntil: number
+  heldYaw: number
+  currentYaw: number
+  moveYawDeg: number | null
+  recovering: boolean
+  speed: number
+  alongKnock: boolean
+  dt: number
+}): number {
+  if (opts.now < opts.holdUntil) return opts.heldYaw
+  if (opts.moveYawDeg === null) return opts.currentYaw
+  if (opts.alongKnock && opts.speed > KNOCK_FACE_DECAY_SPEED) return opts.heldYaw
+  if (!opts.recovering && opts.speed > KNOCK_FACE_DECAY_SPEED) return opts.heldYaw
+  return turnYawDeg(opts.currentYaw, opts.moveYawDeg, KNOCK_FACE_TURN_DEG_S * opts.dt)
+}

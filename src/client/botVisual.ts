@@ -33,7 +33,9 @@
  *      velocity * lookAhead.
  *   3. Lerp renderPos toward that prediction with a rate proportional
  *      to dt: `renderPos = lerp(renderPos, predicted, min(1, k*dt))`.
- *   4. Yaw toward the smoothed velocity.
+ *   4. Yaw toward the smoothed velocity, except after a knock: hold the
+ *      pre-hit facing for KNOCK_FACE_HOLD_S (or until the knock speed decays),
+ *      then ease toward the recovery heading. Never face the knock velocity.
  *   5. On a double jump, add a 360° ease-out spin over DOUBLE_JUMP_SPIN_DUR_S,
  *      composed on that facing yaw so smoothing is not overwritten.
  *   6. On a jump or double jump, a short squash-and-stretch pop on the visual
@@ -55,7 +57,7 @@ import {
   BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
   RoundFormat,
 } from '../shared/pvp'
-import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, BOT_ANIM_JUMP, BOT_ANIM_DOUBLE, type GhostClip } from '../shared/botAnim'
+import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, knockFaceYaw, KNOCK_FACE_HOLD_S, BOT_ANIM_JUMP, BOT_ANIM_DOUBLE, BOT_ANIM_GLIDE, type GhostClip } from '../shared/botAnim'
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -209,6 +211,10 @@ interface BotVisual {
   lastYawDeg: number    // last committed yaw — held when velocity too low
   spinT0: number        // rec.timeSec when the double-jump spin started, or -1
   hopT0: number         // rec.timeSec when the jump / double-jump pop started, or -1
+  knockFaceUntil: number // rec.timeSec until which pre-hit yaw is held, or -1
+  knockHeldYaw: number   // pre-hit yaw to hold during the knock
+  knockDirX: number     // unit XZ of the knock, used so facing never follows it
+  knockDirZ: number
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
@@ -404,6 +410,10 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     lastYawDeg: 0,
     spinT0: -1,
     hopT0: -1,
+    knockFaceUntil: -1,
+    knockHeldYaw: 0,
+    knockDirX: 0,
+    knockDirZ: 0,
     fastUntil: 0,
     snaps: [],
     riding: false,
@@ -509,6 +519,14 @@ function stepLocalKnock(rec: BotVisual, dt: number): void {
   rec.velocity = Vector3.create(k.vel.x, k.vel.y, k.vel.z)
 }
 
+function beginKnockFace(rec: BotVisual, dx: number, dz: number): void {
+  rec.knockHeldYaw = rec.lastYawDeg
+  rec.knockFaceUntil = rec.timeSec + KNOCK_FACE_HOLD_S
+  const len = Math.hypot(dx, dz)
+  if (len > 1e-3) { rec.knockDirX = dx / len; rec.knockDirZ = dz / len }
+  else { rec.knockDirX = 0; rec.knockDirZ = 0 }
+}
+
 /** Play the confirmed knock arc locally, then blend toward the server path once snapshots arrive. */
 export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' | 'burst' | 'spike'): void {
   const rec = bots.get(id)
@@ -534,6 +552,7 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
   rec.snaps = []
   rec.fastUntil = Date.now() + LOCAL_KNOCK_S * 1000
   rec.localKnockUntil = rec.fastUntil
+  beginKnockFace(rec, ux, uz)
   hitBotFace(id)
 }
 
@@ -601,7 +620,10 @@ export function initBotVisual(): void {
       }
 
       rec.pose = b.an ?? 0
+      const wasSt = rec.st
       rec.st = b.st
+      if ((b.st ?? 0) === 1 && wasSt !== 1) beginKnockFace(rec, b.vx ?? 0, b.vz ?? 0)
+      if ((b.st ?? 0) === 0 || (b.st ?? 0) === 2) rec.knockFaceUntil = -1
       if (rec.team !== b.team) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
@@ -734,10 +756,20 @@ export function initBotVisual(): void {
       const vx = rec.velocity.x
       const vz = rec.velocity.z
       const speedSq = vx * vx + vz * vz
-      // Threshold ≈ 0.5 m/s. Below this the bot is effectively idle;
-      // holding lastYawDeg avoids yaw drift from tiny numerical noise.
-      if (speedSq > 0.25) {
-        rec.lastYawDeg = Math.atan2(vx, vz) * (180 / Math.PI)
+      const speed = Math.sqrt(speedSq)
+      const moveYaw = speedSq > 0.25 ? Math.atan2(vx, vz) * (180 / Math.PI) : null
+      if (rec.knockFaceUntil >= 0) {
+        const recovering = rec.pose === BOT_ANIM_JUMP || rec.pose === BOT_ANIM_DOUBLE || rec.pose === BOT_ANIM_GLIDE
+          || rec.clip === 'jump' || rec.clip === 'double' || rec.clip === 'glide'
+        const alongKnock = speed > 1e-3 && (rec.knockDirX !== 0 || rec.knockDirZ !== 0)
+          && (vx * rec.knockDirX + vz * rec.knockDirZ) / speed > 0.5
+        rec.lastYawDeg = knockFaceYaw({
+          now: rec.timeSec, holdUntil: rec.knockFaceUntil, heldYaw: rec.knockHeldYaw,
+          currentYaw: rec.lastYawDeg, moveYawDeg: moveYaw, recovering, speed, alongKnock, dt,
+        })
+        if (rec.st === 0 || rec.st === 2) rec.knockFaceUntil = -1
+      } else if (moveYaw !== null) {
+        rec.lastYawDeg = moveYaw
       }
 
       const tf = Transform.getMutable(rec.root)

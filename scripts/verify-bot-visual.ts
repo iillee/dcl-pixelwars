@@ -15,7 +15,7 @@ import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
-import { doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, JUMP_POP_S, JUMP_SQUASH_S } from '../src/shared/botAnim'
+import { doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, JUMP_POP_S, JUMP_SQUASH_S, knockFaceYaw, KNOCK_FACE_HOLD_S, turnYawDeg, shortestYawDelta } from '../src/shared/botAnim'
 import { RESCUE_PATH } from '../src/shared/rescuePath'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 
@@ -375,4 +375,38 @@ console.log('✓ walking draw stays within 3 m; a knock falls (no glider) and th
     process.exit(1)
   }
   console.log(`✓ bot rescue cloud hang ${RESCUE_PATH.BOT_HANG_Y.toFixed(2)} m (was ${RESCUE_PATH.HANG_Y.toFixed(2)} m); hook at ${hook.toFixed(2)} m sits above the ${crown.toFixed(2)} m crown`)
+}
+
+{
+  if (Math.abs(shortestYawDelta(10, 20) - 10) > 1e-9 || Math.abs(shortestYawDelta(350, 10) - 20) > 1e-9) {
+    console.error('✗ shortestYawDelta is wrong around 0')
+    process.exit(1)
+  }
+  if (Math.abs(turnYawDeg(0, 90, 30) - 30) > 1e-9 || Math.abs(turnYawDeg(10, 0, 30) - 0) > 1e-9) {
+    console.error('✗ turnYawDeg should step or arrive')
+    process.exit(1)
+  }
+  const held = 90
+  const knockMove = 180
+  const recoverMove = 0
+  const during = knockFaceYaw({ now: 0.5, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: knockMove, recovering: false, speed: 20, alongKnock: true, dt: 0.05 })
+  if (during !== held) {
+    console.error(`✗ knock facing turned during the hold: ${during}, expected ${held}`)
+    process.exit(1)
+  }
+  const stillKnock = knockFaceYaw({ now: KNOCK_FACE_HOLD_S + 0.1, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: knockMove, recovering: false, speed: 20, alongKnock: true, dt: 0.05 })
+  if (stillKnock !== held) {
+    console.error(`✗ knock facing followed the knock velocity after the hold: ${stillKnock}`)
+    process.exit(1)
+  }
+  const recovering = knockFaceYaw({ now: KNOCK_FACE_HOLD_S + 0.1, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: recoverMove, recovering: true, speed: 6, alongKnock: false, dt: 0.05 })
+  if (recovering === held || Math.abs(shortestYawDelta(held, recovering)) < 1 || Math.abs(shortestYawDelta(recovering, recoverMove)) >= Math.abs(shortestYawDelta(held, recoverMove))) {
+    console.error(`✗ after the hold, facing should ease toward recovery, got ${recovering}`)
+    process.exit(1)
+  }
+  if (KNOCK_FACE_HOLD_S < 1 || KNOCK_FACE_HOLD_S > 1.5) {
+    console.error(`✗ knock face hold ${KNOCK_FACE_HOLD_S} s should be 1–1.5 s`)
+    process.exit(1)
+  }
+  console.log(`✓ knock facing holds ${KNOCK_FACE_HOLD_S} s, never follows the push, then eases toward recovery`)
 }
