@@ -250,30 +250,41 @@ function TeamScorePill(props: {
   const innerW = Math.max(1, props.width - props.border * 2)
   const f = props.fontSize ?? 12
   const uniqueLead = (props.leaders ?? []).length === 1 ? props.leaders![0] : -1
+  // Rectangular slices inside a rounded, overflow-hidden track (same pattern
+  // as DUCK's ProgressBar). A per-segment end cap wider than a thin first
+  // slice was getting clipped off the rounded left. Boost short painted
+  // slivers to at least the cap diameter, taking the extra from unpainted.
+  const widths = pieces.map(p => p.frac * innerW)
+  if (props.showUnpainted) {
+    const minW = innerR * 2
+    const whiteI = pieces.findIndex(p => p.team === Team.None)
+    let need = 0
+    const short: number[] = []
+    for (let i = 0; i < pieces.length; i++) {
+      if (pieces[i].team !== Team.None && widths[i] > 0 && widths[i] < minW) {
+        need += minW - widths[i]
+        short.push(i)
+      }
+    }
+    const available = whiteI >= 0 ? Math.max(0, widths[whiteI]) : 0
+    const give = Math.min(need, available)
+    if (give > 0 && need > 0) {
+      for (const i of short) widths[i] += give * ((minW - widths[i]) / need)
+      widths[whiteI] -= give
+    }
+  }
   return (
     <UiEntity uiTransform={{ width: props.width, height: props.height, flexShrink: 0, borderRadius: props.height / 2, padding: props.border }} uiBackground={{ color: props.track }}>
-      <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'row', borderRadius: innerR }} uiBackground={{ color: props.innerBg }}>
+      <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'row', borderRadius: innerR, overflow: 'hidden' }} uiBackground={{ color: props.innerBg }}>
         {pieces.map((piece, i) => {
-          const w = piece.frac * innerW
-          const first = i === 0, last = i === pieces.length - 1
+          const w = widths[i]
           const team = piece.team
-          const isLead = team !== Team.None && (props.leaders ?? []).includes(team)
           const label = `${Math.round(piece.pct)}%`
           const showLbl = !!props.showLabels && team !== Team.None && w >= textWSafe(label, f) + 8
           const showStar = !!props.showStar && uniqueLead === team && !showLbl && w >= STAR_SIZE + STAR_PAD * 2
           const fill = team === Team.None ? Color4.White() : barColor(team)
-          // Caps are separate circles on the outer ends only, so a mid-join never
-          // inherits a rounded corner (a single borderRadius on the last segment
-          // would curve into the neighbour).
           return (
-            <UiEntity uiTransform={{
-              width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center',
-              ...(isLead && !props.showUnpainted ? { borderWidth: 2, borderColor: Color4.create(1, 0.92, 0.4, 1) } : {}),
-            }}>
-              {first && last && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, right: 0, top: 0, bottom: 0 }, borderRadius: innerR }} uiBackground={{ color: fill }} />}
-              {!(first && last) && first && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, top: 0, bottom: 0 }, width: innerR * 2, borderRadius: innerR }} uiBackground={{ color: fill }} />}
-              {!(first && last) && last && <UiEntity uiTransform={{ positionType: 'absolute', position: { right: 0, top: 0, bottom: 0 }, width: innerR * 2, borderRadius: innerR }} uiBackground={{ color: fill }} />}
-              {!(first && last) && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: first ? innerR : 0, right: last ? innerR : 0, top: 0, bottom: 0 } }} uiBackground={{ color: fill }} />}
+            <UiEntity uiTransform={{ width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: fill }}>
               {showLbl && <Label value={label} fontSize={f} color={onTeamInk(team)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />}
               {showStar && <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />}
             </UiEntity>
