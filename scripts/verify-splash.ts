@@ -26,6 +26,10 @@ if (!splashSrc.includes('swellSurfaceY') || !splashSrc.includes('waterVisualSeco
   console.error('✗ the splash should be two rings on the live swell plus billboard droplets')
   process.exit(1)
 }
+if (!splashSrc.includes('const seconds = waterVisualSeconds()') || !splashSrc.includes('swellSurfaceY(r.x, r.z, seconds)') || !splashSrc.includes('swellSurfaceY(sx, sz, seconds)') || !splashSrc.includes('tr.position.y = y')) {
+  console.error('✗ splash rings and droplets should re-sample the live swell Y every frame')
+  process.exit(1)
+}
 if (!splashSrc.includes('RING_LIFE_S = 0.85') || !splashSrc.includes('DROP_LIFE_S = 0.9') || !splashSrc.includes('RING_POOL') || !splashSrc.includes('DROP_POOL')) {
   console.error('✗ rings and droplets should be pooled and last about 0.6–1 s')
   process.exit(1)

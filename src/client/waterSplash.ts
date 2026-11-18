@@ -151,6 +151,9 @@ function startDrops(x: number, z: number): void {
 
 function tick(dt: number): void {
   const step = Math.min(dt, 0.1)
+  // Same clock as the visible swell meshes, re-sampled every frame so the
+  // splash rides the waves instead of sitting at the catch height.
+  const seconds = waterVisualSeconds()
   for (const r of rings) {
     if (!r.busy) continue
     r.t += step
@@ -160,11 +163,16 @@ function tick(dt: number): void {
       continue
     }
     const u = r.t / r.life
-    const s = r.start + (r.end - r.start) * u
-    const y = surfaceY(r.x, r.z) + RING_LIFT_M
+    const scale = r.start + (r.end - r.start) * u
+    const y = swellSurfaceY(r.x, r.z, seconds) + RING_LIFT_M
     const tr = Transform.getMutable(r.ent)
-    tr.position = Vector3.create(r.x, y, r.z)
-    tr.scale = Vector3.create(s, s, 1)
+    // Mutate in place (same as foam). Replacing the Vector3 left the splash stuck.
+    tr.position.x = r.x
+    tr.position.y = y
+    tr.position.z = r.z
+    tr.scale.x = scale
+    tr.scale.y = scale
+    tr.scale.z = 1
     Material.setPbrMaterial(r.ent, ringMat((1 - u) * (1 - u) * 0.95))
   }
   for (const d of drops) {
@@ -179,12 +187,16 @@ function tick(dt: number): void {
     const u = d.t / d.life
     const sx = d.x + d.vx * d.t
     const sz = d.z + d.vz * d.t
-    const y = surfaceY(sx, sz) + midY
+    const y = swellSurfaceY(sx, sz, seconds) + midY
     const fade = midY < 1.2 ? Math.max(0, midY / 1.2) : 1 - u * 0.35
     const tr = Transform.getMutable(d.ent)
     const size = d.size * (0.85 + 0.15 * (1 - u))
-    tr.position = Vector3.create(sx, y, sz)
-    tr.scale = Vector3.create(size, size, size)
+    tr.position.x = sx
+    tr.position.y = y
+    tr.position.z = sz
+    tr.scale.x = size
+    tr.scale.y = size
+    tr.scale.z = size
     Material.setPbrMaterial(d.ent, dropMat(Math.max(0, fade)))
   }
 }
