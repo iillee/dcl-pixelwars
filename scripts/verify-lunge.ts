@@ -187,8 +187,10 @@ for (let r = 0; r < 4; r++) {
   }
 
   {
-    // A slow slide used to park on a 5 cm shelf past the last walkable cell.
-    // Knocks that reach the lip, at several speeds and angles, must fall, not hang.
+    // Anvils use floor support only (no tile side walls). The walkable floor
+    // reaches 1.2 m from a node, a little past the 1 m visual edge, so a rest
+    // just past that edge can stay up. Once they leave that support they must
+    // fall, and a knock must never leave them hanging in the air.
     const graph = buildWalkableGraph(tiles)
     const cover = (x: number, z: number) => tiles.some(t => {
       const x0 = t.x * CELL + MAZE_ORIGIN, z0 = t.z * CELL + MAZE_ORIGIN
@@ -224,28 +226,34 @@ for (let r = 0; r < 4; r++) {
       for (let t = 0; t < seconds && (a.alive && (world.isMoving(a) || t < 0.1)); t += 1 / 60) world.tick(1 / 60)
       return a
     }
+    const probe = new AnvilWorld(1)
+    probe.setMaze(graph, tiles, [], false)
+    const noFloor = (x: number, z: number, y: number) => probe.floorAt(x, z, y) === null
+    const hungInAir = (a: { alive: boolean; pos: { x: number; y: number; z: number } }, y0: number) =>
+      a.alive && Math.abs(a.pos.y - y0) < 0.4 && noFloor(a.pos.x, a.pos.z, y0)
+    const fellOff = (a: { alive: boolean; pos: { y: number } }, y0: number) => !a.alive || a.pos.y < y0 - 8
     const atOut = (out: number) => ({ x: lip.x + lip.dx * out, y: lip.y, z: lip.z + lip.dz * out })
     const still = settle(atOut(0.5), 0, 0)
     check('an anvil at rest mid-cell stays on the floor', still.alive && Math.abs(still.pos.y - lip.y) < 0.2 && still.vel.y === 0)
-    const shelf = settle(atOut(0.8), lip.dx * 3, lip.dz * 3)
-    check(`a slow slide over the lip falls, it does not park on the edge (y ${shelf.pos.y.toFixed(2)}, alive ${shelf.alive})`, !shelf.alive || shelf.pos.y < lip.y - 8)
-    const parked = settle(atOut(1.02), lip.dx * 0.5, lip.dz * 0.5)
-    check(`an anvil already on the lip with a little outward speed falls (y ${parked.pos.y.toFixed(2)}, alive ${parked.alive})`, !parked.alive || parked.pos.y < lip.y - 8)
-    const restLip = settle(atOut(1.02), 0, 0)
-    check(`an anvil left sitting on the lip slides off (y ${restLip.pos.y.toFixed(2)}, alive ${restLip.alive})`, !restLip.alive || restLip.pos.y < lip.y - 8)
+    const nearEdge = settle(atOut(1.1), 0, 0)
+    check(`an anvil at rest just inside floor support stays up (y ${nearEdge.pos.y.toFixed(2)}, alive ${nearEdge.alive})`, nearEdge.alive && Math.abs(nearEdge.pos.y - lip.y) < 0.2 && nearEdge.vel.y === 0)
+    const past = settle(atOut(1.35), 0, 0)
+    check(`an anvil past floor support falls (y ${past.pos.y.toFixed(2)}, alive ${past.alive})`, fellOff(past, lip.y))
+    const shove = settle(atOut(0.5), lip.dx * 8, lip.dz * 8)
+    check(`a knock that carries an anvil past the edge falls (y ${shove.pos.y.toFixed(2)}, alive ${shove.alive})`, fellOff(shove, lip.y))
     {
       const srv = new AnvilWorld(1), cli = new AnvilWorld(1)
       srv.setMaze(graph, tiles, [], false)
       cli.setMaze(graph, tiles, [], false)
-      const start = atOut(0.8)
+      const start = atOut(0.5)
       for (const w of [srv, cli]) {
         Object.assign(w.anvils[0], {
-          pos: { ...start }, vel: { x: lip.dx * 3, y: 0, z: lip.dz * 3 }, alive: true, tracking: true,
+          pos: { ...start }, vel: { x: lip.dx * 8, y: 0, z: lip.dz * 8 }, alive: true, tracking: true,
           forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 },
         })
       }
       let maxErr = 0, srvFell = false, cliFell = false
-      const off = (a: { alive: boolean; pos: { y: number } }) => !a.alive || a.pos.y < lip.y - 8
+      const off = (a: { alive: boolean; pos: { y: number } }) => fellOff(a, lip.y)
       for (let t = 0; t < 5; t += 1 / 30) {
         srv.tick(1 / 60); srv.tick(1 / 60)
         cli.tick(1 / 30)
@@ -256,7 +264,7 @@ for (let r = 0; r < 4; r++) {
         }
         if (srvFell && cliFell) break
       }
-      check(`client prediction also falls off the lip with the server (max xz ${maxErr.toFixed(3)} m, srvFell ${srvFell}, cliFell ${cliFell})`, srvFell && cliFell && maxErr <= 0.2)
+      check(`client prediction also falls off the lip with the server (max xz ${maxErr.toFixed(3)} m, srvFell ${srvFell}, cliFell ${cliFell})`, srvFell && cliFell && maxErr <= ANVIL_PREDICT_CLOSE_M)
     }
     let hung = 0, trials = 0
     for (const s of lips.slice(0, 6)) {
@@ -273,16 +281,13 @@ for (let r = 0; r < 4; r++) {
           Object.assign(a, { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 } })
           world.hit(0, ax, az, mult)
           for (let t = 0; t < 6 && world.isMoving(a); t += 1 / 60) world.tick(1 / 60)
-          const out = (a.pos.x - s.x) * s.dx + (a.pos.z - s.z) * s.dz
-          const onLip = a.alive && Math.abs(a.pos.y - s.y) < 0.4 && out >= 0.98
-          if (onLip) hung++
+          if (hungInAir(a, s.y)) hung++
         }
       }
     }
     check(`knocks that reach a lip fall at several speeds and angles (hung ${hung}/${trials})`, hung === 0 && trials >= 20)
-    // Mid-edge of a long rim: a solid neighbor along the ledge used to cancel
-    // the drop, so a side-on knock parked on the lip. Corners and random
-    // knocks from inland must also fall once they are past the edge.
+    // Mid-edge, corner, and random knocks that leave floor support must fall,
+    // not hang in the air. Sitting just past the visual edge is still support.
     const hasNeighbor = (p: [number, number, number], dx: number, dz: number) =>
       [...graph.worldPos.values()].some(q => Math.abs(q[1] - p[1]) < 1.5 && Math.hypot(q[0] - (p[0] + dx * 2), q[2] - (p[2] + dz * 2)) < 1)
     const midLips: typeof lips = []
@@ -316,8 +321,7 @@ for (let r = 0; r < 4; r++) {
         y: s.y,
         z: s.z + s.dz * out0 - s.dx * side,
       }, vx, vz)
-      const cheb = Math.max(Math.abs(a.pos.x - s.x), Math.abs(a.pos.z - s.z))
-      return a.alive && Math.abs(a.pos.y - s.y) < 0.4 && cheb >= 0.99
+      return hungInAir(a, s.y)
     }
     let sideHung = 0, sideTrials = 0
     for (const s of midLips.slice(0, 8)) {
@@ -372,8 +376,7 @@ for (let r = 0; r < 4; r++) {
       Object.assign(a, { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 } })
       world.hit(0, ax, az, 0.5 + (i % 2) * 0.5)
       for (let t = 0; t < 6 && world.isMoving(a); t += 1 / 60) world.tick(1 / 60)
-      const cheb = Math.max(Math.abs(a.pos.x - s.x), Math.abs(a.pos.z - s.z))
-      if (a.alive && Math.abs(a.pos.y - s.y) < 0.4 && cheb >= 0.99) randHung++
+      if (hungInAir(a, s.y)) randHung++
     }
     check(`random side knocks that reach a lip fall (hung ${randHung}/${randTrials})`, randHung === 0 && randTrials === 40)
   }

@@ -9,8 +9,9 @@
  * anvil (re)spawns. A fallen anvil respawns alone after LUNGE_DUMMY_RESPAWN_S.
  *
  * Knockback: v += impulse × LUNGE_DUMMY_UNIT, held force for LUNGE_KNOCK_FORCE_S, gravity, ground
- * friction; interior walls and incoming slab sides stop a horizontal step (sweep so a fast move cannot skip a face); a perimeter lip stays a drop; floor = highest walkable cell within ~1 cell under it (ramps: continuous slope height
+ * friction; floor = highest walkable cell within ~1 cell under it (ramps: continuous slope height
  * via rampSurfaceY), grounded anvils snap down ≤ SNAP_DOWN (down-ramps), none → it falls.
+ * Anvils have no tile side walls and no snap-up; bot bodies use resolveSupport for those.
  */
 import {
   LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
@@ -427,18 +428,11 @@ export class AnvilWorld {
     const wasGrounded = a.vel.y === 0
     a.vel.y -= LUNGE_DUMMY_GRAVITY * dt
     const nx = a.pos.x + a.vel.x * dt + px, nz = a.pos.z + a.vel.z * dt + pz
-    const ny = a.pos.y + a.vel.y * dt
+    let ny = a.pos.y + a.vel.y * dt
+    const floor = this.floorAt(nx, nz, a.pos.y)
     let grounded = false
-    if (this.graph) {
-      const hit = resolveSupport(this.graph, this.rampTiles, this.tiles, a.pos, nx, ny, nz, a.vel.y, wasGrounded)
-      if (Math.abs(hit.x - nx) > 1e-6) a.vel.x = 0
-      if (Math.abs(hit.z - nz) > 1e-6) a.vel.z = 0
-      a.pos = { x: hit.x, y: hit.y, z: hit.z }
-      a.vel.y = hit.velY
-      grounded = hit.grounded
-    } else {
-      a.pos = { x: nx, y: ny, z: nz }
-    }
+    if (floor !== null && (ny <= floor || (wasGrounded && ny - floor <= SNAP_DOWN))) { ny = floor; a.vel.y = 0; grounded = true }
+    a.pos = { x: nx, y: ny, z: nz }
     if (grounded) {
       const h = Math.hypot(a.vel.x, a.vel.z)
       const nh = Math.max(0, h - LUNGE_DUMMY_FRICTION * dt)
