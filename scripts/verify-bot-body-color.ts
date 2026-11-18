@@ -39,6 +39,8 @@ const teamSrc = readFileSync(new URL('../src/shared/team.ts', import.meta.url), 
     expect(pal.balloon, pal.blue, 'balloon is the existing blue-body behaviour')
     expect(TEAM_HEX[Team.Red], pal.red, 'TEAM_HEX red')
     expect(TEAM_HEX[Team.Blue], pal.blue, 'TEAM_HEX blue')
+    expect(TEAM_HEX[Team.Green], pal.green, 'TEAM_HEX green')
+    expect(TEAM_HEX[Team.Yellow], pal.yellow, 'TEAM_HEX yellow')
     const red = TEAM_RGB[Team.Red]
     const blue = TEAM_RGB[Team.Blue]
     if (!near(red.r, 1) || !near(red.g, 117 / 255) || !near(red.b, 119 / 255)) fail('TEAM_RGB red is not #FF7577')
@@ -54,6 +56,8 @@ const teamSrc = readFileSync(new URL('../src/shared/team.ts', import.meta.url), 
   expect(botBodySwatch('green'), '#4FD68C', 'botBodySwatch(green)')
   expect(botBodySwatchForTeam(Team.Red), '#FF7577', 'swatch for red team')
   expect(botBodySwatchForTeam(Team.Blue), '#6A99FC', 'swatch for blue team')
+  expect(botBodySwatchForTeam(Team.Green), '#4FD68C', 'swatch for green team')
+  expect(botBodySwatchForTeam(Team.Yellow), '#FFE04A', 'swatch for yellow team')
   expect(botBodySwatchForTeam(Team.Red, { balloonNeutral: true }), '#6A99FC', 'balloonNeutral keeps blue')
   expect(botBodySwatchForTeam(Team.Blue, { balloonNeutral: true }), '#6A99FC', 'balloonNeutral on blue team')
   expect(botBodySwatchForTeam(Team.None), '#6A99FC', 'unassigned team falls back to blue')

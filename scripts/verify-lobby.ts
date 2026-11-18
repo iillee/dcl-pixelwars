@@ -13,8 +13,8 @@ import {
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
 const tiles = placeLobbyLayout()
-if (tiles.length !== 3) {
-  console.error(`✗ lobby should be 3 tiles, got ${tiles.length}`)
+if (tiles.length !== 5) {
+  console.error(`✗ lobby should be 5 tiles, got ${tiles.length}`)
   process.exit(1)
 }
 if (LOBBY_MODES.length !== 7 || !LOBBY_MODES.some(m => m.id === 'garden') || !LOBBY_MODES.some(m => m.id === 'pots') || !LOBBY_MODES.some(m => m.id === 'prototype') || !LOBBY_MODES.some(m => m.id === 'balloon') || !LOBBY_MODES.some(m => m.id === 'bases') || !LOBBY_MODES.some(m => m.id === 'pvb')) {
@@ -25,12 +25,12 @@ if (placedModes().length !== 0) {
   console.error('✗ alternate modes should stay in the registry, unplaced')
   process.exit(1)
 }
-if (LOBBY_TEAMS.map(m => m.id).join() !== 'red,blue' || LOBBY_TEAMS[0].team !== 1 || LOBBY_TEAMS[1].team !== 2) {
-  console.error('✗ the lobby floor should offer exactly RED and BLUE')
+if (LOBBY_TEAMS.map(m => m.id).join() !== 'red,blue,yellow,green' || LOBBY_TEAMS[0].team !== 1 || LOBBY_TEAMS[1].team !== 2 || LOBBY_TEAMS[2].team !== 4 || LOBBY_TEAMS[3].team !== 3) {
+  console.error('✗ the lobby floor should offer RED, BLUE, YELLOW, and GREEN')
   process.exit(1)
 }
-if (LOBBY_TEAMS[0].hex !== '#FF7577' || LOBBY_TEAMS[1].hex !== '#6A99FC' || teamTitle('red') !== 'RED' || teamTitle('blue') !== 'BLUE') {
-  console.error('✗ team signs should use exact team red/blue and the labels RED and BLUE')
+if (LOBBY_TEAMS[0].hex !== '#FF7577' || LOBBY_TEAMS[1].hex !== '#6A99FC' || LOBBY_TEAMS[2].hex !== '#FFE04A' || LOBBY_TEAMS[3].hex !== '#4FD68C' || teamTitle('red') !== 'RED' || teamTitle('blue') !== 'BLUE' || teamTitle('yellow') !== 'YELLOW' || teamTitle('green') !== 'GREEN') {
+  console.error('✗ team signs should use the four lobby colours and labels RED BLUE YELLOW GREEN')
   process.exit(1)
 }
 if (LOBBY_MODES.some(m => m.economy && m.id !== 'prototype') || !LOBBY_MODES.find(m => m.id === 'prototype')?.economy) {
@@ -74,26 +74,22 @@ if (!validate()) {
   process.exit(1)
 }
 const center = tiles[0]
-if (center.type !== 'straight' || center.r !== 1 || center.x !== LOBBY_CROSS.x || center.z !== LOBBY_CROSS.z) {
-  console.error('✗ the center should be the first tile, a straight opening east and west')
+if (center.type !== 'cross' || center.r !== 0 || center.x !== LOBBY_CROSS.x || center.z !== LOBBY_CROSS.z) {
+  console.error('✗ the center should be the first tile, a four-way cross')
   process.exit(1)
 }
-const centerOpen = openingsAt('straight', center.r)
-if (centerOpen.has(0) || !centerOpen.has(1) || centerOpen.has(2) || !centerOpen.has(3)) {
-  console.error('✗ the center corridor should open east and west only')
+const centerOpen = openingsAt('cross', center.r)
+if (!centerOpen.has(0) || !centerOpen.has(1) || !centerOpen.has(2) || !centerOpen.has(3)) {
+  console.error('✗ the center cross should open north, east, south, and west')
   process.exit(1)
 }
 const ends = getPlacedTilesInOrder().filter(t => t.type === 'end')
-if (ends.length !== 2) {
-  console.error(`✗ expected 2 end tiles, got ${ends.length}`)
+if (ends.length !== 4) {
+  console.error(`✗ expected 4 end tiles, got ${ends.length}`)
   process.exit(1)
 }
 for (const m of LOBBY_MODES) {
-  const end = ends.find(t => t.x === m.cell.x && t.z === m.cell.z)
-  if (end && m.id !== 'pvp' && m.id !== 'bases') {
-    console.error(`✗ ${m.id} should not be built`)
-    process.exit(1)
-  }
+  // Team pads may share those cells; modes themselves stay unplaced and cannot be voted.
   const midX = m.cell.x * CELL + CELL / 2 + MAZE_ORIGIN
   const midZ = m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN
   if (voteModeAt(midX, midZ, MAZE_ORIGIN, CELL) !== '') {
@@ -127,8 +123,8 @@ for (const team of LOBBY_TEAMS) {
   }
 }
 const hold = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [baseSpawn(1).pos, baseSpawn(2).pos])
-if (hold.length !== 5) {
-  console.error(`✗ expected base, base, hub, red, and blue pads, got ${hold.length}`)
+if (hold.length !== 7) {
+  console.error(`✗ expected two bases, hub, and four team pads, got ${hold.length}`)
   process.exit(1)
 }
 const slab = BASE_Y + 0.5
@@ -408,8 +404,8 @@ if (allRed.some(x => x.team !== 1)) {
   process.exit(1)
 }
 const unchosen = assignLobbyTeams(['a', 'b', 'c'], new Map())
-if (unchosen.map(x => x.team).join() !== '1,2,1') {
-  console.error(`✗ unchosen players should fill red first on a tie, got ${unchosen.map(x => x.team).join()}`)
+if (unchosen.map(x => x.team).join() !== '1,2,3') {
+  console.error(`✗ unchosen players should fill the smallest of four teams, red first on a tie, got ${unchosen.map(x => x.team).join()}`)
   process.exit(1)
 }
 clearLobbyVotes()
