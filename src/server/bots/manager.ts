@@ -32,14 +32,16 @@ import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { graphFloorAt } from '../../shared/anvilSim'
 import { planBotLungeAim } from '../../shared/botDash'
+import { pickCombatTarget, type CombatCandidate } from '../../shared/botCombat'
 import { cellsAlongPath, stampAround } from '../../shared/botPaint'
-import { KnockSpec } from '../../shared/knocks'
-import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
+import { KnockSpec, lungeKnock, burstKnock, spikeKnock } from '../../shared/knocks'
+import { inBurst, inAirSpike, burstFootprint, burstDir } from '../../shared/burst'
 import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
   BOT_BURST_CHANCE, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
-  BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
+  BURST_COOLDOWN_S, BURST_RADIUS, BURST_HIT_MAX_DY, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount, BOT_LEAP_ROUTES,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, SERVER_LUNGE_BOT_SLACK,
   botRecoveryEnabled, RoundFormat,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
@@ -60,9 +62,9 @@ type Combat = {
   sweep: { target: string; left: number } | null
   /** Crouch before the dash. lungeStarted waits until this hits zero. */
   windup: { left: number; dx: number; dz: number; target: string; at: V3 } | null
-  /** Human we jumped to spike. Cleared when the dive fires or we land. */
+  /** Foe we jumped to spike. Cleared when the dive fires or we land. */
   spikeFor: string | null
-  /** Human this bot is chasing or swinging at, so a teammate can pick someone else. */
+  /** Foe this bot is chasing or swinging at, so a teammate can pick someone else. */
   chaseHuman: string | null
   /** Air spike in the air. A miss paints when the body settles; a hit does not. */
   dive: { id: number; hit: boolean; fx: number; fz: number } | null
@@ -568,18 +570,69 @@ export function tickBots(dtSec: number): void {
 }
 
 /**
- * Combat brain, every BOT_THINK_S while the bot is on its feet: nearest enemy
- * human on its level within BOT_ENGAGE_RANGE → lunge if close, burst if inside
- * the radius, otherwise chase. Players' cooldowns; one roll per ability per think.
+ * Combat brain, every BOT_THINK_S while the bot is on its feet: nearest foe
+ * (humans preferred, enemy-team bots allowed) on its level within engage
+ * range → lunge if close, burst if inside the radius, otherwise chase.
+ * Players' cooldowns; one roll per ability per think. Hits on bots use the
+ * same knockback as a player hit, so the struck bot runs recovery as usual.
  */
-/** Airborne, past the top of the hop: spike the human in the cylinder, or dive the miss. */
+/** Airborne, past the top of the hop: spike the foe in the cylinder, or dive the miss. */
 /** Feet are over a walkable cell, not off the edge or on a perimeter lip. */
 function overArena(p: { x: number; y: number; z: number }): boolean {
   if (!graph) return false
   return graphFloorAt(graph, rampTiles, p.x, p.z, p.y, 1.05, 8) !== null
 }
 
-function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: number; y: number; z: number }>): void {
+function foeCandidates(b: LiveBot): CombatCandidate[] {
+  const out: CombatCandidate[] = []
+  for (const h of (deps?.humans?.() ?? b.sense.humans ?? [])) {
+    out.push({ id: h.id, team: h.team, x: h.x, y: h.y, z: h.z, kind: 'human' })
+  }
+  for (const o of bots) {
+    if (o.botId === b.botId || o.out) continue
+    if (!o.body.canBeHit()) continue
+    const q = o.body.pos
+    out.push({ id: `bot:${o.botId}`, team: o.team, x: q.x, y: q.y, z: q.z, kind: 'bot' })
+  }
+  return out
+}
+
+function pickFoe(b: LiveBot, engageRange: number): CombatCandidate | null {
+  const p = b.body.pos
+  return pickCombatTarget(
+    { id: `bot:${b.botId}`, team: b.team, x: p.x, y: p.y, z: p.z },
+    foeCandidates(b),
+    { engageRange, avoid: b.sense.avoidHumans },
+  )
+}
+
+function shoveLungeBot(attacker: LiveBot, targetId: string): boolean {
+  if (!targetId.startsWith('bot:')) return false
+  const id = parseInt(targetId.slice(4), 10)
+  const o = bots.find(x => x.botId === id)
+  if (!o || o.team === attacker.team) return false
+  const p = attacker.body.pos
+  const q = o.body.pos
+  if (Math.hypot(q.x - p.x, q.z - p.z) >= 2 || Math.abs(q.y - p.y) >= BOT_SAME_LEVEL_DY) return false
+  const dx = q.x - p.x, dz = q.z - p.z
+  const len = Math.hypot(dx, dz) || 1
+  if (!hitBot(id, p.x, p.y, p.z, 2, BOT_SAME_LEVEL_DY, () => lungeKnock(dx / len, dz / len))) return false
+  deps?.onBotHit?.(attacker.botId, targetId)
+  return true
+}
+
+function shoveBurstBots(attacker: LiveBot, origin: V3, fx: number, fz: number): void {
+  for (const o of bots) {
+    if (o.botId === attacker.botId || o.team === attacker.team || o.out) continue
+    if (!inBurst(origin, o.body.pos)) continue
+    const d = burstDir(origin, o.body.pos, fx, fz)
+    if (hitBot(o.botId, origin.x, origin.y, origin.z, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 3, () => burstKnock(d.x, d.z))) {
+      deps?.onBotHit?.(attacker.botId, `bot:${o.botId}`)
+    }
+  }
+}
+
+function trySpike(b: LiveBot): void {
   const c = b.combat
   if (!b.body.isAirborne() || b.body.verticalSpeed() > 1) return
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
@@ -588,11 +641,12 @@ function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: numbe
   // Same cylinder as a player's aerial Burst, and only over the arena — never
   // off the edge, even if a target is in range below.
   if (!overArena(p)) return
-  let aim: (typeof humans)[number] | null = null
-  for (const h of humans) {
-    if (h.team !== b.team && inAirSpike(p, h)) { aim = h; break }
+  const foes = foeCandidates(b)
+  let aim = foes.find(h => h.id === c.spikeFor && inAirSpike(p, h)) ?? null
+  if (!aim) {
+    const inCyl = foes.filter(h => h.team !== b.team && inAirSpike(p, h))
+    aim = pickCombatTarget({ id: `bot:${b.botId}`, team: b.team, x: p.x, y: p.y, z: p.z }, inCyl, { engageRange: 1e9 })
   }
-  if (!aim && c.spikeFor) aim = humans.find(h => h.id === c.spikeFor) ?? null
   if (!aim && !c.spikeFor) return
   const dx = (aim?.x ?? p.x) - p.x, dz = (aim?.z ?? p.z) - p.z
   const fl = Math.hypot(dx, dz) || 1
@@ -603,6 +657,12 @@ function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: numbe
   c.dive = { id, hit, fx: dx / fl, fz: dz / fl }
   c.spikeFor = null
   deps?.onBurst?.(b.botId, id, b.team, { ...p }, 1, c.dive.fx, c.dive.fz)
+  if (hit && aim && aim.kind === 'bot') {
+    const bid = parseInt(aim.id.slice(4), 10)
+    if (hitBot(bid, p.x, p.y, p.z, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, grounded => spikeKnock(c.dive!.fx, c.dive!.fz, grounded))) {
+      deps?.onBotHit?.(b.botId, aim.id)
+    }
+  }
   console.log(`[Bots] ghost ${b.botId} spikes${hit ? ` ${aim!.id.slice(0, 8)}` : ' (miss)'}`)
 }
 
@@ -652,12 +712,18 @@ function fight(b: LiveBot, dt: number): void {
   const humans = deps?.humans?.() ?? []
   if (c.sweep) {
     c.sweep.left -= dt
-    const h = humans.find(x => x.id === c.sweep!.target)
+    const targetId = c.sweep.target
     const p = b.body.pos
-    if (h && Math.hypot(h.x - p.x, h.z - p.z) < 2 && Math.abs(h.y - p.y) < BOT_SAME_LEVEL_DY) {
-      deps?.onBotHit?.(b.botId, h.id)
-      c.sweep = null
-    } else if (c.sweep.left <= 0) c.sweep = null
+    if (targetId.startsWith('bot:')) {
+      if (shoveLungeBot(b, targetId)) c.sweep = null
+      else if (c.sweep.left <= 0) c.sweep = null
+    } else {
+      const h = humans.find(x => x.id === targetId)
+      if (h && Math.hypot(h.x - p.x, h.z - p.z) < 2 && Math.abs(h.y - p.y) < BOT_SAME_LEVEL_DY) {
+        deps?.onBotHit?.(b.botId, h.id)
+        c.sweep = null
+      } else if (c.sweep.left <= 0) c.sweep = null
+    }
   }
   if (c.windup) {
     c.windup.left -= dt
@@ -673,7 +739,7 @@ function fight(b: LiveBot, dt: number): void {
     }
     return
   }
-  if (!b.body.canWalk()) { trySpike(b, humans); return }
+  if (!b.body.canWalk()) { trySpike(b); return }
   if (deps?.economyOn?.() && deps.economyTank && deps.friendlyDepot) {
     const tank = deps.economyTank(`bot:${b.botId}`)
     if (tank < PAINT_CAPACITY * BOT_REFILL_FRAC) {
@@ -685,18 +751,8 @@ function fight(b: LiveBot, dt: number): void {
   c.think = BOT_THINK_S
   const p = b.body.pos
   const engage = b.personality?.engageM ?? BOT_ENGAGE_RANGE
-  const nearestHuman = (skipTaken: boolean) => {
-    let tgt: (typeof humans)[number] | null = null, best = engage
-    for (const h of humans) {
-      if (h.team === b.team || Math.abs(h.y - p.y) > BOT_SAME_LEVEL_DY) continue
-      if (skipTaken && b.sense.avoidHumans.has(h.id)) continue
-      const d = Math.hypot(h.x - p.x, h.z - p.z)
-      if (d < best) { best = d; tgt = h }
-    }
-    return { tgt, best }
-  }
-  let { tgt, best } = nearestHuman(true)
-  if (!tgt) ({ tgt, best } = nearestHuman(false))
+  const tgt = pickFoe(b, engage)
+  const best = tgt ? Math.hypot(tgt.x - p.x, tgt.z - p.z) : engage
   c.chaseHuman = tgt ? tgt.id : null
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
   if (!tgt) {
@@ -708,6 +764,7 @@ function fight(b: LiveBot, dt: number): void {
     if (gain / fp.length < BOT_BURST_PAINT_FRAC || Math.random() >= BOT_BURST_PAINT_CHANCE) return
     c.burstCd = BURST_COOLDOWN_S
     deps.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    shoveBurstBots(b, p, 0, 1)
     console.log(`[Bots] ghost ${b.botId} bursts for paint (${gain}/${fp.length} cells)`)
     return
   }
@@ -731,7 +788,10 @@ function fight(b: LiveBot, dt: number): void {
   }
   if (can.burst && c.burstCd <= 0 && inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC) && Math.random() < BOT_BURST_CHANCE) {
     c.burstCd = BURST_COOLDOWN_S
+    const fx = tgt.x - p.x, fz = tgt.z - p.z
+    const fl = Math.hypot(fx, fz) || 1
     deps?.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    shoveBurstBots(b, p, fx / fl, fz / fl)
     console.log(`[Bots] ghost ${b.botId} bursts at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
     return
   }
