@@ -32,6 +32,7 @@ import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { graphFloorAt } from '../../shared/anvilSim'
 import { planBotLungeAim } from '../../shared/botDash'
+import { cellsAlongPath, stampAround } from '../../shared/botPaint'
 import { KnockSpec } from '../../shared/knocks'
 import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
 import {
@@ -439,7 +440,9 @@ export function tickBots(dtSec: number): void {
   // Body first (knock flight, cloud ride, landing), then the legs if the
   // body lets them walk. Each step paints the stepped cell AND its walkable
   // neighbors, matching the ~3x3 footprint human players apply via
-  // paintTick. Knocked, falling or riding bots don't paint.
+  // paintTick. A ground dash also paints that stamp along the swept path,
+  // so a 46 m/s lunge does not skip cells between ticks. Knocked, falling,
+  // riding, or mid-air recovery dashes over the void don't paint.
   const dtMs = dtSec * 1000
   const recoverOn = botRecoveryEnabled(deps.format?.() ?? 'bases')
   for (const b of bots) b.body.recoveryEnabled = recoverOn
@@ -460,6 +463,7 @@ export function tickBots(dtSec: number): void {
     }
     const world = { graph, rampTiles, tiles: placedTiles, base: home }
     b.body.lungeEnabled = (deps?.abilities?.() ?? { lunge: true, burst: true }).lunge
+    const prev = { ...b.body.pos }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)
@@ -495,6 +499,11 @@ export function tickBots(dtSec: number): void {
     if (b.out) { b.gait.walking = false; continue }
     fillSense(b)
     fight(b, dtSec)
+    if (b.body.ownDashPaint()) {
+      const cells = cellsAlongPath(graph, rampTiles, prev, b.body.pos)
+      const at = cellNear(b.body.pos) ?? cells[0] ?? b.currentCell
+      for (const nid of orderNearest(cells, at)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
+    }
     if (!b.body.canWalk()) { b.gait.walking = false; continue }
     const stepped = b.tick(dtMs, graph)
     const leap = b.takeLeap()
@@ -526,19 +535,7 @@ export function tickBots(dtSec: number): void {
       // Paint the full 3x3 stamp around the stepped cell (matches human
       // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
       // off-corridor positions are filtered.
-      const colonIdx = stepId.indexOf(':')
-      if (colonIdx < 0) continue
-      const prefix = stepId.slice(0, colonIdx + 1)
-      const [colStr, rowStr] = stepId.slice(colonIdx + 1).split(',')
-      const col = parseInt(colStr, 10)
-      const row = parseInt(rowStr, 10)
-      const stamp: string[] = []
-      for (let dc = -1; dc <= 1; dc++) {
-        for (let dr = -1; dr <= 1; dr++) {
-          const nid = `${prefix}${col + dc},${row + dr}`
-          if (graph.nodes.has(nid)) stamp.push(nid)
-        }
-      }
+      const stamp = stampAround(graph, stepId)
       for (const nid of orderNearest(stamp, stepId)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
   }

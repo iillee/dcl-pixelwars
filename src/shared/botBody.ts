@@ -164,6 +164,7 @@ export class BotBody {
     this.vel = { x: 0, y: 0, z: 0 }
     this.forceLeft = 0; this.lockLeft = 0; this.holdLeft = 0; this.immuneLeft = 0
     this.grounded = true
+    this.dashPaint = false
     this.trace = null
     this.clearRecovery()
   }
@@ -183,14 +184,19 @@ export class BotBody {
     this.lockLeft = 0
     this.glideDashCd = LUNGE_COOLDOWN_S
     this.armRecovery(0)
+    this.dashPaint = true
     return true
   }
   private dashDir: V3 = { x: 0, y: 0, z: 0 }
   private dashSpeed = 0
   private dashLeft = 0
   private dashKeep = 0
+  /** Own ground dash, including the short brake, until we settle, get hit, or leave the floor. */
+  private dashPaint = false
   /** Mid-dash (its own lunge). */
   isDashing(): boolean { return this.mode === 'knock' && this.dashLeft > 0 }
+  /** Grounded on its own lunge: the manager should paint along the path. */
+  ownDashPaint(): boolean { return this.grounded && this.dashPaint && this.mode === 'knock' }
   /** In the air and not inside its own dash. A spike can fire here. */
   isAirborne(): boolean { return this.mode === 'knock' && !this.grounded && this.dashLeft <= 0 }
   verticalSpeed(): number { return this.vel.y }
@@ -234,6 +240,7 @@ export class BotBody {
     this.forceLeft = 0
     this.lockLeft = 0
     this.dashLeft = 0
+    this.dashPaint = false
     this.clearRecovery()
   }
 
@@ -249,6 +256,7 @@ export class BotBody {
     }
     this.lockLeft = Math.max(this.lockLeft, spec.lockS)
     this.dashLeft = 0
+    this.dashPaint = false
     // Each hit starts a new attempt. The reaction delay stays the one this bot rolled.
     this.armRecovery(Math.max(spec.lockS, spec.kind === 'spike' ? AIR_SPIKE_GLIDE_LOCK_S : 0))
     if (this.mode === 'walk') this.grounded = true
@@ -293,6 +301,7 @@ export class BotBody {
         else if (this.reactLeft > 0) this.reactLeft -= dt
         this.steerRecovery(dt, world, out)
         this.physics(dt, world)
+        if (!this.grounded) this.dashPaint = false
         if (this.lockLeft > 0) this.lockLeft -= dt
         if (this.pos.y < fallTriggerY(this.pos.x, this.pos.z)) {
           this.mode = 'rescue'
@@ -307,6 +316,7 @@ export class BotBody {
         if (this.grounded && this.forceLeft <= 0 && this.lockLeft <= 0 && Math.hypot(this.vel.x, this.vel.z) < BOT_RECOVER_SPEED) {
           this.mode = 'walk'
           this.vel = { x: 0, y: 0, z: 0 }
+          this.dashPaint = false
           out.push({ type: 'settled' })
         }
         return
