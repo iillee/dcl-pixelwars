@@ -68,6 +68,8 @@ const WALL_OVER = 0.4
 const WALL_REACH = 1.05
 /** Subdivide a long XZ step so a fast glide, jump, or knock cannot skip a tile face. */
 const SWEEP_STEP = 0.45
+/** Snap up onto a slab only when already this close to the top. Mid-fall from well below must not be pulled back. */
+const SNAP_UP = 0.15
 
 /** Walkable-surface Y of a tile at (x, z): flat slab top, or the ramp slope. Feet frame (FLOOR_FROM_NODE). */
 function tileSurfaceY(tile: Placed, x: number, z: number): number {
@@ -151,28 +153,36 @@ function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: 
 }
 
 /**
- * Wall at (x, z) for a body at height `y`. Interior corridor margins and taller
- * sides stay walls. A perimeter lip is a drop when leaving the floor, but the
- * same vertical face is a wall when the body flies into the slab from outside
- * (`from` is not in this slab), so a glide cannot tunnel through a tile edge.
- * A walkable floor more than a step above `y`, while `y` is still inside the
- * slab, is also a wall (the side of the platform), not a landing and not a
- * pass-under. A floor a full level up is out of RECOVER_UP, so an open gap
- * under a bridge is still a fall.
+ * Wall at (x, z) for a body at height `y`. Only interior corridor margins and
+ * taller sides the body is moving into are walls. A perimeter lip or outer
+ * drop-off is never a wall when leaving the floor or falling past it, so a
+ * knock or slide can go off the edge. A mid-air glide into a tile's vertical
+ * face from outside (from is not in this slab, and the top is too high to
+ * step onto) is still a side hit. A floor a full level up is out of
+ * RECOVER_UP, so an open gap under a bridge is still a fall.
  */
 function wallTopAt(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
   x: number, z: number, y: number, from?: { x: number; z: number }): number | null {
   if (!tiles.length) return null
+  const entering = !!(from && !tileContaining(tiles, from.x, from.z, y))
+  const lip = dropLip(graph, rampTiles, tiles, x, z, y)
+  // Incoming mid-air hit on the vertical face, including a perimeter face
+  // approached from the void. Not when already leaving or falling along the lip.
+  if (entering) {
+    const tile = tileContaining(tiles, x, z, y)
+    if (tile) {
+      const step = graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, STEP_UP)
+      if (step === null) return tileSurfaceY(tile, x, z)
+    }
+  }
+  if (lip) return null
+  // Walkable floor too high to step onto: a side only when moving into it.
+  // Falling down past a cell we already occupy is a drop, not a wall.
   const slabFloor = graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP)
-  if (slabFloor !== null && slabFloor > y + STEP_UP) return slabFloor
+  if (slabFloor !== null && slabFloor > y + STEP_UP) return entering ? slabFloor : null
   const tile = tileContaining(tiles, x, z, y)
   if (!tile) return null
-  if (from && !tileContaining(tiles, from.x, from.z, y)) {
-    const step = graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, STEP_UP)
-    if (step === null) return tileSurfaceY(tile, x, z)
-  }
   if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return null
-  if (dropLip(graph, rampTiles, tiles, x, z, y)) return null
   return tileSurfaceY(tile, x, z)
 }
 
@@ -203,11 +213,11 @@ function clampWall(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
 /**
  * One integration step for a server body (bot or anvil), after velocity was updated.
  * Lands on the walkable surface, refuses an interior wall (the next tile is floor or
- * a taller side), stops a mid-air glide into a tile's vertical face, and snaps a body
- * that has sunk through a slab (less than a level) back onto it. A perimeter lip is
- * not a wall when leaving the floor and is not snapped back onto, so a knock flies
- * off and falls. A floor a full level up is out of RECOVER_UP, so an open gap under
- * a bridge is still a fall.
+ * a taller side), and stops a mid-air glide into a tile's vertical face. Snap up only
+ * when already within SNAP_UP of the top (or SNAP_DOWN if still grounded). Mid-fall
+ * from well below is not pulled back, and a perimeter lip is not a wall, so a knock
+ * or slide flies off and falls. A floor a full level up is out of RECOVER_UP, so an
+ * open gap under a bridge is still a fall.
  */
 export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
   prev: { x: number; y: number; z: number }, nx: number, ny: number, nz: number, velY: number, wasGrounded: boolean,
@@ -225,11 +235,10 @@ export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles:
     if (vy < 0) vy = 0
     grounded = true
   } else {
-    // Below a surface we should be standing on. The 0.6 m step limit hides it once
-    // a step has already dropped through; a level gap is still too far to grab.
-    // Not past a drop lip — that nearby floor is behind us, and pulling back up
-    // would pin a knock to the outer edge.
-    let overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, RECOVER_UP)
+    // Only if already at the top, within SNAP_UP. A 2.5 m grab was pulling
+    // mid-fall bodies and edge knocks back onto the slab.
+    // Not past a drop lip — that nearby floor is behind us.
+    let overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, SNAP_UP)
     if (overhead !== null && lip(overhead)) overhead = null
     if (overhead !== null && overhead > y && vy <= 0) {
       y = overhead

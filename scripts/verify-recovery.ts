@@ -229,9 +229,7 @@ for (let i = 0; i < TRIALS; i++) {
 }
 const rate = saved / TRIALS
 console.log(`weak knock, ${TRIALS} seeded bots: ${(rate * 100).toFixed(0)}% saved`)
-// Slab collision turns an under-floor approach into a landing, so the save
-// rate sits above the old 80% cap; skip-double / misjudge should still drop at least one.
-if (rate < 0.2 || rate > 0.99) fail(`expected most weak knocks saved and at least one fall, got ${(rate * 100).toFixed(0)}%`)
+if (rate < 0.2 || rate > 0.8) fail(`expected some saves and some falls, got ${(rate * 100).toFixed(0)}%`)
 
 let strongSaved = 0
 for (let i = 0; i < 24; i++) {

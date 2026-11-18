@@ -329,7 +329,7 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
 
 // Interior wall (next cell is floor or a taller tile): a shove stays on the slab.
 // Perimeter lip (nothing at this height beyond): a knock flies off and falls.
-// A body left below a walkable cell is snapped back up, not left inside the mesh.
+// A body already at the top (within 0.15 m) snaps onto it; mid-fall from well below does not.
 {
   const tiles = getPlacedTilesInOrder()
   const world = {
@@ -383,15 +383,26 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   }
   console.log(`✓ wall shove stayed on the slab (${along.toFixed(2)} m toward the wall)`)
 
-  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
+  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 0.10, z: wall.p[2] })
   sunk.rng = () => 1
   sunk.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
-  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
-  if (sunk.pos.y < wall.p[1] - 0.25) {
-    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
+  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.05; t += 0.05) sunk.tick(0.05, world)
+  if (sunk.pos.y < wall.p[1] - 0.12) {
+    console.error(`✗ body left just under the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
     process.exit(1)
   }
-  console.log(`✓ sunk body snapped up to ${sunk.pos.y.toFixed(2)}`)
+  console.log(`✓ body already at the top snapped up to ${sunk.pos.y.toFixed(2)}`)
+
+  const midFall = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
+  midFall.rng = () => 1
+  midFall.recoveryEnabled = false
+  midFall.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
+  for (let t = 0; t < 0.4; t += 0.05) midFall.tick(0.05, world)
+  if (midFall.pos.y >= wall.p[1] - 0.3) {
+    console.error(`✗ mid-fall body was pulled back onto the slab at y ${midFall.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ mid-fall body 1.2 m below the top was not snapped back (y ${midFall.pos.y.toFixed(2)})`)
 
   const launch = (dx: number, dz: number) => {
     const bot = new BotBody({ x: lip.p[0], y: lip.p[1], z: lip.p[2] })
