@@ -147,10 +147,12 @@ function neighborSolid(tiles: Placed[], gx: number, gz: number, floorY: number):
 }
 
 /**
- * Past the walkable cell, and the next tile outward is void or a lower level.
- * That lip is a drop-off: don't stop on it and don't snap back onto it when
- * leaving the floor. An interior margin (floor or a taller tile in the next
- * cell) is not a drop.
+ * Past the walkable cell, and the next tile in that direction is void or a
+ * lower level. That lip is a drop-off: don't stop on it and don't snap back
+ * onto it when leaving the floor. A solid neighbor along the other axis (the
+ * rest of a long rim) does not count as support — that was parking anvils
+ * hit off the side. An interior margin (floor or a taller tile in the next
+ * cell in the drop direction) is not a drop.
  */
 function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): boolean {
   if (!tiles.length) return false
@@ -160,10 +162,10 @@ function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: 
   const home = tileAtFeet(tiles, node.x, node.z, node.y)
   if (!home) return true
   const dx = x - node.x, dz = z - node.z
-  let backed = false
-  if (Math.abs(dx) > 0.4) backed = neighborSolid(tiles, home.x + Math.sign(dx), home.z, node.y)
-  if (!backed && Math.abs(dz) > 0.4) backed = neighborSolid(tiles, home.x, home.z + Math.sign(dz), node.y)
-  return !backed
+  let drop = false
+  if (Math.abs(dx) > 0.4 && !neighborSolid(tiles, home.x + Math.sign(dx), home.z, node.y)) drop = true
+  if (Math.abs(dz) > 0.4 && !neighborSolid(tiles, home.x, home.z + Math.sign(dz), node.y)) drop = true
+  return drop
 }
 
 /**

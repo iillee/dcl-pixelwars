@@ -280,6 +280,102 @@ for (let r = 0; r < 4; r++) {
       }
     }
     check(`knocks that reach a lip fall at several speeds and angles (hung ${hung}/${trials})`, hung === 0 && trials >= 20)
+    // Mid-edge of a long rim: a solid neighbor along the ledge used to cancel
+    // the drop, so a side-on knock parked on the lip. Corners and random
+    // knocks from inland must also fall once they are past the edge.
+    const hasNeighbor = (p: [number, number, number], dx: number, dz: number) =>
+      [...graph.worldPos.values()].some(q => Math.abs(q[1] - p[1]) < 1.5 && Math.hypot(q[0] - (p[0] + dx * 2), q[2] - (p[2] + dz * 2)) < 1)
+    const midLips: typeof lips = []
+    const cornerLips: Array<{ x: number; y: number; z: number; dx: number; dz: number }> = []
+    for (const p of graph.worldPos.values()) {
+      const voids: Array<[number, number]> = []
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>) {
+        if (!beyond(p, dx, dz)) continue
+        voids.push([dx, dz])
+        const along = hasNeighbor(p, dz, -dx) || hasNeighbor(p, -dz, dx)
+        if (along) midLips.push({ x: p[0], y: p[1] - 0.05, z: p[2], dx, dz })
+      }
+      if (voids.length >= 2) {
+        for (let i = 0; i < voids.length; i++) {
+          for (let j = i + 1; j < voids.length; j++) {
+            if (voids[i][0] * voids[j][0] + voids[i][1] * voids[j][1] !== 0) continue
+            cornerLips.push({
+              x: p[0], y: p[1] - 0.05, z: p[2],
+              dx: Math.sign(voids[i][0] + voids[j][0]) || voids[i][0],
+              dz: Math.sign(voids[i][1] + voids[j][1]) || voids[i][1],
+            })
+          }
+        }
+      }
+      if (midLips.length >= 16 && cornerLips.length >= 4) break
+    }
+    check('found mid-edge rims and corners on a real arena', midLips.length >= 4)
+    const hungSide = (s: { x: number; y: number; z: number; dx: number; dz: number }, out0: number, side: number, vx: number, vz: number) => {
+      const a = settle({
+        x: s.x + s.dx * out0 + s.dz * side,
+        y: s.y,
+        z: s.z + s.dz * out0 - s.dx * side,
+      }, vx, vz)
+      const cheb = Math.max(Math.abs(a.pos.x - s.x), Math.abs(a.pos.z - s.z))
+      return a.alive && Math.abs(a.pos.y - s.y) < 0.4 && cheb >= 0.99
+    }
+    let sideHung = 0, sideTrials = 0
+    for (const s of midLips.slice(0, 8)) {
+      for (const side of [0.4, 0.7, -0.5]) {
+        for (const ang of [0, 20, -25]) {
+          for (const spd of [3, 6]) {
+            sideTrials++
+            const rad = ang * Math.PI / 180
+            const ax = s.dx * Math.cos(rad) - s.dz * Math.sin(rad)
+            const az = s.dx * Math.sin(rad) + s.dz * Math.cos(rad)
+            if (hungSide(s, 0.8, side, ax * spd, az * spd)) sideHung++
+          }
+        }
+        sideTrials++
+        if (hungSide(s, 1.02, side, 0, 0)) sideHung++
+      }
+    }
+    check(`a side-on knock past a mid-edge lip falls (hung ${sideHung}/${sideTrials})`, sideHung === 0 && sideTrials >= 20)
+    let cornerHung = 0, cornerTrials = 0
+    for (const s of (cornerLips.length ? cornerLips : midLips).slice(0, 6)) {
+      for (const ang of [0, 35, 55]) {
+        for (const spd of [2, 6]) {
+          cornerTrials++
+          const rad = ang * Math.PI / 180
+          const ax = s.dx * Math.cos(rad) - s.dz * Math.sin(rad)
+          const az = s.dx * Math.sin(rad) + s.dz * Math.cos(rad)
+          if (hungSide(s, 0.7, 0, ax * spd, az * spd)) cornerHung++
+        }
+      }
+    }
+    check(`a knock off a corner falls (hung ${cornerHung}/${cornerTrials})`, cornerHung === 0 && cornerTrials >= 6)
+    let randHung = 0, randTrials = 0
+    const pool = midLips.length ? midLips : lips
+    for (let i = 0; i < 40; i++) {
+      const s = pool[i % pool.length]
+      const ang = (i * 17) % 80 - 40
+      const spd = 2 + (i % 5) * 1.5
+      const side = ((i % 5) - 2) * 0.25
+      const rad = ang * Math.PI / 180
+      const ax = s.dx * Math.cos(rad) - s.dz * Math.sin(rad)
+      const az = s.dx * Math.sin(rad) + s.dz * Math.cos(rad)
+      randTrials++
+      // Start inland enough that a lunge-strength shove can reach the lip.
+      const world = new AnvilWorld(1)
+      world.setMaze(graph, tiles, [], false)
+      const a = world.anvils[0]
+      const start = {
+        x: s.x - s.dx * 1.6 + s.dz * side,
+        y: s.y,
+        z: s.z - s.dz * 1.6 - s.dx * side,
+      }
+      Object.assign(a, { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1, push: { x: 0, z: 0, left: 0 } })
+      world.hit(0, ax, az, 0.5 + (i % 2) * 0.5)
+      for (let t = 0; t < 6 && world.isMoving(a); t += 1 / 60) world.tick(1 / 60)
+      const cheb = Math.max(Math.abs(a.pos.x - s.x), Math.abs(a.pos.z - s.z))
+      if (a.alive && Math.abs(a.pos.y - s.y) < 0.4 && cheb >= 0.99) randHung++
+    }
+    check(`random side knocks that reach a lip fall (hung ${randHung}/${randTrials})`, randHung === 0 && randTrials === 40)
   }
 }
 
