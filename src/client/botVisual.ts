@@ -34,9 +34,11 @@
  *   3. Lerp renderPos toward that prediction with a rate proportional
  *      to dt: `renderPos = lerp(renderPos, predicted, min(1, k*dt))`.
  *   4. Yaw toward the smoothed velocity.
- *   5. On a double jump, add a 360° spin over the double clip, composed on
- *      that facing yaw so smoothing is not overwritten. The face and outline
- *      live on the same root, so they spin with it.
+ *   5. On a double jump, add a 360° ease-out spin over DOUBLE_JUMP_SPIN_DUR_S,
+ *      composed on that facing yaw so smoothing is not overwritten.
+ *   6. On a jump or double jump, a short squash-and-stretch pop on the visual
+ *      root (face and outline follow). Jump height uses the live server Y
+ *      instead of the delayed 2 Hz lerp, so takeoff reads as a hop.
  */
 
 import {
@@ -53,7 +55,7 @@ import {
   BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
   RoundFormat,
 } from '../shared/pvp'
-import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, type GhostClip } from '../shared/botAnim'
+import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, BOT_ANIM_JUMP, BOT_ANIM_DOUBLE, type GhostClip } from '../shared/botAnim'
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -206,6 +208,7 @@ interface BotVisual {
   renderPos: Vector3    // smoothed feet position we actually track
   lastYawDeg: number    // last committed yaw — held when velocity too low
   spinT0: number        // rec.timeSec when the double-jump spin started, or -1
+  hopT0: number         // rec.timeSec when the jump / double-jump pop started, or -1
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
@@ -400,6 +403,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     renderPos: Vector3.clone(pos),
     lastYawDeg: 0,
     spinT0: -1,
+    hopT0: -1,
     fastUntil: 0,
     snaps: [],
     riding: false,
@@ -434,6 +438,8 @@ function syncGhostAnim(rec: BotVisual): void {
   rec.clip = clip
   rec.clipUntil = GHOST_CLIP_LOOP[clip] ? 0 : rec.timeSec + GHOST_CLIP_DUR_S[clip]
   rec.spinT0 = clip === 'double' ? rec.timeSec : -1
+  if (clip === 'jump' || clip === 'double') rec.hopT0 = rec.timeSec
+  else rec.hopT0 = -1
 }
 
 function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
@@ -700,7 +706,18 @@ export function initBotVisual(): void {
           rec.renderPos = Vector3.create(rec.localKnock.pos.x, rec.localKnock.pos.y, rec.localKnock.pos.z)
         }
       } else if (interp) {
-        rec.renderPos = Vector3.clone(interp)
+        const jumping = rec.pose === BOT_ANIM_JUMP || rec.pose === BOT_ANIM_DOUBLE
+          || rec.clip === 'jump' || rec.clip === 'double'
+        if (jumping) {
+          // Delayed snapshot lerp smears a 0.3 s hop across a 2 Hz gap.
+          // Keep XZ on the smoothed path; drive Y from the latest packet so
+          // takeoff is a pop, not a drift. Cosmetic hop (jumpPop) is separate.
+          const look = rec.pktAt > 0 ? Math.min(0.6, (now - rec.pktAt) / 1000) : 0
+          const liveY = rec.lastServerPos.y + rec.velocity.y * look - 0.5 * BOT_GRAVITY * look * look
+          rec.renderPos = Vector3.create(interp.x, liveY, interp.z)
+        } else {
+          rec.renderPos = Vector3.clone(interp)
+        }
       } else {
         const look = rec.pktAt > 0 ? Math.min(WALK_EXTRAPOLATE_MAX_S, (now - rec.pktAt) / 1000) : 0
         const predX = rec.lastServerPos.x + rec.velocity.x * look
@@ -726,24 +743,25 @@ export function initBotVisual(): void {
       const tf = Transform.getMutable(rec.root)
       if (rec.kind === 'ghost') {
         const t = rec.timeSec
+        syncGhostAnim(rec)
+        tickBotFace(rec.id, rec.pose, rec.st)
         const air = rec.riding || rec.clip === 'jump' || rec.clip === 'double' || rec.clip === 'glide' || rec.clip === 'fall'
         const bob = air ? 0 : Math.sin(t * BOB_HZ * Math.PI * 2) * BOB_AMPLITUDE
         const drX = air ? 0 : Math.sin(t * DRIFT_HZ_X * Math.PI * 2) * DRIFT_AMPLITUDE
         const drZ = air ? 0 : Math.cos(t * DRIFT_HZ_Z * Math.PI * 2) * DRIFT_AMPLITUDE
+        const pop = rec.hopT0 >= 0 ? jumpPop(rec.timeSec - rec.hopT0) : { y: 0, sx: 1, sy: 1, sz: 1 }
         const pulse = air ? 1 : 1.0 + Math.sin(t * PULSE_HZ * Math.PI * 2) * PULSE_AMPLITUDE
         tf.position = Vector3.create(
           rec.renderPos.x + drX,
-          rec.renderPos.y + GHOST_FLOAT + bob,
+          rec.renderPos.y + GHOST_FLOAT + bob + pop.y,
           rec.renderPos.z + drZ,
         )
-        tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
-        syncGhostAnim(rec)
-        tickBotFace(rec.id, rec.pose, rec.st)
+        tf.scale = Vector3.create(GHOST_SCALE * pulse * pop.sx, GHOST_SCALE * pulse * pop.sy, GHOST_SCALE * pulse * pop.sz)
       } else {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)
       }
-      const spin = rec.spinT0 >= 0 ? doubleJumpSpinDeg(rec.timeSec - rec.spinT0, GHOST_CLIP_DUR_S.double) : 0
+      const spin = rec.spinT0 >= 0 ? doubleJumpSpinDeg(rec.timeSec - rec.spinT0, DOUBLE_JUMP_SPIN_DUR_S) : 0
       tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg + spin, 0)
 
       // Glider faces the ghost's travel direction via the parent yaw.

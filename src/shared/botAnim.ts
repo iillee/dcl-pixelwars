@@ -31,12 +31,42 @@ export function ghostClipForPose(an: number): GhostClip {
   return 'idle'
 }
 
+/** Full 360° double-jump spin, seconds. Faster than the clip so the turn reads as a snap, with ease-out. */
+export const DOUBLE_JUMP_SPIN_DUR_S = 0.38
+
+function easeOutCubic(t: number): number {
+  const u = 1 - t
+  return 1 - u * u * u
+}
+
 /**
- * Extra yaw (degrees) for a full 360° spin over `durS`, the length of the
- * double-jump clip — the same window the player avatar's double-jump spin uses.
+ * Extra yaw (degrees) for a full 360° spin over `durS` with ease-out.
  * 0 before the window and after it completes (360 ≡ 0), so facing yaw is unchanged.
  */
-export function doubleJumpSpinDeg(elapsedS: number, durS: number): number {
+export function doubleJumpSpinDeg(elapsedS: number, durS: number = DOUBLE_JUMP_SPIN_DUR_S): number {
   if (!(durS > 0) || !(elapsedS >= 0) || elapsedS >= durS) return 0
-  return 360 * (elapsedS / durS)
+  return 360 * easeOutCubic(elapsedS / durS)
+}
+
+/** Squash / stretch / settle window on a jump or double jump, seconds. */
+export const JUMP_POP_S = 0.40
+export const JUMP_SQUASH_S = 0.10
+export const JUMP_STRETCH_S = 0.10
+
+export type JumpPop = { y: number; sx: number; sy: number; sz: number }
+
+/** Visual-only hop flourish (metres and scale multipliers). Settles to identity. */
+export function jumpPop(elapsedS: number): JumpPop {
+  const rest: JumpPop = { y: 0, sx: 1, sy: 1, sz: 1 }
+  if (!(elapsedS >= 0) || elapsedS >= JUMP_POP_S) return rest
+  if (elapsedS < JUMP_SQUASH_S) {
+    const s = Math.sin((elapsedS / JUMP_SQUASH_S) * Math.PI)
+    return { y: -0.05 * s, sx: 1 + 0.16 * s, sy: 1 - 0.22 * s, sz: 1 + 0.16 * s }
+  }
+  const stretchEnd = JUMP_SQUASH_S + JUMP_STRETCH_S
+  if (elapsedS < stretchEnd) {
+    const s = Math.sin(((elapsedS - JUMP_SQUASH_S) / JUMP_STRETCH_S) * Math.PI)
+    return { y: 0.12 * s, sx: 1 - 0.12 * s, sy: 1 + 0.20 * s, sz: 1 - 0.12 * s }
+  }
+  return rest
 }

@@ -15,7 +15,8 @@ import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
-import { doubleJumpSpinDeg } from '../src/shared/botAnim'
+import { doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, JUMP_POP_S, JUMP_SQUASH_S } from '../src/shared/botAnim'
+import { RESCUE_PATH } from '../src/shared/rescuePath'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -315,21 +316,63 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
 console.log('✓ walking draw stays within 3 m; a knock falls (no glider) and the draw stays inside 15 m')
 
 {
-  const dur = 0.667
-  const at = (elapsed: number, want: number) => {
+  const dur = DOUBLE_JUMP_SPIN_DUR_S
+  if (dur < 0.35 || dur > 0.4) {
+    console.error(`✗ double-jump spin duration ${dur} s should be 0.35–0.4 s`)
+    process.exit(1)
+  }
+  const at = (elapsed: number, want: number, slop = 1e-9) => {
     const got = doubleJumpSpinDeg(elapsed, dur)
-    if (Math.abs(got - want) > 1e-9) {
+    if (Math.abs(got - want) > slop) {
       console.error(`✗ double-jump spin at ${elapsed.toFixed(3)} s: ${got} deg, expected ${want}`)
       process.exit(1)
     }
   }
   at(-0.1, 0)
   at(0, 0)
-  at(dur * 0.25, 90)
-  at(dur * 0.5, 180)
-  at(dur * 0.75, 270)
+  const mid = doubleJumpSpinDeg(dur * 0.5, dur)
+  if (mid <= 180 || mid >= 360) {
+    console.error(`✗ ease-out spin should be past 180° by halfway, got ${mid}`)
+    process.exit(1)
+  }
   at(dur, 0)
   at(dur + 0.1, 0)
   if (doubleJumpSpinDeg(0.2, 0) !== 0) { console.error('✗ double-jump spin with no duration'); process.exit(1) }
-  console.log('✓ double-jump spin is a full 360° over the clip, then facing is unchanged')
+  const squash = jumpPop(JUMP_SQUASH_S / 2)
+  if (squash.sy >= 1 || squash.sx <= 1) {
+    console.error(`✗ jump squash should flatten Y and widen XZ, got sx=${squash.sx} sy=${squash.sy}`)
+    process.exit(1)
+  }
+  const stretch = jumpPop(JUMP_SQUASH_S + 0.05)
+  if (stretch.sy <= 1 || stretch.y <= 0) {
+    console.error(`✗ jump stretch should lengthen Y and pop up, got sy=${stretch.sy} y=${stretch.y}`)
+    process.exit(1)
+  }
+  const rest = jumpPop(JUMP_POP_S)
+  if (rest.y !== 0 || rest.sx !== 1 || rest.sy !== 1) {
+    console.error('✗ jump pop should settle to identity')
+    process.exit(1)
+  }
+  console.log(`✓ double-jump spin is a full 360° in ${dur} s with ease-out, then facing is unchanged`)
+  console.log('✓ jump and double jump use a squash-and-stretch pop that settles')
+}
+
+{
+  // Custom ghost: GHOST_FLOAT 1.0 + GHOST_SCALE 1.2 * outline crown 1.94 m.
+  const crown = 1.0 + 1.2 * 1.94
+  const hookBelow = 0.95
+  const hook = RESCUE_PATH.BOT_HANG_Y - hookBelow
+  if (RESCUE_PATH.HANG_Y !== 2.65) {
+    console.error(`✗ player cloud hang should stay 2.65 m, got ${RESCUE_PATH.HANG_Y}`)
+    process.exit(1)
+  }
+  if (hook < crown) {
+    console.error(`✗ bot cloud hook at ${hook.toFixed(2)} m overlaps the crown at ${crown.toFixed(2)} m (hang ${RESCUE_PATH.BOT_HANG_Y})`)
+    process.exit(1)
+  }
+  if (RESCUE_PATH.BOT_HANG_Y <= RESCUE_PATH.HANG_Y) {
+    console.error('✗ bot cloud hang should be above the player hang')
+    process.exit(1)
+  }
+  console.log(`✓ bot rescue cloud hang ${RESCUE_PATH.BOT_HANG_Y.toFixed(2)} m (was ${RESCUE_PATH.HANG_Y.toFixed(2)} m); hook at ${hook.toFixed(2)} m sits above the ${crown.toFixed(2)} m crown`)
 }
