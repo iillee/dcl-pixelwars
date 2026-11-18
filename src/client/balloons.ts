@@ -53,8 +53,8 @@ type Pose = { feet: Vec; yawDeg: number; entity?: Entity }
 
 /** Deep red #B3121E, matte with a little gloss. */
 const COLOR: Rgb = { r: 0xB3 / 255, g: 0x12 / 255, b: 0x1E / 255 }
-/** Body, neck, and nub. Strings stay opaque. */
-const BALLOON_ALPHA = 0.8
+/** Body, neck, and nub are fully opaque, same as the strings. */
+const BALLOON_ALPHA = 1
 /** Slight egg: about 1.15× taller than wide, close to the current size. */
 const BODY_XZ = 0.54
 const BODY_Y = 0.62
@@ -276,7 +276,7 @@ function balloonMat(a = BALLOON_ALPHA) {
     roughness: 0.42,
     metallic: 0.05,
     specularIntensity: 0.35,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
     castShadows: false,
   }
 }
@@ -926,7 +926,6 @@ function tickPops(dt: number): void {
     const s = BODY_XZ + u * 0.55
     const tf = Transform.getMutableOrNull(p.ent)
     if (tf) tf.scale = Vector3.create(s, s, s)
-    paintBalloon(p.ent, BALLOON_ALPHA * (1 - u))
     if (p.t >= POP_S) {
       engine.removeEntity(p.ent)
       pops.splice(i, 1)

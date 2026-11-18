@@ -216,8 +216,13 @@ if (!client.includes('BOT_BACK_Y') || !client.includes('BOT_BACK_Z') || !client.
 }
 
 
-if (!client.includes('const BALLOON_ALPHA = 0.8') || !client.includes('MaterialTransparencyMode.MTM_ALPHA_BLEND')) {
-  fail('Balloon Battle balloons should be slightly transparent (alpha 0.8, alpha-blend)')
+if (!client.includes('const BALLOON_ALPHA = 1')) {
+  fail('Balloon Battle balloons should be fully opaque (alpha 1)')
+}
+const balloonFnAt = client.indexOf('function balloonMat(')
+const balloonFn = balloonFnAt >= 0 ? client.slice(balloonFnAt, balloonFnAt + 600) : ''
+if (!balloonFn.includes('MTM_OPAQUE') || balloonFn.includes('MTM_ALPHA_BLEND') || !balloonFn.includes('BALLOON_ALPHA')) {
+  fail('Balloon Battle balloons should use an opaque transparency mode, with no alpha blend')
 }
 const stringFn = client.slice(client.indexOf('function stringMat'), client.indexOf('function stringMat') + 320)
 if (!stringFn.includes('MTM_OPAQUE') || stringFn.includes('MTM_ALPHA_BLEND') || !stringFn.includes('0.85, 0.85, 0.82, 1')) {
