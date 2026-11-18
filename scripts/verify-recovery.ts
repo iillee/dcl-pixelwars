@@ -53,8 +53,8 @@ if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.pl
 if (!visualSrc.includes("function visualKind(): VisualKind") || !visualSrc.includes("return 'ghost'") || visualSrc.includes('botRecoveryEnabled(roundFormat) ?')) {
   fail('the bot visual should always be the ghost, not gated on the current format')
 }
-if (!visualSrc.includes('function syncGhostTag') || !visualSrc.includes('BillboardMode.BM_Y') || !visualSrc.includes("text: red ? 'RED' : 'BLUE'") || visualSrc.includes('paintPlate(root, team, id)')) {
-  fail('team-mode ghosts should use a billboarded RED/BLUE TextShape plate, not AvatarNametag')
+if (visualSrc.includes('function syncGhostTag') || visualSrc.includes('BillboardMode.BM_Y') || visualSrc.includes("text: red ? 'RED' : 'BLUE'")) {
+  fail('the billboarded RED/BLUE team plate should be removed from bot visuals')
 }
 if (!visualSrc.includes('hideGhostPlates') || !visualSrc.includes("roundFormat === 'balloon'") || !visualSrc.includes('NEUTRAL_LIGHT')) {
   fail('Balloon Battle ghosts should hide the team plate and use a neutral light')
