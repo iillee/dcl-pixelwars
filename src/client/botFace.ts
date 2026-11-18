@@ -11,9 +11,11 @@
  * face material with GltfNodeModifiers (the same path the water mesh uses).
  * Face state is independent of team color and of the body's material.
  *
- * Phase 1 wires idle (default) and burst (on burst:fired for `bot:N`, with
- * a short minimum display so it doesn't flicker). The other four PNGs are
- * already in the folder for a later pass.
+ * Wired expressions, highest priority first: hit (lunge / burst / knock /
+ * dash impact, latched ~0.6 s), glide (glider open), fall (fall clip or
+ * uncontrolled fall pose), burst (burst:fired, latched ~0.55 s), dash
+ * (lunge:started, latched ~0.55 s), idle otherwise. Short actions are
+ * latched so a 2 Hz botPositions stream cannot skip them.
  */
 import {
   Animator, engine, Entity, GltfContainer, GltfNodeModifiers, Material,
@@ -22,8 +24,16 @@ import {
 import { Color3, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { type GhostClip } from '../shared/botAnim'
+import {
+  FACE_MIN_S,
+  botIdFromActor,
+  latchFace,
+  resolveBotFace,
+  type BotFaceExpr,
+  type FaceLatches,
+} from '../shared/botFaceState'
 
-export type BotFaceExpr = 'idle' | 'dash' | 'burst' | 'hit' | 'fall' | 'glide'
+export type { BotFaceExpr }
 
 const FACE_GLB = 'assets/models/bots/bot-face.glb'
 const FACE_SRC: Record<BotFaceExpr, string> = {
@@ -39,15 +49,13 @@ const FACE_CLIP_LOOP: Record<GhostClip, boolean> = {
   idle: true, jump: false, double: false, glide: true, fall: true, slide: true,
 }
 
-/** Seconds the burst face stays up after burst:fired, even if the action is instant. */
-const BURST_FACE_MIN_S = 0.55
-
 type FaceRec = {
   ent: Entity
   expr: BotFaceExpr
-  /** Date.now() until which a burst face must stay visible. 0 if none. */
-  untilMs: number
+  latches: FaceLatches
   clip: GhostClip | null
+  pose: number
+  st: number
 }
 
 const faces = new Map<number, FaceRec>()
@@ -85,11 +93,26 @@ function applyExpr(ent: Entity, expr: BotFaceExpr): void {
   })
 }
 
-function botIdFromAttacker(attacker: string): number | null {
-  const s = attacker.toLowerCase()
-  if (!s.startsWith('bot:')) return null
-  const n = parseInt(s.slice(4), 10)
-  return Number.isFinite(n) ? n : null
+function resolve(rec: FaceRec, nowMs = Date.now()): void {
+  const next = resolveBotFace({
+    nowMs,
+    pose: rec.pose,
+    st: rec.st,
+    clip: rec.clip,
+    latches: rec.latches,
+  })
+  rec.latches = next.latches
+  if (rec.expr !== next.expr) {
+    applyExpr(rec.ent, next.expr)
+    rec.expr = next.expr
+  }
+}
+
+function latch(id: number, expr: BotFaceExpr, minS = FACE_MIN_S[expr]): void {
+  const rec = faces.get(id)
+  if (!rec) return
+  rec.latches = latchFace(rec.latches, expr, Date.now(), minS)
+  resolve(rec)
 }
 
 export function attachBotFace(parent: Entity, id: number): void {
@@ -116,7 +139,7 @@ export function attachBotFace(parent: Entity, id: number): void {
     })),
   })
   applyExpr(ent, 'idle')
-  faces.set(id, { ent, expr: 'idle', untilMs: 0, clip: 'idle' })
+  faces.set(id, { ent, expr: 'idle', latches: {}, clip: 'idle', pose: 0, st: 0 })
 }
 
 export function destroyBotFace(id: number): void {
@@ -136,33 +159,45 @@ export function playBotFaceClip(id: number, clip: GhostClip): void {
   rec.clip = clip
 }
 
-export function setBotFace(id: number, expr: BotFaceExpr, minS = 0): void {
-  const rec = faces.get(id)
-  if (!rec) return
-  if (rec.expr !== expr) {
-    applyExpr(rec.ent, expr)
-    rec.expr = expr
-  }
-  rec.untilMs = minS > 0 ? Date.now() + minS * 1000 : 0
+export function setBotFace(id: number, expr: BotFaceExpr, minS = FACE_MIN_S[expr]): void {
+  latch(id, expr, minS)
 }
 
-/** Hold burst for its minimum time, then return to idle. */
-export function tickBotFace(id: number): void {
+/** Latch the hit face when a lunge, burst, spike, or dash knocks this bot. */
+export function hitBotFace(id: number): void {
+  latch(id, 'hit')
+}
+
+/** Hold latched faces and apply glide / fall from the latest pose and wire state. */
+export function tickBotFace(id: number, pose = 0, st = 0): void {
   const rec = faces.get(id)
   if (!rec) return
-  if (rec.expr === 'burst' && rec.untilMs > 0 && Date.now() >= rec.untilMs) {
-    applyExpr(rec.ent, 'idle')
-    rec.expr = 'idle'
-    rec.untilMs = 0
-  }
+  rec.pose = pose
+  rec.st = st
+  resolve(rec)
 }
 
 export function initBotFace(): void {
   if (hooked) return
   hooked = true
   events.on('burst:fired', ({ attacker }) => {
-    const id = botIdFromAttacker(attacker)
+    const id = botIdFromActor(attacker)
     if (id === null) return
-    setBotFace(id, 'burst', BURST_FACE_MIN_S)
+    latch(id, 'burst')
   })
+  events.on('lunge:started', ({ attacker }) => {
+    const id = botIdFromActor(attacker)
+    if (id === null) return
+    latch(id, 'dash')
+  })
+  const onHitTarget = ({ target }: { target: string }) => {
+    const id = botIdFromActor(target)
+    if (id === null) return
+    latch(id, 'hit')
+  }
+  events.on('lunge:impact', onHitTarget)
+  events.on('burst:impact', onHitTarget)
+  // dash:impact currently only targets human victims (dashHit is roster-only),
+  // but hook it so a bot target would still get a hit face if that changes.
+  events.on('dash:impact', onHitTarget)
 }

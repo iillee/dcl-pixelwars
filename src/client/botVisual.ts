@@ -49,7 +49,7 @@ import {
   RoundFormat,
 } from '../shared/pvp'
 import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botAnim'
-import { attachBotFace, destroyBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
+import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { teamPlatesHidden } from './nametags'
@@ -204,6 +204,7 @@ interface BotVisual {
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
+  st: number            // last packet wire state (0 walk, 1 knock, 2 rescue, 3 wind-up, 4 glide)
   pktAt: number         // Date.now() of the last position packet
   lastSimT: number      // server sim time of that packet
   localKnock: LocalKnock | null
@@ -392,6 +393,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     fastUntil: 0,
     snaps: [],
     riding: false,
+    st: 0,
     pktAt: 0,
     lastSimT: 0,
     localKnock: null,
@@ -515,6 +517,7 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
   rec.snaps = []
   rec.fastUntil = Date.now() + LOCAL_KNOCK_S * 1000
   rec.localKnockUntil = rec.fastUntil
+  hitBotFace(id)
 }
 
 export function initBotVisual(): void {
@@ -569,12 +572,14 @@ export function initBotVisual(): void {
         rec.pktAt = now
         rec.lastSimT = simT ?? 0
         rec.pose = b.an ?? 0
+        rec.st = b.st
         rec.riding = b.st === 2
         bots.set(b.id, rec)
         continue
       }
 
       rec.pose = b.an ?? 0
+      rec.st = b.st
       if (rec.team !== b.team) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
@@ -721,7 +726,7 @@ export function initBotVisual(): void {
         )
         tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
         syncGhostAnim(rec)
-        tickBotFace(rec.id)
+        tickBotFace(rec.id, rec.pose, rec.st)
       } else {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)
