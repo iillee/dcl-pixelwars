@@ -130,7 +130,8 @@ export const VOTE_TINT_INSET_M = 0.15
 export const SIGN_CLEAR_M = 10
 /** One short team word (RED / BLUE / GREEN / YELLOW) with side margins inside the pill. */
 export const SIGN_W_M = 32
-export const SIGN_H_M = 8.6
+/** Original pills were 58 × 8.6. Keep that aspect after the width shrink. */
+export const SIGN_H_M = 8.6 * (SIGN_W_M / 58)
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
 /** World scale at that default framing. The wider pill stays about a quarter of the overview. */
@@ -151,8 +152,11 @@ export const SIGN_PLATE_DEPTH_M = 0.7
 export const SIGN_LIP_Z = 0.18
 export const SIGN_LIP_DEPTH_M = 0.55
 /** Extra width and height of the dark rim vs the colored plate. 1.5× the first rim (0.7 / 0.55). */
-export const SIGN_LIP_PAD_W = 1.05
-export const SIGN_LIP_PAD_H = 0.825
+export const SIGN_LIP_PAD_W = 1.05 * (SIGN_W_M / 58)
+export const SIGN_LIP_PAD_H = 0.825 * (SIGN_W_M / 58)
+export const SIGN_BADGE_W_M = 6.4 * (SIGN_W_M / 58)
+export const SIGN_BADGE_H_M = 3.4 * (SIGN_W_M / 58)
+export const SIGN_BADGE_GAP_M = 0.5 * (SIGN_W_M / 58)
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb` / `bases`. */
 export function modeTitle(id: string): string {
@@ -308,8 +312,7 @@ export function voteTintPose(
 /** Local Y of the vote-count chip, tucked just under the pill's bottom lip. */
 export function signBadgeY(): number {
   const lipBottom = -(SIGN_H_M + SIGN_LIP_PAD_H) / 2
-  const chipH = 3.4
-  return lipBottom - 0.5 - chipH / 2
+  return lipBottom - SIGN_BADGE_GAP_M - SIGN_BADGE_H_M / 2
 }
 
 /** Unused mode-vote helper. The live lobby no longer elects a mode. */

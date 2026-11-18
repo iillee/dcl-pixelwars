@@ -7,7 +7,7 @@ import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPl
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
   billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
@@ -487,20 +487,20 @@ if (tickTintsFn.includes('layTileFrame') || tickTintsFn.includes('TILE_FRAME') |
   console.error('✗ the tile frame should stay visible, not be scaled away with the vote tint')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 45') || !lobbySrc.includes('signFaceZ()') || lobbySrc.includes('outlineColor:') || !lobbySrc.includes('outlineWidth: 0') || lobbySrc.includes('outlineWidth: 0.2') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
-  console.error('✗ titles should be one 4.5 m line of unoutlined text, and scale with the overview zoom')
+if (!lobbySrc.includes('TITLE_FONT = 45 * SIGN_TYPE_SCALE') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('TITLE_INK') || !lobbySrc.includes('Color4.create(1, 1, 1, 1)') || !lobbySrc.includes('outlineWidth: TITLE_OUTLINE_W') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
+  console.error('✗ titles should be one scaled white line with a hairline outline, and scale with the overview zoom')
   process.exit(1)
 }
-if (!lobbySrc.includes('pillTextHex') || !lobbySrc.includes('Color4.fromHexString(pillTextHex(m.id))') || lobbySrc.split('textColor: ink').length - 1 < 2) {
+if (!lobbySrc.includes('TITLE_INK') || lobbySrc.split('textColor: ink').length - 1 < 2) {
   console.error('✗ title and subtitle should use the per-mode pill text color, white on every sign including Paint Limit')
   process.exit(1)
 }
-if (Math.abs(SIGN_LIP_PAD_W - 1.05) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825) > 1e-6 || !lobbySrc.includes('SIGN_W_M + SIGN_LIP_PAD_W') || !lobbySrc.includes('SIGN_H_M + SIGN_LIP_PAD_H')) {
-  console.error(`✗ the dark sign rim should be a little thicker (1.05 × 0.825), got ${SIGN_LIP_PAD_W} × ${SIGN_LIP_PAD_H}`)
+if (Math.abs(SIGN_LIP_PAD_W - 1.05 * SIGN_W_M / 58) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825 * SIGN_W_M / 58) > 1e-6 || !lobbySrc.includes('SIGN_W_M + SIGN_LIP_PAD_W') || !lobbySrc.includes('SIGN_H_M + SIGN_LIP_PAD_H')) {
+  console.error(`✗ the dark sign rim should keep the original proportions, got ${SIGN_LIP_PAD_W} × ${SIGN_LIP_PAD_H}`)
   process.exit(1)
 }
-if (SIGN_W_M < 26 || SIGN_W_M > 40 || SIGN_H_M < 6 || SIGN_H_M > 12) {
-  console.error(`✗ plate should be a short single-line team pill, got ${SIGN_W_M}×${SIGN_H_M}`)
+if (SIGN_W_M < 26 || SIGN_W_M > 40 || Math.abs(SIGN_H_M - 8.6 * SIGN_W_M / 58) > 1e-6) {
+  console.error(`✗ plate should keep the original 58×8.6 aspect at the new width, got ${SIGN_W_M}×${SIGN_H_M}`)
   process.exit(1)
 }
 const atRef = signZoomScale(SIGN_ZOOM_REF)
@@ -539,7 +539,7 @@ if (modeTitle('pvb') !== 'BOT INVASION' || modeTitle('pvp') !== 'PIXELWARS' || m
   process.exit(1)
 }
 const lipBottom = -(SIGN_H_M + SIGN_LIP_PAD_H) / 2
-const chipTop = signBadgeY() + 3.4 / 2
+const chipTop = signBadgeY() + SIGN_BADGE_H_M / 2
 if (!(chipTop < lipBottom - 0.2) || !(chipTop > lipBottom - 1.2)) {
   console.error('✗ the vote count chip should sit just under the pill')
   process.exit(1)
