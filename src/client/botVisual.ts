@@ -96,7 +96,8 @@ export const BOT_MODEL: 'ghost' | 'custom' = 'custom'
 type BotModelProfile = {
   src: string
   scale: number
-  /** Local-space Y of the glider on the scaled root. */
+  /** Local-space Y of the glider on the scaled root. Negative lowers it toward the crown.
+   *  With GHOST_SCALE 1.2, -0.25 is 0.30 m in world space. */
   gliderLocalY: number
   /** Local-space Y of the team point light on the scaled root. */
   lightLocalY: number
@@ -110,7 +111,7 @@ const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
   ghost: {
     src: 'assets/models/bots/ghost-recover.glb',
     scale: 1.2,
-    gliderLocalY: 0,
+    gliderLocalY: -0.25,
     lightLocalY: 0,
     knotLocalY: 1.68 / 1.2,
     knotLocalZ: 0.2 / 1.2,
@@ -120,7 +121,7 @@ const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
     // Flattened underside. Flip to 'assets/models/bots/bot-custom.glb' to compare the original bumps.
     src: 'assets/models/bots/bot-custom-flat.glb',
     scale: 1.2,
-    gliderLocalY: 0,
+    gliderLocalY: -0.25,
     lightLocalY: 1.35,
     knotLocalY: 1.48,
     knotLocalZ: 0.42,
