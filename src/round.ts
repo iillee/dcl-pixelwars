@@ -21,9 +21,9 @@ export {
 } from './shared/roundTiming'
 
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
-import { FORMAT_ALTERNATE, type RoundFormat } from './shared/pvp'
+import { type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
-import { gamePhase, inLobby } from './client/phase'
+import { gamePhase } from './client/phase'
 import { modeSubtitle, modeTitle } from './shared/lobby'
 
 export function getCountdownSeconds(): number {
@@ -219,9 +219,7 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
-  if (inLobby() || currentFormat === 'prototype' || currentFormat === 'balloon' || currentFormat === 'bases') return 'Vote with your feet'
-  if (!FORMAT_ALTERNATE) return `Next round: ${modeTitle('pvp')}`
-  return `Next round: ${modeTitle(currentFormat === 'pvb' ? 'pvp' : 'pvb')}`
+  return 'Next round: Pick your team'
 }
 
 export function showBalloonBanner(name: string): void {

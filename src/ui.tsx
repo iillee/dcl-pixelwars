@@ -245,13 +245,19 @@ function TeamScorePill(props: {
           const label = `${Math.round(props.pcts[i])}%`
           const showLbl = !!props.showLabels && w >= textWSafe(label, f) + 8
           const showStar = !!props.showStar && isLead && !showLbl && w >= STAR_SIZE + STAR_PAD * 2
+          const fill = barColor(team)
+          // Caps are separate circles on the outer ends only, so a mid-join never
+          // inherits a rounded corner (a single borderRadius on the last segment
+          // would curve into the neighbour).
           return (
             <UiEntity uiTransform={{
-              width: w, height: '100%', flexShrink: 0,
-              borderRadius: { topLeft: first ? innerR : 0, bottomLeft: first ? innerR : 0, topRight: last ? innerR : 0, bottomRight: last ? innerR : 0 },
-              justifyContent: 'center', alignItems: 'center',
+              width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center',
               ...(isLead ? { borderWidth: 2, borderColor: Color4.create(1, 0.92, 0.4, 1) } : {}),
-            }} uiBackground={{ color: barColor(team) }}>
+            }}>
+              {first && last && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, right: 0, top: 0, bottom: 0 }, borderRadius: innerR }} uiBackground={{ color: fill }} />}
+              {!(first && last) && first && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, top: 0, bottom: 0 }, width: innerR * 2, borderRadius: innerR }} uiBackground={{ color: fill }} />}
+              {!(first && last) && last && <UiEntity uiTransform={{ positionType: 'absolute', position: { right: 0, top: 0, bottom: 0 }, width: innerR * 2, borderRadius: innerR }} uiBackground={{ color: fill }} />}
+              {!(first && last) && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: first ? innerR : 0, right: last ? innerR : 0, top: 0, bottom: 0 } }} uiBackground={{ color: fill }} />}
               {showLbl && <Label value={label} fontSize={f} color={onTeamInk(team)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />}
               {showStar && <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />}
             </UiEntity>
