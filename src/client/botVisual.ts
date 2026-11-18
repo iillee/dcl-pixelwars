@@ -6,8 +6,10 @@
  * the glide clip) and 'ghost' (the original Aug 2026 mesh in
  * ghost-recover.glb, with official DCL locomotion clips). The glider
  * pops out only while gliding. Classic, Base Charge, and Paint Limit get
- * a team light and, for the custom mesh, a red or blue body GLB; Balloon
- * Battle is FFA so the body stays blue and the light is neutral.
+ * a team light and, for the custom mesh, a runtime body tint from the
+ * team palette (GltfNodeModifiers on BotBody, Arm_L, and Arm_R). Balloon
+ * Battle is FFA so the body uses the balloon swatch (blue) and the light
+ * is neutral.
  * The visual is always this mesh (not gated on the current format), so a
  * late mode sync cannot leave an AvatarShape standing. The AvatarShape
  * path remains as a gated fallback only.
@@ -52,6 +54,7 @@ import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botA
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
+import { applyBotBodyForTeam, clearBotBodyColor, onBotBodyThemeChange } from './botBody'
 import { teamPlatesHidden } from './nametags'
 
 const BODY = 'urn:decentraland:off-chain:base-avatars:BaseMale'
@@ -115,8 +118,6 @@ const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
 }
 
 const profile = BOT_PROFILES[BOT_MODEL]
-const CUSTOM_MODEL_SRC_BLUE = 'assets/models/bots/bot-custom-flat.glb'
-const CUSTOM_MODEL_SRC_RED = 'assets/models/bots/bot-custom-flat-red.glb'
 const GLIDER_SRC = 'assets/models/glider.glb'
 /** Seconds. Official ghost clips match scripts/build-ghost-anims.py; custom clips are 24 fps. */
 const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
@@ -259,13 +260,15 @@ function lightColor(team: number): Color3 {
   return team === Team.Red ? RED_LIGHT : BLUE_LIGHT
 }
 
-/** Custom bodies pick a red or blue GLB by team. Balloon Battle (and any
- *  other mode that already hides team plates) keeps the blue body, matching
- *  the existing neutral-light rule. The official ghost mesh is unchanged. */
-function ghostModelSrc(team: number): string {
-  if (BOT_MODEL !== 'custom') return profile.src
-  if (hideGhostPlates()) return CUSTOM_MODEL_SRC_BLUE
-  return team === Team.Red ? CUSTOM_MODEL_SRC_RED : CUSTOM_MODEL_SRC_BLUE
+/** One custom body GLB for every team. Color is applied at runtime. The
+ *  official ghost mesh is unchanged. */
+function ghostModelSrc(): string {
+  return profile.src
+}
+
+function applyCustomBotBody(entity: Entity, team: number): void {
+  if (BOT_MODEL !== 'custom') return
+  applyBotBodyForTeam(entity, team, hideGhostPlates())
 }
 
 function paintLight(entity: Entity, team: number): void {
@@ -330,6 +333,7 @@ function destroyBot(id: number): void {
   AvatarShape.deleteFrom(rec.root)
   Tween.deleteFrom(rec.root)
   Animator.deleteFrom(rec.root)
+  clearBotBodyColor(rec.root)
   GltfContainer.deleteFrom(rec.root)
   LightSource.deleteFrom(rec.root)
   engine.removeEntity(rec.root)
@@ -355,7 +359,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
   })
   let light: Entity | null = null
   if (kind === 'ghost') {
-    GltfContainer.create(root, { src: ghostModelSrc(team), visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+    GltfContainer.create(root, { src: ghostModelSrc(), visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
     Animator.create(root, {
       states: (['idle', 'jump', 'double', 'glide', 'fall', 'slide'] as GhostClip[]).map(clip => ({
         clip,
@@ -365,6 +369,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
         weight: 1,
       })),
     })
+    applyCustomBotBody(root, team)
     attachBotFace(root, id)
     light = engine.addEntity()
     Transform.create(light, { parent: root, position: Vector3.create(0, profile.lightLocalY, 0) })
@@ -522,6 +527,11 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
 
 export function initBotVisual(): void {
   initBotFace()
+  onBotBodyThemeChange(() => {
+    for (const rec of bots.values()) {
+      if (rec.kind === 'ghost') applyCustomBotBody(rec.root, rec.team)
+    }
+  })
   registerBotLookup({
     team: id => { const r = bots.get(parseInt(id.slice(4), 10)); return r ? (r.team as Team) : Team.None },
     feet: id => {
@@ -583,11 +593,7 @@ export function initBotVisual(): void {
       if (rec.team !== b.team) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
-          const src = ghostModelSrc(b.team)
-          if (src !== ghostModelSrc(rec.team)) {
-            GltfContainer.createOrReplace(rec.root, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
-            if (rec.clip) Animator.playSingleAnimation(rec.root, rec.clip, true)
-          }
+          applyCustomBotBody(rec.root, b.team)
         } else {
           paintAvatar(rec.root, b.team, rec.id)
         }
