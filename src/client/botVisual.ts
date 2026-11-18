@@ -106,7 +106,8 @@ const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
     clipDurS: { idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667 },
   },
   custom: {
-    src: 'assets/models/bots/bot-custom.glb',
+    // Flattened underside. Flip to 'assets/models/bots/bot-custom.glb' to compare the original bumps.
+    src: 'assets/models/bots/bot-custom-flat.glb',
     scale: 1.2,
     tagAboveM: 2.35,
     gliderLocalY: 0,
