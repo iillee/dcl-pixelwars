@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 /**
  * verify-lunge.ts — offline checks for the Lunge logic (shared/lunge.ts).
  * Run: npx tsx scripts/verify-lunge.ts. Covers hit geometry, knockback
@@ -7,7 +8,7 @@
 import { boxHit as sweptHit, hitboxAt, knockDir, LungeLedger, ImpactGate } from '../src/shared/lunge'
 import { rampSurfaceY, buildWalkableGraph } from '../src/shared/mazeGraph'
 import { AnvilWorld } from '../src/shared/anvilSim'
-import { Placed, CELL, MAZE_ORIGIN, STEP, generateWithRetry, getPlacedTilesInOrder, teleportPairs } from '../src/maze/generator'
+import { Placed, CELL, MAZE_ORIGIN, STEP, generateWithRetry, getPlacedTilesInOrder, placeLobbyLayout, teleportPairs } from '../src/maze/generator'
 import { LUNGE_DUMMY_COUNT, LUNGE_DUMMY_RESPAWN_S, ANVIL_PREDICT_CLOSE_M } from '../src/shared/pvp'
 import { LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W, LUNGE_HITBOX_H, LUNGE_COOLDOWN_S, SERVER_MIN_LUNGE_GAP_S, SERVER_LUNGE_HIT_WINDOW_S, LUNGE_IMPACT_MAX_AGE_MS } from '../src/shared/pvp'
 
@@ -155,6 +156,35 @@ for (let r = 0; r < 4; r++) {
   check('fallen anvil hides', !w.anvils[1].alive && w.anvils[1].respawnIn > 0)
   w.tick(LUNGE_DUMMY_RESPAWN_S + 0.1)
   check('…and auto-respawns after LUNGE_DUMMY_RESPAWN_S', w.anvils[1].alive)
+  {
+    // Same seed is used for the boot lobby and often the first match. Predicting
+    // on the leftover lobby graph lets an arena anvil fall through the floor,
+    // then the 1.6 s timeout pops it back to the server pose.
+    const lobby = placeLobbyLayout()
+    const arena = tiles
+    const srv = new AnvilWorld(1)
+    srv.setMaze(buildWalkableGraph(arena), arena, tp)
+    const start = { ...srv.anvils[0].pos }
+    const cell = sq(srv.anvils[0])
+    const onLobbyFloor = lobby.some(p => `${p.x},${p.z}` === cell)
+    const stale = new AnvilWorld(1)
+    stale.setMaze(buildWalkableGraph(lobby), lobby, [], false)
+    Object.assign(stale.anvils[0], { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1 })
+    const fresh = new AnvilWorld(1)
+    fresh.setMaze(buildWalkableGraph(arena), arena, [], false)
+    Object.assign(fresh.anvils[0], { pos: { ...start }, vel: { x: 0, y: 0, z: 0 }, alive: true, tracking: false, forceLeft: 0, respawnIn: -1 })
+    srv.hit(0, 1, 0); stale.hit(0, 1, 0); fresh.hit(0, 1, 0)
+    for (let i = 0; i < 1.2 * 60; i++) { srv.tick(1 / 60); stale.tick(1 / 60); fresh.tick(1 / 60) }
+    const srvDrop = start.y - srv.anvils[0].pos.y
+    const staleDrop = start.y - stale.anvils[0].pos.y
+    const freshDrop = start.y - fresh.anvils[0].pos.y
+    const dummySrc = readFileSync(new URL('../src/client/lungeDummy.ts', import.meta.url), 'utf8')
+    check('lungeDummy rebinds prediction when the lobby floor becomes the arena, not only when the seed changes', dummySrc.includes('function predictMazeSig') && dummySrc.includes('sig !== predictSig') && dummySrc.includes('isLobbyLayout()'))
+    if (!onLobbyFloor) {
+      check(`a stale lobby graph must not be used to predict an arena slide (stale drop ${staleDrop.toFixed(2)} m, server ${srvDrop.toFixed(2)} m, on ${cell})`, staleDrop > 8 && srvDrop < 4 && srv.anvils[0].alive)
+    }
+    check(`rebinding to the arena graph keeps the anvil with the server (fresh drop ${freshDrop.toFixed(2)} m, server ${srvDrop.toFixed(2)} m)`, Math.abs(freshDrop - srvDrop) < 1 && fresh.anvils[0].alive === srv.anvils[0].alive)
+  }
 }
 
 if (fails) { console.log(`✗ ${fails} lunge check(s) failed`); process.exit(1) }

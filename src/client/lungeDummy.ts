@@ -24,8 +24,8 @@ import {
 } from '../shared/pvp'
 import { AnvilWorld } from '../shared/anvilSim'
 import { buildWalkableGraph } from '../shared/mazeGraph'
-import { getPlacedTilesInOrder } from '../maze/generator'
-import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
+import { getPlacedTilesInOrder, type Placed } from '../maze/generator'
+import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
 import { room } from '../shared/messages'
 import { isKnockbackImmune, safePhysics } from './knockback'
 import { hitsOpen } from './phase'
@@ -69,7 +69,17 @@ const dummies: Dummy[] = []
 // Local copy of the shared sim, used ONLY for predicted anvils (positions come from the server).
 const predictWorld = new AnvilWorld()
 let predictSeed = -1
+let predictSig = ''
 let predictReady = false
+
+/** Bind the local prediction sim to the floor the server is on, not just the seed.
+ *  Boot lays the lobby at seed 1, and the first match often reuses that same seed,
+ *  so a seed-only bind would keep the 3-tile lobby graph and let a knocked anvil
+ *  fall through the arena, then pop back when prediction times out. */
+function predictMazeSig(seed: number, tiles: Placed[]): string {
+  const layout = isLobbyLayout() ? 'lobby' : 'arena'
+  return `${layout}:${seed}:${tiles.map(t => `${t.type}:${t.r}:${t.x}:${t.z}:${t.y}`).join('|')}`
+}
 
 export function isDummyEnabled(): boolean { return LUNGE_TEST_DUMMY }
 
@@ -298,9 +308,12 @@ export function initLungeDummy(): void {
     if (launchCooldown > 0) launchCooldown -= dt
     // Local sim copy for prediction: same walk graph / ramps as the server; never respawns here.
     const seed = getCurrentSeed()
-    if (ANVIL_PREDICT_ENABLED && !isRebuilding() && seed !== predictSeed && getPlacedTilesInOrder().length > 0) {
-      predictWorld.setMaze(buildWalkableGraph(getPlacedTilesInOrder()), getPlacedTilesInOrder(), [], false)
+    const tiles = getPlacedTilesInOrder()
+    const sig = predictMazeSig(seed, tiles)
+    if (ANVIL_PREDICT_ENABLED && !isRebuilding() && tiles.length > 0 && sig !== predictSig) {
+      predictWorld.setMaze(buildWalkableGraph(tiles), tiles, [], false)
       predictSeed = seed
+      predictSig = sig
       predictReady = true
     }
     if (predictReady) {
