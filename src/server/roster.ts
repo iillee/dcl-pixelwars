@@ -13,7 +13,9 @@
  * Lives in RAM; a server restart resets it.
  */
 
-const teamOf = new Map<string, number>() // userId → 1 (Red) | 2 (Blue)
+import { emptyTeamCounts, smallestTeam, teamName, type TeamCounts } from '../shared/team'
+
+const teamOf = new Map<string, number>() // userId → Team (1–4)
 
 /** PvB only: new (and wrong-team) joiners take this colour. null = PvP balance. */
 let forcedTeam: number | null = null
@@ -42,19 +44,21 @@ function isActive(uid: string, now = Date.now()): boolean {
 
 /** Active human count per team, optionally excluding one userId.
  *  Humans only — bots are not in this map. They fill the gap afterwards. */
-export function activeTeamCounts(exclude?: string): { red: number; blue: number } {
+export function activeTeamCounts(exclude?: string): TeamCounts {
   const now = Date.now()
-  let red = 0, blue = 0
+  const counts = emptyTeamCounts()
   for (const [uid, t] of teamOf) {
     if (uid === exclude || !isActive(uid, now)) continue
-    if (t === 1) red++
-    else if (t === 2) blue++
+    if (t === 1) counts.red++
+    else if (t === 2) counts.blue++
+    else if (t === 3) counts.green++
+    else if (t === 4) counts.yellow++
   }
-  return { red, blue }
+  return counts
 }
 
-/** Assign or look up the team for a userId. Returns 1 (Red) or 2 (Blue).
- *  PvP: new joiners take the side with fewer active humans (this map, not bots).
+/** Assign or look up the team for a userId (1–4 in Classic).
+ *  PvP: new joiners take the current smallest team (ties prefer lower team id).
  *  PvB: setForcedTeam sends every joiner to the human colour. */
 export function assignTeam(userId: string): number {
   const existing = teamOf.get(userId)
@@ -62,20 +66,20 @@ export function assignTeam(userId: string): number {
     // PvB: a rejoiner who still holds the bot colour moves onto the human team.
     if (forcedTeam !== null && existing !== forcedTeam) {
       teamOf.set(userId, forcedTeam)
-      console.log(`[Roster] ${userId} → ${forcedTeam === 1 ? 'RED' : 'BLUE'} (PvB human team, was ${existing === 1 ? 'RED' : 'BLUE'})`)
+      console.log(`[Roster] ${userId} → ${teamName(forcedTeam)} (PvB human team, was ${teamName(existing)})`)
       return forcedTeam
     }
     return existing
   }
   if (forcedTeam !== null) {
     teamOf.set(userId, forcedTeam)
-    console.log(`[Roster] new ${userId} → ${forcedTeam === 1 ? 'RED' : 'BLUE'} (PvB human team)`)
+    console.log(`[Roster] new ${userId} → ${teamName(forcedTeam)} (PvB human team)`)
     return forcedTeam
   }
-  const { red, blue } = activeTeamCounts(userId)
-  const team = red < blue ? 1 : blue < red ? 2 : (Math.random() < 0.5 ? 1 : 2)
+  const counts = activeTeamCounts(userId)
+  const team = smallestTeam(counts)
   teamOf.set(userId, team)
-  console.log(`[Roster] new ${userId} → ${team === 1 ? 'RED' : 'BLUE'} (active red=${red} blue=${blue})`)
+  console.log(`[Roster] new ${userId} → ${teamName(team)} (active red=${counts.red} blue=${counts.blue} green=${counts.green} yellow=${counts.yellow})`)
   return team
 }
 

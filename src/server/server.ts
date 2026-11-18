@@ -49,7 +49,7 @@ import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwav
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
-import { LOBBY_VOTE_MS, assignLobbyTeams, modeById, type ModeId } from '../shared/lobby'
+import { LOBBY_VOTE_MS, assignLobbyTeams, modeById, teamIdOf, type ModeId } from '../shared/lobby'
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
 import { clearLobbyVotes, countedTeam, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, snapshotLobbyChoices, stepLobby, tallyTeams } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
@@ -59,6 +59,7 @@ import { beginLagFrame, endLagFrame, hookRoomSend, noteLagSection } from './lagS
 import { clearDepots, friendlyDepotCell, noteDepotFeet, seedDepots, tickDepotRefill } from './depots'
 import { clearTerritoryRegen, nearestCuredCell, noteRegenStance, seedStartTerritory, tickTerritoryRegen } from './territoryRegen'
 import { applyTank, feetDue, orderNearest, PAINT_CAPACITY, refillAtDepot, refillOnTerritory, WalletGate } from '../shared/territory'
+import { pvpBotFill, teamCountsTotal, teamName, smallestTeam, PLAYING_TEAMS } from '../shared/team'
 import { basesOn, baseThresholdVerdict, baseTimeoutVerdict, VICTORY_PROGRESS, type BaseSnapshot, type BaseVerdict } from '../shared/bases'
 import { baseProgress, baseSnapshot, clearBaseNetwork, markNetworkDirty, seedBaseTerritory, tickBaseGrowth } from './baseNetwork'
 
@@ -317,13 +318,13 @@ export async function setupServer(): Promise<void> {
       winner: '',
       votes: (() => {
         const teams = tallyTeams(presentIds(), now)
-        return [{ id: 'red', n: teams.red }, { id: 'blue', n: teams.blue }]
+        return [{ id: 'red', n: teams.red }, { id: 'blue', n: teams.blue }, { id: 'green', n: teams.green }, { id: 'yellow', n: teams.yellow }]
       })(),
       present: presentIds().length,
       feet: lobbySampleIds().length,
       srvZone: verdict.zone,
       why: verdict.why,
-      mine: to ? (countedTeam(to) === 1 ? 'red' : countedTeam(to) === 2 ? 'blue' : '') : '',
+      mine: to ? (teamIdOf(countedTeam(to)) || '') : '',
       seed: currentRoundIndex(),
       layout: worldLayout(),
       seq: worldSeq,
@@ -353,7 +354,7 @@ export async function setupServer(): Promise<void> {
   type IntermissionPhase = 'idle' | 'lobby'
   let intermission: IntermissionPhase = 'idle'
   // Scores held from round end until the arena regen (after the vote).
-  let pendingFinal = { red: 0, blue: 0, total: 0 }
+  let pendingFinal = { red: 0, blue: 0, green: 0, yellow: 0, total: 0 }
   let pendingNextIdx = 0
   let lobbyOpen = false
   /** Bumps on every lobby/arena floor change. Clients ignore a lower seq. */
@@ -378,7 +379,7 @@ export async function setupServer(): Promise<void> {
   function sendLobbyLayout(to?: string): void {
     const msg = {
       seed: currentRoundIndex(),
-      finalRed: pendingFinal.red, finalBlue: pendingFinal.blue, finalTotal: pendingFinal.total,
+      finalRed: pendingFinal.red, finalBlue: pendingFinal.blue, finalGreen: pendingFinal.green ?? 0, finalYellow: pendingFinal.yellow ?? 0, finalTotal: pendingFinal.total,
       format: roundFormat,
       layout: 'lobby',
       seq: worldSeq,
@@ -432,12 +433,12 @@ export async function setupServer(): Promise<void> {
     hadVotes = false
     wantFull = false
     emptySince = 0
-    if (present.length === 0 && teams.red + teams.blue === 0) {
+    if (present.length === 0 && teams.red + teams.blue + teams.green + teams.yellow === 0) {
       console.log('[Lobby] no players → idle')
       sendRoundClock()
       return
     }
-    console.log(`[Lobby] starting Pixelwars red=${teams.red} blue=${teams.blue}`)
+    console.log(`[Lobby] starting Pixelwars red=${teams.red} blue=${teams.blue} green=${teams.green} yellow=${teams.yellow}`)
     startNextRound('pvp')
   }
 
@@ -574,15 +575,15 @@ export async function setupServer(): Promise<void> {
         room.send('teamAssigned', { team }, { to: [userId] })
       }
       const counts = activeTeamCounts()
-      plannedBots = counts.red + counts.blue === 0 || counts.red === counts.blue ? 0 : Math.abs(counts.red - counts.blue)
-      console.log(`[Server] lobby teams: ${assigned.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ') || '(none)'} (bots=${plannedBots})`)
+      plannedBots = teamCountsTotal(pvpBotFill(counts))
+      console.log(`[Server] lobby teams: ${assigned.map(s => `${s.userId.slice(0, 8)}=${teamName(s.team)}`).join(' ') || '(none)'} (bots=${plannedBots})`)
     }
     lobbyOpen = false
     intermission = 'idle'
     setRoundState(seed, Date.now() + ROUND_INTERVAL_MS, true)
     anvilsAwake(true)
     bumpWorld()
-    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalTotal: c.total, format: roundFormat, layout: 'arena', seq: worldSeq })
+    room.send('roundReset', { seed, finalRed: c.red, finalBlue: c.blue, finalGreen: c.green ?? 0, finalYellow: c.yellow ?? 0, finalTotal: c.total, format: roundFormat, layout: 'arena', seq: worldSeq })
     clearPaintState()
     clearBaseNetwork()
     basesResolved = false
@@ -599,7 +600,7 @@ export async function setupServer(): Promise<void> {
       const entries = getFullState()
       const cov = coverage()
       for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-        room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, total: cov.total, ...worldFields() })
+        room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: cov.red, blue: cov.blue, green: cov.green ?? 0, yellow: cov.yellow ?? 0, total: cov.total, ...worldFields() })
       }
     }
     if (economyOn() && refillAtDepot()) {
@@ -619,7 +620,7 @@ export async function setupServer(): Promise<void> {
     void saveLeaderboard()
     publishLeaderboard()
     pendingNextIdx = 0
-    pendingFinal = { red: 0, blue: 0, total: 0 }
+    pendingFinal = { red: 0, blue: 0, green: 0, yellow: 0, total: 0 }
     console.log(`[Server] round ${seed} started format=${roundFormat} humanTeam=${humanTeamLabel} bots=${plannedBots} (activeHumans=${activeHumanCount()})`)
     sendRoundClock()
   }
@@ -711,7 +712,7 @@ export async function setupServer(): Promise<void> {
     // Mid-match only. A lobby join keeps the team they already have until the vote starts a round.
     if (isRoundActive() && roundFormat !== 'pvb') {
       const other = activeSoloHumanTeam(from)
-      if (other !== null && team === other) { team = other === 1 ? 2 : 1; setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${team === 1 ? 'RED' : 'BLUE'} (1v1 vs the other human)`) }
+      if (other !== null && team === other) { team = smallestTeam({ red: 0, blue: 0, green: 0, yellow: 0 }, PLAYING_TEAMS.filter(t => t !== other)); setTeam(from, team); console.log(`[Server] joinRoster ${from.slice(0, 10)} flipped to ${teamName(team)} (1v1 vs the other human)`) }
     }
     markActive(from) // count them as present immediately; paint activity will refresh it
     lastPingAt.set(from, Date.now())
@@ -865,7 +866,7 @@ export async function setupServer(): Promise<void> {
     // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
     // message. Every chunk carries the same coverage counters.
     for (let i = 0; i < changes.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total })
+      room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: c.total })
     }
     noteLagSection('paint', t0)
   }
@@ -916,7 +917,7 @@ export async function setupServer(): Promise<void> {
     coverageClock = 0
     const c = coverage()
     if (c.total > 0) {
-      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} total=${c.total} bots=${botCount()}`)
+      console.log(`[Server] coverage: red=${c.red} blue=${c.blue} green=${c.green} yellow=${c.yellow} total=${c.total} bots=${botCount()}`)
     }
   })
 
@@ -1396,12 +1397,12 @@ export async function setupServer(): Promise<void> {
     lastSnapshotAt.set(from, now)
     const entries = getFullState()
     const c = coverage()
-    console.log(`[Server] snapshot → ${from} (${entries.length} cells, red=${c.red} blue=${c.blue})`)
+    console.log(`[Server] snapshot → ${from} (${entries.length} cells, red=${c.red} blue=${c.blue} green=${c.green} yellow=${c.yellow})`)
     // Chunked like paintDelta. The client applies each chunk independently
     // (same path as paint:delta), so order and count don't matter. An empty
     // round still sends one empty chunk so the client sees the server alive.
     for (let i = 0; i === 0 || i < entries.length; i += MAX_CHANGES_PER_MSG) {
-      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, total: c.total, ...worldFields() }, { to: [from] })
+      room.send('snapshot', { entries: entries.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: c.total, ...worldFields() }, { to: [from] })
     }
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
@@ -1504,7 +1505,7 @@ export async function setupServer(): Promise<void> {
     const idx = lastRoundIndex + 1
     const present = presentCount() > 0
     const c = coverage()
-    console.log(`[Server] round ${lastRoundIndex} ended (final red=${c.red} blue=${c.blue} total=${c.total}) present=${present}`)
+    console.log(`[Server] round ${lastRoundIndex} ended (final red=${c.red} blue=${c.blue} green=${c.green} yellow=${c.yellow} total=${c.total}) present=${present}`)
 
     // Personal results + owners BEFORE summary UI.
     const teamCells: Record<number, number> = { 1: 0, 2: 0 }
@@ -1528,7 +1529,7 @@ export async function setupServer(): Promise<void> {
     // The floor swaps now: lobby tiles, no paint, no anvils, no bots.
     setRoundState(lastRoundIndex, now, false)
     pendingNextIdx = idx
-    pendingFinal = { red: c.red, blue: c.blue, total: c.total }
+    pendingFinal = { red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: c.total }
     if (balloonOn() && !balloonResolved) pickBalloonEnd(balloonTimeout(balloons), 'clock')
     if (basesOn(roundFormat) && !basesResolved) {
       const p = baseProgress()
@@ -1539,6 +1540,8 @@ export async function setupServer(): Promise<void> {
       room.send('roundEnded', {
         finalRed: Math.round(p.red),
         finalBlue: Math.round(p.blue),
+        finalGreen: 0,
+        finalYellow: 0,
         finalTotal: VICTORY_PROGRESS,
         kind: 'bases',
         victor: basesWinner,
@@ -1549,6 +1552,8 @@ export async function setupServer(): Promise<void> {
       room.send('roundEnded', {
         finalRed: balloonOn() ? 0 : c.red,
         finalBlue: balloonOn() ? 0 : c.blue,
+        finalGreen: balloonOn() ? 0 : (c.green ?? 0),
+        finalYellow: balloonOn() ? 0 : (c.yellow ?? 0),
         finalTotal: balloonOn() ? 0 : c.total,
         kind: balloonOn() ? 'balloon' : 'paint',
         victor: balloonOn() ? balloonVictor : '',

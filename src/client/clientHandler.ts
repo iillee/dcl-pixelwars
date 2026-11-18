@@ -24,7 +24,7 @@ import { parseWorldLayout } from '../shared/worldState'
 import { engine, PlayerIdentityData, AvatarBase, Transform } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
-import { Team } from '../shared/team'
+import { Team, teamName } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
 import { noteLagPong, noteServerRx } from './lagHud'
@@ -80,11 +80,11 @@ function wireInbound(): void {
     events.emit('team:assigned', { team: team as Team })
   })
 
-  room.onMessage('paintDelta', ({ changes, red, blue, total }) => {
+  room.onMessage('paintDelta', ({ changes, red, blue, green, yellow, total }) => {
     noteServerRx()
     events.emit('paint:delta', {
       changes: changes.map(c => ({ id: c.id, team: c.team as Team })),
-      red, blue, total,
+      red, blue, green: green ?? 0, yellow: yellow ?? 0, total,
     })
   })
 
@@ -92,7 +92,7 @@ function wireInbound(): void {
     events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
   })
 
-  room.onMessage('snapshot', ({ entries, red, blue, total, seed, layout, seq, format, phase }) => {
+  room.onMessage('snapshot', ({ entries, red, blue, green, yellow, total, seed, layout, seq, format, phase }) => {
     noteServerRx()
     console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
     gotSnapshot = true
@@ -106,7 +106,7 @@ function wireInbound(): void {
     }, 'snapshot')
     events.emit('paint:snapshot', {
       entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
-      red, blue, total,
+      red, blue, green: green ?? 0, yellow: yellow ?? 0, total,
     })
   })
 
@@ -151,8 +151,8 @@ function wireInbound(): void {
     })
   })
 
-  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal, kind, victor, victorName }) => {
-    events.emit('round:ended', { finalRed, finalBlue, finalTotal, kind: kind === 'balloon' ? 'balloon' : kind === 'bases' ? 'bases' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
+  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victor, victorName }) => {
+    events.emit('round:ended', { finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal, kind: kind === 'balloon' ? 'balloon' : kind === 'bases' ? 'bases' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
   })
 
   room.onMessage('balloonState', ({ entries }) => {
@@ -171,9 +171,9 @@ function wireInbound(): void {
     events.emit('base:win', { team })
   })
 
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout, seq }) => {
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalGreen, finalYellow, finalTotal, format, layout, seq }) => {
     events.emit('round:reset', {
-      seed, finalRed, finalBlue, finalTotal,
+      seed, finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal,
       format: wireFormat(format),
       layout: layout === 'lobby' ? 'lobby' : 'arena',
       seq: seq ?? 0,
@@ -249,7 +249,7 @@ function wireTeamAssigned(): void {
   events.on('team:assigned', ({ team }) => {
     myTeam = team
     setLocalTeam(myTeam)
-    console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
+    console.log(`[Client] teamAssigned → ${teamName(myTeam)}`)
     // Ask for the current authoritative paint state. Fires exactly once
     // per teamAssigned; server has a 5s cooldown against abuse. Fixes:
     // reloading during a round used to wipe our view of already-painted

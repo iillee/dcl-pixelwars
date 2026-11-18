@@ -43,6 +43,7 @@ import {
   botRecoveryEnabled, RoundFormat,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
 } from '../../shared/pvp'
+import { PLAYING_TEAMS, addTeamCount, emptyTeamCounts, pvpBotFill, teamCountsTotal, teamName as sharedTeamName, type TeamCounts } from '../../shared/team'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
 import { orderNearest } from '../../shared/territory'
 import { BOT_REFILL_FRAC, PAINT_CAPACITY } from '../../shared/territory'
@@ -79,7 +80,7 @@ export interface ManagerDeps {
   /** Read paint state to power smart-target heuristics. */
   paint: PaintReader
   /** Active humans per team (roster idle rule). Humans only — never bots. */
-  activeHumans: () => { red: number; blue: number }
+  activeHumans: () => { red: number; blue: number; green?: number; yellow?: number }
   /** Bot crossed the fall line at `at`; the cloud carries it to `base` (broadcast rescueStart, count the death). */
   onFell?: (id: number, at: V3, base: V3) => void
   /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
@@ -117,16 +118,16 @@ let placedTiles: Placed[] = []
 let bots: LiveBot[] = []
 let botIdCounter = 0
 
-/** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
+/** PvP evens all four teams up to a capped target. PvB locks bots to the other colour (humanTeam is 1 or 2). */
 export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
 let population: BotPopulation = { kind: 'pvp' }
 /** Base cells per team, deep cells first, refreshed with the graph. */
-const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+const baseCellCache: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] }
 
 export function initBots(d: ManagerDeps): void {
   deps = d
   population = { kind: 'pvp' }
-  console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
+  console.log('[Bots] initialised (PvP four-team fill; PvB via setPopulation)')
 }
 
 /** Called from startNextRound. The next tick fits the pool (PvP immediately, PvB at the boundary). */
@@ -150,6 +151,8 @@ export function rebuildBotGraph(seed: number): void {
     placedTiles = []
     baseCellCache[1] = []
     baseCellCache[2] = []
+    baseCellCache[3] = []
+    baseCellCache[4] = []
     return
   }
   const t0 = Date.now()
@@ -167,26 +170,36 @@ export function rebuildBotGraph(seed: number): void {
 }
 
 function cacheBaseCells(): void {
-  baseCellCache[1] = []
-  baseCellCache[2] = []
+  for (const team of PLAYING_TEAMS) baseCellCache[team] = []
   if (!graph) return
-  const buckets: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+  const buckets: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] }
   for (const id of graph.nodes) {
     const t = baseTeamOfCellId(id)
-    if (t === 1 || t === 2) buckets[t].push(id)
+    if (t === 1 || t === 2 || t === 3 || t === 4) buckets[t].push(id)
   }
-  for (const team of [1, 2] as const) {
-    buckets[team].sort((a, b) => {
-      const da = graph!.deepNodes.has(a) ? 0 : 1
-      const db = graph!.deepNodes.has(b) ? 0 : 1
-      if (da !== db) return da - db
-      const pa = graph!.worldPos.get(a)
-      const pb = graph!.worldPos.get(b)
-      if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
-      if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
-      return a < b ? -1 : a > b ? 1 : 0
-    })
-    baseCellCache[team] = buckets[team]
+  const sortDeep = (list: string[]) => list.sort((a, b) => {
+    const da = graph!.deepNodes.has(a) ? 0 : 1
+    const db = graph!.deepNodes.has(b) ? 0 : 1
+    if (da !== db) return da - db
+    const pa = graph!.worldPos.get(a)
+    const pb = graph!.worldPos.get(b)
+    if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
+    if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+  for (const team of PLAYING_TEAMS) {
+    if (buckets[team].length === 0) {
+      const target = baseSpawn(team).pos
+      const scored: Array<{ id: string; d: number }> = []
+      for (const id of graph.nodes) {
+        const p = graph.worldPos.get(id)
+        if (!p) continue
+        scored.push({ id, d: (p[0] - target.x) ** 2 + (p[2] - target.z) ** 2 })
+      }
+      scored.sort((a, b) => a.d - b.d)
+      buckets[team] = scored.slice(0, 8).map(x => x.id)
+    }
+    baseCellCache[team] = sortDeep(buckets[team])
   }
 }
 
@@ -205,7 +218,7 @@ function placeAtBase(b: LiveBot): void {
  * so a reseat can keep its own cell when nobody else is on it.
  */
 function pickSpawn(team: number, self?: LiveBot): { cell: string; pos: V3 } {
-  const cells = team === 1 || team === 2 ? baseCellCache[team] : []
+  const cells = baseCellCache[team] ?? []
   const taken = new Set<string>()
   for (const o of bots) if (o !== self && o.team === team) taken.add(o.currentCell)
   const primary = baseStartCell(team)
@@ -253,33 +266,34 @@ function cellNear(p: V3): string | null {
 function baseStartCell(team: number): string {
   const g = graph!
   const target = baseSpawn(team).pos
-  for (const pool of [g.deepNodes, g.nodes]) {
-    let best: string | null = null, bestD = Infinity
-    for (const id of pool) {
-      if (baseTeamOfCellId(id) !== team) continue
-      const p = g.worldPos.get(id)
-      if (!p) continue
-      const d = (p[0] - target.x) ** 2 + (p[1] - target.y) ** 2 + (p[2] - target.z) ** 2
-      if (d < bestD) { bestD = d; best = id }
+  const nearest = (requireHome: boolean): string | null => {
+    for (const pool of [g.deepNodes, g.nodes]) {
+      let best: string | null = null, bestD = Infinity
+      for (const id of pool) {
+        if (requireHome && baseTeamOfCellId(id) !== team) continue
+        const p = g.worldPos.get(id)
+        if (!p) continue
+        const d = (p[0] - target.x) ** 2 + (p[1] - target.y) ** 2 + (p[2] - target.z) ** 2
+        if (d < bestD) { bestD = d; best = id }
+      }
+      if (best) return best
     }
-    if (best) return best
+    return null
   }
-  return [...g.nodes][0]
+  return nearest(true) ?? nearest(false) ?? [...g.nodes][0]
 }
 
 function teamName(team: number): string {
-  return team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'NONE'
+  return sharedTeamName(team)
 }
 
-function countLabel(c: { red: number; blue: number }): string {
-  return `red=${c.red} blue=${c.blue} bots=${bots.length}`
+function asCounts(c: { red: number; blue: number; green?: number; yellow?: number }): TeamCounts {
+  return { red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0 }
 }
 
-/** Short team and how many bots it needs. Even or empty lobbies need none. */
-function desiredFill(c: { red: number; blue: number }): { team: number; count: number } {
-  if (c.red + c.blue === 0 || c.red === c.blue) return { team: 0, count: 0 }
-  if (c.red < c.blue) return { team: 1, count: c.blue - c.red }
-  return { team: 2, count: c.red - c.blue }
+function countLabel(c: { red: number; blue: number; green?: number; yellow?: number }): string {
+  const t = asCounts(c)
+  return `red=${t.red} blue=${t.blue} green=${t.green} yellow=${t.yellow} bots=${bots.length}`
 }
 
 /** Bot whose nearest human is farthest. No reported positions → newest id. */
@@ -305,7 +319,7 @@ function pickFarthest(pool: LiveBot[]): LiveBot {
   return best
 }
 
-function spawnBot(team: number, reason: string, counts: { red: number; blue: number }): void {
+function spawnBot(team: number, reason: string, counts: { red: number; blue: number; green?: number; yellow?: number }): void {
   if (!graph || !deps) return
   // Own base, spread across the base cells. Each bot is its own instance:
   // path, combat cooldowns, and `bot:<id>` paint / hit credit.
@@ -334,7 +348,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)}) pace ${personality.speedMul.toFixed(2)} engage ${personality.engageM.toFixed(1)}m retarget ${personality.retargetS.toFixed(1)}s ${focus}`)
 }
 
-function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
+function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number; green?: number; yellow?: number }): void {
   const i = bots.indexOf(b)
   if (i < 0) return
   bots.splice(i, 1)
@@ -349,21 +363,33 @@ function balanceBots(): void {
     balancePvb()
     return
   }
-  const counts = deps.activeHumans()
-  const want = desiredFill(counts)
-  if (want.count === 0) {
-    const why = counts.red + counts.blue === 0 ? 'zero humans' : 'teams even'
-    while (bots.length > 0) retireBot(pickFarthest(bots), why, counts)
+  const counts = asCounts(deps.activeHumans())
+  const want = pvpBotFill(counts)
+  if (teamCountsTotal(counts) === 0) {
+    while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  for (const b of bots.filter(x => x.team !== want.team)) {
-    retireBot(b, `wrong team, short side is ${teamName(want.team)}`, counts)
+  const have = emptyTeamCounts()
+  for (const b of bots) addTeamCount(have, b.team)
+  for (const t of PLAYING_TEAMS) {
+    const extra = (t === 1 ? have.red : t === 2 ? have.blue : t === 3 ? have.green : have.yellow)
+      - (t === 1 ? want.red : t === 2 ? want.blue : t === 3 ? want.green : want.yellow)
+    if (extra <= 0) continue
+    const side = bots.filter(x => x.team === t)
+    for (let i = 0; i < extra && side.length > 0; i++) {
+      const b = pickFarthest(side)
+      retireBot(b, 'excess, farthest from a human', counts)
+      const idx = side.indexOf(b)
+      if (idx >= 0) side.splice(idx, 1)
+    }
   }
-  while (bots.length > want.count) retireBot(pickFarthest(bots), 'excess, farthest from a human', counts)
-  while (bots.length < want.count) {
-    const before = bots.length
-    spawnBot(want.team, 'fill short team', counts)
-    if (bots.length === before) break
+  for (const t of PLAYING_TEAMS) {
+    const need = t === 1 ? want.red : t === 2 ? want.blue : t === 3 ? want.green : want.yellow
+    while (bots.filter(x => x.team === t).length < need) {
+      const before = bots.length
+      spawnBot(t, 'fill team', counts)
+      if (bots.length === before) break
+    }
   }
 }
 
@@ -375,7 +401,7 @@ function balanceBots(): void {
 function balancePvb(): void {
   if (!deps) return
   const counts = deps.activeHumans()
-  const humans = counts.red + counts.blue
+  const humans = counts.red + counts.blue + (counts.green ?? 0) + (counts.yellow ?? 0)
   const wantN = pvbBotCount(humans)
   const team = population.kind === 'pvb' && population.humanTeam === 1 ? 2 : 1
   for (const b of bots.filter(x => x.team !== team)) {
@@ -413,7 +439,7 @@ export function benchBot(id: number): void {
 export function balloonBotIds(): number[] { return bots.map(b => b.botId) }
 
 export function sleepBots(): void {
-  const counts = deps ? deps.activeHumans() : { red: 0, blue: 0 }
+  const counts = deps ? deps.activeHumans() : { red: 0, blue: 0, green: 0, yellow: 0 }
   while (bots.length > 0) retireBot(bots[0], 'lobby', counts)
 }
 

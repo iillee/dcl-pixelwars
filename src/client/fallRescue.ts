@@ -78,7 +78,7 @@ import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
 import { LOOK } from '../shared/waterLook'
 import { waterVisualSeconds } from './water'
-import { Team } from '../shared/team'
+import { Team, isPlayingTeam } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
@@ -428,7 +428,7 @@ function rescueHome(): Vec {
   if (assignedHome) return assignedHome
   // Center of the 3-tile lobby (straight between the PvP and PvB ends).
   if (isLobbyLayout()) return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
-  return baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  return baseSpawn(isPlayingTeam(localTeam()) ? localTeam() : 1).pos
 }
 
 /** Landing the last rescueStart assigned, if any. Used by the slip-off teleport. */

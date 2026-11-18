@@ -37,7 +37,7 @@ export type Events = {
   'round:owners': { owners: Array<{ id: string; name: string; team: number; cells: number; kos: number; deaths: number; painted: number }> }
 
   // Broadcast on join / leave / round reset: every active player's team.
-  // Subscriber: client/nametags (red/blue plates above avatars).
+  // Subscriber: client/nametags (team-colored plates above avatars).
   'team:roster': { entries: Array<{ userId: string; team: Team }> }
 
   // 5 Hz broadcast: authoritative paint changes since the last tick, plus
@@ -47,6 +47,8 @@ export type Events = {
     changes: Array<{ id: string; team: Team }>
     red: number
     blue: number
+    green: number
+    yellow: number
     total: number
   }
 
@@ -60,6 +62,8 @@ export type Events = {
     entries: Array<{ id: string; team: Team }>
     red: number
     blue: number
+    green: number
+    yellow: number
     total: number
   }
 
@@ -67,6 +71,8 @@ export type Events = {
   'round:ended': {
     finalRed: number
     finalBlue: number
+    finalGreen: number
+    finalYellow: number
     finalTotal: number
     kind: 'paint' | 'balloon' | 'bases'
     victor: string
@@ -90,6 +96,8 @@ export type Events = {
     seed: number
     finalRed: number
     finalBlue: number
+    finalGreen: number
+    finalYellow: number
     finalTotal: number
     format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
     layout?: 'arena' | 'lobby'

@@ -8,7 +8,7 @@ import { Color4, Vector3 } from '@dcl/sdk/math'
 import { baseSpawn, getPlacedTilesInOrder } from '../maze/generator'
 import { isRebuilding } from '../maze/rebuild'
 import { buildWalkableGraph, type WalkableGraph } from '../shared/mazeGraph'
-import { Team, TEAM_RGB } from '../shared/team'
+import { Team, TEAM_RGB, isPlayingTeam } from '../shared/team'
 import { nearestNode, onDepot, PAINT_REFILL_MODE, placeDepots, type DepotAnchor } from '../shared/territory'
 import { getCurrentCellId, paintEconomyOn, paintTeamOf, painterTeam, predictDepotRefill } from '../paint'
 import { inLobby } from './phase'
@@ -25,7 +25,7 @@ let graph: WalkableGraph | null = null
 
 /** Same RGB as floor paint (TEAM_RGB / pallet.jpeg). Neutral posts stay off-white until captured. */
 function tint(team: Team, glow: number) {
-  const c = team === Team.Red || team === Team.Blue ? TEAM_RGB[team] : NEUTRAL
+  const c = isPlayingTeam(team) ? TEAM_RGB[team] : NEUTRAL
   return {
     albedoColor: Color4.create(c.r, c.g, c.b, 1),
     emissiveColor: Color4.create(c.r, c.g, c.b, 1),

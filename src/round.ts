@@ -74,7 +74,12 @@ interface BannerState {
   visible: boolean
   redPct: number
   bluePct: number
-  winner: 'RED' | 'BLUE' | 'TIE' | 'PLAYER'
+  greenPct: number
+  yellowPct: number
+  /** RED / BLUE / GREEN / YELLOW, TIE, or PLAYER (balloon). */
+  winner: string
+  /** Full title: 'RED WINS!', 'RED & BLUE TIE!', or "IT'S A TIE!". */
+  headline: string
   victorName: string
   kind: 'paint' | 'balloon' | 'bases'
   shownAtMs: number
@@ -91,7 +96,10 @@ const banner: BannerState = {
   visible: false,
   redPct: 0,
   bluePct: 0,
+  greenPct: 0,
+  yellowPct: 0,
   winner: 'TIE',
+  headline: "IT'S A TIE!",
   victorName: '',
   kind: 'paint',
   shownAtMs: 0,
@@ -110,22 +118,25 @@ let pendingOwners: Array<{ id: string; name: string; team: number; cells: number
 let pendingOwnersAtMs = 0
 
 export function setRoundResult(cells: number, teamCells: number, team: number): void {
-  const teamName = team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'YOUR TEAM'
+  const label = isPlayingTeam(team) ? teamName(team) : 'YOUR TEAM'
   const share = teamCells > 0 ? Math.round((cells / teamCells) * 100) : 0
   pendingCells = cells
-  pendingPersonal = `YOU PAINTED ${cells} CELLS  ·  ${share}% OF ${teamName}`
+  pendingPersonal = `YOU PAINTED ${cells} CELLS  ·  ${share}% OF ${label}`
   pendingAtMs = Date.now()
   // If the banner is already up (message order flipped), show it now.
   if (banner.visible) { banner.personal = pendingPersonal; banner.myCells = cells; pendingPersonal = '' }
 }
 
-export function showRoundEndBanner(red: number, blue: number, total: number): void {
-  const redPct  = total > 0 ? (red  / total) * 100 : 0
-  const bluePct = total > 0 ? (blue / total) * 100 : 0
+export function showRoundEndBanner(red: number, blue: number, total: number, green = 0, yellow = 0): void {
+  const cov: TeamCoverage = { red, blue, green, yellow, total }
   banner.visible = true
-  banner.redPct = redPct
-  banner.bluePct = bluePct
-  banner.winner = redPct > bluePct ? 'RED' : bluePct > redPct ? 'BLUE' : 'TIE'
+  banner.redPct = coveragePct(cov, 1)
+  banner.bluePct = coveragePct(cov, 2)
+  banner.greenPct = coveragePct(cov, 3)
+  banner.yellowPct = coveragePct(cov, 4)
+  const headline = winnerHeadline(cov)
+  banner.headline = headline
+  banner.winner = headline.endsWith(' WINS!') ? headline.slice(0, -6) : 'TIE'
   banner.victorName = ''
   banner.kind = 'paint'
   banner.shownAtMs = Date.now()
@@ -149,6 +160,7 @@ export function getBanner(): BannerState {
 // ─── Server event subscriber ────────────────────────────────────
 import { events } from './shared/events'
 import { coverage } from './paint'
+import { TEAM_NAME, coveragePct, isPlayingTeam, teamName, winnerHeadline, type TeamCoverage } from './shared/team'
 
 /**
  * initRoundNet — shows the end-of-round banner when the server declares
@@ -164,15 +176,15 @@ export function initRoundNet(): void {
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
   // Scores arrive on round:ended. The banner keeps its own timer. The lobby
   // roundReset that follows swaps the floor and does not dismiss this screen.
-  events.on('round:ended', ({ finalRed, finalBlue, finalTotal, kind, victorName }) => {
+  events.on('round:ended', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victorName }) => {
     const localTotal = coverage().total
     console.log(
-      `[Client] roundEnded final red=${finalRed} blue=${finalBlue} ` +
+      `[Client] roundEnded final red=${finalRed} blue=${finalBlue} green=${finalGreen ?? 0} yellow=${finalYellow ?? 0} ` +
       `serverTotal=${finalTotal} localTotal=${localTotal}`
     )
     if (kind === 'balloon') showBalloonBanner(victorName || 'SOMEONE')
     else if (kind === 'bases') showBasesBanner(finalRed, finalBlue, finalTotal)
-    else showRoundEndBanner(finalRed, finalBlue, localTotal)
+    else showRoundEndBanner(finalRed, finalBlue, localTotal, finalGreen ?? 0, finalYellow ?? 0)
   })
   events.on('round:clock', ({ idx, active, format }) => {
     // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
@@ -216,7 +228,10 @@ export function showBalloonBanner(name: string): void {
   banner.visible = true
   banner.redPct = 0
   banner.bluePct = 0
+  banner.greenPct = 0
+  banner.yellowPct = 0
   banner.winner = name ? 'PLAYER' : 'TIE'
+  banner.headline = name ? (name.toUpperCase() + ' WINS!') : "IT'S A TIE!"
   banner.victorName = name
   banner.kind = 'balloon'
   banner.shownAtMs = Date.now()
@@ -239,7 +254,10 @@ export function showBasesBanner(red: number, blue: number, threshold: number): v
   banner.visible = true
   banner.redPct = (red / t) * 100
   banner.bluePct = (blue / t) * 100
+  banner.greenPct = 0
+  banner.yellowPct = 0
   banner.winner = red > blue ? 'RED' : blue > red ? 'BLUE' : 'TIE'
+  banner.headline = red > blue ? 'RED WINS!' : blue > red ? 'BLUE WINS!' : "IT'S A TIE!"
   banner.victorName = ''
   banner.kind = 'bases'
   banner.shownAtMs = Date.now()

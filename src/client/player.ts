@@ -24,7 +24,7 @@ import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
 import { earlySpawnPads } from '../shared/lobby'
-import { Team } from '../shared/team'
+import { Team, isPlayingTeam } from '../shared/team'
 import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
 import { assignedRescueHome, cancelFallRescue, fallRescueCameraRide, holdFallLine, initFallRescue } from './fallRescue'
@@ -40,7 +40,7 @@ let spawnPads: Entity[] = []
 
 function ensureSpawnPads(): void {
   if (!IS_SKY || spawnPads.length) return
-  for (const p of earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2].map(t => baseSpawn(t).pos))) {
+  for (const p of earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))) {
     const e = engine.addEntity()
     Transform.create(e, {
       position: Vector3.create(p.x, p.y, p.z),
@@ -67,7 +67,7 @@ function teleportHome(why: string): void {
     const assigned = why === 'fell' ? assignedRescueHome() : null
     const s = assigned
       ? { pos: assigned, look: { x: assigned.x, y: assigned.y, z: assigned.z + 8 } }
-      : baseSpawn(myTeam === Team.Blue ? 2 : 1) // no team yet → RED base (scene.json default)
+      : baseSpawn(isPlayingTeam(myTeam) ? myTeam : 1) // no team yet → RED base (scene.json default)
     pos = s.pos; look = s.look
   }
   console.log(`[Player] teleport (${why}) → ${pos.x.toFixed(0)},${pos.y.toFixed(1)},${pos.z.toFixed(0)}`)

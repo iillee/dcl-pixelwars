@@ -25,7 +25,7 @@ function lockedTeam(id: string): Team {
 // Re-exported here so existing `import { Team } from './paint'` call sites
 // keep working during the refactor.
 export { Team } from './shared/team'
-import { Team } from './shared/team'
+import { Team, coverageFromTeams, type TeamCoverage } from './shared/team'
 import { events } from './shared/events'
 import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, refillOnTerritory } from './shared/territory'
 
@@ -37,17 +37,17 @@ import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, refillOnTerritor
  * from setupClient() after paint state is initialized.
  */
 export function initPaintNet(): void {
-  events.on('paint:delta', ({ changes, red, blue, total }) => {
+  events.on('paint:delta', ({ changes, red, blue, green, yellow, total }) => {
     for (const { id, team } of changes) applyRemotePaint(id, team)
-    setServerCoverage({ red, blue, total })
+    setServerCoverage({ red, blue, green: green ?? 0, yellow: yellow ?? 0, total })
   })
 
-  events.on('paint:snapshot', ({ entries, red, blue, total }) => {
+  events.on('paint:snapshot', ({ entries, red, blue, green, yellow, total }) => {
     for (const { id, team } of entries) {
       applyRemotePaint(id, team)
       cellSince.set(id, 0)
     }
-    setServerCoverage({ red, blue, total })
+    setServerCoverage({ red, blue, green: green ?? 0, yellow: yellow ?? 0, total })
   })
 
   events.on('paint:wallet', ({ tank, denied, regen }) => {
@@ -65,7 +65,7 @@ export function initPaintNet(): void {
 
   events.on('round:reset', ({ format, layout }) => {
     clearAllPaintState()
-    setServerCoverage({ red: 0, blue: 0, total: 0 })
+    setServerCoverage({ red: 0, blue: 0, green: 0, yellow: 0, total: 0 })
     setPaintEconomy(layout !== 'lobby' && format === 'prototype')
     setPaintWorld(layout !== 'lobby' && paintAllowed(format))
     adoptWallet(PAINT_CAPACITY)
@@ -82,9 +82,11 @@ export function initPaintNet(): void {
 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
-  [Team.None]: Color4.create(1, 1, 1, 1),
-  [Team.Red]:  Color4.create(255/255, 117/255, 119/255, 1), // pallet.jpeg #FF7577
-  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC (queued for Phase 3)
+  [Team.None]:   Color4.create(1, 1, 1, 1),
+  [Team.Red]:    Color4.create(255/255, 117/255, 119/255, 1), // #FF7577
+  [Team.Blue]:   Color4.create(106/255, 153/255, 252/255, 1), // #6A99FC
+  [Team.Green]:  Color4.create( 79/255, 214/255, 140/255, 1), // #4FD68C
+  [Team.Yellow]: Color4.create(255/255, 224/255,  74/255, 1), // #FFE04A
 }
 
 // ─── Mask format ─────────────────────────────────────────────────────
@@ -351,8 +353,8 @@ export function clearAllPaintState() {
 // players' paint — not just cells visible to the local client. Before the
 // first delta arrives, coverage() falls back to a local scan (returns
 // zeros on fresh join, which is fine — Step 5's snapshot fills the gap).
-let serverCoverage: { red: number; blue: number; total: number } | null = null
-export function setServerCoverage(c: { red: number; blue: number; total: number }): void {
+let serverCoverage: TeamCoverage | null = null
+export function setServerCoverage(c: TeamCoverage): void {
   serverCoverage = c
 }
 
@@ -750,7 +752,7 @@ function spawnCellsForTileImmediate(
 }
 
 // ─── Public: coverage counter ────────────────────────────────────────
-// red / blue = absolute painted-cell counts (server-authoritative when
+// red / blue / green / yellow = painted-cell counts (server-authoritative when
 // paintDelta has arrived, otherwise a local fallback).
 // total = WALKABLE CELLS IN THE MAZE, not "cells that have been touched."
 // Previously used cellTeam.size, which is only cells with a recorded team
@@ -759,17 +761,12 @@ function spawnCellsForTileImmediate(
 // because we spawn one entity per walkable mask cell. During round
 // teardown it briefly drops toward 0 as tiles are removed and climbs back
 // as new tiles spawn; % briefly overshoots then settles, which is fine.
-export function coverage(): { red: number; blue: number; total: number } {
+export function coverage(): TeamCoverage {
   const total = cellEntity.size
   if (serverCoverage !== null) {
-    return { red: serverCoverage.red, blue: serverCoverage.blue, total }
+    return { red: serverCoverage.red, blue: serverCoverage.blue, green: serverCoverage.green ?? 0, yellow: serverCoverage.yellow ?? 0, total }
   }
-  let red = 0, blue = 0
-  for (const t of cellTeam.values()) {
-    if (t === Team.Red) red++
-    else if (t === Team.Blue) blue++
-  }
-  return { red, blue, total }
+  return coverageFromTeams(cellTeam.values(), total)
 }
 
 // ─── Coord math: world pos → cell ID ─────────────────────────────────

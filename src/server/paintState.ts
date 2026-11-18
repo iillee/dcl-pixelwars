@@ -12,8 +12,9 @@
  * Round resets: clearAll() called from roundLoop (Step 6). Not called yet.
  */
 
-// team values match Team enum in src/paint.ts: 1 = Red, 2 = Blue.
+// team values match Team enum: 1 Red, 2 Blue, 3 Green, 4 Yellow.
 import { baseTeamOfCellId } from '../maze/generator'
+import { coverageFromTeams, type TeamCoverage } from '../shared/team'
 import { BASE_PAINT_LOCK } from '../maze/level'
 
 const cellTeam = new Map<string, number>()
@@ -53,7 +54,7 @@ export function applyPaint(id: string, team: number, painter: string): boolean {
   // BASES mode: each team's origin cells stay locked to that team.
   if (lockTeamBases) {
     const home = baseTeamOfCellId(id)
-    if ((home === 1 || home === 2) && home !== team) return false
+    if (home !== 0 && home !== team) return false
   }
   // Last painter owns the cell, even a teammate re-painting our own colour (no score credit for that).
   cellPainter.set(id, painter)
@@ -123,13 +124,8 @@ export function ownerCounts(): Array<{ id: string; team: number; cells: number }
 }
 
 /** Live coverage counters. Called by the 5s log tick. */
-export function coverage(): { red: number; blue: number; total: number } {
-  let red = 0, blue = 0
-  for (const t of cellTeam.values()) {
-    if (t === 1) red++
-    else if (t === 2) blue++
-  }
-  return { red, blue, total: cellTeam.size }
+export function coverage(): TeamCoverage {
+  return coverageFromTeams(cellTeam.values())
 }
 
 /** O(1) painted-cell count for lag logs. */

@@ -51,6 +51,8 @@ export const Messages = {
     changes: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
     red: Schemas.Int,
     blue: Schemas.Int,
+    green: Schemas.Int,
+    yellow: Schemas.Int,
     total: Schemas.Int,
   }),
 
@@ -76,6 +78,8 @@ export const Messages = {
     entries: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
     red: Schemas.Int,
     blue: Schemas.Int,
+    green: Schemas.Int,
+    yellow: Schemas.Int,
     total: Schemas.Int,
     // Current round's maze seed (= server round index): late joiners build the maze from this
     // even if the SeedHolder CRDT never reaches them.
@@ -127,6 +131,8 @@ export const Messages = {
   roundEnded: Schemas.Map({
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
+    finalGreen: Schemas.Int,
+    finalYellow: Schemas.Int,
     finalTotal: Schemas.Int,
     kind: Schemas.String,
     victor: Schemas.String,
@@ -138,6 +144,8 @@ export const Messages = {
     seed: Schemas.Int,
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
+    finalGreen: Schemas.Int,
+    finalYellow: Schemas.Int,
     finalTotal: Schemas.Int,
     format: Schemas.String,
     // 'arena' grows the match maze. 'lobby' grows the voting cross in its place.
