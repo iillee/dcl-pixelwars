@@ -39,6 +39,8 @@ export const BOT_BODY_NORMAL_SRC = 'assets/images/bots/body-normal.png'
  * https://docs.decentraland.org/creator/scenes-sdk7/3d-content-essentials/materials
  */
 export const BOT_BODY_MESH_PATHS = ['BotBody', 'Arm_L', 'Arm_R'] as const
+/** Outline meshes (BotBodyOutline, Arm_L_Outline, Arm_R_Outline) keep their
+ *  own unlit navy material and must not be included here. */
 
 export type BotBodyColor = Color3 | Color4 | Rgb01 | string
 
