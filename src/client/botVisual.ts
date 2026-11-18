@@ -6,8 +6,8 @@
  * the glide clip) and 'ghost' (the original Aug 2026 mesh in
  * ghost-recover.glb, with official DCL locomotion clips). The glider
  * pops out only while gliding. Classic, Base Charge, and Paint Limit get
- * a team light and a billboarded RED/BLUE plate; Balloon Battle is FFA
- * so the light is neutral and the plate stays hidden.
+ * a team light and, for the custom mesh, a red or blue body GLB; Balloon
+ * Battle is FFA so the body stays blue and the light is neutral.
  * The visual is always this mesh (not gated on the current format), so a
  * late mode sync cannot leave an AvatarShape standing. The AvatarShape
  * path remains as a gated fallback only.
@@ -115,7 +115,8 @@ const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
 }
 
 const profile = BOT_PROFILES[BOT_MODEL]
-const GHOST_MODEL_SRC = profile.src
+const CUSTOM_MODEL_SRC_BLUE = 'assets/models/bots/bot-custom-flat.glb'
+const CUSTOM_MODEL_SRC_RED = 'assets/models/bots/bot-custom-flat-red.glb'
 const GLIDER_SRC = 'assets/models/glider.glb'
 /** Seconds. Official ghost clips match scripts/build-ghost-anims.py; custom clips are 24 fps. */
 const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
@@ -257,6 +258,15 @@ function lightColor(team: number): Color3 {
   return team === Team.Red ? RED_LIGHT : BLUE_LIGHT
 }
 
+/** Custom bodies pick a red or blue GLB by team. Balloon Battle (and any
+ *  other mode that already hides team plates) keeps the blue body, matching
+ *  the existing neutral-light rule. The official ghost mesh is unchanged. */
+function ghostModelSrc(team: number): string {
+  if (BOT_MODEL !== 'custom') return profile.src
+  if (hideGhostPlates()) return CUSTOM_MODEL_SRC_BLUE
+  return team === Team.Red ? CUSTOM_MODEL_SRC_RED : CUSTOM_MODEL_SRC_BLUE
+}
+
 function paintLight(entity: Entity, team: number): void {
   LightSource.createOrReplace(entity, {
     type: LightSource.Type.Point({}),
@@ -344,7 +354,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
   })
   let light: Entity | null = null
   if (kind === 'ghost') {
-    GltfContainer.create(root, { src: GHOST_MODEL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+    GltfContainer.create(root, { src: ghostModelSrc(team), visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
     Animator.create(root, {
       states: (['idle', 'jump', 'double', 'glide', 'fall', 'slide'] as GhostClip[]).map(clip => ({
         clip,
@@ -568,7 +578,11 @@ export function initBotVisual(): void {
       if (rec.team !== b.team) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
-          rec.team = b.team
+          const src = ghostModelSrc(b.team)
+          if (src !== ghostModelSrc(rec.team)) {
+            GltfContainer.createOrReplace(rec.root, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+            if (rec.clip) Animator.playSingleAnimation(rec.root, rec.clip, true)
+          }
         } else {
           paintAvatar(rec.root, b.team, rec.id)
         }
