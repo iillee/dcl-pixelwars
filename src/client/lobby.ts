@@ -2,12 +2,12 @@
  * Lobby signs and the feet report. The tiles themselves come from rebuildMaze.
  * Counts are whatever the server last broadcast. This file does not assign a team.
  */
-import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, AudioSource } from '@dcl/sdk/ecs'
+import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, AudioSource, TextAlignMode } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, signBadgeY, signFaceZ, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_TITLE_FONT, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, signBadgeY, signFaceZ, signPlateWidth, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -31,24 +31,21 @@ const SIGN_BOB_M = 0.35
 const SIGN_BOB_PERIOD_S = 3.2
 const boards: { count: Entity }[] = []
 /** SDK TextShape: fontSize 10 is 1 m tall. No extra scale on these entities.
- *  Sizes follow the 58 → 32 m width shrink so the pill's original proportions stay. */
-const SIGN_TYPE_SCALE = SIGN_W_M / 58
-const TITLE_FONT = 45 * SIGN_TYPE_SCALE
-const SUB_FONT = 14 * SIGN_TYPE_SCALE
-const COUNT_FONT = 22 * SIGN_TYPE_SCALE
-const TITLE_Y_M = 1.15 * SIGN_TYPE_SCALE
-const SUB_Y_M = -2.45 * SIGN_TYPE_SCALE
-const TITLE_BOX_H = 5.2 * SIGN_TYPE_SCALE
-const SUB_BOX_H = 2 * SIGN_TYPE_SCALE
-const SUB_BOX_W = 40 * SIGN_TYPE_SCALE
-const COUNT_BOX_W = 6 * SIGN_TYPE_SCALE
-const COUNT_BOX_H = 3 * SIGN_TYPE_SCALE
-/** TextShape has no unlit flag; the plate is unlit BasicMaterial, so scene lighting
- *  used to wash the white letters on the pastel. A hairline dark outline keeps the
- *  fill crisp white. */
+ *  The title fills most of the pill height; width follows each word. TextShape has
+ *  no unlit flag, so a near-black outline keeps the white fill readable on yellow. */
+const TITLE_FONT = SIGN_TITLE_FONT
+const SUB_FONT = 8
+const COUNT_FONT = SIGN_COUNT_FONT
+const TITLE_Y_M = 0
+const SUB_Y_M = -2
+const TITLE_BOX_H = SIGN_H_M * 0.95
+const SUB_BOX_H = 1.2
+const SUB_BOX_W = 20
+const COUNT_BOX_W = SIGN_BADGE_W_M * 0.9
+const COUNT_BOX_H = SIGN_BADGE_H_M * 0.9
 const TITLE_INK = Color4.create(1, 1, 1, 1)
-const TITLE_OUTLINE = Color4.create(0.08, 0.07, 0.08, 1)
-const TITLE_OUTLINE_W = 0.08
+const TITLE_OUTLINE = Color4.create(0.04, 0.03, 0.04, 1)
+const TITLE_OUTLINE_W = 0.18
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
@@ -135,8 +132,9 @@ function laySigns(): void {
     const ink = TITLE_INK
     const slab = plateMat(display)
     const lip = plateMat(Color4.create(display.r * 0.55, display.g * 0.55, display.b * 0.55, 1))
-    pill(root, SIGN_W_M + SIGN_LIP_PAD_W, SIGN_H_M + SIGN_LIP_PAD_H, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
-    pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
+    const width = signPlateWidth(teamTitle(m.id))
+    pill(root, width + SIGN_LIP_PAD_W, SIGN_H_M + SIGN_LIP_PAD_H, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
+    pill(root, width, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const title = add(root, Vector3.create(0, TITLE_Y_M, face), Vector3.One())
     TextShape.create(title, {
       text: teamTitle(m.id),
@@ -145,8 +143,9 @@ function laySigns(): void {
       textColor: ink,
       outlineWidth: TITLE_OUTLINE_W,
       outlineColor: TITLE_OUTLINE,
+      textAlign: TextAlignMode.TAM_MIDDLE_CENTER,
       textWrapping: false,
-      width: SIGN_W_M - 4,
+      width,
       height: TITLE_BOX_H,
     })
     const sub = add(root, Vector3.create(0, SUB_Y_M, face), Vector3.One())
@@ -169,7 +168,9 @@ function laySigns(): void {
       fontSize: COUNT_FONT,
       fontSrc: 'Lilita One',
       textColor: Color4.create(0.1, 0.06, 0.07, 1),
-      outlineWidth: 0,
+      outlineWidth: 0.06,
+      outlineColor: Color4.create(0.98, 0.97, 0.94, 1),
+      textAlign: TextAlignMode.TAM_MIDDLE_CENTER,
       textWrapping: false,
       width: COUNT_BOX_W,
       height: COUNT_BOX_H,

@@ -128,10 +128,22 @@ export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side.
  *  Far enough that a sign at the default overview scale stays off the lobby tiles. */
 export const SIGN_CLEAR_M = 10
-/** One short team word (RED / BLUE / GREEN / YELLOW) with side margins inside the pill. */
-export const SIGN_W_M = 32
-/** Original pills were 58 × 8.6. Keep that aspect after the width shrink. */
-export const SIGN_H_M = 8.6 * (SIGN_W_M / 58)
+/** Reference width used only to keep the short 58×8.6 pill height after the earlier shrink. */
+export const SIGN_REF_W_M = 32
+/** Shared height of every team pill. Width now follows the word, not this height's old aspect. */
+export const SIGN_H_M = 8.6 * (SIGN_REF_W_M / 58)
+/** SDK TextShape: fontSize 10 is 1 m tall. Titles fill most of the pill height. */
+export const SIGN_TITLE_FONT = 38
+/** Lilita One caps are fairly wide; this is the estimated width of one letter as a fraction of cap height. */
+const SIGN_TITLE_CHAR = 0.72
+/** Modest side padding around the word, in metres. */
+const SIGN_TITLE_PAD_M = 0.42 * SIGN_H_M
+/** Plate width for one team word, tight around the letters plus side padding. */
+export function signPlateWidth(label: string): number {
+  const fontM = SIGN_TITLE_FONT / 10
+  const textW = Math.max(1, label.length) * fontM * SIGN_TITLE_CHAR
+  return textW + SIGN_TITLE_PAD_M * 2
+}
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
 /** World scale at that default framing. The wider pill stays about a quarter of the overview. */
@@ -152,11 +164,13 @@ export const SIGN_PLATE_DEPTH_M = 0.7
 export const SIGN_LIP_Z = 0.18
 export const SIGN_LIP_DEPTH_M = 0.55
 /** Extra width and height of the dark rim vs the colored plate. 1.5× the first rim (0.7 / 0.55). */
-export const SIGN_LIP_PAD_W = 1.05 * (SIGN_W_M / 58)
-export const SIGN_LIP_PAD_H = 0.825 * (SIGN_W_M / 58)
-export const SIGN_BADGE_W_M = 6.4 * (SIGN_W_M / 58)
-export const SIGN_BADGE_H_M = 3.4 * (SIGN_W_M / 58)
-export const SIGN_BADGE_GAP_M = 0.5 * (SIGN_W_M / 58)
+export const SIGN_LIP_PAD_W = 1.05 * (SIGN_REF_W_M / 58)
+export const SIGN_LIP_PAD_H = 0.825 * (SIGN_REF_W_M / 58)
+/** Vote-count chip, sized so a two-digit number fills most of it. */
+export const SIGN_BADGE_W_M = 4.6
+export const SIGN_BADGE_H_M = 2.4
+export const SIGN_BADGE_GAP_M = 0.5 * (SIGN_REF_W_M / 58)
+export const SIGN_COUNT_FONT = 18
 
 /** Player-facing name. Internal ids stay `pvp` / `pvb` / `bases`. */
 export function modeTitle(id: string): string {

@@ -7,8 +7,8 @@ import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPl
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -487,20 +487,36 @@ if (tickTintsFn.includes('layTileFrame') || tickTintsFn.includes('TILE_FRAME') |
   console.error('✗ the tile frame should stay visible, not be scaled away with the vote tint')
   process.exit(1)
 }
-if (!lobbySrc.includes('TITLE_FONT = 45 * SIGN_TYPE_SCALE') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('TITLE_INK') || !lobbySrc.includes('Color4.create(1, 1, 1, 1)') || !lobbySrc.includes('outlineWidth: TITLE_OUTLINE_W') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
-  console.error('✗ titles should be one scaled white line with a hairline outline, and scale with the overview zoom')
+if (!lobbySrc.includes('TITLE_FONT = SIGN_TITLE_FONT') || !lobbySrc.includes('signFaceZ()') || !lobbySrc.includes('signPlateWidth(teamTitle(m.id))') || !lobbySrc.includes('TITLE_INK') || !lobbySrc.includes('Color4.create(1, 1, 1, 1)') || !lobbySrc.includes('outlineWidth: TITLE_OUTLINE_W') || lobbySrc.includes('modeTitleLines') || lobbySrc.includes('overviewSignScale()') === false) {
+  console.error('✗ titles should be one tight white line with a dark outline, and scale with the overview zoom')
+  process.exit(1)
+}
+if (!lobbySrc.includes('TITLE_OUTLINE_W = 0.18') || !lobbySrc.includes('Color4.create(0.04, 0.03, 0.04, 1)')) {
+  console.error('✗ title ink needs a near-black outline so white letters stay readable on yellow')
   process.exit(1)
 }
 if (!lobbySrc.includes('TITLE_INK') || lobbySrc.split('textColor: ink').length - 1 < 2) {
   console.error('✗ title and subtitle should use the per-mode pill text color, white on every sign including Paint Limit')
   process.exit(1)
 }
-if (Math.abs(SIGN_LIP_PAD_W - 1.05 * SIGN_W_M / 58) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825 * SIGN_W_M / 58) > 1e-6 || !lobbySrc.includes('SIGN_W_M + SIGN_LIP_PAD_W') || !lobbySrc.includes('SIGN_H_M + SIGN_LIP_PAD_H')) {
+if (Math.abs(SIGN_LIP_PAD_W - 1.05 * SIGN_REF_W_M / 58) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825 * SIGN_REF_W_M / 58) > 1e-6 || !lobbySrc.includes('width + SIGN_LIP_PAD_W') || !lobbySrc.includes('SIGN_H_M + SIGN_LIP_PAD_H')) {
   console.error(`✗ the dark sign rim should keep the original proportions, got ${SIGN_LIP_PAD_W} × ${SIGN_LIP_PAD_H}`)
   process.exit(1)
 }
-if (SIGN_W_M < 26 || SIGN_W_M > 40 || Math.abs(SIGN_H_M - 8.6 * SIGN_W_M / 58) > 1e-6) {
-  console.error(`✗ plate should keep the original 58×8.6 aspect at the new width, got ${SIGN_W_M}×${SIGN_H_M}`)
+if (Math.abs(SIGN_H_M - 8.6 * SIGN_REF_W_M / 58) > 1e-6 || SIGN_TITLE_FONT / 10 < SIGN_H_M * 0.75) {
+  console.error(`✗ pills should stay short and the title should fill most of the height, got h=${SIGN_H_M} font=${SIGN_TITLE_FONT}`)
+  process.exit(1)
+}
+const redW = signPlateWidth('RED')
+const blueW = signPlateWidth('BLUE')
+const greenW = signPlateWidth('GREEN')
+const yellowW = signPlateWidth('YELLOW')
+if (!(redW < blueW && blueW < greenW && greenW < yellowW) || yellowW >= 26 || redW < SIGN_H_M + 1) {
+  console.error(`✗ each pill should hug its word, got RED=${redW.toFixed(2)} BLUE=${blueW.toFixed(2)} GREEN=${greenW.toFixed(2)} YELLOW=${yellowW.toFixed(2)}`)
+  process.exit(1)
+}
+if (SIGN_COUNT_FONT / 10 < SIGN_BADGE_H_M * 0.7 || SIGN_BADGE_H_M < 2 || SIGN_BADGE_H_M > 3.2) {
+  console.error(`✗ the vote-count chip should be large enough to read, got ${SIGN_BADGE_H_M} font ${SIGN_COUNT_FONT}`)
   process.exit(1)
 }
 const atRef = signZoomScale(SIGN_ZOOM_REF)
@@ -579,7 +595,7 @@ if (Math.abs(blueSign.x - (eastEdge + SIGN_CLEAR_M)) > 0.01 || blueSign.y !== BA
   console.error(`✗ the BLUE sign should sit 10 m past the east edge at base+22, got ${blueSign.x}, ${blueSign.y}`)
   process.exit(1)
 }
-const signSpan = SIGN_W_M * SIGN_ORTHO_AT_REF / 2
+const signSpan = signPlateWidth('YELLOW') * SIGN_ORTHO_AT_REF / 2
 if (Math.hypot(blueSign.x - redSign.x, blueSign.z - redSign.z) <= signSpan * 2) {
   console.error('✗ the red and blue signs overlap in the default overview')
   process.exit(1)
