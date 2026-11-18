@@ -78,14 +78,16 @@ const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 // pill-shaped dark semi-transparent track (PANEL_BG_SEMI), uniform border padding, fully rounded
 // outer ends (radius = half the fill height); red/white/blue meet on straight vertical edges.
 // No texture, no label.
-const BAR_W = 320
 const BAR_BORDER = 3
 const BAR_FILL_H = 18
+/** In-match top row: eye + timer + mute, matching the lobby desktop order. */
+const MATCH_TIMER_W = 200
+const MATCH_TOP_W = TOP_BTN + TOP_GAP + MATCH_TIMER_W + TOP_GAP + TOP_BTN
+const BAR_W = MATCH_TOP_W
 const BAR_INNER_W = BAR_W - BAR_BORDER * 2
-/** Mobile top row: star | mute | timer | eye; the score bar spans the whole row there. */
-const MOBILE_TIMER_W = 200
-const MOBILE_TOP_W = 68 * 3 + MOBILE_TIMER_W + 8 * 3 // = TOP_BTN * 3 + timer + TOP_GAP * 3
-const barW = () => isMobile() ? MOBILE_TOP_W : BAR_W
+const MOBILE_TIMER_W = MATCH_TIMER_W
+const MOBILE_TOP_W = 68 * 3 + MOBILE_TIMER_W + 8 * 3 // BASES charge meters still span the old mobile row
+const barW = () => MATCH_TOP_W
 const barInnerW = () => barW() - BAR_BORDER * 2
 const BAR_INNER_R = BAR_FILL_H / 2
 const BAR_CAP = BAR_FILL_H / 2 // each end always shows its team colour (rounded cap) so nothing sits outside the bar at 0%
@@ -230,29 +232,43 @@ function TeamScorePill(props: {
   fontSize?: number
   leaders?: number[]
   showStar?: boolean
+  showUnpainted?: boolean
 }) {
-  const fracs = segmentFracs(props.pcts)
+  const teamFracs = props.showUnpainted
+    ? props.pcts.map(p => Math.max(0, p) / 100)
+    : segmentFracs(props.pcts)
+  const whiteFrac = props.showUnpainted
+    ? Math.max(0, 1 - teamFracs.reduce((a, b) => a + b, 0))
+    : 0
+  const pieces: { team: number; frac: number; pct: number }[] = []
+  for (let i = 0; i < teamFracs.length; i++) {
+    if (props.showUnpainted && teamFracs[i] <= 0.0001) continue
+    pieces.push({ team: PLAYING_TEAMS[i] ?? 0, frac: teamFracs[i], pct: props.pcts[i] ?? 0 })
+  }
+  if (whiteFrac > 0.0001) pieces.push({ team: Team.None, frac: whiteFrac, pct: 0 })
   const innerR = Math.max(1, (props.height - props.border * 2) / 2)
   const innerW = Math.max(1, props.width - props.border * 2)
   const f = props.fontSize ?? 12
+  const uniqueLead = (props.leaders ?? []).length === 1 ? props.leaders![0] : -1
   return (
     <UiEntity uiTransform={{ width: props.width, height: props.height, flexShrink: 0, borderRadius: props.height / 2, padding: props.border }} uiBackground={{ color: props.track }}>
       <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'row', borderRadius: innerR }} uiBackground={{ color: props.innerBg }}>
-        {PLAYING_TEAMS.map((team, i) => {
-          const w = fracs[i] * innerW
-          const first = i === 0, last = i === PLAYING_TEAMS.length - 1
-          const isLead = (props.leaders ?? []).includes(team)
-          const label = `${Math.round(props.pcts[i])}%`
-          const showLbl = !!props.showLabels && w >= textWSafe(label, f) + 8
-          const showStar = !!props.showStar && isLead && !showLbl && w >= STAR_SIZE + STAR_PAD * 2
-          const fill = barColor(team)
+        {pieces.map((piece, i) => {
+          const w = piece.frac * innerW
+          const first = i === 0, last = i === pieces.length - 1
+          const team = piece.team
+          const isLead = team !== Team.None && (props.leaders ?? []).includes(team)
+          const label = `${Math.round(piece.pct)}%`
+          const showLbl = !!props.showLabels && team !== Team.None && w >= textWSafe(label, f) + 8
+          const showStar = !!props.showStar && uniqueLead === team && !showLbl && w >= STAR_SIZE + STAR_PAD * 2
+          const fill = team === Team.None ? Color4.White() : barColor(team)
           // Caps are separate circles on the outer ends only, so a mid-join never
           // inherits a rounded corner (a single borderRadius on the last segment
           // would curve into the neighbour).
           return (
             <UiEntity uiTransform={{
               width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center',
-              ...(isLead ? { borderWidth: 2, borderColor: Color4.create(1, 0.92, 0.4, 1) } : {}),
+              ...(isLead && !props.showUnpainted ? { borderWidth: 2, borderColor: Color4.create(1, 0.92, 0.4, 1) } : {}),
             }}>
               {first && last && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, right: 0, top: 0, bottom: 0 }, borderRadius: innerR }} uiBackground={{ color: fill }} />}
               {!(first && last) && first && <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, top: 0, bottom: 0 }, width: innerR * 2, borderRadius: innerR }} uiBackground={{ color: fill }} />}
@@ -684,14 +700,11 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
-            {/* Mobile: separate eye | timer | star mute buttons. Desktop: single clock panel (star + eye left, mute right) as in 36507d7. */}
+            {/* Match (mobile + desktop): eye | timer | mute. Lobby keeps its existing layouts. */}
             {isMobile() ? (
+            lobby ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
               <UiEntity uiTransform={{ flexDirection: 'row', margin: { right: TOP_GAP } }}>
-                {lobby ? null : <TileButton id="ui_top_star" onPress={toggleLeaderboard} marginRight={TOP_GAP}>
-                  <UiEntity uiTransform={{ width: 30, height: 30, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC }, color: SUMMARY_INK }} />
-                </TileButton>}
                 <TileButton id="ui_top_mute" onPress={toggleMusic}>
                   <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
                     uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
@@ -699,7 +712,7 @@ export const uiMenu = () => (
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: lobby ? Math.min(lobbyPillW, Math.max(MOBILE_TIMER_W, canvasW - 120)) : MOBILE_TIMER_W, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+                  width: Math.min(lobbyPillW, Math.max(MOBILE_TIMER_W, canvasW - 120)), height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
                   // Key-tile frame: light rim, dark ring (padding), light inner panel filling the rest.
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
                 }}
@@ -707,7 +720,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={lobby ? 16 : 36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: lobby ? 32 : '100%' }} />
+                  <Label value={hudClockText(secs)} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 32 }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
@@ -715,6 +728,30 @@ export const uiMenu = () => (
                 <OverviewEye />
               </UiEntity>
             </UiEntity>
+            ) : (
+            <UiEntity uiTransform={{ width: MATCH_TOP_W, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <OverviewRow />
+                <OverviewEye />
+              </UiEntity>
+              <UiEntity
+                uiTransform={{
+                  width: MATCH_TIMER_W, height: TOP_BTN, margin: { left: TOP_GAP, right: TOP_GAP }, borderRadius: HOTBAR_RADIUS,
+                  borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
+                }}
+                uiBackground={{ color: HOTBAR_TILE_BG }}
+              >
+                <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
+                  uiBackground={{ color: SUMMARY_CARD_BG }}>
+                  <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                </UiEntity>
+              </UiEntity>
+              <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+              </TileButton>
+            </UiEntity>
+            )
             ) : lobby ? (
             <UiEntity uiTransform={{ width: lobbyPillW + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
@@ -741,15 +778,14 @@ export const uiMenu = () => (
               </TileButton>
             </UiEntity>
             ) : (
-            <UiEntity uiTransform={{ width: 200, flexDirection: 'column', alignItems: 'center' }}>
-              <OverviewRow desktop />
-              {/* Desktop eye: its own key-tile button just LEFT of the timer (same frame as the overview sub-buttons). */}
-              <UiEntity uiTransform={{ positionType: 'absolute', position: { top: 0, right: 200 + TOP_GAP } }}>
+            <UiEntity uiTransform={{ width: MATCH_TOP_W, height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <OverviewRow desktop besideEye />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: 200, height: 68,
+                  width: MATCH_TIMER_W, height: 68, margin: { left: TOP_GAP, right: TOP_GAP },
                   justifyContent: 'center', alignItems: 'center', borderRadius: HOTBAR_RADIUS,
                   // Hotbar key-tile frame: light rim (same width/colour/radius as the tiles) around a dark ring.
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
@@ -759,39 +795,14 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <Label value={hudClockText(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
-                {/* Star icon on the left, mirror of mute on the right (same size/top). */}
-                <UiEntity
-                  uiTransform={{
-                    width: 21, height: 21,
-                    positionType: 'absolute', position: { top: 20, left: 19 },
-                    pointerFilter: 'block',
-                  }}
-                  uiBackground={{
-                    textureMode: 'stretch',
-                    texture: { src: STAR_SRC },
-                    color: SUMMARY_INK,
-                  }}
-                  onMouseDown={toggleLeaderboard}
-                />
-                {/* Mute icon docked inside the timer panel on the right. No pill
-                    background — just the icon sitting on the panel. */}
-                <UiEntity
-                  uiTransform={{
-                    width: 21, height: 21,
-                    positionType: 'absolute', position: { top: 20, right: 19 },
-                    pointerFilter: 'block',
-                  }}
-                  uiBackground={{
-                    textureMode: 'stretch',
-                    texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' },
-                    color: SUMMARY_INK,
-                  }}
-                  onMouseDown={toggleMusic}
-                />
               </UiEntity>
+              <TileButton id="ui_match_mute" onPress={toggleMusic}>
+                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+              </TileButton>
             </UiEntity>
             )}
-            {/* Territory bar: four team segments, leader outlined. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
+            {/* Territory bar: team colours plus a white unpainted remainder. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
             {lobby || isBalloonRound() ? null : isBasesRound() ? (
               getSummaryProgress() >= 0 ? <UiEntity uiTransform={{ width: chargeHudW(), height: isMobile() ? 58 : 66, margin: { top: 6 } }} /> : <BasesChargeHud />
             ) : getSummaryProgress() >= 0 || standingsOpen ? (
@@ -802,7 +813,7 @@ export const uiMenu = () => (
               const leaders = leadingTeams(cov)
               return (
                 <UiEntity uiTransform={{ margin: { top: 6 }, pointerFilter: 'block' }} onMouseDown={toggleStandings}>
-                  <TeamScorePill pcts={[pct.red, pct.blue, pct.green, pct.yellow]} width={barW()} height={BAR_FILL_H + BAR_BORDER * 2} border={BAR_BORDER} track={BAR_TRACK} innerBg={PANEL_LIGHT} showLabels={true} fontSize={isMobile() ? 11 : 12} leaders={leaders} showStar={true} />
+                  <TeamScorePill pcts={[pct.red, pct.blue, pct.green, pct.yellow]} width={barW()} height={BAR_FILL_H + BAR_BORDER * 2} border={BAR_BORDER} track={BAR_TRACK} innerBg={PANEL_LIGHT} showUnpainted={true} showStar={true} leaders={leaders} />
                 </UiEntity>
               )
             })()}
@@ -812,8 +823,8 @@ export const uiMenu = () => (
     })()}
 
     {/* ─── Leaderboard popup: centered modal ────────────────────────
-        Renders when leaderboardOpen is true. Star button in the timer
-        panel toggles this + fires requestLeaderboard for a fresh snapshot. */}
+        Renders when leaderboardOpen is true. The in-match timer no longer
+        has a star button; standings still open from the score bar. */}
     {leaderboardOpen && (() => {
       // Mobile: top 10 only (fits without scrolling), no backdrop; tapping the board or its X closes it.
       const mob = isMobile()

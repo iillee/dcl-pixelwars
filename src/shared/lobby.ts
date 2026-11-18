@@ -128,8 +128,8 @@ export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the mode sign sits, on the outer side.
  *  Far enough that a sign at the default overview scale stays off the lobby tiles. */
 export const SIGN_CLEAR_M = 10
-/** One line of "BOT INVASION", the longest title, with side margins inside the pill. */
-export const SIGN_W_M = 58
+/** One short team word (RED / BLUE / GREEN / YELLOW) with side margins inside the pill. */
+export const SIGN_W_M = 32
 export const SIGN_H_M = 8.6
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29

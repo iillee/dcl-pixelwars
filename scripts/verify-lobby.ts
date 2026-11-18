@@ -499,8 +499,8 @@ if (Math.abs(SIGN_LIP_PAD_W - 1.05) > 1e-6 || Math.abs(SIGN_LIP_PAD_H - 0.825) >
   console.error(`✗ the dark sign rim should be a little thicker (1.05 × 0.825), got ${SIGN_LIP_PAD_W} × ${SIGN_LIP_PAD_H}`)
   process.exit(1)
 }
-if (SIGN_W_M < 40 || SIGN_H_M > 12) {
-  console.error(`✗ plate should be a wide single-line pill, got ${SIGN_W_M}×${SIGN_H_M}`)
+if (SIGN_W_M < 26 || SIGN_W_M > 40 || SIGN_H_M < 6 || SIGN_H_M > 12) {
+  console.error(`✗ plate should be a short single-line team pill, got ${SIGN_W_M}×${SIGN_H_M}`)
   process.exit(1)
 }
 const atRef = signZoomScale(SIGN_ZOOM_REF)
