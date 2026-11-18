@@ -154,7 +154,10 @@ export function tallyTeams(present: string[], _now?: number): TeamCounts & { vot
   for (const id of voterIds(present)) {
     const team = countedTeam(id)
     if (!team) continue
-    if (team === 1) counts.red++; else counts.blue++
+    if (team === 1) counts.red++
+    else if (team === 2) counts.blue++
+    else if (team === 3) counts.green++
+    else if (team === 4) counts.yellow++
     voted.add(id)
   }
   return { ...counts, voted }
@@ -213,7 +216,7 @@ export function stepLobby(s: LobbyClock, present: string[], now: number): { next
     return { next, log: '' }
   }
   const teams = tallyTeams(voters, now)
-  const any = teams.red + teams.blue > 0
+  const any = teams.red + teams.blue + teams.green + teams.yellow > 0
   if (next.countdownEnds > 0) {
     if (any) { next.hadVotes = true; next.emptySince = 0 }
     else if (next.hadVotes) {

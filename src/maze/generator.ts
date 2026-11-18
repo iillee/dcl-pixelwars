@@ -102,8 +102,7 @@ export function getPlacedTilesInOrder(): Placed[] {
 
 /**
  * Five tiles. A cross at the center opens north, east, south, and west.
- * Pixelwars, Bases, Prototype, and Balloon Battle ends sit on those edges.
- * Bot Invasion stays in the registry and can take the east tile back.
+ * Team ends sit on those edges: RED west, BLUE east, YELLOW north, GREEN south.
  * The center is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {
@@ -111,8 +110,7 @@ export function placeLobbyLayout(): Placed[] {
   resetGrid()
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
-  // East-west corridor. A four-way cross would open north and south into the void.
-  place('straight', 1, LOBBY_CROSS.x, LOBBY_CROSS.z)
+  place('cross', 0, LOBBY_CROSS.x, LOBBY_CROSS.z)
   for (const m of LOBBY_TEAMS) {
     const r = m.cell.x < LOBBY_CROSS.x ? 1 : m.cell.x > LOBBY_CROSS.x ? 3 : m.cell.z > LOBBY_CROSS.z ? 2 : 0
     place('end', r, m.cell.x, m.cell.z)
@@ -472,18 +470,32 @@ export function mirrorCell(x: number, z: number): [number, number] {
 
 const BASE_X0 = Math.floor(GRID_W / 2) - Math.floor(SKY_BASE_SIZE / 2)
 
-/** Grid cells of a team's base. Bases-only: RED = SW corner tile (0,0),
- *  BLUE = NE corner tile (7,7). Full mode: RED mid-south, BLUE mid-north. */
+/** Corner (or mid-edge) origin of a team's spawn region. */
+export function spawnAnchor(team: number): [number, number] {
+  const size = SKY_BASE_SIZE
+  const m = SKY_BASE_MARGIN
+  if (SKY_BASES_ONLY) {
+    if (team === 2) return [GRID_W - size - m, GRID_H - size - m]
+    if (team === 3) return [GRID_W - size - m, m]
+    if (team === 4) return [m, GRID_H - size - m]
+    return [m, m]
+  }
+  if (team === 2) return [BASE_X0, GRID_H - size - m]
+  if (team === 3) return [GRID_W - size - m, BASE_X0]
+  if (team === 4) return [m, BASE_X0]
+  return [BASE_X0, m]
+}
+
+/** Grid cells of a team's base. Bases-only: RED = SW (0,0), BLUE = NE,
+ *  GREEN = SE, YELLOW = NW. Full mode: mid-south / mid-north / mid-east / mid-west.
+ *  Only RED and BLUE are locked paint bases today; GREEN and YELLOW use these
+ *  cells as spawn anchors (and the nearest floor if the corner is empty). */
 export function baseCells(team: number): Array<[number, number]> {
   const out: Array<[number, number]> = []
-  const x0 = SKY_BASES_ONLY ? SKY_BASE_MARGIN : BASE_X0
+  if (team !== 1 && team !== 2 && team !== 3 && team !== 4) return out
+  const [x0, z0] = spawnAnchor(team)
   for (let i = 0; i < SKY_BASE_SIZE; i++) {
-    for (let j = 0; j < SKY_BASE_SIZE; j++) {
-      // Bases-only: RED in the SW corner, BLUE its 180° image in the NE corner.
-      const z0 = SKY_BASE_MARGIN
-      const x = x0 + i, z = z0 + j
-      out.push(team === 1 ? [x, z] : mirrorCell(x, z))
-    }
+    for (let j = 0; j < SKY_BASE_SIZE; j++) out.push([x0 + i, z0 + j])
   }
   return out
 }
@@ -512,10 +524,27 @@ export function baseTeamOfCellId(id: string): number {
 export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
   const mid = (GRID_W - 1) / 2
   const dist = (c: [number, number]) => Math.abs(c[0] - mid) + Math.abs(c[1] - mid)
-  const dMin = Math.min(...baseCells(team).map(dist))
-  // Average the nearest tiles: edge-centred bases have two (e.g. RED (1,3)
-  // and (1,4)), and their shared edge sits on the ring walkway.
-  const near = baseCells(team).filter(c => dist(c) === dMin)
+  const placed = getPlacedTilesInOrder()
+  const hasFloor = (c: [number, number]) => placed.some(p => p.x === c[0] && p.z === c[1])
+  const anchors = baseCells(team)
+  const usable = anchors.filter(c => placed.length === 0 || hasFloor(c))
+  let near: Array<[number, number]>
+  if (usable.length > 0) {
+    const dMin = Math.min(...usable.map(dist))
+    near = usable.filter(c => dist(c) === dMin)
+  } else if (placed.length > 0) {
+    const [ax, az] = spawnAnchor(team)
+    let bestD = Infinity
+    const best: Array<[number, number]> = []
+    for (const p of placed) {
+      const d = Math.abs(p.x - ax) + Math.abs(p.z - az)
+      if (d < bestD) { bestD = d; best.length = 0; best.push([p.x, p.z]) }
+      else if (d === bestD) best.push([p.x, p.z])
+    }
+    near = best
+  } else {
+    near = anchors.length ? anchors : [spawnAnchor(team)]
+  }
   const cx = near.reduce((a, c) => a + c[0] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
   const cz = near.reduce((a, c) => a + c[1] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
   const y = BASE_Y + 1.5 // walkable slab top is +0.5

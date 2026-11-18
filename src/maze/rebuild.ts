@@ -31,7 +31,7 @@ import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { clearTeleportOrbs, spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
-import { LOBBY_MODES } from '../shared/lobby'
+import { LOBBY_TEAMS } from '../shared/lobby'
 import { SeedHolder, seedHolder } from '../shared/components'
 import { ServerWorld, isStaleWorld, parseWorldLayout, shouldRebuildWorld } from '../shared/worldState'
 
@@ -87,8 +87,7 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   if (nextLobby) {
     layoutKind = 'lobby'
     placeLobbyLayout()
-    const earlyEnd = (x: number, z: number) => LOBBY_MODES.some(m =>
-      m.placed && (m.id === 'prototype' || m.id === 'balloon') && m.cell.x === x && m.cell.z === z)
+    const earlyEnd = (x: number, z: number) => LOBBY_TEAMS.some(m => m.cell.x === x && m.cell.z === z)
     // Cross, Prototype north, and Balloon Battle south are full size before
     // anyone is moved onto them. Team Fight and Bot Fight ends still grow in.
     const solid = getPlacedTilesInOrder().filter(p =>
@@ -116,8 +115,7 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
 
   if (nextLobby) {
     currentSeed = seed
-    const earlyEnd = (x: number, z: number) => LOBBY_MODES.some(m =>
-      m.placed && (m.id === 'prototype' || m.id === 'balloon') && m.cell.x === x && m.cell.z === z)
+    const earlyEnd = (x: number, z: number) => LOBBY_TEAMS.some(m => m.cell.x === x && m.cell.z === z)
     const arms = getPlacedTilesInOrder().filter(p =>
       p.type === 'end' && !earlyEnd(p.x, p.z))
     spawnQueue = arms.map((p, i) => ({ p, delay: i * STAGGER }))

@@ -2,18 +2,18 @@
  * Lobby layout and team-choice rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * The built floor is three tiles: an east-west corridor through the old
- * lobby hub, RED on the west end, and BLUE on the east end. Standing on a
- * team tile chooses that side for the next Classic Pixelwars round.
+ * The built floor is the four-arm cross through the lobby hub: RED west,
+ * BLUE east, YELLOW north, and GREEN south. Standing on a team tile
+ * chooses that side for the next Classic Pixelwars round.
  * Alternate modes stay in the registry, unplaced, so their code remains
  * reachable later. Bot Invasion, Color Garden, and Pot Hunt stay parked too.
  */
 
-import { TEAM_HEX } from './team'
+import { TEAM_HEX, emptyTeamCounts as emptyTeamTally, isPlayingTeam, smallestTeam, addTeamCount, type TeamCounts as SharedTeamCounts } from './team'
 
 export type ModeId = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' | 'garden' | 'pots'
-export type TeamId = 'red' | 'blue'
-export type TeamChoice = 1 | 2
+export type TeamId = 'red' | 'blue' | 'green' | 'yellow'
+export type TeamChoice = 1 | 2 | 3 | 4
 export type TeamRule = 'balance' | 'humans-together'
 export type LobbyPhase = 'match' | 'summary' | 'lobby' | 'idle'
 
@@ -78,7 +78,7 @@ export const LOBBY_MODES: ModeDef[] = [
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
-/** West RED (team 1) and east BLUE (team 2). Exact TEAM_HEX colours. */
+/** West RED, east BLUE, north YELLOW, south GREEN. Exact TEAM_HEX colours. */
 export type TeamDef = {
   id: TeamId
   team: TeamChoice
@@ -91,6 +91,8 @@ export type TeamDef = {
 export const LOBBY_TEAMS: TeamDef[] = [
   { id: 'red', team: 1, label: 'RED', cell: { x: 1, z: 2 }, color: rgbFromHex(TEAM_HEX[1]), hex: TEAM_HEX[1] },
   { id: 'blue', team: 2, label: 'BLUE', cell: { x: 3, z: 2 }, color: rgbFromHex(TEAM_HEX[2]), hex: TEAM_HEX[2] },
+  { id: 'yellow', team: 4, label: 'YELLOW', cell: { x: 2, z: 3 }, color: rgbFromHex(TEAM_HEX[4]), hex: TEAM_HEX[4] },
+  { id: 'green', team: 3, label: 'GREEN', cell: { x: 2, z: 1 }, color: rgbFromHex(TEAM_HEX[3]), hex: TEAM_HEX[3] },
 ]
 
 export function lobbyTeamById(id: string): TeamDef | undefined {
@@ -98,17 +100,15 @@ export function lobbyTeamById(id: string): TeamDef | undefined {
 }
 
 export function teamTitle(id: string): string {
-  if (id === 'red') return 'RED'
-  if (id === 'blue') return 'BLUE'
-  return ''
+  return LOBBY_TEAMS.find(t => t.id === id)?.label ?? ''
 }
 
 export function teamIdOf(team: number): TeamId | '' {
-  return team === 1 ? 'red' : team === 2 ? 'blue' : ''
+  return (LOBBY_TEAMS.find(t => t.team === team)?.id ?? '') as TeamId | ''
 }
 
 export function teamFromId(id: string): TeamChoice | 0 {
-  return id === 'red' ? 1 : id === 'blue' ? 2 : 0
+  return LOBBY_TEAMS.find(t => t.id === id)?.team ?? 0
 }
 
 /** End tiles actually built on the lobby floor. */
@@ -482,16 +482,16 @@ export function everyPresentInZone(present: string[], voted: Set<string>): boole
   return present.every(id => voted.has(id))
 }
 
-export type TeamCounts = { red: number; blue: number }
+export type TeamCounts = SharedTeamCounts
 
 export function emptyTeamCounts(): TeamCounts {
-  return { red: 0, blue: 0 }
+  return emptyTeamTally()
 }
 
 /**
  * Apply lobby team picks at round start. Chosen players keep their colour.
- * Anyone who did not pick goes to the current smaller team; a tie prefers
- * red so the result is deterministic. All-one-side is allowed.
+ * Anyone who did not pick goes to the current smallest team; a tie prefers
+ * the lower team id (red, then blue, green, yellow). All-one-side is allowed.
  */
 export function assignLobbyTeams(
   present: string[],
@@ -499,7 +499,7 @@ export function assignLobbyTeams(
 ): Array<{ userId: string; team: TeamChoice }> {
   const pick = new Map<string, TeamChoice>()
   for (const [id, team] of chosen) {
-    if (team === 1 || team === 2) pick.set(id.toLowerCase(), team)
+    if (isPlayingTeam(team)) pick.set(id.toLowerCase(), team)
   }
   const seen = new Set<string>()
   const ids: string[] = []
@@ -509,20 +509,19 @@ export function assignLobbyTeams(
     seen.add(key)
     ids.push(id)
   }
-  let red = 0
-  let blue = 0
+  const counts = emptyTeamCounts()
   const assigned = new Map<string, TeamChoice>()
   for (const id of ids) {
     const team = pick.get(id.toLowerCase())
     if (!team) continue
     assigned.set(id, team)
-    if (team === 1) red++; else blue++
+    addTeamCount(counts, team)
   }
   for (const id of ids) {
     if (assigned.has(id)) continue
-    const team: TeamChoice = red <= blue ? 1 : 2
+    const team = smallestTeam(counts) as TeamChoice
     assigned.set(id, team)
-    if (team === 1) red++; else blue++
+    addTeamCount(counts, team)
   }
   return ids.map(userId => ({ userId, team: assigned.get(userId)! }))
 }

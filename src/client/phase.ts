@@ -66,7 +66,7 @@ export function myVote(): ModeId | TeamId | '' {
 }
 
 export function setMyVote(next: string): void {
-  mine = next === 'red' || next === 'blue' || next === 'pvp' || next === 'pvb' || next === 'bases' || next === 'prototype' || next === 'balloon' ? next : ''
+  mine = next === 'red' || next === 'blue' || next === 'green' || next === 'yellow' || next === 'pvp' || next === 'pvb' || next === 'bases' || next === 'prototype' || next === 'balloon' ? next : ''
 }
 
 /** present = players the server is scoring. feet = stored lobby samples. */
