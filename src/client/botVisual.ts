@@ -63,6 +63,10 @@ import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { applyBotBodyForTeam, clearBotBodyColor, onBotBodyThemeChange } from './botBody'
 import { teamPlatesHidden } from './nametags'
+import { resolveSupport } from '../shared/anvilSim'
+import { buildWalkableGraph, type WalkableGraph } from '../shared/mazeGraph'
+import { getPlacedTilesInOrder, type Placed } from '../maze/generator'
+import { TILES } from '../maze/tiles'
 
 const BODY = 'urn:decentraland:off-chain:base-avatars:BaseMale'
 const FACE = [
@@ -187,6 +191,7 @@ type LocalKnock = {
   force: V3
   forceLeft: number
   floorY: number | null
+  grounded: boolean
 }
 type VisualKind = 'ghost' | 'avatar'
 /** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
@@ -491,9 +496,26 @@ function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
   }
 }
 
+let knockMaze: { key: string; graph: WalkableGraph; rampTiles: Placed[]; tiles: Placed[] } | null = null
+
+/** Walkable graph for the local knock arc, so the predicted path rides ramps like the server. */
+function knockMazeWorld(): { graph: WalkableGraph; rampTiles: Placed[]; tiles: Placed[] } | null {
+  const tiles = getPlacedTilesInOrder()
+  if (!tiles.length) return null
+  const first = tiles[0], last = tiles[tiles.length - 1]
+  const key = tiles.length + ':' + first.x + ',' + first.z + ',' + first.y + ':' + last.x + ',' + last.z + ',' + last.y
+  if (knockMaze && knockMaze.key === key) return knockMaze
+  const graph = buildWalkableGraph(tiles)
+  knockMaze = { key, graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles }
+  return knockMaze
+}
+
+function clearKnockMaze(): void { knockMaze = null }
+
 function stepLocalKnock(rec: BotVisual, dt: number): void {
   const k = rec.localKnock
   if (!k) return
+  const world = knockMazeWorld()
   let left = Math.min(Number.isFinite(dt) ? dt : 0, 0.1)
   while (left > 1e-6) {
     const s = Math.min(left, 0.05)
@@ -504,13 +526,34 @@ function stepLocalKnock(rec: BotVisual, dt: number): void {
       k.vel.z += k.force.z * s
       k.forceLeft -= s
     }
+    const wasGrounded = k.grounded && k.vel.y <= 0
     k.vel.y -= BOT_GRAVITY * s
-    k.pos.x += k.vel.x * s
-    k.pos.y += k.vel.y * s
-    k.pos.z += k.vel.z * s
-    if (k.floorY !== null && k.pos.y <= k.floorY) {
-      k.pos.y = k.floorY
-      if (k.vel.y < 0) k.vel.y = 0
+    const nx = k.pos.x + k.vel.x * s
+    const ny = k.pos.y + k.vel.y * s
+    const nz = k.pos.z + k.vel.z * s
+    if (world) {
+      const hit = resolveSupport(world.graph, world.rampTiles, world.tiles, k.pos, nx, ny, nz, k.vel.y, wasGrounded)
+      if (Math.abs(hit.x - nx) > 1e-6) k.vel.x = 0
+      if (Math.abs(hit.z - nz) > 1e-6) k.vel.z = 0
+      k.pos.x = hit.x
+      k.pos.y = hit.y
+      k.pos.z = hit.z
+      k.vel.y = hit.velY
+      k.grounded = hit.grounded
+      if (k.grounded) k.floorY = hit.y
+    } else {
+      k.pos.x = nx
+      k.pos.y = ny
+      k.pos.z = nz
+      if (k.floorY !== null && k.pos.y <= k.floorY) {
+        k.pos.y = k.floorY
+        if (k.vel.y < 0) k.vel.y = 0
+        k.grounded = true
+      } else {
+        k.grounded = false
+      }
+    }
+    if (k.grounded) {
       const h = Math.hypot(k.vel.x, k.vel.z)
       const nh = Math.max(0, h - BOT_FRICTION * s)
       if (h > 1e-4) { k.vel.x *= nh / h; k.vel.z *= nh / h } else { k.vel.x = 0; k.vel.z = 0 }
@@ -547,6 +590,7 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
     force: { x: spec.forceDir.x * spec.force * u, y: spec.forceDir.y * spec.force * u, z: spec.forceDir.z * spec.force * u },
     forceLeft: spec.forceS,
     floorY: grounded ? rec.renderPos.y : null,
+    grounded,
   }
   rec.knockBlend = 0
   rec.snaps = []
@@ -572,10 +616,11 @@ export function initBotVisual(): void {
   })
   events.on('round:reset', ({ format }) => {
     setRoundFormat(format)
+    clearKnockMaze()
     clearAllBots()
   })
   events.on('round:clock', ({ format }) => { setRoundFormat(format) })
-  events.on('lobby:floor', () => { clearAllBots() })
+  events.on('lobby:floor', () => { clearKnockMaze(); clearAllBots() })
   // While a bot is in the round, tell the server where we stand so it can chase and aim.
   let aimClock = 0
   engine.addSystem((dt: number) => {

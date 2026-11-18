@@ -67,10 +67,14 @@ const RECOVER_UP = 2.5
 const WALL_OVER = 0.4
 /** A walkable node covers its own 2 m cell (centre to edge is 1 m). Past that is the wall margin. */
 const WALL_REACH = 1.05
-/** How close to a node still counts as on the cell for a drop lip. WALL_REACH
- *  (1.05) left a 5 cm shelf past the edge where a slow slide stayed grounded
- *  and parked, which looked like the anvil was stuck on the lip. */
-const LIP_REACH = 0.99
+/** How close to a node still counts as on the cell for a drop lip. The
+ *  walkable cell's edge is 1 m from its centre. 0.99 treated the seam
+ *  between two cells — including a ramp centreline — as a drop, so a
+ *  knock up a ramp fell through the mesh and popped at the top. 1.05 left
+ *  a 5 cm shelf past the edge where a slow slide looked stuck on the lip.
+ *  1.02 keeps the true edge (and a 2 cm epsilon for float error) without
+ *  that shelf. */
+const LIP_REACH = 1.02
 /** Subdivide a long XZ step so a fast glide, jump, or knock cannot skip a tile face. */
 const SWEEP_STEP = 0.45
 /** Snap up onto a slab only when already this close to the top. Mid-fall from well below must not be pulled back. */
@@ -90,6 +94,17 @@ export type SupportOpts = { mantle?: boolean }
 function tileSurfaceY(tile: Placed, x: number, z: number): number {
   const nodeY = TILES[tile.type].isRamp ? rampSurfaceY(tile, x, z) : tile.y + 0.55
   return nodeY + FLOOR_FROM_NODE
+}
+
+/** True when `fy` is this ramp's slope (or landing) at (x, z), not a flat neighbour. */
+function isRampSurface(rampTiles: Placed[], x: number, z: number, fy: number): boolean {
+  for (const t of rampTiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    if (Math.abs(rampSurfaceY(t, x, z) + FLOOR_FROM_NODE - fy) <= 0.2) return true
+  }
+  return false
 }
 
 /** Tile whose footprint contains (x, z) and whose slab could still contain a body at `y`.
@@ -244,6 +259,9 @@ function clampWall(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
  * a taller side), and stops a mid-air glide into a tile's vertical face. Snap up only
  * when already within SNAP_UP of the top (or SNAP_DOWN if still grounded), unless
  * `opts.mantle` is set for an inbound recovery glide, which may snap from MANTLE_UP.
+ * A knock already on (or just entering) a ramp follows that slope even when the
+ * hit's lift left wasGrounded false, or the rise in one substep is more than
+ * SNAP_UP — otherwise the body flies through the mesh and pops at the top.
  * Mid-fall from well below is not pulled back, and a perimeter lip is not a wall, so a knock
  * or slide flies off and falls. A floor a full level up is out of RECOVER_UP, so an
  * open gap under a bridge is still a fall.
@@ -276,6 +294,25 @@ export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles:
       y = overhead
       vy = 0
       grounded = true
+    }
+  }
+  // Ride a ramp we were already on. A lunge lift makes wasGrounded false, and
+  // the slope can rise more than STEP_UP in one substep, so the branches
+  // above would miss and the body would tunnel. Inbound mantle, mid-fall,
+  // and a sheer slab stay on the strict snap. Anvils do not use this path.
+  if (!grounded && !opts?.mantle) {
+    const travel = Math.hypot(stopped.x - prev.x, stopped.z - prev.z)
+    const rampUp = travel * (STEP / CELL) + 0.5
+    const prevFloor = graphFloorAt(graph, rampTiles, prev.x, prev.z, prev.y, CELL_SIZE * 0.6, 1)
+    const nearPrev = prevFloor !== null && Math.abs(prev.y - prevFloor) <= 1
+    if (nearPrev || wasGrounded) {
+      let rampFloor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y, CELL_SIZE * 0.6, Math.max(STEP_UP, rampUp))
+      if (rampFloor !== null && lip(rampFloor)) rampFloor = null
+      if (rampFloor !== null && isRampSurface(rampTiles, stopped.x, stopped.z, rampFloor) && y <= rampFloor + 0.35) {
+        y = rampFloor
+        vy = 0
+        grounded = true
+      }
     }
   }
   return { x: stopped.x, y, z: stopped.z, velY: vy, grounded }
