@@ -420,4 +420,57 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     process.exit(1)
   }
   console.log(`✓ perimeter knock left the level (bot fell, anvil fell)`)
+
+  // Mid-air glide / jump / fast move into a tile's vertical face must stop at
+  // the slab, not tunnel through — including a step long enough to skip the edge.
+  const outside = (() => {
+    let x = lip.p[0], z = lip.p[2]
+    for (let i = 0; i < 40; i++) {
+      x += lip.dx
+      z += lip.dz
+      if (!cover(x, z).length) return { x: x + lip.dx * 1.5, z: z + lip.dz * 1.5 }
+    }
+    return null
+  })()
+  if (!outside) { console.error('✗ could not stand in the void outside a tile face'); process.exit(1) }
+  const faceX = outside.x - lip.dx * 1.5
+  const faceZ = outside.z - lip.dz * 1.5
+  // Stand a short step outside the vertical face, below a step-up so this is a
+  // side hit (not a landing). Stay close so a 6 m/s glide reaches the slab
+  // before falling out of it.
+  const startX = faceX + lip.dx * 0.8
+  const startZ = faceZ + lip.dz * 0.8
+  const intoX = -lip.dx, intoZ = -lip.dz
+  const faceDist = (sx: number, sz: number) => (faceX - sx) * intoX + (faceZ - sz) * intoZ
+  const alongIn = (sx: number, sz: number, px: number, pz: number) => (px - sx) * intoX + (pz - sz) * intoZ
+  const fire = (impulse: number, ticks: number) => {
+    const start = { x: startX, y: lip.p[1] - 0.9, z: startZ }
+    const bot = new BotBody(start)
+    bot.rng = () => 1
+    bot.recoveryEnabled = false
+    bot.knock({
+      kind: 'lunge',
+      impulse: { x: intoX * impulse, y: 0, z: intoZ * impulse },
+      forceDir: { x: intoX, y: 0, z: intoZ },
+      force: 0, forceS: 0, lockS: 0,
+    })
+    for (let t = 0; t < ticks * 0.05; t += 0.05) bot.tick(0.05, world)
+    const travel = alongIn(start.x, start.z, bot.pos.x, bot.pos.z)
+    const past = travel - faceDist(start.x, start.z)
+    return { past, y: bot.pos.y, start }
+  }
+  // Realistic mid-air glide (~HUMAN_GLIDE_SPEED 6 → impulse 24 at BOT_KNOCK_UNIT 0.25).
+  const glide = fire(24, 6)
+  if (glide.past > 1.5) {
+    console.error(`✗ mid-air glide tunneled through the tile side: ${glide.past.toFixed(2)} m past the face`)
+    process.exit(1)
+  }
+  console.log(`✓ mid-air glide stopped at the tile side (${glide.past.toFixed(2)} m past the face)`)
+  // One 0.05 s step at ~200 m/s would skip an 8 m lip without a swept check.
+  const fast = fire(800, 1)
+  if (fast.past > 1.5) {
+    console.error(`✗ fast jump/knock tunneled through the tile side: ${fast.past.toFixed(2)} m past the face`)
+    process.exit(1)
+  }
+  console.log(`✓ fast mid-air step swept and stopped at the tile side (${fast.past.toFixed(2)} m past the face)`)
 }
