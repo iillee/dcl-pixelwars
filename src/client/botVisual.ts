@@ -49,6 +49,7 @@ import {
   RoundFormat,
 } from '../shared/pvp'
 import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botAnim'
+import { attachBotFace, destroyBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { teamPlatesHidden } from './nametags'
@@ -311,6 +312,7 @@ function holdWalker(entity: Entity, pos: Vector3): void {
 function destroyBot(id: number): void {
   const rec = bots.get(id)
   if (!rec) return
+  destroyBotFace(id)
   if (rec.glider) engine.removeEntity(rec.glider)
   if (rec.light) engine.removeEntity(rec.light)
   AvatarNametag.deleteFrom(rec.root)
@@ -352,6 +354,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
         weight: 1,
       })),
     })
+    attachBotFace(root, id)
     light = engine.addEntity()
     Transform.create(light, { parent: root, position: Vector3.create(0, profile.lightLocalY, 0) })
     paintLight(light, team)
@@ -405,6 +408,7 @@ function syncGhostAnim(rec: BotVisual): void {
   const clip = pickGhostClip(rec)
   if (clip === rec.clip) return
   Animator.playSingleAnimation(rec.root, clip, true)
+  playBotFaceClip(rec.id, clip)
   rec.clip = clip
   rec.clipUntil = GHOST_CLIP_LOOP[clip] ? 0 : rec.timeSec + GHOST_CLIP_DUR_S[clip]
 }
@@ -504,6 +508,7 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
 }
 
 export function initBotVisual(): void {
+  initBotFace()
   registerBotLookup({
     team: id => { const r = bots.get(parseInt(id.slice(4), 10)); return r ? (r.team as Team) : Team.None },
     feet: id => {
@@ -702,6 +707,7 @@ export function initBotVisual(): void {
         )
         tf.scale = Vector3.create(GHOST_SCALE * pulse, GHOST_SCALE * pulse, GHOST_SCALE * pulse)
         syncGhostAnim(rec)
+        tickBotFace(rec.id)
       } else {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)
