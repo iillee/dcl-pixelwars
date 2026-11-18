@@ -205,23 +205,15 @@ function repeatTex(src: string, tiling = 1) {
   })
 }
 
-/** Mesh node names baked by scripts/build-water-swell.ts. Explorer requires a
- *  mesh node path on GltfNodeModifiers; an empty path does not tint these GLBs. */
-function seaMeshPath(src: string): string {
-  if (src === WATER.swellNearSrc || src === WATER.swell48NearSrc) return 'SwellNear'
-  if (src === WATER.swellMidSrc || src === WATER.swell48MidSrc) return 'SwellMid'
-  if (src === WATER.swellFarSrc || src === WATER.swell48FarSrc) return 'SwellFar'
-  if (src === WATER.swellLiteSrc || src === WATER.swell48LiteSrc) return 'SwellLite'
-  if (src === WATER.flatSrc) return 'FlatSea'
-  if (src === WATER.flatLiteSrc) return 'FlatLite'
-  if (src === WATER_FOG.hazeSrc) return 'Haze'
-  return 'Sea'
-}
-
-function applySeaPbr(entity: Entity, src: string, pbr: Record<string, unknown>): void {
+/**
+ * Empty path is the SDK's global modifier: it replaces the material on every
+ * node in the GLB. A named path (e.g. 'Haze') kept the tint but dropped the
+ * alpha-gradient mask, so the horizon haze rendered as a solid wall.
+ */
+function applySeaPbr(entity: Entity, pbr: Parameters<typeof Material.setPbrMaterial>[1]): void {
   GltfNodeModifiers.create(entity, {
     modifiers: [{
-      path: seaMeshPath(src),
+      path: '',
       castShadows: false,
       material: {
         material: {
@@ -294,7 +286,7 @@ function addSwell(root: Entity, src: string, wet: boolean): Entity {
     }],
   })
   swellClips.push(wave)
-  applySeaPbr(wave, src, swellShade(WATER_COLOR, wet))
+  applySeaPbr(wave, swellShade(WATER_COLOR, wet))
   if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
   return wave
 }
@@ -344,7 +336,7 @@ function addFoam(root: Entity, src: string): Entity {
       weight: 1,
     }],
   })
-  applySeaPbr(veil, src, foamShade())
+  applySeaPbr(veil, foamShade())
   scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
   return veil
 }
@@ -357,7 +349,7 @@ function addFlat(root: Entity, src: string): Entity {
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  applySeaPbr(sea, src, {
+  applySeaPbr(sea, {
     texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
     albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
     emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
@@ -395,7 +387,7 @@ function placeHazeRing(mid: number, bottom: number, radius: number, height: numb
     invisibleMeshesCollisionMask: 0,
   })
   const c = HAZE_COLOR
-  applySeaPbr(ring, WATER_FOG.hazeSrc, {
+  applySeaPbr(ring, {
     texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
     albedoColor: Color4.create(c.r, c.g, c.b, c.a),
     emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),

@@ -191,15 +191,17 @@ if (!LOOK.sea || !LOOK.seaLast || !LOOK.gloss || !LOOK.softNormal) {
     console.error('✗ setupClient should still call armSea')
     process.exit(1)
   }
-  if (waterSrc.includes("path: ''") || waterSrc.includes('path: ""')) {
-    console.error('✗ water GltfNodeModifiers need the baked mesh node names, not an empty path')
+  if (!waterSrc.includes("path: ''") && !waterSrc.includes('path: ""')) {
+    console.error('✗ water GltfNodeModifiers should use an empty path, the SDK global modifier')
     process.exit(1)
   }
-  for (const name of ['SwellNear', 'SwellMid', 'SwellFar', 'SwellLite', 'FlatSea', 'FlatLite', 'Haze']) {
-    if (!waterSrc.includes("'" + name + "'")) {
-      console.error('✗ water modifiers should target mesh node ' + name)
-      process.exit(1)
-    }
+  if (waterSrc.includes("path: 'Haze'") || waterSrc.includes('path: "Haze"')) {
+    console.error('✗ a named Haze path drops the alpha gradient and leaves a solid wall')
+    process.exit(1)
+  }
+  if (!waterSrc.includes('MTM_ALPHA_BLEND') || !waterSrc.includes('hazeMask')) {
+    console.error('✗ the haze ring must keep its alpha-gradient mask and alpha-blend mode')
+    process.exit(1)
   }
   if (waterSrc.includes('deferred until teamAssigned') || waterSrc.includes('if (!team) return')) {
     console.error('✗ the sea should not wait on team:assigned before spawning')
@@ -209,7 +211,7 @@ if (!LOOK.sea || !LOOK.seaLast || !LOOK.gloss || !LOOK.softNormal) {
     console.error('✗ armSea should still stagger after combat clips, without a team gate')
     process.exit(1)
   }
-  console.log('✓ sea still arms from setupClient, without a team gate, and tints named mesh nodes')
+  console.log('✓ sea still arms from setupClient, without a team gate, and the haze stays a blended gradient')
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
