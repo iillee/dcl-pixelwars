@@ -30,3 +30,13 @@ export function ghostClipForPose(an: number): GhostClip {
   if (an === BOT_ANIM_SLIDE) return 'slide'
   return 'idle'
 }
+
+/**
+ * Extra yaw (degrees) for a full 360° spin over `durS`, the length of the
+ * double-jump clip — the same window the player avatar's double-jump spin uses.
+ * 0 before the window and after it completes (360 ≡ 0), so facing yaw is unchanged.
+ */
+export function doubleJumpSpinDeg(elapsedS: number, durS: number): number {
+  if (!(durS > 0) || !(elapsedS >= 0) || elapsedS >= durS) return 0
+  return 360 * (elapsedS / durS)
+}

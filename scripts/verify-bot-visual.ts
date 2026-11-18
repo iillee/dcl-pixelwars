@@ -15,6 +15,7 @@ import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
+import { doubleJumpSpinDeg } from '../src/shared/botAnim'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -312,3 +313,23 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   process.exit(1)
 }
 console.log('✓ walking draw stays within 3 m; a knock falls (no glider) and the draw stays inside 15 m')
+
+{
+  const dur = 0.667
+  const at = (elapsed: number, want: number) => {
+    const got = doubleJumpSpinDeg(elapsed, dur)
+    if (Math.abs(got - want) > 1e-9) {
+      console.error(`✗ double-jump spin at ${elapsed.toFixed(3)} s: ${got} deg, expected ${want}`)
+      process.exit(1)
+    }
+  }
+  at(-0.1, 0)
+  at(0, 0)
+  at(dur * 0.25, 90)
+  at(dur * 0.5, 180)
+  at(dur * 0.75, 270)
+  at(dur, 0)
+  at(dur + 0.1, 0)
+  if (doubleJumpSpinDeg(0.2, 0) !== 0) { console.error('✗ double-jump spin with no duration'); process.exit(1) }
+  console.log('✓ double-jump spin is a full 360° over the clip, then facing is unchanged')
+}

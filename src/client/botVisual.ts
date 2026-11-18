@@ -34,6 +34,9 @@
  *   3. Lerp renderPos toward that prediction with a rate proportional
  *      to dt: `renderPos = lerp(renderPos, predicted, min(1, k*dt))`.
  *   4. Yaw toward the smoothed velocity.
+ *   5. On a double jump, add a 360° spin over the double clip, composed on
+ *      that facing yaw so smoothing is not overwritten. The face and outline
+ *      live on the same root, so they spin with it.
  */
 
 import {
@@ -50,7 +53,7 @@ import {
   BOT_AIM_REPORT_HZ, BOT_FRICTION, BOT_GRAVITY, BOT_KNOCK_UNIT,
   RoundFormat,
 } from '../shared/pvp'
-import { botShowsGlider, ghostClipForPose, type GhostClip } from '../shared/botAnim'
+import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, type GhostClip } from '../shared/botAnim'
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
@@ -202,6 +205,7 @@ interface BotVisual {
   velocity: Vector3     // metres/sec, estimated from server updates
   renderPos: Vector3    // smoothed feet position we actually track
   lastYawDeg: number    // last committed yaw — held when velocity too low
+  spinT0: number        // rec.timeSec when the double-jump spin started, or -1
   fastUntil: number     // Date.now() until which the snapshot interpolation draws it
   snaps: Snap[]         // recent server snapshots on the sim clock
   riding: boolean       // last packet said rescue (st 2)
@@ -395,6 +399,7 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     velocity: Vector3.Zero(),
     renderPos: Vector3.clone(pos),
     lastYawDeg: 0,
+    spinT0: -1,
     fastUntil: 0,
     snaps: [],
     riding: false,
@@ -428,6 +433,7 @@ function syncGhostAnim(rec: BotVisual): void {
   playBotFaceClip(rec.id, clip)
   rec.clip = clip
   rec.clipUntil = GHOST_CLIP_LOOP[clip] ? 0 : rec.timeSec + GHOST_CLIP_DUR_S[clip]
+  rec.spinT0 = clip === 'double' ? rec.timeSec : -1
 }
 
 function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
@@ -737,7 +743,8 @@ export function initBotVisual(): void {
         tf.position = rec.renderPos
         holdWalker(rec.root, rec.renderPos)
       }
-      tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg, 0)
+      const spin = rec.spinT0 >= 0 ? doubleJumpSpinDeg(rec.timeSec - rec.spinT0, GHOST_CLIP_DUR_S.double) : 0
+      tf.rotation = Quaternion.fromEulerDegrees(0, rec.lastYawDeg + spin, 0)
 
       // Glider faces the ghost's travel direction via the parent yaw.
       // Retract on landing, a raw fall, or the Lakitu rescue.
