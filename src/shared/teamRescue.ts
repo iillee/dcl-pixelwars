@@ -19,6 +19,8 @@ export type RescueGraph = {
 
 export type PaintedCell = { id: string; team: number }
 
+import { isPlayingTeam } from './team'
+
 export type RescuePick = { id: string; pos: RescueVec }
 
 const MIN_NEIGHBORS = 2
@@ -42,7 +44,7 @@ export function pickTeamRescueCell(
   graph: RescueGraph,
   occupied?: Set<string>,
 ): RescuePick | null {
-  if (team !== 1 && team !== 2) return null
+  if (!isPlayingTeam(team)) return null
   type Cand = { id: string; pos: RescueVec; wall: number; neighbors: number; deep: boolean; dist: number }
   const cands: Cand[] = []
   for (const cell of painted) {

@@ -79,13 +79,50 @@ if (!edge || edge.id !== 'red-edge') fail(`with only unsafe paint, prefer a cell
 const unknown = pickTeamRescueCell(1, from, [{ id: 'ghost', team: 1 }], g)
 if (unknown) fail('a painted id that is not walkable must be ignored')
 
-if (pickTeamRescueCell(0, from, painted, g) || pickTeamRescueCell(3, from, painted, g)) {
-  fail('only red or blue teams can be revived on paint')
-}
+if (pickTeamRescueCell(0, from, painted, g)) fail('an unassigned team must not land on paint')
+
+// Green and yellow use the same nearest-own-colour rule, including cells
+// whose floor is not the L0 base height.
+const raised = graph([
+  { id: 'green-a', x: 20, y: 11.05, z: 0, wall: 2, deep: true, adj: ['green-b'] },
+  { id: 'green-b', x: 22, y: 11.05, z: 0, wall: 2, deep: true, adj: ['green-a'] },
+  { id: 'green-far', x: 80, y: 11.05, z: 0, wall: 2, deep: true, adj: [] },
+  { id: 'yellow-high', x: 8, y: 21.55, z: 8, wall: 2, deep: true, adj: ['yellow-b'] },
+  { id: 'yellow-b', x: 10, y: 21.55, z: 8, wall: 2, deep: true, adj: ['yellow-high'] },
+  { id: 'yellow-low', x: 0.4, y: 0.55, z: 0, wall: 2, deep: true, adj: [] },
+  { id: 'red-a', x: 10, z: 0, wall: 2, deep: true, adj: ['red-b'] },
+  { id: 'red-b', x: 12, z: 0, wall: 2, deep: true, adj: ['red-a'] },
+])
+const fourPaint: PaintedCell[] = [
+  { id: 'green-a', team: 3 },
+  { id: 'green-b', team: 3 },
+  { id: 'green-far', team: 3 },
+  { id: 'yellow-high', team: 4 },
+  { id: 'yellow-b', team: 4 },
+  { id: 'yellow-low', team: 4 },
+  { id: 'red-a', team: 1 },
+]
+
+const green = pickTeamRescueCell(3, from, fourPaint, raised)
+if (!green || green.id !== 'green-a') fail(`green should pick its nearest deep cell (got ${green?.id})`)
+if (Math.abs(green.pos.y - 11.05) > 1e-9) fail(`green landing should keep the tile height (got ${green.pos.y})`)
+
+const yellow = pickTeamRescueCell(4, { x: 8, y: 21, z: 8 }, fourPaint, raised)
+if (!yellow || yellow.id !== 'yellow-high') fail(`yellow should pick the closest own-colour cell at that height (got ${yellow?.id})`)
+if (Math.abs(yellow.pos.y - 21.55) > 1e-9) fail(`yellow landing should keep the raised tile height (got ${yellow.pos.y})`)
+
+const yellowNoPaint = pickTeamRescueCell(4, from, [{ id: 'green-a', team: 3 }, { id: 'red-a', team: 1 }], raised)
+if (yellowNoPaint) fail('a team with no paint must fall back to the normal spawn')
+
+const src = readFileSync(new URL('../src/shared/teamRescue.ts', import.meta.url), 'utf8')
+if (src.includes('team !== 1 && team !== 2')) fail('pickTeamRescueCell should accept all four playing teams')
+const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+const paintedFn = server.slice(server.indexOf('function paintedRescueHome'), server.indexOf('const clampRescueT'))
+if (paintedFn.includes('team !== 1 && team !== 2')) fail('server paintedRescueHome should not skip green and yellow')
 
 const mgr = readFileSync(new URL('../src/server/bots/manager.ts', import.meta.url), 'utf8')
 if (!mgr.includes("b.body.mode === 'knock'") || !mgr.includes('paintedSnap') || !mgr.includes('paintedCells')) {
   fail('bots should only search a painted landing while knocked, and share one paint snapshot per tick')
 }
 
-console.log('✓ nearest painted rescue cell, occupancy, safety, and spawn fallback')
+console.log('✓ nearest painted rescue cell, occupancy, safety, four-team landings, and spawn fallback')

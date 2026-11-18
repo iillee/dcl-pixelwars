@@ -1242,7 +1242,6 @@ export async function setupServer(): Promise<void> {
     if (!matchLive() || !paintAllowed(roundFormat)) return null
     // BASES always returns to the team base, never the nearest paint.
     if (basesOn(roundFormat)) return null
-    if (team !== 1 && team !== 2) return null
     const g = getWalkableGraph()
     if (!g) return null
     return pickTeamRescueCell(team, from, painted ?? getFullState(), g, occupied)?.pos ?? null
