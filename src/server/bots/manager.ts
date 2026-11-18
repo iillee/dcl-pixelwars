@@ -458,9 +458,15 @@ export function tickBots(dtSec: number): void {
       home = deps.rescuePaintedHome(b.team, b.body.pos, occupied, paintedSnap) ?? spawn
     }
     const world = { graph, rampTiles, tiles: placedTiles, base: home }
+    b.body.lungeEnabled = (deps?.abilities?.() ?? { lunge: true, burst: true }).lunge
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)
+      else if (ev.type === 'dash') {
+        b.combat.lungeCd = LUNGE_COOLDOWN_S
+        deps?.onLunge?.(b.botId, ++b.combat.ids, ev.dx, ev.dz, ev.at)
+        console.log(`[Bots] ghost ${b.botId} recovery dashes`)
+      }
       else if (ev.type === 'settled') {
         const dive = b.combat.dive
         b.combat.dive = null
@@ -543,12 +549,21 @@ export function tickBots(dtSec: number): void {
  * the radius, otherwise chase. Players' cooldowns; one roll per ability per think.
  */
 /** Airborne, past the top of the hop: spike the human in the cylinder, or dive the miss. */
+/** Feet are over a walkable cell, not off the edge or on a perimeter lip. */
+function overArena(p: { x: number; y: number; z: number }): boolean {
+  if (!graph) return false
+  return graphFloorAt(graph, rampTiles, p.x, p.z, p.y, 1.05, 8) !== null
+}
+
 function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: number; y: number; z: number }>): void {
   const c = b.combat
   if (!b.body.isAirborne() || b.body.verticalSpeed() > 1) return
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
   if (!can.burst || c.burstCd > 0 || c.dive) return
   const p = b.body.pos
+  // Same cylinder as a player's aerial Burst, and only over the arena — never
+  // off the edge, even if a target is in range below.
+  if (!overArena(p)) return
   let aim: (typeof humans)[number] | null = null
   for (const h of humans) {
     if (h.team !== b.team && inAirSpike(p, h)) { aim = h; break }

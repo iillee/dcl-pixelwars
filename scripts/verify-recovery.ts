@@ -6,6 +6,10 @@
  * that never tries falls, and a seeded spread of reaction / misjudge / skipped
  * double-jump lands in between. A full lunge still falls even when the attempt is perfect.
  * Jump apexes match the human heights in shared/pvp.ts.
+ *
+ * The world includes tiles so lip faces are real, matching live play. A returning
+ * glide that arrives a little under the lip must mantle on, and a knocked body
+ * at the same height must still fall off. Weak-knock saves stay in the 20–80% band.
  */
 import { readFileSync } from 'node:fs'
 import { generateWithRetry, getPlacedTilesInOrder, CELL, MAZE_ORIGIN } from '../src/maze/generator'
@@ -13,9 +17,12 @@ import { TILES } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock, KnockSpec } from '../src/shared/knocks'
+import { graphFloorAt } from '../src/shared/anvilSim'
+import { inAirSpike } from '../src/shared/burst'
 import {
   BOT_GRAVITY, BOT_KNOCK_UNIT, botJumpSpeed, botRecoveryEnabled,
   HUMAN_JUMP_HEIGHT, HUMAN_RUN_JUMP_HEIGHT, HUMAN_DOUBLE_JUMP_HEIGHT,
+  LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S, AIR_SPIKE_MIN_ABOVE,
 } from '../src/shared/pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE, botShowsGlider } from '../src/shared/botAnim'
 import { rescueAllowsSnapshotInterp, snapsAfterRescueRelease } from '../src/shared/rescuePath'
@@ -79,6 +86,7 @@ const graph = buildWalkableGraph(tiles)
 const world = {
   graph,
   rampTiles: tiles.filter(t => TILES[t.type].isRamp),
+  tiles,
   base: { x: 0, y: 0, z: 0 },
 }
 
@@ -191,7 +199,7 @@ for (const s of spots) {
   const got = run(s, weakKnock(s.dx, s.dz), perfect(), true)
   const off = run(s, weakKnock(s.dx, s.dz), never(), true)
   const lunged = run(s, lungeKnock(s.dx, s.dz), perfect(), true)
-  if (got.outcome === 'saved' && got.jump && off.outcome === 'fell' && lunged.outcome === 'fell') {
+  if (got.outcome === 'saved' && got.jump && got.doubled && off.outcome === 'fell' && lunged.outcome === 'fell') {
     spot = s
     weakPerfect = got
     break
@@ -237,6 +245,100 @@ for (let i = 0; i < 24; i++) {
 }
 console.log(`full lunge, 24 seeded bots: ${strongSaved} saved`)
 if (strongSaved > 2) fail(`strong knocks were saved ${strongSaved}/24 times`)
+
+// A returning glide whose feet are a little under the lip, moving inward.
+// Live physics uses the feet; the visible ghost sits ~1.9 m above them, so
+// this is the "stuck on the edge and can't get back on" case.
+{
+  const s = spot
+  const floorY = s.y
+  // Stand just outside the perimeter face, 0.45 m below the top, heading in.
+  let outX = s.x + s.dx * 6, outZ = s.z + s.dz * 6
+  for (let d = 2; d <= 10; d += 0.5) {
+    const x = s.x + s.dx * d, z = s.z + s.dz * d
+    if (!cover(x, z).length) { outX = x + s.dx * 0.4; outZ = z + s.dz * 0.4; break }
+  }
+  const to = { x: s.x, y: floorY, z: s.z }
+  const start = { x: outX, y: floorY - 0.45, z: outZ }
+  const inward = { x: -s.dx * 4, y: 0, z: -s.dz * 4 }
+
+  const glider = new BotBody(start)
+  glider.startGlideApproach(start, inward, to)
+  let gotOn = false
+  let stuck = true
+  for (let t = 0; t < 4; t += 0.05) {
+    for (const e of glider.tick(0.05, world)) {
+      if (e.type === 'settled') gotOn = true
+      if (e.type === 'fell') stuck = false
+    }
+    const onFloor = graphFloorAt(world.graph, world.rampTiles, glider.pos.x, glider.pos.z, glider.pos.y, 1.2, 0.8)
+    if (gotOn || (glider.isGrounded() && onFloor !== null && Math.abs((onFloor ?? 0) - floorY) < 0.4)) {
+      gotOn = true
+      stuck = false
+      break
+    }
+  }
+  if (!gotOn) {
+    fail(`inbound glide 0.45 m under the lip stayed off the floor at (${glider.pos.x.toFixed(2)}, ${glider.pos.y.toFixed(2)}, ${glider.pos.z.toFixed(2)})`)
+  } else {
+    console.log(`✓ inbound glide 0.45 m under the lip mantled back on (y ${glider.pos.y.toFixed(2)})`)
+  }
+
+  // Same pose, no recovery: a knock into the face must not mantle up.
+  const knocked = new BotBody(start)
+  knocked.recoveryEnabled = false
+  knocked.rng = () => 1
+  knocked.knock({
+    kind: 'lunge',
+    impulse: { x: -s.dx * 16, y: 0, z: -s.dz * 16 },
+    forceDir: { x: -s.dx, y: 0, z: -s.dz },
+    force: 0, forceS: 0, lockS: 0,
+  })
+  let knockSaved = false
+  for (let t = 0; t < 2; t += 0.05) {
+    for (const e of knocked.tick(0.05, world)) if (e.type === 'settled') knockSaved = true
+  }
+  const knockFloor = graphFloorAt(world.graph, world.rampTiles, knocked.pos.x, knocked.pos.z, knocked.pos.y, 1.2, 0.2)
+  if (knockSaved || (knocked.isGrounded() && knockFloor !== null && Math.abs((knockFloor ?? 0) - floorY) < 0.2 && knocked.pos.y >= floorY - 0.12)) {
+    fail(`outbound/knocked body 0.45 m under the lip was pulled onto the slab at y ${knocked.pos.y.toFixed(2)}`)
+  } else {
+    console.log(`✓ knocked body 0.45 m under the lip did not mantle (y ${knocked.pos.y.toFixed(2)})`)
+  }
+
+  // Air / glide dash: same lunge numbers as a player, once, then the cooldown.
+  const far = { x: s.x + s.dx * 12, y: floorY + 1.2, z: s.z + s.dz * 12 }
+  const dasher = new BotBody(far)
+  dasher.startGlideApproach(far, { x: -s.dx * 2, y: 0, z: -s.dz * 2 }, to)
+  let dashes = 0
+  let peak = 0
+  for (let t = 0; t < LUNGE_COOLDOWN_S + 0.15; t += 0.05) {
+    for (const e of dasher.tick(0.05, world)) if (e.type === 'dash') dashes++
+    peak = Math.max(peak, dasher.horizontalSpeed())
+    if (t > LUNGE_ACTIVE_S + 0.05 && t < LUNGE_COOLDOWN_S - 0.05 && dashes !== 1) {
+      fail(`recovery dash count during cooldown at t=${t.toFixed(2)}s was ${dashes}`)
+      break
+    }
+  }
+  const want = LUNGE_DISTANCE / LUNGE_ACTIVE_S
+  if (dashes !== 1) fail(`recovery dash should fire once in ${LUNGE_COOLDOWN_S}s, got ${dashes}`)
+  if (peak < want * 0.9) fail(`recovery dash peak ${peak.toFixed(1)} m/s, expected ~${want.toFixed(1)}`)
+  else console.log(`✓ recovery air/glide dash uses the player lunge (${peak.toFixed(1)} m/s) once, then cools down`)
+
+  // Aerial burst only over the arena, using the player's cylinder, never off the edge.
+  const over = { x: s.x, y: floorY + AIR_SPIKE_MIN_ABOVE + 1.2, z: s.z }
+  const below = { x: s.x, y: floorY, z: s.z }
+  const off = { x: s.x + s.dx * 8, y: floorY + AIR_SPIKE_MIN_ABOVE + 1.2, z: s.z + s.dz * 8 }
+  const onArena = graphFloorAt(world.graph, world.rampTiles, over.x, over.z, over.y, 1.05, 8) !== null
+  const offArena = graphFloorAt(world.graph, world.rampTiles, off.x, off.z, off.y, 1.05, 8) !== null
+  if (!onArena) fail('spike over-arena sample was not over a walkable cell')
+  if (offArena) fail('spike off-edge sample was still over a walkable cell')
+  if (!inAirSpike(over, below)) fail('player air-spike cylinder should cover a target directly below on the floor')
+  if (offArena || !onArena) {
+    // already failed
+  } else {
+    console.log('✓ aerial spike is allowed over the arena and refused off the edge')
+  }
+}
 
 if (failed) process.exit(1)
 console.log('✓ recovery checks passed')
