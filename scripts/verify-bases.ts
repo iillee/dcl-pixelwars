@@ -73,18 +73,18 @@ if (baseThresholdVerdict(90_000, 90_000).kind !== 'tie') fail('both sides at the
 if (baseTimeoutVerdict(10, 20).kind !== 'winner' || (baseTimeoutVerdict(10, 20) as { team: number }).team !== 2) fail('timeout should go to the higher charge')
 if (baseTimeoutVerdict(4, 4).kind !== 'tie') fail('equal charge at timeout is a tie')
 
-if (EAST_SLOT_MODE !== 'bases') fail('the east lobby tile should currently host BASES')
+if (EAST_SLOT_MODE !== 'bases') fail('the unused east mode slot should still default to BASES')
 const basesMode = LOBBY_MODES.find(m => m.id === 'bases')
 const pvbMode = LOBBY_MODES.find(m => m.id === 'pvb')
-if (!basesMode || !basesMode.live || !basesMode.placed || basesMode.economy || basesMode.teamRule !== 'balance') {
-  fail('BASES should be the live balanced east mode, with no paint economy')
+if (!basesMode || !basesMode.live || basesMode.placed || basesMode.economy || basesMode.teamRule !== 'balance') {
+  fail('BASES should stay in the registry as a balanced mode with no paint economy, unplaced')
 }
-if (basesMode.cell.x !== EAST_LOBBY_CELL.x || basesMode.cell.z !== EAST_LOBBY_CELL.z) fail('BASES should sit on the east lobby tile')
+if (basesMode.cell.x !== EAST_LOBBY_CELL.x || basesMode.cell.z !== EAST_LOBBY_CELL.z) fail('BASES should keep the east lobby cell in the registry')
 if (!pvbMode || pvbMode.live || pvbMode.placed || pvbMode.economy || pvbMode.teamRule !== 'humans-together') {
   fail('Bot Invasion must stay in the registry, unplaced, with its original rules')
 }
 if (pvbMode.cell.x !== EAST_PARK_CELL.x || pvbMode.cell.z !== EAST_PARK_CELL.z) fail('parked Bot Invasion should use the unused east park cell')
-if (placedModes().some(m => m.id === 'pvb') || !placedModes().some(m => m.id === 'bases')) fail('the lobby floor should show BASES, not Bot Invasion')
+if (placedModes().length !== 0) fail('the lobby floor should not place alternate modes')
 if (modeTitle('pvb') !== 'BOT INVASION' || modeSubtitle('pvb') !== 'vs Bots') fail('Bot Invasion titles must stay intact')
 if (modeTitle('bases') !== 'BASE CHARGE' || modeSubtitle('bases') !== 'Prototype') fail('BASES lobby copy is wrong')
 const blue = basesMode.color

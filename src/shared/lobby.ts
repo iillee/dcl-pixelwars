@@ -1,15 +1,19 @@
 /**
- * Lobby layout and vote rules. Pure. The generator places these cells;
+ * Lobby layout and team-choice rules. Pure. The generator places these cells;
  * the server decides a zone from a player's feet. No engine imports.
  *
- * The built floor is five tiles: a cross center opening all four ways,
- * Pixelwars on the west end, Bases on the east end, Prototype on the north end,
- * and Balloon Battle on the south end.
- * Bot Invasion stays in the registry, parked off the floor, so the east tile
- * can be swapped back. Color Garden and Pot Hunt stay unplaced too.
+ * The built floor is three tiles: an east-west corridor through the old
+ * lobby hub, RED on the west end, and BLUE on the east end. Standing on a
+ * team tile chooses that side for the next Classic Pixelwars round.
+ * Alternate modes stay in the registry, unplaced, so their code remains
+ * reachable later. Bot Invasion, Color Garden, and Pot Hunt stay parked too.
  */
 
+import { TEAM_HEX } from './team'
+
 export type ModeId = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' | 'garden' | 'pots'
+export type TeamId = 'red' | 'blue'
+export type TeamChoice = 1 | 2
 export type TeamRule = 'balance' | 'humans-together'
 export type LobbyPhase = 'match' | 'summary' | 'lobby' | 'idle'
 
@@ -30,10 +34,8 @@ export type ModeDef = {
 
 export const LOBBY_CROSS = { x: 2, z: 2 }
 
-/** West Pixelwars, east Bases, north Prototype, and south Balloon Battle
- *  share an edge with the center. Bot Invasion is parked on an unused cell.
- *  Garden and pots stay unbuilt. They cannot win a vote.
- *  Flip EAST_SLOT_MODE to `'pvb'` to put Bot Invasion back on the east tile. */
+/** Alternate-mode cells stay on file. The live floor uses LOBBY_TEAMS instead.
+ *  Flip EAST_SLOT_MODE to `'pvb'` if Bot Invasion is ever put back on the east tile. */
 export const EAST_LOBBY_CELL = { x: 3, z: 2 }
 export const EAST_PARK_CELL = { x: 3, z: 0 }
 export const EAST_SLOT_MODE: 'pvb' | 'bases' = 'bases'
@@ -67,16 +69,55 @@ export const MODE_PILL_TEXT_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 
 }
 
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: true, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
-  { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: eastLive('pvb'), economy: false, color: rgbFromHex(MODE_PILL_HEX.pvb) },
-  { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: eastLive('bases'), economy: false, color: rgbFromHex(MODE_PILL_HEX.bases) },
-  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: true, economy: true, color: rgbFromHex(MODE_PILL_HEX.prototype) },
-  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: true, economy: false, color: rgbFromHex(MODE_PILL_HEX.balloon) },
+  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
+  { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvb) },
+  { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.bases) },
+  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: false, economy: true, color: rgbFromHex(MODE_PILL_HEX.prototype) },
+  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.balloon) },
   { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
   { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
-/** Full vote window, in one place. Starts when the first live vote is counted.
+/** West RED (team 1) and east BLUE (team 2). Exact TEAM_HEX colours. */
+export type TeamDef = {
+  id: TeamId
+  team: TeamChoice
+  label: string
+  cell: { x: number; z: number }
+  color: { r: number; g: number; b: number }
+  hex: string
+}
+
+export const LOBBY_TEAMS: TeamDef[] = [
+  { id: 'red', team: 1, label: 'RED', cell: { x: 1, z: 2 }, color: rgbFromHex(TEAM_HEX[1]), hex: TEAM_HEX[1] },
+  { id: 'blue', team: 2, label: 'BLUE', cell: { x: 3, z: 2 }, color: rgbFromHex(TEAM_HEX[2]), hex: TEAM_HEX[2] },
+]
+
+export function lobbyTeamById(id: string): TeamDef | undefined {
+  return LOBBY_TEAMS.find(t => t.id === id)
+}
+
+export function teamTitle(id: string): string {
+  if (id === 'red') return 'RED'
+  if (id === 'blue') return 'BLUE'
+  return ''
+}
+
+export function teamIdOf(team: number): TeamId | '' {
+  return team === 1 ? 'red' : team === 2 ? 'blue' : ''
+}
+
+export function teamFromId(id: string): TeamChoice | 0 {
+  return id === 'red' ? 1 : id === 'blue' ? 2 : 0
+}
+
+/** End tiles actually built on the lobby floor. */
+export function placedLobbyEnds(): TeamDef[] {
+  return LOBBY_TEAMS
+}
+
+
+/** Full start window, in one place. Starts when the first team is chosen.
  *  Standing in a zone does not end it early, and an empty lobby does not start it. */
 export const LOBBY_VOTE_MS = 10_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
@@ -147,7 +188,7 @@ export function signFaceZ(): number {
   const near = SIGN_CAMERA_AXIS < 0 ? Math.min(plateNear, lipNear) : Math.max(plateNear, lipNear)
   return near + SIGN_CAMERA_AXIS * 0.2
 }
-/** Standing still this long drops the vote. */
+/** Standing still this long is reported as AFK. A team choice is sticky and is not dropped. */
 export const LOBBY_AFK_MS = 60_000
 /** A position sample older than this is not a vote.
  *  1.5 s was short enough that a stored sample (feet still 1) was already
@@ -165,7 +206,7 @@ export function liveModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.live)
 }
 
-/** End tiles actually built. Pixelwars west, Bases (or parked Bot Invasion) east, Prototype north, Balloon Battle south. */
+/** Alternate modes currently built as lobby ends. Empty while the floor is a team picker. */
 export function placedModes(): ModeDef[] {
   return LOBBY_MODES.filter(m => m.placed)
 }
@@ -271,8 +312,7 @@ export function signBadgeY(): number {
   return lipBottom - 0.5 - chipH / 2
 }
 
-/** Top HUD line. When the vote countdown is running, this is STARTING IN N. */
-/** Top HUD line. Countdown names the unique leader, or ???? on a tie. No countdown stays CHOOSE A GAME MODE. */
+/** Unused mode-vote helper. The live lobby no longer elects a mode. */
 export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
   const tied = leadingModes(counts)
   if (tied.length === 0) return ''
@@ -280,10 +320,11 @@ export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
   return tied[0]
 }
 
-export function hudVoteHeadline(leftSecs = 0, lead: ModeId | 'tie' | '' = ''): string {
-  if (!(leftSecs > 0)) return 'CHOOSE A GAME MODE'
-  const name = !lead || lead === 'tie' ? '????' : (modeTitle(lead) || '????')
-  return `${name} IS STARTING IN ${leftSecs}`
+/** Top HUD line. Countdown is always Classic Pixelwars. Idle stays CHOOSE A TEAM. */
+export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
+  const n = Math.max(0, Math.ceil(leftSecs))
+  if (n <= 0) return 'CHOOSE A TEAM'
+  return `PIXELWARS IS STARTING IN ${n}`
 }
 
 
@@ -302,11 +343,29 @@ export function billboardAnchor(
   }
 }
 
-/** Live mode whose tint rectangle contains this point. The rest of the cell abstains. */
+/** True when a point sits on an end-tile activation rectangle. */
+export function inEndZone(
+  worldX: number, worldZ: number, modeCell: { x: number; z: number }, origin: number, cell: number,
+): boolean {
+  if (!(cell > 0)) return false
+  const zone = voteZoneLocal(cell)
+  const rad = endYawQuarter(modeCell) * Math.PI / 2
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const midX = modeCell.x * cell + cell / 2 + origin
+  const midZ = modeCell.z * cell + cell / 2 + origin
+  const wx = worldX - midX
+  const wz = worldZ - midZ
+  const lx = wx * cos - wz * sin + cell / 2
+  const lz = wx * sin + wz * cos + cell / 2
+  return lx >= zone.x0 && lx <= zone.x1 && lz >= zone.z0 && lz <= zone.z1
+}
+
+/** Live *and placed* mode whose tint rectangle contains this point. Unused while modes are unplaced. */
 export function voteModeAt(worldX: number, worldZ: number, origin: number, cell: number): ModeId | '' {
   if (!(cell > 0)) return ''
   for (const m of LOBBY_MODES) {
-    if (!m.live) continue
+    if (!m.live || !m.placed) continue
     const zone = voteZoneLocal(cell)
     const rad = endYawQuarter(m.cell) * Math.PI / 2
     const cos = Math.cos(rad)
@@ -320,6 +379,19 @@ export function voteModeAt(worldX: number, worldZ: number, origin: number, cell:
     if (lx >= zone.x0 && lx <= zone.x1 && lz >= zone.z0 && lz <= zone.z1) return m.id
   }
   return ''
+}
+
+/** Team whose tint rectangle contains this point, or 0 if the player is not on a team tile. */
+export function voteTeamAt(worldX: number, worldZ: number, origin: number, cell: number): TeamChoice | 0 {
+  if (!(cell > 0)) return 0
+  for (const t of LOBBY_TEAMS) {
+    if (inEndZone(worldX, worldZ, t.cell, origin, cell)) return t.team
+  }
+  return 0
+}
+
+export function voteTeamIdAt(worldX: number, worldZ: number, origin: number, cell: number): TeamId | '' {
+  return teamIdOf(voteTeamAt(worldX, worldZ, origin, cell))
 }
 
 export function lobbyFeet(cell: number, origin: number, baseY: number): { x: number; y: number; z: number } {
@@ -339,10 +411,9 @@ export function spawnPadAt(x: number, feetY: number, z: number, sx = 16, sz = 16
 
 /**
  * Invisible floors under the places a joiner is put down before the tile mesh
- * can hold them. Team bases and the cross center match the original pads.
- * Bases, Prototype, and Balloon Battle also cover their vote floors, including
- * the doorway off the cross. Bot Fight and Team Fight vote tiles are not given
- * an extra pad.
+ * can hold them. Team bases and the lobby hub match the original pads. The
+ * RED and BLUE floors also get a pad, including the doorway off the hub,
+ * because those ends still grow in after the corridor appears.
  */
 export function earlySpawnPads(
   origin: number,
@@ -354,9 +425,8 @@ export function earlySpawnPads(
   const pads = bases.map(b => spawnPadAt(b.x, feetY, b.z))
   const cross = lobbyFeet(cell, origin, baseY)
   pads.push(spawnPadAt(cross.x, cross.y, cross.z))
-  for (const m of LOBBY_MODES) {
-    if (!m.placed || m.id === 'pvp' || m.id === 'pvb') continue
-    const pose = voteTintPose(m.cell, origin, cell)
+  for (const team of LOBBY_TEAMS) {
+    const pose = voteTintPose(team.cell, origin, cell)
     pads.push(spawnPadAt(pose.x, feetY, pose.z, pose.width, pose.length, pose.yawDeg))
   }
   return pads
@@ -410,4 +480,49 @@ export function stillAfk(movedAt: number, now: number): boolean {
 export function everyPresentInZone(present: string[], voted: Set<string>): boolean {
   if (present.length === 0) return false
   return present.every(id => voted.has(id))
+}
+
+export type TeamCounts = { red: number; blue: number }
+
+export function emptyTeamCounts(): TeamCounts {
+  return { red: 0, blue: 0 }
+}
+
+/**
+ * Apply lobby team picks at round start. Chosen players keep their colour.
+ * Anyone who did not pick goes to the current smaller team; a tie prefers
+ * red so the result is deterministic. All-one-side is allowed.
+ */
+export function assignLobbyTeams(
+  present: string[],
+  chosen: ReadonlyMap<string, number>,
+): Array<{ userId: string; team: TeamChoice }> {
+  const pick = new Map<string, TeamChoice>()
+  for (const [id, team] of chosen) {
+    if (team === 1 || team === 2) pick.set(id.toLowerCase(), team)
+  }
+  const seen = new Set<string>()
+  const ids: string[] = []
+  for (const id of present) {
+    const key = id.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    ids.push(id)
+  }
+  let red = 0
+  let blue = 0
+  const assigned = new Map<string, TeamChoice>()
+  for (const id of ids) {
+    const team = pick.get(id.toLowerCase())
+    if (!team) continue
+    assigned.set(id, team)
+    if (team === 1) red++; else blue++
+  }
+  for (const id of ids) {
+    if (assigned.has(id)) continue
+    const team: TeamChoice = red <= blue ? 1 : 2
+    assigned.set(id, team)
+    if (team === 1) red++; else blue++
+  }
+  return ids.map(userId => ({ userId, team: assigned.get(userId)! }))
 }

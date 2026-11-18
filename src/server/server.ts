@@ -14,7 +14,7 @@ import { engine } from '@dcl/sdk/ecs'
 import { syncEntity } from '@dcl/sdk/network'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { room } from '../shared/messages'
-import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount, shuffleTeams } from './roster'
+import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanCount, activeSoloHumanTeam, activeTeamCounts, setTeam, setForcedTeam, assignAllConnected, pruneForNewRound, rosterEntries, connectedCount } from './roster'
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, paintedCount, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
@@ -49,9 +49,9 @@ import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwav
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
-import { LOBBY_MODES, LOBBY_VOTE_MS, modeById, pickWinner, type ModeId } from '../shared/lobby'
+import { LOBBY_VOTE_MS, assignLobbyTeams, modeById, type ModeId } from '../shared/lobby'
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
-import { clearLobbyVotes, countedMode, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, stepLobby, tallyVotes } from './lobbyVote'
+import { clearLobbyVotes, countedTeam, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, snapshotLobbyChoices, stepLobby, tallyTeams } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder, placeLobbyLayout } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
@@ -315,12 +315,15 @@ export async function setupServer(): Promise<void> {
       phase,
       voteMs,
       winner: '',
-      votes: LOBBY_MODES.map(m => ({ id: m.id, n: verdict.counts[m.id] ?? 0 })),
+      votes: (() => {
+        const teams = tallyTeams(presentIds(), now)
+        return [{ id: 'red', n: teams.red }, { id: 'blue', n: teams.blue }]
+      })(),
       present: presentIds().length,
       feet: lobbySampleIds().length,
       srvZone: verdict.zone,
       why: verdict.why,
-      mine: to ? countedMode(to, now) : '',
+      mine: to ? (countedTeam(to) === 1 ? 'red' : countedTeam(to) === 2 ? 'blue' : '') : '',
       seed: currentRoundIndex(),
       layout: worldLayout(),
       seq: worldSeq,
@@ -423,19 +426,19 @@ export async function setupServer(): Promise<void> {
 
   function resolveVote(): void {
     const now = Date.now()
-    const { counts } = tallyVotes(presentIds(), now)
-    const winner = pickWinner(counts, worldSeq)
+    const present = presentIds()
+    const teams = tallyTeams(present, now)
     countdownEnds = 0
     hadVotes = false
     wantFull = false
     emptySince = 0
-    if (!winner) {
-      console.log('[Lobby] no votes → idle')
+    if (present.length === 0 && teams.red + teams.blue === 0) {
+      console.log('[Lobby] no players → idle')
       sendRoundClock()
       return
     }
-    console.log(`[Lobby] winner ${winner} pvp=${counts.pvp} pvb=${counts.pvb}`)
-    startNextRound(winner)
+    console.log(`[Lobby] starting Pixelwars red=${teams.red} blue=${teams.blue}`)
+    startNextRound('pvp')
   }
 
   let balloons: BalloonCounts = {}
@@ -530,7 +533,7 @@ export async function setupServer(): Promise<void> {
     forceBalloonEnd(lastStanding(balloons, balloonStarted), 'leave')
   }
 
-  /** Reshuffle (PvP) or stack humans (PvB), roundReset (maze), start clock. */
+  /** Apply lobby team picks (PvP) or stack humans (PvB), roundReset (maze), start clock. */
   function startNextRound(mode: ModeId): void {
     roundFormat = mode === 'pvb' ? 'pvb' : mode === 'bases' ? 'bases' : mode === 'prototype' ? 'prototype' : mode === 'balloon' ? 'balloon' : 'pvp'
     const seed = pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex()
@@ -557,11 +560,22 @@ export async function setupServer(): Promise<void> {
     } else {
       setForcedTeam(null)
       setPopulation({ kind: 'pvp' })
-      const shuffled = shuffleTeams()
-      for (const { userId, team } of shuffled) room.send('teamAssigned', { team }, { to: [userId] })
+      const ids: string[] = []
+      const seen = new Set<string>()
+      for (const id of [...presentIds(), ...rosterEntries().map(e => e.userId)]) {
+        const key = id.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        ids.push(id)
+      }
+      const assigned = assignLobbyTeams(ids, snapshotLobbyChoices())
+      for (const { userId, team } of assigned) {
+        setTeam(userId, team)
+        room.send('teamAssigned', { team }, { to: [userId] })
+      }
       const counts = activeTeamCounts()
       plannedBots = counts.red + counts.blue === 0 || counts.red === counts.blue ? 0 : Math.abs(counts.red - counts.blue)
-      console.log(`[Server] teams reshuffled: ${shuffled.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ')}`)
+      console.log(`[Server] lobby teams: ${assigned.map(s => `${s.userId.slice(0, 8)}=${s.team === 1 ? 'R' : 'B'}`).join(' ') || '(none)'} (bots=${plannedBots})`)
     }
     lobbyOpen = false
     intermission = 'idle'
@@ -633,11 +647,16 @@ export async function setupServer(): Promise<void> {
     if (intermission !== 'lobby') openLobby(false)
     lastPingAt.set(from, Date.now())
     noteLobbyPos(from, x, y, z, Date.now())
+    const pick = countedTeam(from)
+    if (pick && getTeam(from) !== pick) {
+      setTeam(from, pick)
+      room.send('teamAssigned', { team: pick }, { to: [from] })
+    }
   })
 
   room.onMessage('lobbyReady', (_d, context) => {
-    // The floor being walkable does not start the vote. stepLobby starts
-    // LOBBY_VOTE_MS when the first live sample is counted.
+    // The floor being walkable does not start the countdown. stepLobby starts
+    // LOBBY_VOTE_MS when the first team is chosen.
     if (!context?.from) return
   })
 

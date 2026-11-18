@@ -1,13 +1,13 @@
 /**
  * Lobby signs and the feet report. The tiles themselves come from rebuildMaze.
- * Counts are whatever the server last broadcast. This file does not decide a winner.
+ * Counts are whatever the server last broadcast. This file does not assign a team.
  */
 import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, AudioSource } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_MODES, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, emptyCounts, type ModeId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, modeSubtitle, modeTitle, placedModes, signBadgeY, signFaceZ, toSceneFeet, voteLead, voteModeAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_TEAMS, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, signBadgeY, signFaceZ, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -38,22 +38,21 @@ const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
 let confirmEnt: Entity = 0 as Entity
-let pulsed: ModeId | '' = ''
+let pulsed: TeamId | '' = ''
 const CONFIRM_SOUND = 'assets/sounds/click.wav'
 
 type Rgb = { r: number; g: number; b: number }
 
-type LiveMode = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
-
-function pillHex(id: ModeId): string {
-  return MODE_PILL_HEX[id as LiveMode]
+function pillHex(id: TeamId): string {
+  const t = LOBBY_TEAMS.find(x => x.id === id)
+  return t?.hex ?? '#FFFFFF'
 }
 
-function pillTextHex(id: ModeId): string {
-  return MODE_PILL_TEXT_HEX[id as LiveMode]
+function pillTextHex(_id: TeamId): string {
+  return '#FFFFFF'
 }
 
-function pillRgb(id: ModeId): Rgb {
+function pillRgb(id: TeamId): Rgb {
   const c = Color4.fromHexString(pillHex(id))
   return { r: c.r, g: c.g, b: c.b }
 }
@@ -102,7 +101,7 @@ function pill(parent: Entity, w: number, h: number, d: number, center: Vector3, 
 
 function laySigns(): void {
   clearSigns()
-  for (const m of placedModes()) {
+  for (const m of LOBBY_TEAMS) {
     const pose = billboardAnchor(m.cell, MAZE_ORIGIN, CELL, BASE_Y)
     const root = engine.addEntity()
     // Letters sit on local −Z, the side a yaw billboard turns toward the camera.
@@ -125,7 +124,7 @@ function laySigns(): void {
     pill(root, SIGN_W_M, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const title = add(root, Vector3.create(0, 1.15, face), Vector3.One())
     TextShape.create(title, {
-      text: modeTitle(m.id),
+      text: teamTitle(m.id),
       fontSize: TITLE_FONT,
       fontSrc: 'Lilita One',
       textColor: ink,
@@ -136,7 +135,7 @@ function laySigns(): void {
     })
     const sub = add(root, Vector3.create(0, -2.45, face), Vector3.One())
     TextShape.create(sub, {
-      text: modeSubtitle(m.id),
+      text: '',
       fontSize: SUB_FONT,
       fontSrc: 'Lilita One',
       textColor: ink,
@@ -206,7 +205,7 @@ function syncSignFacing(): void {
     applySignPose(root)
     const tr = Transform.getMutableOrNull(root)
     if (!tr) continue
-    // Each sign is offset in phase so the three do not move in lockstep.
+    // Each sign is offset in phase so the two do not move in lockstep.
     const bob = Math.sin((t / SIGN_BOB_PERIOD_S) * Math.PI * 2 + i * 2.1) * SIGN_BOB_M * scale
     tr.position = Vector3.create(tr.position.x, signBaseY[i] + bob, tr.position.z)
   }
@@ -218,11 +217,11 @@ function syncSignFacing(): void {
 }
 
 function refreshSigns(): void {
-  const modes = placedModes()
-  if (boards.length !== modes.length) return
-  for (let i = 0; i < modes.length; i++) {
+  const teams = LOBBY_TEAMS
+  if (boards.length !== teams.length) return
+  for (let i = 0; i < teams.length; i++) {
     const count = TextShape.getMutableOrNull(boards[i].count)
-    if (count) count.text = String(voteCount(modes[i].id))
+    if (count) count.text = String(voteCount(teams[i].id))
   }
 }
 
@@ -292,14 +291,14 @@ function playConfirm(): void {
 }
 
 /** Local tint while standing on an end. A little more opaque once it counts. No glow. */
-function tickTints(_dt: number, local: ModeId | ''): void {
+function tickTints(_dt: number, local: TeamId | ''): void {
   const mine = myVote()
-  const modes = placedModes()
-  if (tints.length !== modes.length) return
-  if (mine && mine === local && mine !== pulsed) { pulsed = mine; playConfirm() }
+  const teams = LOBBY_TEAMS
+  if (tints.length !== teams.length) return
+  if ((mine === 'red' || mine === 'blue') && mine === local && mine !== pulsed) { pulsed = mine; playConfirm() }
   if (!mine) pulsed = ''
-  for (let i = 0; i < modes.length; i++) {
-    const m = modes[i]
+  for (let i = 0; i < teams.length; i++) {
+    const m = teams[i]
     const tr = Transform.getMutableOrNull(tints[i])
     if (!tr) continue
     const here = local === m.id
@@ -352,7 +351,7 @@ export function initLobby(): void {
     const p = t.position
     lastFeet = { x: p.x, y: p.y, z: p.z }
     const sceneNow = toSceneFeet(p.x, p.z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
-    tickTints(dt, voteModeAt(sceneNow.x, sceneNow.z, MAZE_ORIGIN, CELL))
+    tickTints(dt, voteTeamIdAt(sceneNow.x, sceneNow.z, MAZE_ORIGIN, CELL))
     refreshSigns()
     posClock += dt
     if (posClock < 0.5) return
@@ -370,10 +369,10 @@ export function hudLobbyDebug(): string {
   if (!DEBUG_LOBBY || !inLobby()) return ''
   const scene = toSceneFeet(lastFeet.x, lastFeet.z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
   const c = cellAt(scene.x, scene.z, MAZE_ORIGIN, CELL)
-  const named = LOBBY_MODES.find(m => c && m.cell.x === c.x && m.cell.z === c.z)
-  const zone = named ? (named.live ? named.id : `${named.id}-soon`) : (voteModeAt(scene.x, scene.z, MAZE_ORIGIN, CELL) || (c ? 'abstain' : 'out'))
+  const named = LOBBY_TEAMS.find(m => c && m.cell.x === c.x && m.cell.z === c.z)
+  const zone = named ? named.id : (voteTeamIdAt(scene.x, scene.z, MAZE_ORIGIN, CELL) || (c ? 'abstain' : 'out'))
   const wire = serverLobbyCounts()
-  return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} pvp ${voteCount('pvp')} pvb ${voteCount('pvb')} srvZone ${wire.zone} why=${wire.why}`
+  return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} red ${voteCount('red')} blue ${voteCount('blue')} srvZone ${wire.zone} why=${wire.why}`
 }
 
 export function hudClockText(matchSecs: number): string {
@@ -386,9 +385,7 @@ export function hudClockText(matchSecs: number): string {
   if (phase === 'summary') return 'END'
   if (phase === 'lobby' || phase === 'idle') {
     const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteRemainingMs() / 1000)) : 0
-    const counts = emptyCounts()
-    for (const m of LOBBY_MODES) counts[m.id] = voteCount(m.id)
-    return hudVoteHeadline(left, voteLead(counts))
+    return hudVoteHeadline(left)
   }
   return 'VOTE'
 }

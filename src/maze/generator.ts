@@ -19,7 +19,7 @@ import {
   GROWTH_PRIMARY, GROWTH_FALLBACK,
   openingsAt, highDirAt,
 } from './tiles'
-import { LOBBY_CROSS, placedModes } from '../shared/lobby'
+import { LOBBY_CROSS, LOBBY_TEAMS } from '../shared/lobby'
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
@@ -111,8 +111,9 @@ export function placeLobbyLayout(): Placed[] {
   resetGrid()
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
-  place('cross', 0, LOBBY_CROSS.x, LOBBY_CROSS.z)
-  for (const m of placedModes()) {
+  // East-west corridor. A four-way cross would open north and south into the void.
+  place('straight', 1, LOBBY_CROSS.x, LOBBY_CROSS.z)
+  for (const m of LOBBY_TEAMS) {
     const r = m.cell.x < LOBBY_CROSS.x ? 1 : m.cell.x > LOBBY_CROSS.x ? 3 : m.cell.z > LOBBY_CROSS.z ? 2 : 0
     place('end', r, m.cell.x, m.cell.z)
   }

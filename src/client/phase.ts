@@ -2,7 +2,7 @@
  * Client mirror of the server phase. Combat and paint read this.
  * The lobby floor (voting cross) is up for both 'lobby' and 'idle'.
  */
-import type { LobbyPhase, ModeId } from '../shared/lobby'
+import type { LobbyPhase, ModeId, TeamId } from '../shared/lobby'
 
 export type VoteRow = { id: string; n: number }
 
@@ -18,7 +18,7 @@ let serverFeet = 0
 let clocks = 0
 let serverZone = 'none'
 let serverWhy = 'no-clock'
-let mine: ModeId | '' = ''
+let mine: ModeId | TeamId | '' = ''
 
 export function gamePhase(): LobbyPhase {
   return phase
@@ -46,7 +46,7 @@ export function voteRows(): VoteRow[] {
   return votes
 }
 
-export function voteCount(id: ModeId): number {
+export function voteCount(id: string): number {
   return votes.find(v => v.id === id)?.n ?? 0
 }
 
@@ -60,13 +60,13 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
   clocks++
 }
 
-/** Mode the server is counting for us. Empty until that clock says so. */
-export function myVote(): ModeId | '' {
+/** Team (or leftover mode id) the server is counting for us. Empty until that clock says so. */
+export function myVote(): ModeId | TeamId | '' {
   return mine
 }
 
 export function setMyVote(next: string): void {
-  mine = next === 'pvp' || next === 'pvb' || next === 'bases' || next === 'prototype' || next === 'balloon' ? next : ''
+  mine = next === 'red' || next === 'blue' || next === 'pvp' || next === 'pvb' || next === 'bases' || next === 'prototype' || next === 'balloon' ? next : ''
 }
 
 /** present = players the server is scoring. feet = stored lobby samples. */
