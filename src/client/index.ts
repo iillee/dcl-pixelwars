@@ -170,8 +170,7 @@ export async function setupClient(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
-  // Sea meshes wait until the player has a team and the burst/lunge clips
-  // have loaded (LOOK.seaLast). Each mesh is one frame apart. The ocean
-  // bed starts after the haze.
+  // Sea meshes wait until the burst/lunge clips have loaded (LOOK.seaLast),
+  // then arrive one frame apart. The ocean bed starts after the haze.
   armSea(() => startOceanAmbience())
 }

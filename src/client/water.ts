@@ -21,7 +21,6 @@ import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
 import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, hazeBand, hazeOuterBand, horizonOuterRadiusM, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
-import { events } from '../shared/events'
 import { combatVfxReady } from './audio'
 import { initFoam, setFoamSeconds } from './foam'
 
@@ -159,10 +158,10 @@ export function initWater(): void {
 }
 
 /**
- * With `LOOK.seaLast`, the sea waits until the player has a team and the
- * burst/lunge clips have finished loading. Each mesh is then one frame apart
- * so a single frame does not decode every GLB. The ocean bed is `onAudio`,
- * after the haze.
+ * With `LOOK.seaLast`, the sea waits until the burst/lunge clips have
+ * finished loading (or 4s). Each mesh is then one frame apart so a single
+ * frame does not decode every GLB. The ocean bed is `onAudio`, after the
+ * haze. Team assignment is not a gate: the ocean belongs to the lobby too.
  */
 export function armSea(onAudio: () => void): void {
   if (!LOOK.sea) {
@@ -174,13 +173,10 @@ export function armSea(onAudio: () => void): void {
     onAudio()
     return
   }
-  console.log('[Water] deferred until teamAssigned; burst ripple pool is already built')
-  let team = false
+  console.log('[Water] deferred until combat clips are in (or 4s); meshes load one frame apart')
   let age = 0
   let stepping = false
-  events.on('team:assigned', () => { team = true })
   engine.addSystem(function seaLast(dt: number) {
-    if (!team) return
     age += dt
     if (!stepping) {
       if (!combatVfxReady() && age < 4) return
@@ -206,6 +202,34 @@ function repeatTex(src: string, tiling = 1) {
     wrapMode: TextureWrapMode.TWM_REPEAT,
     filterMode: TextureFilterMode.TFM_TRILINEAR,
     tiling: Vector2.create(tiling, tiling),
+  })
+}
+
+/** Mesh node names baked by scripts/build-water-swell.ts. Explorer requires a
+ *  mesh node path on GltfNodeModifiers; an empty path does not tint these GLBs. */
+function seaMeshPath(src: string): string {
+  if (src === WATER.swellNearSrc || src === WATER.swell48NearSrc) return 'SwellNear'
+  if (src === WATER.swellMidSrc || src === WATER.swell48MidSrc) return 'SwellMid'
+  if (src === WATER.swellFarSrc || src === WATER.swell48FarSrc) return 'SwellFar'
+  if (src === WATER.swellLiteSrc || src === WATER.swell48LiteSrc) return 'SwellLite'
+  if (src === WATER.flatSrc) return 'FlatSea'
+  if (src === WATER.flatLiteSrc) return 'FlatLite'
+  if (src === WATER_FOG.hazeSrc) return 'Haze'
+  return 'Sea'
+}
+
+function applySeaPbr(entity: Entity, src: string, pbr: Record<string, unknown>): void {
+  GltfNodeModifiers.create(entity, {
+    modifiers: [{
+      path: seaMeshPath(src),
+      castShadows: false,
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr,
+        },
+      },
+    }],
   })
 }
 
@@ -270,19 +294,7 @@ function addSwell(root: Entity, src: string, wet: boolean): Entity {
     }],
   })
   swellClips.push(wave)
-  const c = WATER_COLOR
-  GltfNodeModifiers.create(wave, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: swellShade(c, wet),
-        },
-      },
-    }],
-  })
+  applySeaPbr(wave, src, swellShade(WATER_COLOR, wet))
   if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
   return wave
 }
@@ -332,18 +344,7 @@ function addFoam(root: Entity, src: string): Entity {
       weight: 1,
     }],
   })
-  GltfNodeModifiers.create(veil, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: foamShade(),
-        },
-      },
-    }],
-  })
+  applySeaPbr(veil, src, foamShade())
   scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
   return veil
 }
@@ -356,29 +357,18 @@ function addFlat(root: Entity, src: string): Entity {
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  GltfNodeModifiers.create(sea, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: {
-            texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-            albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
-            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
-            emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
-            emissiveIntensity: 1,
-            metallic: WATER.metallic,
-            roughness: WATER.roughness,
-            specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
-            transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
-            castShadows: false,
-          },
-        },
-      },
-    }],
+  applySeaPbr(sea, src, {
+    texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
+    albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
+    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
+    emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
+    emissiveIntensity: 1,
+    metallic: WATER.metallic,
+    roughness: WATER.roughness,
+    specularIntensity: WATER.specular,
+    reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false,
   })
   return sea
 }
@@ -405,28 +395,17 @@ function placeHazeRing(mid: number, bottom: number, radius: number, height: numb
     invisibleMeshesCollisionMask: 0,
   })
   const c = HAZE_COLOR
-  GltfNodeModifiers.create(ring, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: {
-            texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
-            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            emissiveColor: Color3.create(c.r, c.g, c.b),
-            emissiveIntensity: 0.65,
-            roughness: 1,
-            metallic: 0,
-            specularIntensity: 0,
-            transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-            castShadows: false,
-          },
-        },
-      },
-    }],
+  applySeaPbr(ring, WATER_FOG.hazeSrc, {
+    texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+    emissiveColor: Color3.create(c.r, c.g, c.b),
+    emissiveIntensity: 0.65,
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    castShadows: false,
   })
 }
 

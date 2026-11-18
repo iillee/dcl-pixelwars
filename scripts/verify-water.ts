@@ -184,6 +184,33 @@ if (!LOOK.sea || !LOOK.seaLast || !LOOK.gloss || !LOOK.softNormal) {
   console.error('✗ the sea, its gloss, and the soft normal should be on')
   process.exit(1)
 }
+{
+  const waterSrc = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
+  const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+  if (!indexSrc.includes('armSea(')) {
+    console.error('✗ setupClient should still call armSea')
+    process.exit(1)
+  }
+  if (waterSrc.includes("path: ''") || waterSrc.includes('path: ""')) {
+    console.error('✗ water GltfNodeModifiers need the baked mesh node names, not an empty path')
+    process.exit(1)
+  }
+  for (const name of ['SwellNear', 'SwellMid', 'SwellFar', 'SwellLite', 'FlatSea', 'FlatLite', 'Haze']) {
+    if (!waterSrc.includes("'" + name + "'")) {
+      console.error('✗ water modifiers should target mesh node ' + name)
+      process.exit(1)
+    }
+  }
+  if (waterSrc.includes('deferred until teamAssigned') || waterSrc.includes('if (!team) return')) {
+    console.error('✗ the sea should not wait on team:assigned before spawning')
+    process.exit(1)
+  }
+  if (!waterSrc.includes('combat clips are in') && !waterSrc.includes('Team assignment is not a gate')) {
+    console.error('✗ armSea should still stagger after combat clips, without a team gate')
+    process.exit(1)
+  }
+  console.log('✓ sea still arms from setupClient, without a team gate, and tints named mesh nodes')
+}
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
   process.exit(1)

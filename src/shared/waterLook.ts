@@ -215,8 +215,9 @@ export const SURFACE = {
 export const LOOK = {
   /** Our swell, rim, and haze. */
   sea: true,
-  /** Load the sea only after teamAssigned and the combat sounds are in.
-   *  Off starts the sea on the first frame, for an A/B of Burst lag. */
+  /** Stagger sea meshes one frame apart, after combat clips are in (or 4s).
+   *  Off starts the sea on the first frame, for an A/B of Burst lag.
+   *  This is not gated on team assignment — the ocean is part of the lobby world. */
   seaLast: true,
   gloss: true,
   glossRoughness: 0.3,
