@@ -80,6 +80,7 @@ import { LOOK } from '../shared/waterLook'
 import { waterVisualSeconds } from './water'
 import { Team, isPlayingTeam } from '../shared/team'
 import { playFallRescueSfx } from './audio'
+import { playWaterSplash } from './waterSplash'
 import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
@@ -738,6 +739,7 @@ function begin(p: Vec): void {
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
   playFallRescueSfx()
+  playWaterSplash(hold.x, hold.z, true)
   // The catch itself does not move the player. Overview off so the follow camera rides the tween.
   holdFallLine()
   exitOverview()
@@ -920,6 +922,7 @@ function onRemoteStart(m: {
     return
   }
   if (![m.x, m.y, m.z, m.bx, m.by, m.bz, m.grab, m.rise, m.cruise, m.descend].every(n => Number.isFinite(n))) return
+  playWaterSplash(catchP.x, catchP.z, false)
   clearRemote(who)
   const root = engine.addEntity()
   const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y, rescueHangY(who))

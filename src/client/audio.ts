@@ -15,6 +15,7 @@
  */
 
 import { AssetLoad, AssetLoadLoadingState, AudioSource, Entity, LoadingState, Transform, engine } from '@dcl/sdk/ecs'
+import { Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_BOOM_VOL } from '../shared/pvp'
 import { OCEAN_AMBIENCE_SRC, OCEAN_AMBIENCE_VOLUME } from '../shared/waterLook'
@@ -47,6 +48,7 @@ export function initAudio(): void {
   initAirSpikeSfx()
   initFlagtagSfx()
   initRescueSfx()
+  initSplashSfx()
   dashSfxEnt = engine.addEntity()
   Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
@@ -312,4 +314,79 @@ function initRescueSfx(): void {
 export function playFallRescueSfx(): void {
   if (!rescueSfxEnt) return
   AudioSource.createOrReplace(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: true, loop: false, volume: RESCUE_VOL, global: true, currentTime: 0 })
+}
+
+/** Optional fall-in splash clip. Missing file: preload never finishes, play stays silent. */
+export const SPLASH_SRC = 'assets/sounds/splash.mp3'
+const SPLASH_VOL_WORLD = 0.7
+const SPLASH_VOL_SELF = 1
+const SPLASH_WORLD_POOL = 4
+const SPLASH_WORLD_LIFE_S = 2.2
+let splashReady = false
+let splashSelfEnt: Entity | null = null
+const splashWorld: { ent: Entity; left: number }[] = []
+function splashClipLoaded(): boolean {
+  for (const [ent] of engine.getEntitiesWith(AssetLoadLoadingState)) {
+    const set = AssetLoadLoadingState.get(ent)
+    let found = false
+    const visit = (st: { currentState?: number; asset?: string }) => {
+      if (st.asset === SPLASH_SRC && st.currentState === LoadingState.FINISHED) found = true
+    }
+    if (set && typeof (set as { forEach?: unknown }).forEach === 'function') {
+      ;(set as { forEach: (fn: (st: { currentState?: number; asset?: string }) => void) => void }).forEach(visit)
+    }
+    if (found) return true
+  }
+  return false
+}
+function tickSplashSfx(dt: number): void {
+  if (!splashReady && splashClipLoaded()) splashReady = true
+  for (const slot of splashWorld) {
+    if (slot.left <= 0) continue
+    slot.left -= dt
+    if (slot.left > 0) continue
+    const src = AudioSource.getMutableOrNull(slot.ent)
+    if (src) src.playing = false
+    Transform.getMutable(slot.ent).position = Vector3.create(0, -200, 0)
+  }
+}
+function initSplashSfx(): void {
+  try {
+    const pre = engine.addEntity()
+    AssetLoad.create(pre, { assets: [SPLASH_SRC] })
+  } catch {
+    return
+  }
+  splashSelfEnt = engine.addEntity()
+  Transform.create(splashSelfEnt, { parent: engine.CameraEntity })
+  for (let i = 0; i < SPLASH_WORLD_POOL; i++) {
+    const ent = engine.addEntity()
+    Transform.create(ent, { position: Vector3.create(0, -200, 0) })
+    splashWorld.push({ ent, left: 0 })
+  }
+  engine.addSystem(tickSplashSfx)
+}
+function splashPitch(): number {
+  return 0.9 + Math.random() * (1.1 - 0.9)
+}
+/** Spatial splash at the catch. A missing clip is a no-op. The faller also gets a slightly louder 2D copy. */
+export function playSplashSfx(at: { x: number; y: number; z: number }, forFaller: boolean): void {
+  if (!splashReady) {
+    if (splashClipLoaded()) splashReady = true
+    else return
+  }
+  const pitch = splashPitch()
+  let slot = splashWorld.find(s => s.left <= 0)
+  if (!slot && splashWorld.length) slot = splashWorld.reduce((a, b) => a.left < b.left ? a : b)
+  if (slot) {
+    slot.left = SPLASH_WORLD_LIFE_S
+    Transform.getMutable(slot.ent).position = Vector3.create(at.x, at.y, at.z)
+    AudioSource.createOrReplace(slot.ent, {
+      audioClipUrl: SPLASH_SRC, playing: true, loop: false, volume: SPLASH_VOL_WORLD, global: false, pitch, currentTime: 0,
+    })
+  }
+  if (!forFaller || !splashSelfEnt) return
+  AudioSource.createOrReplace(splashSelfEnt, {
+    audioClipUrl: SPLASH_SRC, playing: true, loop: false, volume: SPLASH_VOL_SELF, global: true, pitch, currentTime: 0,
+  })
 }

@@ -32,6 +32,7 @@ import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
 import { initAudio, startOceanAmbience } from './audio'
+import { initWaterSplash } from './waterSplash'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
@@ -109,6 +110,7 @@ export async function setupClient(): Promise<void> {
   setupUi()
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
+  initWaterSplash()
   setupOverviewCamera()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
