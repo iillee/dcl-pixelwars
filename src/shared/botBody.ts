@@ -103,7 +103,7 @@ export class BotBody {
    * Test hook: start mid-glide at `pos` with velocity `vel`, steering to `to`.
    * Used by verify-recovery to reproduce a lip snag and the air dash.
    */
-  startGlideApproach(pos: V3, vel: V3, to: V3): void {
+  startGlideApproach(pos: V3, vel: V3, to: V3, glideT = 0.2): void {
     this.mode = 'knock'
     this.grounded = false
     this.willRecover = true
@@ -111,7 +111,7 @@ export class BotBody {
     this.phase = 'glide'
     this.jumped = true
     this.didDouble = true
-    this.glideTime = 0.2
+    this.glideTime = glideT
     this.jumpTime = 0
     this.reactLeft = 0
     this.noJumpLeft = 0
@@ -404,7 +404,7 @@ export class BotBody {
     if (this.phase === 'idle') {
       // Touching the lip clears the phase. Slipping off again keeps the glide; it does not grant a second jump.
       if (this.jumped) {
-        if (!this.grounded && this.recoverTo && this.glideTime > 0 && this.glideTime < BOT_RECOVER_MAX_S) this.phase = 'glide'
+        if (!this.grounded && this.recoverTo && this.glideTime > 0 && this.willRecover) this.phase = 'glide'
         else return
       } else {
         if (!this.threatened(world)) return
@@ -423,10 +423,13 @@ export class BotBody {
     }
     const t = this.recoverTo
     if (!t) { this.clearRecovery(); return }
-    if (this.pos.y < t.y - BOT_RECOVER_GIVE_UP_M) { this.abortGlide(); return }
-    if (this.phase === 'glide') this.steerGlide(t, dt, out)
+    const approach = this.phase === 'glide' ? this.finalApproach(world) : null
+    // Don't fold the glider just short of a lip they can still reach.
+    if (this.pos.y < t.y - BOT_RECOVER_GIVE_UP_M && !approach) { this.abortGlide(); return }
+    if (this.phase === 'glide') this.steerGlide(t, dt, out, world)
     else this.steerToward(t, dt, out)
     this.holdLipClearance(t)
+    if (approach) this.stretchFinalApproach(approach.floor)
     if (this.phase === 'jump') {
       this.jumpTime += dt
       const apex = this.vel.y <= 0.4 || this.jumpTime > 0.55
@@ -444,7 +447,12 @@ export class BotBody {
       return
     }
     this.glideTime += dt
-    if (this.glideTime > BOT_RECOVER_MAX_S) this.abortGlide()
+    // A close inbound glide may run a little long to finish the last metres.
+    // Past that, let it fall — otherwise a graze can float forever.
+    if (this.glideTime > BOT_RECOVER_MAX_S) {
+      const late = this.finalApproach(world)
+      if (!late || this.glideTime > BOT_RECOVER_MAX_S + BotBody.FINAL_EXTRA_S) this.abortGlide()
+    }
   }
 
   /** First jump's arc, then a 1 m/s glide, does not cover the floor before the give-up line. */
@@ -462,6 +470,61 @@ export class BotBody {
     // Land on the floor, not at the give-up line. The snap only catches a body just above it.
     const budget = apex - (t.y + 0.25)
     return budget <= 0 || time > budget / Math.max(0.25, HUMAN_GLIDE_FALL)
+  }
+
+  /** Inbound glide within this many metres of a walkable cell: keep going (m). */
+  static readonly FINAL_APPROACH_M = 4
+  /** How far below that floor a last stretch may still climb into the mantle (m). */
+  static readonly FINAL_STRETCH_M = 1.6
+  /** Extra glide time allowed once already in the final approach (s). */
+  static readonly FINAL_EXTRA_S = 1.25
+
+  /** Nearest walkable cell within `range` of the feet, on a nearby deck. */
+  private nearbyFloor(world: BotWorld, range: number): V3 | null {
+    const yRef = this.recoverTo?.y ?? this.pos.y
+    let best: V3 | null = null
+    let bestD = range
+    for (const p of world.graph.worldPos.values()) {
+      if (Math.abs(p[1] - yRef) > 2 && Math.abs(p[1] - this.pos.y) > 2) continue
+      const d = Math.hypot(p[0] - this.pos.x, p[2] - this.pos.z)
+      if (d <= bestD) { bestD = d; best = { x: p[0], y: p[1], z: p[2] } }
+    }
+    return best
+  }
+
+  /**
+   * Gliding back and close enough to a walkable lip that giving up would
+   * drop them just short of the edge. Also used to aim the last stretch at
+   * that lip instead of a deep or misjudged recoverTo.
+   */
+  private finalApproach(world: BotWorld): { floor: V3 } | null {
+    if (!this.willRecover || this.phase !== 'glide' || this.grounded) return null
+    const floor = this.nearbyFloor(world, BotBody.FINAL_APPROACH_M)
+    if (!floor) return null
+    if (this.pos.y < floor.y - BotBody.FINAL_STRETCH_M) return null
+    const dx = floor.x - this.pos.x, dz = floor.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    const speed = Math.hypot(this.vel.x, this.vel.z)
+    const inbound = speed < 0.4 || d < 1.5 || this.vel.x * dx + this.vel.z * dz > 0
+    return inbound ? { floor } : null
+  }
+
+  /**
+   * Close the last vertical gap so the feet arrive inside the mantle window.
+   * Does not climb from a hopeless short jump (outside FINAL_STRETCH_M).
+   */
+  private stretchFinalApproach(floor: V3): void {
+    const dy = floor.y - this.pos.y
+    if (dy <= 0) {
+      if (this.pos.y < floor.y + 0.55) this.vel.y = Math.max(this.vel.y, 0)
+      return
+    }
+    if (dy > BotBody.FINAL_STRETCH_M) return
+    const d = Math.hypot(floor.x - this.pos.x, floor.z - this.pos.z)
+    const sp = Math.max(1, Math.hypot(this.vel.x, this.vel.z))
+    const eta = Math.max(0.08, d / sp)
+    const need = Math.max(0, dy - 0.4)
+    this.vel.y = Math.max(this.vel.y, Math.min(2.4, need / eta))
   }
 
   /**
@@ -520,7 +583,7 @@ export class BotBody {
    * dash) fires toward that floor on the same cooldown and active time, and
    * only when the floor is still out of a plain glide's reach.
    */
-  private steerGlide(t: V3, dt: number, out: BotBodyEvent[]): void {
+  private steerGlide(t: V3, dt: number, out: BotBodyEvent[], world?: BotWorld): void {
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z
     const d = Math.hypot(dx, dz)
     if (d <= 0.3) return
@@ -535,7 +598,10 @@ export class BotBody {
     const c = Math.cos(step), s = Math.sin(step)
     const ndx = dirx * c - dirz * s
     const ndz = dirx * s + dirz * c
-    const spWant = d < 2.5 ? Math.min(HUMAN_GLIDE_SPEED, d * 2) : HUMAN_GLIDE_SPEED
+    // Don't ease off in the last 2.5 m unless the feet are already over a floor.
+    // Slowing down still outside the lip is what left them short of the edge.
+    const over = !!world && graphFloorAt(world.graph, world.rampTiles, this.pos.x, this.pos.z, this.pos.y, 1.2, 1) !== null
+    const spWant = (!over) ? HUMAN_GLIDE_SPEED : (d < 2.5 ? Math.min(HUMAN_GLIDE_SPEED, d * 2) : HUMAN_GLIDE_SPEED)
     // Excess over the glide cap decays like the player's external-velocity drag.
     const excess = sp - spWant
     sp = excess > 0 ? spWant + excess * Math.exp(-1.5 * dt) : sp + (spWant - sp) * Math.min(1, 8 * dt)

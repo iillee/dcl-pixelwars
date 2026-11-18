@@ -338,6 +338,35 @@ if (strongSaved > 2) fail(`strong knocks were saved ${strongSaved}/24 times`)
   } else {
     console.log('✓ aerial spike is allowed over the arena and refused off the edge')
   }
+
+  // Already on the last stretch: 1.2 m under the lip, a couple of metres out,
+  // and almost out of glide time. Must keep the glider open and get on.
+  {
+    const floorY = s.y
+    let outX = s.x + s.dx * 6, outZ = s.z + s.dz * 6
+    for (let d = 2; d <= 10; d += 0.5) {
+      const x = s.x + s.dx * d, z = s.z + s.dz * d
+      if (!cover(x, z).length) { outX = x + s.dx * 0.9; outZ = z + s.dz * 0.9; break }
+    }
+    const to = { x: s.x, y: floorY, z: s.z }
+    const start = { x: outX, y: floorY - 1.2, z: outZ }
+    const late = new BotBody(start)
+    late.startGlideApproach(start, { x: -s.dx * 5, y: 0, z: -s.dz * 5 }, to, 3.4)
+    let gotOn = false
+    let gaveUp = false
+    for (let t = 0; t < 3; t += 0.05) {
+      for (const e of late.tick(0.05, world)) {
+        if (e.type === 'settled') gotOn = true
+        if (e.type === 'fell') gaveUp = true
+      }
+      if (gotOn || gaveUp) break
+    }
+    if (!gotOn || gaveUp) {
+      fail(`late inbound glide gave up short of the lip at (${late.pos.x.toFixed(2)}, ${late.pos.y.toFixed(2)}, ${late.pos.z.toFixed(2)})`)
+    } else {
+      console.log(`✓ late inbound glide kept going and reached the lip (y ${late.pos.y.toFixed(2)})`)
+    }
+  }
 }
 
 if (failed) process.exit(1)
