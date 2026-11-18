@@ -38,6 +38,11 @@ const CLASSIC_CAMERA_TARGET = { x: 88, y: 2, z: 96 }
 let myTeam: Team = Team.None
 let spawnPads: Entity[] = []
 
+function clearSpawnPads(): void {
+  for (const e of spawnPads) engine.removeEntity(e)
+  spawnPads = []
+}
+
 function ensureSpawnPads(): void {
   if (!IS_SKY || spawnPads.length) return
   for (const p of earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))) {
@@ -64,6 +69,10 @@ function teleportHome(why: string): void {
     pos = c
     look = { x: c.x, y: c.y, z: c.z + 8 }
   } else if (IS_SKY) {
+    // Put a temporary collider under the current team floors (which may sit
+    // above or below L0) before the tile mesh can hold the player.
+    clearSpawnPads()
+    ensureSpawnPads()
     const assigned = why === 'fell' ? assignedRescueHome() : null
     const s = assigned
       ? { pos: assigned, look: { x: assigned.x, y: assigned.y, z: assigned.z + 8 } }
@@ -129,8 +138,7 @@ export function initPlayerNet(): void {
     engine.addSystem(() => {
       if (!spawnPads.length) return
       if (isLobbyLayout() || !isMazeReady()) return
-      for (const e of spawnPads) engine.removeEntity(e)
-      spawnPads = []
+      clearSpawnPads()
       console.log('[Player] maze ready → spawn pads removed')
     })
   }

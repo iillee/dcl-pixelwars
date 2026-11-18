@@ -517,38 +517,77 @@ export function baseTeamOfCellId(id: string): number {
   return baseTeamOfTile(+parts[0], +parts[1], +parts[2])
 }
 
+/** Feet height above a tile's origin. Walkable slab top is about +0.5, so this
+ *  sits just above the floor the way L0 red/blue bases always did. */
+const SPAWN_FEET = 1.5
+
+/** Highest tile at a grid cell, if any. */
+function tileAtCell(placed: Placed[], x: number, z: number): Placed | undefined {
+  let best: Placed | undefined
+  for (const p of placed) {
+    if (p.x !== x || p.z !== z) continue
+    if (!best || p.y > best.y) best = p
+  }
+  return best
+}
+
+/** Stand on one tile: its own height, and on a ramp the lower landing (not mid-slope). */
+function spawnOnTile(p: Placed): { x: number; y: number; z: number } {
+  let x = (p.x + 0.5) * CELL + MAZE_ORIGIN
+  let z = (p.z + 0.5) * CELL + MAZE_ORIGIN
+  const high = highDirAt(p.type, p.r)
+  if (high !== null) {
+    const low = OPP[high]
+    const inset = CELL * 0.3
+    x += DX[low] * inset
+    z += DZ[low] * inset
+  }
+  return { x, y: p.y + SPAWN_FEET, z }
+}
+
+function pickSpawnTile(tiles: Placed[], mid: number): Placed {
+  const dist = (p: Placed) => Math.abs(p.x - mid) + Math.abs(p.z - mid)
+  const flats = tiles.filter(p => !TILES[p.type].isRamp)
+  const pool = flats.length ? flats : tiles
+  let best = pool[0]
+  for (const p of pool) {
+    const d = dist(p), bd = dist(best)
+    if (d < bd || (d === bd && p.y > best.y)) best = p
+  }
+  return best
+}
+
 /** World-space spawn (feet) on a team's base, plus a camera target at the
- *  scene centre. Uses the centre of the base TILE nearest the scene centre:
- *  a ring of turn tiles has a hole in the middle of the block, so the block
- *  centre isn't walkable. */
+ *  scene centre. Uses one solid tile — the team anchor if it has a floor at
+ *  any level, otherwise the nearest placed floor. Height follows that tile
+ *  (green/yellow corners are often above or below L0). Never averages two
+ *  cells, which can land in the hole between them. */
 export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
   const mid = (GRID_W - 1) / 2
-  const dist = (c: [number, number]) => Math.abs(c[0] - mid) + Math.abs(c[1] - mid)
   const placed = getPlacedTilesInOrder()
-  const hasFloor = (c: [number, number]) => placed.some(p => p.x === c[0] && p.z === c[1])
   const anchors = baseCells(team)
-  const usable = anchors.filter(c => placed.length === 0 || hasFloor(c))
-  let near: Array<[number, number]>
-  if (usable.length > 0) {
-    const dMin = Math.min(...usable.map(dist))
-    near = usable.filter(c => dist(c) === dMin)
-  } else if (placed.length > 0) {
-    const [ax, az] = spawnAnchor(team)
+  const [ax, az] = spawnAnchor(team)
+  const lookAt = (pos: { x: number; y: number; z: number }) => ({ pos, look: { x: SCENE_SIZE / 2, y: pos.y, z: SCENE_SIZE / 2 } })
+  if (placed.length === 0) {
+    const [x, z] = anchors[0] ?? [ax, az]
+    return lookAt({ x: (x + 0.5) * CELL + MAZE_ORIGIN, y: BASE_Y + SPAWN_FEET, z: (z + 0.5) * CELL + MAZE_ORIGIN })
+  }
+  const onAnchor = anchors.map(([x, z]) => tileAtCell(placed, x, z)).filter((p): p is Placed => !!p)
+  let tile: Placed | undefined = onAnchor.length ? pickSpawnTile(onAnchor, mid) : undefined
+  if (!tile) {
     let bestD = Infinity
-    const best: Array<[number, number]> = []
+    const near: Placed[] = []
     for (const p of placed) {
       const d = Math.abs(p.x - ax) + Math.abs(p.z - az)
-      if (d < bestD) { bestD = d; best.length = 0; best.push([p.x, p.z]) }
-      else if (d === bestD) best.push([p.x, p.z])
+      if (d < bestD) { bestD = d; near.length = 0; near.push(p) }
+      else if (d === bestD) near.push(p)
     }
-    near = best
-  } else {
-    near = anchors.length ? anchors : [spawnAnchor(team)]
+    tile = near.length ? pickSpawnTile(near, mid) : undefined
   }
-  const cx = near.reduce((a, c) => a + c[0] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
-  const cz = near.reduce((a, c) => a + c[1] + 0.5, 0) / near.length * CELL + MAZE_ORIGIN
-  const y = BASE_Y + 1.5 // walkable slab top is +0.5
-  return { pos: { x: cx, y, z: cz }, look: { x: SCENE_SIZE / 2, y, z: SCENE_SIZE / 2 } }
+  if (!tile) {
+    return lookAt({ x: (ax + 0.5) * CELL + MAZE_ORIGIN, y: BASE_Y + SPAWN_FEET, z: (az + 0.5) * CELL + MAZE_ORIGIN })
+  }
+  return lookAt(spawnOnTile(tile))
 }
 
 /** Tiles kept alive across round rebuilds (players stand on them at reset). */

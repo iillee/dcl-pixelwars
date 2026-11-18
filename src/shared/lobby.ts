@@ -419,10 +419,10 @@ export function earlySpawnPads(
   origin: number,
   cell: number,
   baseY: number,
-  bases: Array<{ x: number; z: number }>,
+  bases: Array<{ x: number; y?: number; z: number }>,
 ): SpawnPad[] {
   const feetY = baseY + 1.5
-  const pads = bases.map(b => spawnPadAt(b.x, feetY, b.z))
+  const pads = bases.map(b => spawnPadAt(b.x, b.y ?? feetY, b.z))
   const cross = lobbyFeet(cell, origin, baseY)
   pads.push(spawnPadAt(cross.x, cross.y, cross.z))
   for (const team of LOBBY_TEAMS) {
