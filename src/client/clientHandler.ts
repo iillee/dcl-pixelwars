@@ -24,6 +24,7 @@ import { parseWorldLayout } from '../shared/worldState'
 import { engine, PlayerIdentityData, AvatarBase, Transform } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
+import { initPaintScore } from './paintScore'
 import { Team, teamName } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
@@ -59,6 +60,7 @@ export function initClientHandler(): void {
     pingClock = 0
     room.send('presencePing', {})
   })
+  initPaintScore()
   wireInbound()
   wireTeamAssigned()
   wireOutbound()
@@ -90,6 +92,9 @@ function wireInbound(): void {
 
   room.onMessage('paintWallet', ({ tank, denied, regen }) => {
     events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
+  })
+  room.onMessage('paintScore', ({ n }) => {
+    events.emit('paint:score', { n: n ?? 0 })
   })
 
   room.onMessage('snapshot', ({ entries, red, blue, green, yellow, total, seed, layout, seq, format, phase }) => {

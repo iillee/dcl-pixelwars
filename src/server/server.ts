@@ -106,13 +106,44 @@ export async function setupServer(): Promise<void> {
   // Per-player cells flipped this round. Bots use `bot:<id>` and are cleared
   // with the round. Same 'gained' count humans get; bots are not persisted.
   const roundCells = new Map<string, number>()
+  const dirtyPaintScores = new Set<string>()
+  const lastSentPaintScore = new Map<string, number>()
+  const addRoundCells = (id: string, n: number): void => {
+    if (n <= 0) return
+    roundCells.set(id, (roundCells.get(id) ?? 0) + n)
+    if (!id.startsWith('bot:')) dirtyPaintScores.add(id)
+  }
+  const flushPaintScores = (): void => {
+    for (const id of dirtyPaintScores) {
+      const n = roundCells.get(id) ?? 0
+      if (lastSentPaintScore.get(id) === n) continue
+      lastSentPaintScore.set(id, n)
+      room.send('paintScore', { n }, { to: [id] })
+    }
+    dirtyPaintScores.clear()
+  }
+  const sendPaintScoreTo = (id: string): void => {
+    if (!id || id.startsWith('bot:')) return
+    const n = roundCells.get(id) ?? 0
+    lastSentPaintScore.set(id, n)
+    room.send('paintScore', { n }, { to: [id] })
+  }
+  const clearRoundCellsAndNotify = (): void => {
+    const ids = new Set<string>()
+    for (const id of lastSentPaintScore.keys()) if (!id.startsWith('bot:')) ids.add(id)
+    for (const id of roundCells.keys()) if (!id.startsWith('bot:')) ids.add(id)
+    roundCells.clear()
+    dirtyPaintScores.clear()
+    for (const id of ids) room.send('paintScore', { n: 0 }, { to: [id] })
+    lastSentPaintScore.clear()
+  }
   /** Team of each `bot:<id>` seen this round, including bots retired after scoring. */
   const botTeams = new Map<string, number>()
   // Bot paint: live/round scoreboard only. Never leaderboardIncrement (that map is persisted).
   const applyBotPaint = (cellId: string, team: number, painter: string): boolean => {
     const gained = paintCells(painter, team, [cellId], cellId, false)
     if (gained > 0) {
-      roundCells.set(painter, (roundCells.get(painter) ?? 0) + gained)
+      addRoundCells(painter, gained)
       botTeams.set(painter, team)
     }
     return gained > 0
@@ -786,7 +817,7 @@ export async function setupServer(): Promise<void> {
     }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
-      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+      addRoundCells(from, gained)
     }
   })
 
@@ -860,7 +891,7 @@ export async function setupServer(): Promise<void> {
     const t0 = Date.now()
     const changes = drainDelta()
     const work = Date.now() - t0
-    if (changes.length === 0) { noteLagSection('paint', t0); return }
+    if (changes.length === 0) { flushPaintScores(); noteLagSection('paint', t0); return }
     console.log(`[Server] paintFlush n=${changes.length} wait=${queued}ms work=${work}ms`)
     const c = coverage()
     // Saturation discipline (shared/messages.ts): ≤ MAX_CHANGES_PER_MSG per
@@ -868,6 +899,7 @@ export async function setupServer(): Promise<void> {
     for (let i = 0; i < changes.length; i += MAX_CHANGES_PER_MSG) {
       room.send('paintDelta', { changes: changes.slice(i, i + MAX_CHANGES_PER_MSG), red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: c.total })
     }
+    flushPaintScores()
     noteLagSection('paint', t0)
   }
   engine.addSystem((dt: number) => {
@@ -1049,7 +1081,7 @@ export async function setupServer(): Promise<void> {
     const gained = paintCells(from, team, fp, centre, true)
     if (gained > 0) {
       leaderboardIncrement(from, gained)
-      roundCells.set(from, (roundCells.get(from) ?? 0) + gained)
+      addRoundCells(from, gained)
     }
     return fp
   }
@@ -1386,7 +1418,7 @@ export async function setupServer(): Promise<void> {
       const gained = paintCells(b.from, b.team, cells, null, true)
       if (gained > 0) {
         leaderboardIncrement(b.from, gained)
-        roundCells.set(b.from, (roundCells.get(b.from) ?? 0) + gained)
+        addRoundCells(b.from, gained)
       }
       console.log(`[Server] bombBlast ${b.from.slice(0, 8)} at ${b.x.toFixed(1)},${b.y.toFixed(1)},${b.z.toFixed(1)} → ${gained} cells`)
       room.send('bombBlast', { attacker: b.from, team: b.team, x: b.x, y: b.y, z: b.z, cells: gained })
@@ -1418,6 +1450,7 @@ export async function setupServer(): Promise<void> {
     }
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
+    sendPaintScoreTo(from)
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:
@@ -1529,7 +1562,7 @@ export async function setupServer(): Promise<void> {
       room.send('roundResult', { cells: roundCells.get(userId) ?? 0, teamCells: teamCells[team] ?? 0, team }, { to: [userId] })
     }
     const painted = new Map(roundCells)
-    roundCells.clear()
+    clearRoundCellsAndNotify()
     pendingBombs.length = 0
     const owners = buildStandings(painted)
     botTeams.clear()

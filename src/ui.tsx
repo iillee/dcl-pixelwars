@@ -20,6 +20,7 @@ import {
 } from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
+import { paintedHud } from "./client/paintScore"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -614,6 +615,36 @@ function bannerHeadline(): string {
   return (b.headline || (b.winner === 'TIE' ? "IT'S A TIE!" : `${b.winner} WINS!`)).replace(/!$/, '')
 }
 
+/** Compact personal tiles-painted total, centered under the territory bar so it stays
+ *  clear of the eye, timer, mute, and scoreboard. Same light-pill language as the clock. */
+function PaintedHud() {
+  if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
+  const { n, plus } = paintedHud()
+  const mob = isMobile()
+  const font = mob ? 14 : 18
+  const h = mob ? 28 : 34
+  const padX = mob ? 12 : 16
+  const label = `PAINTED: ${n}`
+  const w = Math.ceil(textWSafe(label, font) + padX * 2 + (plus > 0 ? textWSafe(`+${plus}`, font) + 8 : 0))
+  return (
+    <UiEntity uiTransform={{ margin: { top: 6 }, height: h, flexShrink: 0, pointerFilter: 'none', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+      <UiEntity
+        uiTransform={{
+          width: w, height: h, borderRadius: HOTBAR_RADIUS, borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+          padding: TILE_RING, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
+        }}
+        uiBackground={{ color: HOTBAR_TILE_BG }}
+      >
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, padding: { left: padX - TILE_RING, right: padX - TILE_RING }, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}
+          uiBackground={{ color: PANEL_LIGHT }}>
+          <Label value={label} fontSize={font} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ height: '100%' }} />
+          {plus > 0 && <Label value={`+${plus}`} fontSize={font} color={SUMMARY_MVP} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: '100%', margin: { left: 8 } }} />}
+        </UiEntity>
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 /** Prototype only. Vertical pill on the right: caption and team-colored fill from the bottom. */
 function PaintTankBar() {
   if (!paintEconomyOn() || inLobby()) return null
@@ -854,6 +885,7 @@ export const uiMenu = () => (
                 </UiEntity>
               )
             })()}
+            <PaintedHud />
           </UiEntity>
         </UiEntity>
       )

@@ -64,6 +64,10 @@ export const Messages = {
     regen: Schemas.Int,
   }),
 
+  // Server → the painter only. Batched personal tiles-painted total for this round
+  // (not one message per tile). Sent with the 5 Hz paint flush, on snapshot, and as 0 on reset.
+  paintScore: Schemas.Map({ n: Schemas.Int }),
+
   // Client → Server: request the current authoritative paint state.
   // Sent once after teamAssigned so a reloaded/late-joining client sees
   // the round's existing paint instead of a blank maze. Server rate-limits
