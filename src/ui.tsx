@@ -20,7 +20,7 @@ import {
 } from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
-import { paintedHud, paintTileFill } from "./client/paintScore"
+import { paintedHud } from "./client/paintScore"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -615,7 +615,7 @@ function bannerHeadline(): string {
   return (b.headline || (b.winner === 'TIE' ? "IT'S A TIE!" : `${b.winner} WINS!`)).replace(/!$/, '')
 }
 
-/** Shared vertical pill used by the Prototype paint tank and the tiles-painted tracker. */
+/** Shared vertical pill used by the Prototype paint tank. */
 function SideFillTrack(props: { trackW: number; trackH: number; pad: number; radius: number; innerR: number; fillH: number; fillColor: any; empty: boolean }) {
   const { trackW, trackH, pad, radius, innerR, fillH, fillColor, empty } = props
   return (
@@ -630,49 +630,52 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
   )
 }
 
-/** Personal tiles-painted total, as a left-side vertical bar matching the Paint Economy tank.
- *  Sits mid-height so it stays clear of the mobile joystick (bottom-left) and Dash/Burst/jump (right). */
+/** Personal tiles-painted total. A mute-sized pill parked to the right of
+ *  mute as an overlay, so the centered eye / timer / mute cluster (and the
+ *  territory bar under it) never shifts. Hidden in the lobby, summary, and
+ *  standings. */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const { n, plus } = paintedHud()
-  const mob = isMobile()
-  const cv = canvasSize()
-  const trackH = mob ? 168 : 240
-  const trackW = mob ? 28 : 36
-  const pad = 3
-  const radius = trackW / 2
-  const innerW = trackW - pad * 2
-  const innerH = trackH - pad * 2
-  const innerR = innerW / 2
-  const fill = paintTileFill(n)
-  const fillH = n <= 0 ? 0 : Math.max(innerW, Math.round(innerH * fill))
-  const team = painterTeam()
-  const teamColor = isPlayingTeam(team) ? barColor(team) : BAR_RED
   const countText = String(n)
   const plusText = plus > 0 ? '+' + plus : ''
-  const font = mob ? 16 : 20
-  const plusFont = mob ? 14 : 16
-  const headH = mob ? 44 : 52
-  const top = Math.max(16, Math.round((cv.h - trackH - headH) / 2))
+  const mob = isMobile()
+  const cv = UiCanvasInformation.getOrNull(engine.RootEntity)
+  const uiW = cv && cv.height > 0 ? (cv.width / cv.height) * 1080 : 1280
+  const wrapperLeft = (uiW - MATCH_TOP_W) / 2 + (MATCH_TOP_W - TOP_BTN)
+  const inset = 8
+  let width = TOP_BTN
+  let left = TOP_BTN + TOP_GAP
+  const maxRight = uiW - inset
+  if (wrapperLeft + left + width > maxRight) left = Math.max(TOP_BTN + 4, maxRight - width - wrapperLeft)
+  if (wrapperLeft + left + width > maxRight) width = Math.max(52, maxRight - wrapperLeft - left)
   return (
     <UiEntity
       uiTransform={{
         positionType: 'absolute',
-        position: { top, left: mob ? 10 : 22 },
-        width: 72,
-        height: trackH + headH,
-        flexDirection: 'column',
-        alignItems: 'center',
+        position: { top: 0, left },
+        width,
+        height: TOP_BTN,
+        flexShrink: 0,
         pointerFilter: 'none',
       }}
     >
-      <UiEntity uiTransform={{ width: 72, height: headH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', margin: { bottom: 8 } }}>
-        <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', height: mob ? 22 : 26 }}>
-          <Label value={countText} fontSize={font} color={Color4.White()} textAlign="bottom-center" textWrap="nowrap" uiTransform={{ height: mob ? 22 : 26 }} />
-          {plusText !== '' && <Label value={plusText} fontSize={plusFont} color={SUMMARY_MVP} textAlign="bottom-left" textWrap="nowrap" uiTransform={{ height: mob ? 20 : 24, margin: { left: 4 } }} />}
+      <UiEntity
+        uiTransform={{
+          width, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+          borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: TILE_RING,
+        }}
+        uiBackground={{ color: HOTBAR_TILE_BG }}
+      >
+        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
+          uiBackground={{ color: PANEL_LIGHT }}>
+          <Label value={countText} fontSize={mob ? 22 : 26} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
-      <SideFillTrack trackW={trackW} trackH={trackH} pad={pad} radius={radius} innerR={innerR} fillH={fillH} fillColor={teamColor} empty={n <= 0} />
+      {plusText !== '' && (
+        <Label value={plusText} fontSize={mob ? 14 : 16} color={SUMMARY_MVP} textAlign="middle-center" textWrap="nowrap"
+          uiTransform={{ positionType: 'absolute', position: { top: -8, right: 2 }, height: 18, pointerFilter: 'none' }} />
+      )}
     </UiEntity>
   )
 }
@@ -769,7 +772,6 @@ function BasesChargeHud() {
 export const uiMenu = () => (
   <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 } }}>
     <PaintTankBar />
-    <PaintedHud />
 
     {/* ─── Top-left: mute button ─────────────────────────────────────── */}
     {/* Mute button lives inside the timer panel below, pinned to its right edge. */}
@@ -841,10 +843,13 @@ export const uiMenu = () => (
                   <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
-              <TileButton id="ui_top_mute" onPress={toggleMusic}>
-                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-              </TileButton>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
+                <PaintedHud />
+              </UiEntity>
             </UiEntity>
             )
             ) : lobby ? (
@@ -891,10 +896,13 @@ export const uiMenu = () => (
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <Label value={hudClockText(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
               </UiEntity>
-              <TileButton id="ui_match_mute" onPress={toggleMusic}>
-                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-              </TileButton>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <TileButton id="ui_match_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
+                <PaintedHud />
+              </UiEntity>
             </UiEntity>
             )}
             {/* Territory bar: team colours plus a white unpainted remainder. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
