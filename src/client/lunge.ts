@@ -49,6 +49,7 @@ import {
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
   VICTIM_SPECULATIVE_KNOCK,
+  CHARGE_STILL_SPEED, DASH_CHARGE_MULT, lungeImpulseOf,
 } from '../shared/pvp'
 import { boxHit, knockDir, ImpactGate, V3, hitboxAt } from '../shared/lunge'
 import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeHitbox'
@@ -63,6 +64,7 @@ import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initK
 import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
+import { beginChargeHold, cancelChargeHold, chargeHud, isChargeHolding, takeChargeHold, tickChargeVfx } from './chargeHold'
 
 const BOOM_SRC = 'assets/sounds/bomb_exploding.mp3' // strong impact layer under the pop
 const BOT_FLOAT = FLOAT_HEIGHT
@@ -82,6 +84,8 @@ let peakSpeed = 0
 let curSpeed = 0
 let baseSpeed = 0 // forward speed at the press (run momentum), kept by the brake
 const lastVel = { x: 0, z: 0 }
+let fireImpulse = LUNGE_IMPULSE
+let fireCharged = false
 const hitThis = new Set<string>()
 const gate = new ImpactGate(LUNGE_IMPACT_MAX_AGE_MS)
 // Victim anticipation: remote lunges we may already be inside of. Key = attacker#id.
@@ -329,21 +333,53 @@ function clearKnockLock(): void {
 // ─── Public HUD + trigger ───────────────────────────────────────────
 export function isLungeEnabledNow(): boolean { return lungeEnabledForRound(getRoundIndex()) }
 
-export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean } {
+export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean; charging: number; charged: boolean } {
   const enabled = isLungeEnabledNow()
   const cd = Math.max(0, cooldownLeft)
+  const ch = chargeHud('lunge')
   return {
     show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0 && !isMoveLocked(),
     cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery' || isMoveLocked(),
+    charging: ch.charging, charged: ch.charged,
   }
 }
 
-/** E / LUNGE slot. Silent no-op while active, recovering, cooling down, or held by a fall rescue. */
-export function triggerLunge(): void {
-  if (isMoveLocked()) return
-  if (!isLungeEnabledNow() || localTeam() === Team.None || cooldownLeft > 0 || state !== 'ready') return
+function canFireLunge(): boolean {
+  return !isMoveLocked() && isLungeEnabledNow() && localTeam() !== Team.None && cooldownLeft <= 0 && state === 'ready'
+}
+
+function canStartLungeCharge(): boolean {
+  return isPlayerGrounded() && Math.hypot(lastVel.x, lastVel.z) <= CHARGE_STILL_SPEED
+}
+
+/** E / LUNGE slot down. Moving or airborne fires immediately; standing still starts a 3 s charge. */
+export function beginLungeHold(): void {
+  if (isChargeHolding()) return
+  if (!canFireLunge()) return
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!t) return
+  if (!canStartLungeCharge()) { fireLunge(false); return }
+  beginChargeHold('lunge', t.position.x, t.position.y, t.position.z, localTeam())
+}
+
+/** E / LUNGE slot up. A full 3 s hold fires the charged dash; anything shorter is a normal dash. */
+export function releaseLungeHold(): void {
+  if (!isChargeHolding('lunge')) return
+  const hold = takeChargeHold()
+  if (!hold) return
+  fireLunge(hold.charged)
+}
+
+/** Press entry point — same as beginLungeHold (hotbar uses begin/release). */
+export function triggerLunge(): void { beginLungeHold() }
+
+/** E / LUNGE slot. Silent no-op while active, recovering, cooling down, or held by a fall rescue. */
+function fireLunge(charged: boolean): void {
+  if (!canFireLunge()) return
+  const t = Transform.getOrNull(engine.PlayerEntity)
+  if (!t) return
+  fireCharged = charged
+  fireImpulse = lungeImpulseOf(charged)
   // Feedback first, on the input frame, before any physics or network work.
   playLungeSfx()
   if (LUNGE_EMOTE) {
@@ -365,12 +401,12 @@ export function triggerLunge(): void {
   hitThis.clear()
   setReducedControl(true)
   safePhysics('lunge impulse', () => {
-    Physics.applyImpulseToPlayer(Vector3.create(dir.x * LUNGE_IMPULSE, LUNGE_LIFT, dir.z * LUNGE_IMPULSE))
+    Physics.applyImpulseToPlayer(Vector3.create(dir.x * fireImpulse, LUNGE_LIFT, dir.z * fireImpulse))
     // Downhill: push down during the lunge so we follow the ramp instead of launching off it.
     // Only when the lunge starts on the ground; an air lunge keeps its arc.
     if (isPlayerGrounded()) Physics.applyForceToPlayerForDuration(stickForceEnt, LUNGE_ACTIVE_S, Vector3.create(0, -1, 0), LUNGE_STICK_FORCE)
   })
-  sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
+  sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z, charged ? 1 : 0)
   const look = shownTeam(localTeam(), localDry())
   spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(look),
     0.08, 0.08, 0.5, 1.1, 0.5, undefined, { who: '', off: { x: dir.x * 0.6, y: 1.1, z: dir.z * 0.6 } })
@@ -387,11 +423,11 @@ function endActive(): void {
   // Only the lunge's extra speed above the run speed at the press is braked.
   const peakExtra = peakSpeed - baseSpeed
   const frac = peakExtra > 0.5 ? Math.max(0, Math.min(1, (curSpeed - baseSpeed) / peakExtra)) : 1
-  const b = LUNGE_IMPULSE * LUNGE_BRAKE * frac
+  const b = fireImpulse * LUNGE_BRAKE * frac
   if (b > 0.01) safePhysics('lunge brake', () => Physics.applyImpulseToPlayer(Vector3.create(-dir.x * b, 0, -dir.z * b)))
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   const travelled = p ? Math.hypot(p.x - startPos.x, p.z - startPos.z) : 0
-  console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE}) hit=${hitAny} brake=${frac.toFixed(2)} run=${baseSpeed.toFixed(1)} peak=${peakSpeed.toFixed(1)}`)
+  console.log(`[Lunge] #${lungeId} travelled ${travelled.toFixed(2)} m (target ${LUNGE_DISTANCE * (fireCharged ? DASH_CHARGE_MULT : 1)})${fireCharged ? ' charged' : ''} hit=${hitAny} brake=${frac.toFixed(2)} run=${baseSpeed.toFixed(1)} peak=${peakSpeed.toFixed(1)}`)
   if (p && !hitAny) missDust(p) // grey dust ahead; a hit is the chest pop + boom
   playRecoveryClick()
   state = 'recovery'; stateLeft = LUNGE_RECOVERY_S
@@ -537,6 +573,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
 }
 
 function cancelLunge(why: string): void {
+  if (isChargeHolding('lunge')) cancelChargeHold()
   if (state === 'active' || state === 'recovery') dbgLog(`#${lungeId} cancelled (${why})`)
   if (state === 'active' || state === 'recovery') setReducedControl(false)
   state = cooldownLeft > 0 ? 'cooldown' : 'ready'
@@ -590,7 +627,8 @@ export function initLunge(): void {
       }
       if (lockLeft <= 0) { lockLeft = 0; applyControl() }
     }
-    if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) triggerLunge()
+    if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_DOWN)) beginLungeHold()
+    if (inputSystem.isTriggered(InputAction.IA_PRIMARY, PointerEventType.PET_UP)) releaseLungeHold()
     trySpeculativeVictim(dt)
 
     const t = Transform.getOrNull(engine.PlayerEntity)
@@ -618,6 +656,16 @@ export function initLunge(): void {
     if (pos && prevPos && dt > 0) {
       const vx = (pos.x - prevPos.x) / dt, vz = (pos.z - prevPos.z) / dt
       if (Math.hypot(vx, vz) < 60) { lastVel.x = vx; lastVel.z = vz } // ignore teleports
+    }
+    if (isChargeHolding('lunge')) {
+      if (isMoveLocked()) cancelChargeHold()
+      else {
+        tickChargeVfx()
+        if (!isPlayerGrounded() || Math.hypot(lastVel.x, lastVel.z) > CHARGE_STILL_SPEED) {
+          takeChargeHold()
+          fireLunge(false)
+        }
+      }
     }
     prevPos = pos
 

@@ -27,8 +27,8 @@ import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { LUNGE_MODE, BURST_MODE } from '../shared/pvp'
-import { getLungeHud, triggerLunge } from './lunge'
-import { getBurstHud, requestBurst } from './paintBurst'
+import { getLungeHud, beginLungeHold, releaseLungeHold } from './lunge'
+import { getBurstHud, beginBurstHold, releaseBurstHold } from './paintBurst'
 
 export const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -63,7 +63,7 @@ type Geo = {
 const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50, tuck: 48 }
 const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 72 }
 
-type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean }
+type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean; charging?: number; charged?: boolean }
 /** Walk-only brace. Slot tint only — no LOCK label, ring, disc, or volume mesh. */
 const LOCK_TINT = Color4.create(1, 0.78, 0.35, 1)
 
@@ -80,10 +80,11 @@ export function KeyHint(props: { label: string }) {
   )
 }
 
-function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; g: Geo }) {
+function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; onRelease: () => void; g: Geo }) {
   const { hud, g } = props
-  const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
-  const border = !hud.enabled ? DIM_BORDER : hud.ready ? GOLD_BORDER : WHITE_BORDER
+  const charging = hud.charging ?? 0
+  const fill = charging > 0 ? charging : (!hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac)))
+  const border = !hud.enabled ? DIM_BORDER : (hud.charged || hud.ready) ? GOLD_BORDER : WHITE_BORDER
   return (
     <UiEntity
       key={`ui_pvp_slot_${props.id}`}
@@ -94,6 +95,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
       }}
       uiBackground={{ color: SLOT_BG }}
       onMouseDown={props.onPress}
+      onMouseUp={props.onRelease}
     >
       {fill > 0 && (
         <UiEntity
@@ -146,7 +148,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
   )
 }
 
-function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPress: () => void; g: Geo }) {
+function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPress: () => void; onRelease: () => void; g: Geo }) {
   const { g } = props
   const mobile = isMobile()
   return (
@@ -167,6 +169,7 @@ function Tooltip(props: { id: string; side: 'left' | 'right'; text: string; onPr
       }}
       uiBackground={{ color: WHITE }}
       onMouseDown={props.onPress}
+      onMouseUp={props.onRelease}
     >
       <Label
         key={`ui_pvp_tipLabel_${props.id}`}
@@ -210,7 +213,7 @@ const CIRCLE_ICON_FRAC = 0.72 // icon size as a fraction of the circle diameter
 const CIRCLE_READY = Color4.create(1.0, 0.78, 0.15, 1) // gold ring while ready
 const CIRCLE_INK = Color4.create(0.13, 0.13, 0.15, 1)
 
-function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: () => void; bottom: number }) {
+function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: () => void; onRelease: () => void; bottom: number }) {
   const { hud } = props
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
   const ring = hud.ready ? CIRCLE_READY : CIRCLE_INK
@@ -220,7 +223,8 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
       uiTransform={{ positionType: 'absolute', position: { right: JUMP_CX_RIGHT - CIRCLE_X_OFFSET - CIRCLE_D / 2, bottom: props.bottom }, width: CIRCLE_D, height: CIRCLE_D,
         borderRadius: CIRCLE_D / 2, borderWidth: CIRCLE_RING, borderColor: ring, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
       uiBackground={{ color: hud.recovering ? LOCK_TINT : PANEL_LIGHT }}
-      onMouseDown={props.onPress}>
+      onMouseDown={props.onPress}
+      onMouseUp={props.onRelease}>
       <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), height: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), pointerFilter: 'none' }}
         uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />
       {cooling && <Label value={`${Math.ceil(hud.cooldown)}`} fontSize={Math.round(CIRCLE_D * 0.4)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
@@ -253,8 +257,8 @@ export function AbilityHotbar() {
     const cb = (n: number) => JUMP_CY_BOTTOM + JUMP_D / 2 + CIRCLE_GAP + n * (CIRCLE_D + CIRCLE_GAP)
     return (
       <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
-        {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} bottom={cb(0)} />}
-        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={requestBurst} bottom={cb(1)} />}
+        {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={beginLungeHold} onRelease={releaseLungeHold} bottom={cb(0)} />}
+        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={beginBurstHold} onRelease={releaseBurstHold} bottom={cb(1)} />}
       </UiEntity>
     )
   }
@@ -263,8 +267,8 @@ export function AbilityHotbar() {
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={triggerLunge} g={g} />}
-      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={requestBurst} g={g} />}
+      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={beginLungeHold} onRelease={releaseLungeHold} g={g} />}
+      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={beginBurstHold} onRelease={releaseBurstHold} g={g} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -282,8 +286,8 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
-          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={g} />}
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={beginLungeHold} onRelease={releaseLungeHold} g={g} />}
+          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={beginBurstHold} onRelease={releaseBurstHold} g={g} />}
         </UiEntity>
       </UiEntity>
     </UiEntity>

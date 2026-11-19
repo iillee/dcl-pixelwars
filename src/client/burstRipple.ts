@@ -23,6 +23,7 @@ import { cellMaterial } from '../paint'
 import {
   BURST_TILE_RIPPLE, BURST_TILE_RIPPLE_S, BURST_TILE_LIFT, BURST_TILE_UP_S, BURST_TILE_DOWN_S,
   BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_POOL,
+  BURST_PAINT_SHAPE, BURST_PAINT_RADIUS_CELLS,
   SLAB_OUTLINE, SLAB_OUTLINE_M, DASH_TILE_POP, DASH_TILE_LIFT_FRAC, DASH_TILE_UP_S, DASH_TILE_DOWN_S, DASH_TILE_DELAY_S, DASH_TILE_MAX, DASH_TILE_INNER_LAG_S,
   DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
@@ -89,16 +90,16 @@ export function nearGround(p: V3): boolean {
 }
 
 /** Cells the ripple would raise. -1 when the maze graph is not built yet. */
-export function footprintAt(p: V3, cell: string): number {
+export function footprintAt(p: V3, cell: string, radiusCells = BURST_PAINT_RADIUS_CELLS): number {
   const g = ensureGraph()
   if (!g) return -1
   const centre = burstCentre(g, cell, p)
   if (!centre) return 0
-  return burstFootprint(g, centre).length
+  return burstFootprint(g, centre, BURST_PAINT_SHAPE, radiusCells).length
 }
 
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
-export function startRipple(p: V3, team: Team, cell = ''): void {
+export function startRipple(p: V3, team: Team, cell = '', radiusCells = BURST_PAINT_RADIUS_CELLS): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
   // Team.None (lobby, Balloon Battle, or an empty tank) raises temporary white
   // slabs. They are pooled visuals only and never write the paint grid.
@@ -106,7 +107,7 @@ export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!g) return
   const centre = burstCentre(g, cell, p)
   if (!centre) return
-  const cells = burstFootprint(g, centre)
+  const cells = burstFootprint(g, centre, BURST_PAINT_SHAPE, radiusCells)
   const c0 = g.worldPos.get(centre)!
   let maxD = CELL_M
   for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }

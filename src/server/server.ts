@@ -41,6 +41,7 @@ import {
   bombEnabledForRound, BOMB_FUSE_S, SERVER_MIN_BOMB_GAP_S,
   lungeEnabledForRound, LUNGE_HITBOX_W, LUNGE_HITBOX_D, LUNGE_HITBOX_FORWARD, LUNGE_HIT_MAX_DY, SERVER_LUNGE_BOT_SLACK,
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY,
+  BURST_PAINT_SHAPE, burstPaintRadiusCells, burstRadiusM, chargeAccepted,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   pvbBotCount, pvbHumanTeam,
 } from '../shared/pvp'
@@ -160,12 +161,12 @@ export async function setupServer(): Promise<void> {
     },
     abilities: () => ({ lunge: lungeEnabledForRound(currentRoundIndex()), burst: burstEnabledForRound(currentRoundIndex()) }),
     onLunge: (id, lungeId, dx, dz, at) => {
-      room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z, dry: paintDry(`bot:${id}`) })
+      room.send('lungeStarted', { attacker: `bot:${id}`, id: lungeId, dx, dz, x: at.x, y: at.y, z: at.z, dry: paintDry(`bot:${id}`), chg: 0 })
     },
     onBurst: (id, burstId, team, at, air = 0, _fx = 0, _fz = 1) => {
       const by = `bot:${id}`
       const now = Date.now()
-      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air, lx: 0, ly: 0, lz: 0, dry: paintDry(by) })
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air, lx: 0, ly: 0, lz: 0, dry: paintDry(by), chg: 0 })
       if (air) {
         // The victim's client knocks itself from this broadcast. Stats only, here.
         for (const e of rosterEntries()) {
@@ -195,7 +196,7 @@ export async function setupServer(): Promise<void> {
       if (!paintDry(by)) {
         for (const cid of list) applyBotPaint(cid, team, by)
       }
-      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(by) })
+      room.send('burstFired', { attacker: by, id: burstId, team, x: at.x, y: at.y, z: at.z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(by), chg: 0 })
       const now = Date.now()
       for (const e of rosterEntries()) {
         const a = botAim.get(e.userId.toLowerCase())
@@ -241,6 +242,17 @@ export async function setupServer(): Promise<void> {
   // Paint Burst: last accepted burst per player (cooldown) + hit dedupe.
   const lastBurstAt = new Map<string, number>()
   const bursts = new BurstLedger()
+  /** Hold-to-charge starts. Server timestamps these; a charged fire must match kind, duration, and feet. */
+  const chargeHolds = new Map<string, { kind: number; at: number; x: number; y: number; z: number }>()
+  const takeCharge = (from: string, kind: number, x: number, y: number, z: number, want: boolean): boolean => {
+    const h = chargeHolds.get(from)
+    chargeHolds.delete(from)
+    if (!want || !h || h.kind !== kind) return false
+    const dist = Math.hypot(x - h.x, z - h.z)
+    const ok = chargeAccepted(Date.now() - h.at, dist, true)
+    if (want && !ok) console.log(`[Server] charge rejected ${from.slice(0, 8)} kind=${kind} held=${Date.now() - h.at}ms dist=${dist.toFixed(2)}`)
+    return ok
+  }
   // Players whose fall-rescue cloud other clients should be showing.
   const rescueRiders = new Set<string>()
   const rescueStartAt = new Map<string, number>()
@@ -675,6 +687,7 @@ export async function setupServer(): Promise<void> {
     lunges.forget(userId)
     bursts.forget(userId)
     lastBurstAt.delete(userId)
+    chargeHolds.delete(userId)
     const left = userId.toLowerCase()
     if (rescueRiders.delete(left)) {
       rescueStartAt.delete(left)
@@ -962,7 +975,14 @@ export async function setupServer(): Promise<void> {
   // avatars, so player range is client-trusted; the ghost is range-checked
   // here). Accepted once per (attacker, lunge id, target) and only within
   // SERVER_LUNGE_HIT_WINDOW_S of the accepted start.
-  room.onMessage('lungeStart', ({ id, dx, dz, x, y, z }, context) => {
+  room.onMessage('chargeStart', ({ kind, x, y, z }, context) => {
+    const from = context?.from
+    if (!from || (kind !== 0 && kind !== 1) || ![x, y, z].every(isFinite)) return
+    if (getTeam(from) === null) return
+    chargeHolds.set(from, { kind, at: Date.now(), x, y, z })
+  })
+
+  room.onMessage('lungeStart', ({ id, dx, dz, x, y, z, chg }, context) => {
     const from = context?.from
     if (!from || !lungeEnabledForRound(currentRoundIndex()) || !vfxLive()) return
     if (getTeam(from) === null) return
@@ -972,8 +992,9 @@ export async function setupServer(): Promise<void> {
       console.log(`[Server] lungeStart ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
+    const charged = takeCharge(from, 0, x, y, z, chg === 1)
     if (matchLive()) markActive(from)
-    room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z, dry: paintDry(from) })
+    room.send('lungeStarted', { attacker: from, id, dx: dx / len, dz: dz / len, x, y, z, dry: paintDry(from), chg: charged ? 1 : 0 })
   })
 
   room.onMessage('lungeHit', ({ id, target, dx, dz, x, y, z }, context) => {
@@ -1028,10 +1049,11 @@ export async function setupServer(): Promise<void> {
       // A spike that already connected this bot must not shove it again when the miss lands.
       if (bursts.hasHit(from, id, key)) continue
       const feet = { x: b.x, y: b.y, z: b.z }
-      if (!shockwaveHitsBot(origin, feet, painted.has(b.cell))) continue
+      const rad = burstRadiusM(bursts.charged(from, id))
+      if (!shockwaveHitsBot(origin, feet, painted.has(b.cell), rad)) continue
       const d = burstDir(origin, feet, fx, fz)
       // Limits stay at least as wide as shockwaveHitsBot so a footprint hit is not rejected here.
-      if (hitBot(b.id, origin.x, origin.y, origin.z, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 3, () => burstKnock(d.x, d.z))) {
+      if (hitBot(b.id, origin.x, origin.y, origin.z, rad + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 3, () => burstKnock(d.x, d.z))) {
         bursts.hit(from, id, key, now)
         noteHit(from, key)
         room.send('burstImpact', { attacker: from, id, target: key, dx: d.x, dz: d.z, air: 0 })
@@ -1040,10 +1062,10 @@ export async function setupServer(): Promise<void> {
     }
     if (shoved) sendBotPositionsNow()
   }
-  const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number): string[] => {
+  const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number, charged = false): string[] => {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
-    const fp = graph && centre ? burstFootprint(graph, centre) : []
+    const fp = graph && centre ? burstFootprint(graph, centre, BURST_PAINT_SHAPE, burstPaintRadiusCells(charged)) : []
     // Empty tank: knockback still uses the full footprint; no cell changes.
     if (paintDry(from)) return fp
     const gained = paintCells(from, team, fp, centre, true)
@@ -1065,7 +1087,7 @@ export async function setupServer(): Promise<void> {
     room.send('burstPainted', { id, n, ct, sin, sout }, { to: [from] })
     console.log(`[Server] burstPainted #${id} n=${n} proc=${sout - sin}ms`)
   }
-  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air, ct }, context) => {
+  room.onMessage('burstUse', ({ id, cell, x, y, z, fx, fz, air, ct, chg }, context) => {
     const sin = Date.now()
     const from = context?.from
     console.log(`[Server] burstUse recv #${id} air=${air ?? 0} ct=${ct || 0} sin=${sin}`)
@@ -1080,9 +1102,10 @@ export async function setupServer(): Promise<void> {
         if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) return
         lastBurstAt.set(from, now)
         const airborne = air !== 0
-        bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
+        const charged = takeCharge(from, 1, x, y, z, chg === 1)
+        bursts.start(from, id, now, airborne ? 1 : 0, fx, fz, charged ? 1 : 0)
         bursts.place(from, id, { x, y, z })
-        room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from), chg: charged ? 1 : 0 })
       }
       sendPainted(from, id, 0, ct || 0, sin)
       return
@@ -1092,7 +1115,7 @@ export async function setupServer(): Promise<void> {
     // it must not broadcast or punch a second time.
     if (bursts.matches(from, id)) {
       if (bursts.mode(from, id) === 0 && !bursts.hasPaint(from, id)) {
-        const fp = paintBurstFootprint(from, team, cell, x, y, z)
+        const fp = paintBurstFootprint(from, team, cell, x, y, z, bursts.charged(from, id))
         console.log(`[Server] burstUse ${from.slice(0, 8)} #${id} replay footprint=${fp.length} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
         commitBurstPaint(from, id, fp, ct || 0, sin)
       }
@@ -1103,13 +1126,14 @@ export async function setupServer(): Promise<void> {
       return
     }
     const airborne = air !== 0
+    const charged = takeCharge(from, 1, x, y, z, chg === 1)
     lastBurstAt.set(from, now)
     markActive(from)
-    bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
+    bursts.start(from, id, now, airborne ? 1 : 0, fx, fz, charged ? 1 : 0)
     const origin = { x, y, z }
     bursts.place(from, id, origin)
     // Broadcast first so remotes see FX / ImpactGate start ASAP (paint loop used to delay this).
-    room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
+    room.send('burstFired', { attacker: from, id, team, x, y, z, air: airborne ? 1 : 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from), chg: charged ? 1 : 0 })
     // Paint the circle whenever a walkable cell resolves under the feet, even if
     // the client tagged the press air. burstCentre's window is BURST_PAINT_MAX_DY+1
     // (2.5 m). A real jump above that waits for burstLand. commitPaint runs once.
@@ -1118,7 +1142,7 @@ export async function setupServer(): Promise<void> {
     const centreY = centreNow ? graphNow!.worldPos.get(centreNow)?.[1] : undefined
     const dy = centreY === undefined ? Infinity : Math.abs(centreY - y)
     const nearFloor = centreNow !== null && dy <= BURST_PAINT_MAX_DY + 1
-    const fp = nearFloor || !airborne ? paintBurstFootprint(from, team, cell, x, y, z) : []
+    const fp = nearFloor || !airborne ? paintBurstFootprint(from, team, cell, x, y, z, charged) : []
     const rampIds = fp.filter(c => getPlacedTilesInOrder().some(t => t.type === 'ramp' && c.startsWith(`${t.x},${t.z},${t.y}:`))).length
     const reason = !graphNow ? 'no-graph' : fp.length === 0 && airborne ? 'air-above-floor' : fp.length === 0 ? 'no-centre' : airborne ? 'near-floor' : 'ground'
     console.log(`[Burst] server footprint=${fp.length} reason=${reason} dy=${Number.isFinite(dy) ? dy.toFixed(2) : 'na'} air=${airborne ? 1 : 0} cell=${cell || '(none)'} ramps=${rampIds}`)
@@ -1162,7 +1186,7 @@ export async function setupServer(): Promise<void> {
     if (!matchLive()) {
       if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
         bursts.place(from, id, { x, y, z })
-        room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
+        room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from), chg: bursts.charged(from, id) ? 1 : 0 })
       }
       sendPainted(from, id, 0, ct || 0, sin)
       return
@@ -1184,13 +1208,13 @@ export async function setupServer(): Promise<void> {
     if (bursts.openLanding(from, id, now, SERVER_BURST_LAND_WINDOW_S)) {
       const face = bursts.facing(from, id)
       bursts.place(from, id, origin)
-      room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
+      room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from), chg: bursts.charged(from, id) ? 1 : 0 })
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, cell, origin) : null
-      const preview = graph && centre ? burstFootprint(graph, centre) : []
+      const preview = graph && centre ? burstFootprint(graph, centre, BURST_PAINT_SHAPE, burstPaintRadiusCells(bursts.charged(from, id))) : []
       radialBotShock(from, id, team, origin, face.x, face.z, now, preview)
     }
-    const fp = paintBurstFootprint(from, team, cell, x, y, z)
+    const fp = paintBurstFootprint(from, team, cell, x, y, z, bursts.charged(from, id))
     console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} footprint=${fp.length} cell=${cell || '(none)'} pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
     if (fp.length === 0) {
       console.log(`[Server] burstLand ${from.slice(0, 8)} #${id} no-centre pos=${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`)
@@ -1310,7 +1334,7 @@ export async function setupServer(): Promise<void> {
       const feet = { x: bot.x, y: bot.y, z: bot.z }
       const spike = bursts.impactAir(from, id) !== 0
       // Rendered feet (what the attacker swung at) vs the server body. Same slack as a lunge.
-      if (!burstBotInRange(origin, feet, spike)) {
+      if (!burstBotInRange(origin, feet, spike, burstRadiusM(bursts.charged(from, id)))) {
         console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} bot ${bid} rejected: range`)
         return
       }
@@ -1318,7 +1342,7 @@ export async function setupServer(): Promise<void> {
       // Claim before the knock so a spike and the landing shockwave cannot both land.
       if (bursts.hit(from, id, key, Date.now()) !== 'ok') return
       const ux = dx / len, uz = dz / len
-      const reach = (spike ? AIR_SPIKE_RADIUS : BURST_RADIUS) + SERVER_LUNGE_BOT_SLACK
+      const reach = (spike ? AIR_SPIKE_RADIUS : burstRadiusM(bursts.charged(from, id))) + SERVER_LUNGE_BOT_SLACK
       const maxDy = (spike ? AIR_SPIKE_DEPTH : BURST_HIT_MAX_DY) + 2
       if (!hitBot(bid, origin.x, origin.y, origin.z, reach, maxDy, grounded =>
         spike ? spikeKnock(ux, uz, grounded) : burstKnock(ux, uz))) return

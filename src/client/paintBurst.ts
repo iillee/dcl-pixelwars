@@ -44,6 +44,7 @@ import {
   AIR_SPIKE_KEEP_FRACTION, AIR_SPIKE_HANG_S, AIR_SPIKE_HANG_FORCE,
   AIR_SPIKE_RECOVER_GLIDE, AIR_SPIKE_RECOVER_GLIDE_S,
   LUNGE_KNOCKBACK, burstEnabledForRound, VICTIM_SPECULATIVE_KNOCK,
+  CHARGE_STILL_SPEED, BURST_CHARGE_MULT, burstPaintRadiusCells, burstRadiusM,
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
@@ -67,6 +68,7 @@ import { hitsOpen, inLobby, paintOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { beginChargeHold, cancelChargeHold, chargeHud, isChargeHolding, takeChargeHold, tickChargeVfx } from './chargeHold'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = FLOAT_HEIGHT
@@ -99,13 +101,15 @@ function addFx(life: number, setup: (ent: Entity) => void, step: Fx['step'] = ()
 }
 const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
-function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
+function showShockwave(p: V3, team: Team, local: boolean, cell = '', charged = false): void {
   const rgb = rgbOf(team)
-  startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
+  const radiusCells = burstPaintRadiusCells(charged)
+  startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell, radiusCells) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
+  const ring = 4 * (charged ? BURST_CHARGE_MULT : 1)
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4
-    const r = 4 * (0.6 + Math.random() * 0.4) // visual ring size unchanged (was BURST_RADIUS = 4)
+    const r = ring * (0.6 + Math.random() * 0.4)
     const from = Vector3.create(p.x, p.y + 0.8, p.z)
     const to = Vector3.create(p.x + Math.cos(a) * r, p.y + 0.3 + Math.random() * 1.2, p.z + Math.sin(a) * r)
     const size = 0.25 + Math.random() * 0.15
@@ -184,18 +188,18 @@ const stampWatch: Array<{ who: string; team: Team; id: number; left: number; fx:
 const pressAt = new Map<number, number>()
 
 /** Shockwave already played. Resend until burstPainted, with a fresh grounded sample. */
-type PaintHold = { id: number; kind: 'ground' | 'land'; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
+type PaintHold = { id: number; kind: 'ground' | 'land'; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number; chg: number }
 const paintHolds: PaintHold[] = []
 /** Airborne burstUse, original sample. Resend until our own burstFired. Position stays the press. */
-type UseHold = { id: number; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number }
+type UseHold = { id: number; x: number; y: number; z: number; fx: number; fz: number; cell: string; arm: number; left: number; chg: number }
 const useHolds: UseHold[] = []
 
 function safeSend(label: string, fn: () => void): boolean {
   try { fn(); return true } catch (e) { console.log(`[Burst] ${label} send failed`, e); return false }
 }
-function queuePaint(kind: 'ground' | 'land', id: number, cell: string, p: V3, fx: number, fz: number): void {
+function queuePaint(kind: 'ground' | 'land', id: number, cell: string, p: V3, fx: number, fz: number, chg = 0): void {
   if (!paintOpen()) return
-  const row: PaintHold = { id, kind, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_PAINT_RETRY_S }
+  const row: PaintHold = { id, kind, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_PAINT_RETRY_S, chg }
   const i = paintHolds.findIndex(h => h.id === id)
   if (i >= 0) paintHolds[i] = row
   else paintHolds.push(row)
@@ -208,8 +212,8 @@ function clearPaint(id: number): void {
   const i = paintHolds.findIndex(h => h.id === id)
   if (i >= 0) paintHolds.splice(i, 1)
 }
-function queueUse(id: number, cell: string, p: V3, fx: number, fz: number): void {
-  const row: UseHold = { id, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_USE_RETRY_S }
+function queueUse(id: number, cell: string, p: V3, fx: number, fz: number, chg = 0): void {
+  const row: UseHold = { id, x: p.x, y: p.y, z: p.z, fx, fz, cell, arm: BURST_PAINT_RETRY_GAP_S, left: BURST_USE_RETRY_S, chg }
   const i = useHolds.findIndex(h => h.id === id)
   if (i >= 0) useHolds[i] = row
   else useHolds.push(row)
@@ -229,7 +233,7 @@ function flushBurstNet(dt: number): void {
     h.left -= dt
     h.arm -= dt
     if (h.arm > 0) { if (h.left <= 0) useHolds.splice(i, 1); continue }
-    safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1))
+    safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1, Date.now(), h.chg))
     h.arm = BURST_PAINT_RETRY_GAP_S
     if (h.left <= 0) useHolds.splice(i, 1)
   }
@@ -240,12 +244,12 @@ function flushBurstNet(dt: number): void {
     if (h.arm > 0) { if (h.left <= 0) { console.log(`[Burst] #${h.id} paint retry gave up (${h.kind})`); paintHolds.splice(i, 1) }; continue }
     const live = sampleBurstStance()
     if (live?.grounded) { h.x = live.x; h.y = live.y; h.z = live.z; h.cell = live.cell }
-    if (h.kind === 'ground') safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 0))
+    if (h.kind === 'ground') safeSend('burstUse retry', () => sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 0, Date.now(), h.chg))
     else {
       // The landing paint needs the airborne ledger. A lost press is started here; a
       // press the server already has is ignored (same id, no second broadcast).
       safeSend('burstLand retry', () => {
-        sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1)
+        sendBurstUse(h.id, h.cell, h.x, h.y, h.z, h.fx, h.fz, 1, Date.now(), h.chg)
         sendBurstLand(h.id, h.cell, h.x, h.y, h.z)
       })
     }
@@ -346,11 +350,20 @@ function commitAirDive(fx: number, fz: number): void {
  *  Clamped so a teleport doesn't look like a meteor. */
 let fallSampleY: number | null = null
 let fallVy = 0
+let fallSampleX: number | null = null
+let fallSampleZ: number | null = null
+const lastBurstVel = { x: 0, z: 0 }
 function sampleFall(dt: number): void {
-  const y = Transform.getOrNull(engine.PlayerEntity)?.position.y
-  if (y === undefined) { fallSampleY = null; return }
-  if (fallSampleY !== null && dt > 1e-4) fallVy = Math.max(-40, Math.min(40, (y - fallSampleY) / dt))
-  fallSampleY = y
+  const p = Transform.getOrNull(engine.PlayerEntity)?.position
+  if (!p) { fallSampleY = null; fallSampleX = null; fallSampleZ = null; return }
+  if (fallSampleY !== null && dt > 1e-4) fallVy = Math.max(-40, Math.min(40, (p.y - fallSampleY) / dt))
+  if (fallSampleX !== null && fallSampleZ !== null && dt > 1e-4) {
+    const vx = (p.x - fallSampleX) / dt, vz = (p.z - fallSampleZ) / dt
+    if (Math.hypot(vx, vz) < 60) { lastBurstVel.x = vx; lastBurstVel.z = vz }
+  }
+  fallSampleY = p.y
+  fallSampleX = p.x
+  fallSampleZ = p.z
 }
 
 /** Connect: keep a fraction of the downward speed, no upward hop.
@@ -447,11 +460,12 @@ function posOf(who: string): V3 | null {
 export function isBurstEnabledNow(): boolean { return burstEnabledForRound(getRoundIndex()) }
 
 /** F slot state, same shape as getLungeHud (fill = cooldown, no number). cooldownFrac: 1 = just used, 0 = ready. */
-export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean } {
+export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; recovering: boolean; charging: number; charged: boolean } {
   const enabled = isBurstEnabledNow() && localTeam() !== Team.None
   const cd = Math.max(0, cooldownLeft)
   const locked = isMoveLocked()
-  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S, recovering: locked }
+  const ch = chargeHud('burst')
+  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S, recovering: locked, charging: ch.charging, charged: ch.charged }
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
@@ -490,7 +504,7 @@ function losThen(from: V3, to: V3, cb: () => void, endSlack = 0.6): void {
 /** Ground shockwave hits: opponents in BURST_RADIUS, outward burstDir, then burstHit.
  *  A grounded press and an air-miss landing both call this. LOS, anvil dummies,
  *  and the server's team / once / window / KO credit checks are the press path. */
-function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): void {
+function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number, charged = false): void {
   if (!hitsOpen()) return
   const players: Array<V3 & { id: string }> = []
   for (const [entity, pid, tr] of engine.getEntitiesWith(PlayerIdentityData, Transform)) {
@@ -499,7 +513,8 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
     if ((tt !== Team.Red && tt !== Team.Blue) || tt === team) continue
     players.push({ id: pid.address.toLowerCase(), x: tr.position.x, y: tr.position.y, z: tr.position.z })
   }
-  for (const h of shockwaveHits(p, players, fx, fz)) {
+  const knockR = burstRadiusM(charged)
+  for (const h of shockwaveHits(p, players, fx, fz, knockR)) {
     losThen(p, h.at, () => {
       // Optimistic connect: attacker hears/sees the hit now; victim knock still waits on burstImpact.
       sendBurstHit(id, h.id, h.x, h.z)
@@ -508,7 +523,7 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
     })
   }
   const dummies = getDummyTargets().map(d => ({ id: d.i, x: d.pos.x, y: d.pos.y, z: d.pos.z }))
-  for (const h of shockwaveHits(p, dummies, fx, fz)) {
+  for (const h of shockwaveHits(p, dummies, fx, fz, knockR)) {
     losThen(p, h.at, () => hitDummy(h.id, h.x, h.z, 1, id), DUMMY_LOS_SLACK)
   }
   // Same cylinder and outward burstKnock as players. Feet, not the avatar origin.
@@ -518,7 +533,7 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
     if (b.team === team) continue
     bots.push({ id: `bot:${b.id}`, x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z })
   }
-  for (const h of shockwaveHits(p, bots, fx, fz)) {
+  for (const h of shockwaveHits(p, bots, fx, fz, knockR)) {
     losThen(p, h.at, () => {
       sendBurstHit(id, h.id, h.x, h.z)
       playDashHitSfx()
@@ -527,15 +542,42 @@ function radialKnock(p: V3, team: Team, fx: number, fz: number, id: number): voi
   }
 }
 
-/** Hotbar press (mobile circle, desktop slot). The gameplay system fires it, so the
- *  stance sample is this frame's feet and the send runs there too. */
-let burstRequested = false
-export function requestBurst(): void { burstRequested = true }
+function canFireBurst(): boolean {
+  return !isMoveLocked() && isBurstEnabledNow() && localTeam() !== Team.None && cooldownLeft <= 0
+}
 
-export function triggerBurst(): void {
-  if (isMoveLocked()) return
+function burstIsAirOrMoving(): boolean {
+  const stance = sampleBurstStance()
+  if (!stance) return true
+  const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded()) || !stance.grounded || !isPlayerGrounded()
+  const moving = Math.hypot(lastBurstVel.x, lastBurstVel.z) > CHARGE_STILL_SPEED
+  return air || moving
+}
+
+/** F / BURST slot down. Air or moving fires immediately; standing still starts a 3 s charge. */
+export function beginBurstHold(): void {
+  if (isChargeHolding()) return
+  if (!canFireBurst()) return
+  const stance = sampleBurstStance()
+  if (!stance) return
+  if (burstIsAirOrMoving()) { triggerBurst(false); return }
+  beginChargeHold('burst', stance.x, stance.y, stance.z, localTeam())
+}
+
+/** F / BURST slot up. A full 3 s hold fires the charged burst; anything shorter is normal. */
+export function releaseBurstHold(): void {
+  if (!isChargeHolding('burst')) return
+  const hold = takeChargeHold()
+  if (!hold) return
+  triggerBurst(hold.charged)
+}
+
+/** Hotbar press entry — same as beginBurstHold (hotbar uses begin/release). */
+export function requestBurst(): void { beginBurstHold() }
+
+export function triggerBurst(charged = false): void {
+  if (!canFireBurst()) return
   const team = localTeam()
-  if (!isBurstEnabledNow() || team === Team.None || cooldownLeft > 0) return
   const stance = sampleBurstStance()
   const t = Transform.getOrNull(engine.PlayerEntity)
   if (!stance || !t) return
@@ -546,11 +588,13 @@ export function triggerBurst(): void {
   cooldownLeft = BURST_COOLDOWN_S
   // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
+  // A charge that started on the ground stays a ground burst (air mid-hold already fired).
   const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
-  const cells = footprintAt(p, stance.cell)
+  const chg = charged && !air ? 1 : 0
+  const cells = footprintAt(p, stance.cell, burstPaintRadiusCells(chg === 1))
   const tPress = Date.now()
   pressAt.set(id, tPress)
-  console.log(`[Burst] press t=${tPress} #${id} stance=${air ? 'air' : 'ground'} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
+  console.log(`[Burst] press t=${tPress} #${id} stance=${air ? 'air' : 'ground'}${chg ? ' charged' : ''} lift=${Number.isFinite(stance.lift) ? stance.lift.toFixed(2) : 'inf'} vy=${fallVy.toFixed(2)} cell=${stance.cell || '(none)'} cells=${cells}`)
   if (air) {
     fireAirSpike(id, team, p, f.x, f.z, tPress)
     console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
@@ -558,19 +602,19 @@ export function triggerBurst(): void {
   }
   const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
-  showShockwave(p, vfxTeam(team, localDry()), true, cell)
+  showShockwave(p, vfxTeam(team, localDry()), true, cell, chg === 1)
   console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
-  queuePaint('ground', id, cell, p, f.x, f.z)
-  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress))) kickPaint(id)
+  queuePaint('ground', id, cell, p, f.x, f.z, chg)
+  if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress, chg))) kickPaint(id)
   if (BURST_EMOTE_ENABLED) {
     // Hold movement for a moment first: the explorer cancels emotes on locomotion (desktop: never seen while running).
     holdForEmote(BURST_EMOTE_FREEZE_S)
     void triggerSceneEmote({ src: BURST_EMOTE_SRC, loop: false }).catch(() => {})
     emoteLeft = BURST_EMOTE_S
   }
-  radialKnock(p, team, f.x, f.z, id)
+  radialKnock(p, team, f.x, f.z, id, chg === 1)
   // TEMP (ramp paint debug): reported cell + feet position; compare with the [Server] burst line.
-  console.log(`[Burst] #${id} fired cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
+  console.log(`[Burst] #${id} fired${chg ? ' charged' : ''} cell=${cell || '(none)'} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`)
 }
 
 /** Local aerial Burst: glider stays shut until the feet land (or the lock times out).
@@ -706,7 +750,7 @@ export function initPaintBurst(): void {
     emoteLeft = 0
     void stopEmote({}).catch(() => {})
   })
-  events.on('burst:fired', ({ attacker, id, team, x, y, z, air, dry }) => {
+  events.on('burst:fired', ({ attacker, id, team, x, y, z, air, dry, chg }) => {
     const att = attacker.toLowerCase()
     const selfAddr = myAddress()
     const look = vfxTeam(team, dry === 1)
@@ -727,7 +771,7 @@ export function initPaintBurst(): void {
         armLandingStamp(att, look, id)
       } else if (!sawShock(`${att}#${id}`, Date.now())) {
         // Ground press, or the landing rebroadcast. The stamp may have played it already.
-        showShockwave({ x, y, z }, look, false)
+        showShockwave({ x, y, z }, look, false, '', chg === 1)
       }
     }
     // Victim anticipation: if we're already in the volume, knock now
@@ -743,12 +787,14 @@ export function initPaintBurst(): void {
     if (!tp) return
     const origin: V3 = { x, y, z }
     const me: V3 = { x: tp.x, y: tp.y, z: tp.z }
-    if (air ? !inAirSpike(origin, me) : !inBurst(origin, me)) return
+    if (air ? !inAirSpike(origin, me) : !inBurst(origin, me, burstRadiusM(chg === 1))) return
     const k = burstDir(origin, me, faceX, faceZ)
     if (air) applyAirKnock(att, id, k.x, k.z, 'speculative spike')
     else applyVictimKnock(att, id, k.x, k.z, 'speculative knock')
   })
   events.on('burst:impact', ({ attacker, id, target, dx, dz, air }) => onImpact(attacker, id, target, dx, dz, air))
+  events.on('round:reset', () => { if (isChargeHolding('burst')) cancelChargeHold() })
+  events.on('player:respawned', () => { if (isChargeHolding('burst')) cancelChargeHold() })
   events.on('burst:painted', ({ id, n }) => {
     if (n > 0 || !paintOpen()) { clearPaint(id); clearUse(id) }
   })
@@ -778,10 +824,19 @@ export function initPaintBurst(): void {
       }
     }
     if (cooldownLeft > 0) cooldownLeft -= dt
-    // Key and hotbar share this call, after the paint system has run. One press, one burst.
-    if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {
-      burstRequested = false
-      triggerBurst()
+    // Key and hotbar share this hold: down starts (or fires immediately if moving/air),
+    // up releases, and a mid-hold move or jump fires the normal burst at once.
+    if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) beginBurstHold()
+    if (inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_UP)) releaseBurstHold()
+    if (isChargeHolding('burst')) {
+      if (isMoveLocked()) cancelChargeHold()
+      else {
+        tickChargeVfx()
+        if (burstIsAirOrMoving()) {
+          takeChargeHold()
+          triggerBurst(false)
+        }
+      }
     }
     tickStamps(dt)
     flushBurstNet(dt)

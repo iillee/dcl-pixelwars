@@ -234,8 +234,8 @@ export const Messages = {
   // started lunge `id` (per-client counter) at (x, y, z) along (dx, dz).
   // Server checks cooldown and rebroadcasts lungeStarted so every client
   // can show the lunge on that avatar.
-  lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, dry: Schemas.Int }),
+  lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, chg: Schemas.Int }),
+  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, dry: Schemas.Int, chg: Schemas.Int }),
   // Client → Server: lunge `id` touched `target` (player address, or
   // "bot:<id>"); (dx, dz) = knockback direction, (x, y, z) = attacker pos.
   lungeHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
@@ -248,7 +248,7 @@ export const Messages = {
   // air: 0 grounded radial (server paints the circle now), non-zero airborne spike
   // (no paint yet — a later burstLand paints the same footprint once, on a miss that lands).
   // Server checks the shared cooldown and rebroadcasts burstFired.
-  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int, ct: Schemas.Number }),
+  burstUse: Schemas.Map({ id: Schemas.Int, cell: Schemas.String, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fx: Schemas.Number, fz: Schemas.Number, air: Schemas.Int, ct: Schemas.Number, chg: Schemas.Int }),
   // Client → Server: airborne burst `id` met the floor at (x, y, z) on `cell`.
   // Same centre + footprint + applyPaint path as a grounded burstUse. Once per id.
   // The first accepted sample also opens the ground shockwave (burstFired air 0,
@@ -260,7 +260,7 @@ export const Messages = {
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   // air 1 is the airborne press. A second burstFired with air 0, same id, is that
   // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
-  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number, dry: Schemas.Int }),
+  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number, dry: Schemas.Int, chg: Schemas.Int }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.
@@ -333,6 +333,11 @@ export const Messages = {
   // sender only. Used by the optional lag HUD, about once every 2s.
   lagPing: Schemas.Map({ t: Schemas.Number }),
   lagPong: Schemas.Map({ t: Schemas.Number }),
+
+  // Client → Server: started holding Lunge (kind 0) or Burst (kind 1) at (x, y, z).
+  // The server timestamps this and later accepts a charged fire only if it lasted
+  // CHARGE_MS and the fire feet stayed within CHARGE_STILL_M of this point.
+  chargeStart: Schemas.Map({ kind: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
 }
 
 export const room = registerMessages(Messages)

@@ -186,14 +186,14 @@ function wireInbound(): void {
   })
 
   room.onMessage('lungeStarted', (m) => {
-    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z, dry: m.dry ? 1 : 0 })
+    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z, dry: m.dry ? 1 : 0, chg: m.chg ? 1 : 0 })
   })
   room.onMessage('lungeImpact', ({ attacker, id, target, dx, dz }) => {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
 
-  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz, dry }) => {
-    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz, dry: dry ? 1 : 0 })
+  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz, dry, chg }) => {
+    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz, dry: dry ? 1 : 0, chg: chg ? 1 : 0 })
   })
   room.onMessage('burstImpact', ({ attacker, id, target, dx, dz, air }) => {
     events.emit('burst:impact', { attacker, id, target, dx, dz, air })
@@ -362,8 +362,11 @@ function wireOutbound(): void {
 }
 
 /** Lunge: we started lunge `id` (see client/lunge.ts). */
-export function sendLungeStart(id: number, dx: number, dz: number, x: number, y: number, z: number): void {
-  room.send('lungeStart', { id, dx, dz, x, y, z })
+export function sendLungeStart(id: number, dx: number, dz: number, x: number, y: number, z: number, chg = 0): void {
+  room.send('lungeStart', { id, dx, dz, x, y, z, chg: chg ? 1 : 0 })
+}
+export function sendChargeStart(kind: number, x: number, y: number, z: number): void {
+  room.send('chargeStart', { kind, x, y, z })
 }
 
 /** Lunge: lunge `id` touched `target`. */
@@ -373,9 +376,9 @@ export function sendLungeHit(id: number, target: string, dx: number, dz: number,
 }
 
 /** Paint Burst (client/paintBurst.ts). */
-export function sendBurstUse(id: number, cell: string, x: number, y: number, z: number, fx: number, fz: number, air = 0, ct = Date.now()): void {
-  console.log(`[Client] → burstUse #${id}${air ? ` air=${air}` : ''} t=${ct}`)
-  room.send('burstUse', { id, cell, x, y, z, fx, fz, air, ct })
+export function sendBurstUse(id: number, cell: string, x: number, y: number, z: number, fx: number, fz: number, air = 0, ct = Date.now(), chg = 0): void {
+  console.log(`[Client] → burstUse #${id}${air ? ` air=${air}` : ''}${chg ? ' charged' : ''} t=${ct}`)
+  room.send('burstUse', { id, cell, x, y, z, fx, fz, air, ct, chg: chg ? 1 : 0 })
 }
 /** Airborne Burst met the floor. Server paints the ground-Burst footprint once. */
 export function sendBurstLand(id: number, cell: string, x: number, y: number, z: number, ct = Date.now()): void {
