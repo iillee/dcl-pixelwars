@@ -232,6 +232,14 @@ if (uiSrc.includes('tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }')
   console.error('✗ mid-game standings must not reuse the end-screen tablesLayout scale')
   process.exit(1)
 }
+if (uiSrc.includes('mix(barColor(team), Color4.Black()') || /inkTeam\s*=\s*\([^)]*\)\s*=>\s*mix\(/.test(uiSrc)) {
+  console.error('✗ panel team text should use the exact TEAM_RGB palette, not a darkened shade')
+  process.exit(1)
+}
+if (!uiSrc.includes('TEAM_RGB[Team.Red]') || !uiSrc.includes('TEAM_RGB[Team.Blue]') || !uiSrc.includes('TEAM_RGB[Team.Green]') || !uiSrc.includes('TEAM_RGB[Team.Yellow]')) {
+  console.error('✗ bar and team colours should come from TEAM_RGB, not one-off hexes')
+  process.exit(1)
+}
 if (uiSrc.includes('tablesLayout(b.owners') || !uiSrc.includes('standingsLayout(counts, cv, SUMMARY_HEAD_H')) {
   console.error('✗ the end-screen team panels should use the compact mid-game standings layout')
   process.exit(1)

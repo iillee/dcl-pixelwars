@@ -526,12 +526,20 @@ if (yellowPlane.src !== 'assets/textures/sign-title-yellow.png' || redPlane.src 
   console.error('✗ unlit title plates should keep a shared letter height and a tight width per word')
   process.exit(1)
 }
-if (yellowPlane.w >= SIGN_W_M - 0.5 || yellowPlane.h >= SIGN_H_M - 0.2) {
+if (SIGN_TITLE_PAD_M <= SIGN_H_M * 0.5) {
+  console.error(`✗ YELLOW needs side padding past the rounded caps, pad=${SIGN_TITLE_PAD_M} capR=${SIGN_H_M / 2}`)
+  process.exit(1)
+}
+if (yellowPlane.w >= SIGN_W_M - SIGN_TITLE_PAD_M || yellowPlane.h >= SIGN_H_M - 0.2) {
   console.error(`✗ YELLOW must fit inside the pill with padding, plane ${yellowPlane.w.toFixed(3)}×${yellowPlane.h.toFixed(3)} pill ${SIGN_W_M.toFixed(3)}×${SIGN_H_M.toFixed(3)}`)
   process.exit(1)
 }
-if (Math.abs(bluePlane.h - greenPlane.h) > 0.12 || signTitleScale() <= 0) {
+if (Math.abs(bluePlane.h - greenPlane.h) > 0.12 || Math.abs(redPlane.h - yellowPlane.h) > 0.15 || signTitleScale() <= 0) {
   console.error('✗ all four titles should share one typographic scale')
+  process.exit(1)
+}
+if (Math.abs(signTitleScale() - (SIGN_W_M - SIGN_TITLE_PAD_M * 2) / 5282) > 1e-9) {
+  console.error('✗ title scale must be set by YELLOW plus the shared side padding')
   process.exit(1)
 }
 if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('MeshRenderer.setPlane(title)') || lobbySrc.includes('setPlane(title,') || lobbySrc.includes('SIGN_TITLE_UVS') || lobbySrc.includes('fromEulerDegrees(0, 180, 0)')) {

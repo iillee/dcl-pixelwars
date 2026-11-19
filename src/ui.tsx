@@ -133,7 +133,7 @@ const SUMMARY_OUTLINE = HOTBAR_BORDER_W
 const SUMMARY_TITLE_BG = Color4.create(0.07, 0.07, 0.09, 1)
 const SUMMARY_TITLE_FG = Color4.create(1, 1, 1, 1)
 /** Team accent readable on the light-grey panel. */
-const inkTeam = (team: number) => mix(barColor(team), Color4.Black(), 0.25)
+const inkTeam = (team: number) => barColor(team)
 const SUMMARY_UNPAINTED = PANEL_LIGHT
 const SUMMARY_MVP = Color4.create(0.98, 0.78, 0.2, 1)
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t

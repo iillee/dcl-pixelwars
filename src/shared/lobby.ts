@@ -138,8 +138,14 @@ export const SIGN_H_M = 8.6 * (SIGN_REF_W_M / 58)
 export const SIGN_TITLE_FONT = 38
 /** Lilita One caps are fairly wide; this is the estimated width of one letter as a fraction of cap height. */
 const SIGN_TITLE_CHAR = 0.72
-/** Modest side padding around the word, in metres. */
-export const SIGN_TITLE_PAD_M = 0.42 * SIGN_H_M
+/**
+ * Side padding from the pill edge to YELLOW's glyphs, in metres. Set past the
+ * rounded cap radius (SIGN_H_M / 2) so the longest word sits in the straight
+ * section with a little breathing room. All four pills share SIGN_W_M, and
+ * every title uses the same typographic scale, so shorter words stay centered
+ * at the same letter height with more side space.
+ */
+export const SIGN_TITLE_PAD_M = SIGN_H_M * 0.5 + 0.4
 /** Plate width for one team word, tight around the letters plus side padding. */
 export function signPlateWidth(label: string): number {
   const fontM = SIGN_TITLE_FONT / 10
