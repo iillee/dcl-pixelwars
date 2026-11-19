@@ -67,7 +67,7 @@ import {
   getWorldPosition,
 } from '@dcl/sdk/ecs'
 import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
-import { movePlayerTo } from '~system/RestrictedActions'
+import { movePlayerTo, stopEmote, triggerSceneEmote } from '~system/RestrictedActions'
 import { isMobile } from '@dcl/sdk/platform'
 import { getPlayer } from '@dcl/sdk/players'
 import { room } from '../shared/messages'
@@ -131,24 +131,23 @@ export const FALL_RESCUE = {
 
 /**
  * Rescue-cloud visuals. The root stays over the rider. A child `spin` yaws
- * toward the camera each frame (Billboard on a child of the scaled pad was
- * not reliable). These shift the puff, hook, and coded line around that spin.
+ * so local +Z points away from the camera (same convention as BM_Y). The puff
+ * is placed each frame along the camera's right vector, not a baked local X,
+ * so a yaw-sign mismatch cannot flip it to the far side.
  */
-/** Puff sits this far to the camera-right (local -X after the Y yaw). */
-const CLOUD_OFFSET_X = -1.85
+/** Metres from the hook to the puff center, along the camera's right. */
+const CLOUD_SIDE = 1.45
+/** Puff bottom above the cloud root (the root is HANG_Y above the feet). */
 const CLOUD_OFFSET_Y = 0.75
-const CLOUD_OFFSET_Z = 0
 /** Uniform scale on the body (face and rod inherit it). */
 const CLOUD_SCALE = 1.25
 /**
- * Authored rod-mesh tip in glTF metres, before the rod's X-mirror.
- * Measured on cloud-rod.glb (min-X vertex): (-1.1985, -0.0492, -0.4557).
- * A tip helper is parented to the rod at this point so world placement
- * picks up the yaw, the body scale, and ROD_SCALE_X.
+ * Authored rod-mesh tip in glTF metres (min-X vertex on cloud-rod.glb).
+ * The rod already extends toward local -X, so with the puff on the camera's
+ * right the tip points at the hook. A tip helper is parented to the rod at
+ * this point so world placement picks up yaw and CLOUD_SCALE.
  */
 const ROD_TIP_LOCAL = { x: -1.1985, y: -0.0492, z: -0.4557 }
-/** Negative X-scale swings the tip from the puff's far side toward the hook. */
-const ROD_SCALE_X = -1
 /** Hook below the cloud root, just above a ~1.8 m rider's head (world Y ~ 2.35, clear of the nametag). */
 const HOOK_Y = -0.30
 const HOOK_SCALE = Vector3.create(0.38, 0.38, 0.38)
@@ -156,9 +155,12 @@ const HOOK_SCALE = Vector3.create(0.38, 0.38, 0.38)
 const LINE_RADIUS = 0.018
 const LINE_SEGS = 4
 const LINE_SAG = 0.04
-/** Hide the line if a stale or unready endpoint would stretch a segment across the view. */
-const LINE_MAX_M = 6
+/** Hide the line only if an endpoint is clearly stale or unready. */
+const LINE_MAX_M = 12
 const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
+/** Looping scene emote (same armature as the burst punch) while the rider is carried. */
+const FALL_EMOTE_SRC = 'assets/emotes/bot_fall_emote.glb'
+const FALL_EMOTE_RETRIG_S = 1.25
 const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
 const CLOUD_ROD_SRC = 'assets/models/cloud-rod.glb'
@@ -176,6 +178,7 @@ type CloudVisual = {
   root: Entity
   ents: Entity[]
   spin: Entity
+  body: Entity
   tip: Entity
   hook: Entity
   line: StringLine
@@ -457,47 +460,124 @@ function setFaceCamera(c: CloudVisual | null, on: boolean): void {
   if (!on) Transform.getMutable(c.spin).rotation = Quaternion.Identity()
 }
 
-/** Yaw `spin` so local -Z faces the camera. The pad/anchor and the detached root stay identity, so local yaw is world yaw. */
+/** Horizontal camera-right of a look from `cam` toward `at` (up x forward). */
+function cameraRightXZ(at: { x: number; z: number }, cam: { x: number; z: number }): { x: number; z: number } | null {
+  const fx = at.x - cam.x
+  const fz = at.z - cam.z
+  const len = Math.hypot(fx, fz)
+  if (len < 1e-4) return null
+  return { x: fz / len, z: -fx / len }
+}
+
+/** Yaw `spin` so local +Z points away from the camera (BM_Y / LookRotation convention). Yaw only. */
 function yawSpinToCamera(spin: Entity): void {
   const pos = getWorldPosition(engine, spin)
   const cam = getWorldPosition(engine, engine.CameraEntity)
-  const dx = cam.x - pos.x
-  const dz = cam.z - pos.z
-  if (dx * dx + dz * dz < 1e-4) return
-  const yawDeg = Math.atan2(-dx, -dz) * (180 / Math.PI)
-  Transform.getMutable(spin).rotation = Quaternion.fromEulerDegrees(0, yawDeg, 0)
+  const fx = pos.x - cam.x
+  const fz = pos.z - cam.z
+  if (fx * fx + fz * fz < 1e-4) return
+  Transform.getMutable(spin).rotation = Quaternion.lookRotation(Vector3.create(fx, 0, fz), Vector3.Up())
+}
+
+/** Place the puff CLOUD_SIDE metres along the camera's right, in spin-local space. */
+function placePuffBesideCamera(c: CloudVisual, cam: { x: number; z: number }, at: { x: number; z: number }): { x: number; z: number } | null {
+  const bodyTf = Transform.getMutable(c.body)
+  // Ride camera looks along +Z with spin at identity, so camera-right is local +X.
+  if (!(c.face && !(c === floater && cameraRide))) {
+    bodyTf.position = Vector3.create(CLOUD_SIDE, CLOUD_OFFSET_Y, 0)
+    return { x: 1, z: 0 }
+  }
+  const right = cameraRightXZ(at, cam)
+  if (!right) return null
+  const q = Transform.get(c.spin).rotation
+  const inv = Quaternion.create(-q.x, -q.y, -q.z, q.w)
+  const local = Vector3.rotate(Vector3.create(right.x * CLOUD_SIDE, 0, right.z * CLOUD_SIDE), inv)
+  bodyTf.position = Vector3.create(local.x, CLOUD_OFFSET_Y, local.z)
+  return right
+}
+
+let rigLogAt = 0
+function logCloudRig(
+  c: CloudVisual,
+  hook: { x: number; y: number; z: number },
+  tip: { x: number; y: number; z: number },
+  cam: { x: number; y: number; z: number },
+  right: { x: number; z: number } | null,
+  len: number
+): void {
+  if (c !== floater) return
+  const now = Date.now()
+  if (now - rigLogAt < 1000) return
+  rigLogAt = now
+  const body = getWorldPosition(engine, c.body)
+  const side = right ? right.x.toFixed(2) + ',' + right.z.toFixed(2) : 'n/a'
+  console.log(
+    '[FallRescue] rig hook=' + hook.x.toFixed(2) + ',' + hook.y.toFixed(2) + ',' + hook.z.toFixed(2) +
+      ' tip=' + tip.x.toFixed(2) + ',' + tip.y.toFixed(2) + ',' + tip.z.toFixed(2) +
+      ' puff=' + body.x.toFixed(2) + ',' + body.y.toFixed(2) + ',' + body.z.toFixed(2) +
+      ' cam=' + cam.x.toFixed(2) + ',' + cam.y.toFixed(2) + ',' + cam.z.toFixed(2) +
+      ' right=' + side + ' line=' + len.toFixed(2)
+  )
 }
 
 function updateCloudVisual(c: CloudVisual): void {
-  // A child ride camera is parented to the root and looks along -Z; do not yaw in front of it.
-  if (c.face && !(c === floater && cameraRide)) yawSpinToCamera(c.spin)
-  const tip = getWorldPosition(engine, c.tip)
+  const cam = getWorldPosition(engine, engine.CameraEntity)
   const hook = getWorldPosition(engine, c.hook)
+  if (c.face && !(c === floater && cameraRide)) yawSpinToCamera(c.spin)
+  const right = placePuffBesideCamera(c, cam, hook)
+  const tip = getWorldPosition(engine, c.tip)
+  const hookNow = getWorldPosition(engine, c.hook)
   const root = getWorldPosition(engine, c.root)
-  const len = Math.hypot(tip.x - hook.x, tip.y - hook.y, tip.z - hook.z)
+  const len = Math.hypot(tip.x - hookNow.x, tip.y - hookNow.y, tip.z - hookNow.z)
   const tipR = Math.hypot(tip.x - root.x, tip.y - root.y, tip.z - root.z)
-  const hookR = Math.hypot(hook.x - root.x, hook.y - root.y, hook.z - root.z)
-  const ready = [tip.x, tip.y, tip.z, hook.x, hook.y, hook.z, root.x, root.y, root.z].every(Number.isFinite)
-  if (!ready || len > LINE_MAX_M || tipR > 8 || hookR > 8) {
+  const hookR = Math.hypot(hookNow.x - root.x, hookNow.y - root.y, hookNow.z - root.z)
+  const ready = [tip.x, tip.y, tip.z, hookNow.x, hookNow.y, hookNow.z, root.x, root.y, root.z].every(Number.isFinite)
+  logCloudRig(c, hookNow, tip, cam, right, len)
+  if (!ready || len > LINE_MAX_M || tipR > 12 || hookR > 12) {
     hideStringLine(c.line)
     return
   }
   const scale = Transform.getOrNull(c.root)?.scale.y ?? 1
   c.line.radius = LINE_RADIUS * Math.max(0.02, scale)
-  placeStringLine(c.line, tip, hook, 0, { sag: LINE_SAG * Math.max(0.02, scale), lagTau: 0 })
+  placeStringLine(c.line, tip, hookNow, 0, { sag: LINE_SAG * Math.max(0.02, scale), lagTau: 0 })
 }
 
-/** Lavender cloud: faceless body (ghost outline in the GLB), face, mirrored rod, hook, world-space line. */
+let fallEmoteOn = false
+let fallEmoteRetrig = 0
+
+function startFallEmote(): void {
+  fallEmoteOn = true
+  fallEmoteRetrig = FALL_EMOTE_RETRIG_S
+  void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(err =>
+    console.log('[FallRescue] fall emote failed', err)
+  )
+}
+
+function stopFallEmote(): void {
+  if (!fallEmoteOn) return
+  fallEmoteOn = false
+  fallEmoteRetrig = 0
+  void stopEmote({}).catch(() => {})
+}
+
+function tickFallEmote(dt: number): void {
+  if (!fallEmoteOn) return
+  fallEmoteRetrig -= dt
+  if (fallEmoteRetrig > 0) return
+  fallEmoteRetrig = FALL_EMOTE_RETRIG_S
+  void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(() => {})
+}
+
+/** Lavender cloud: faceless body (ghost outline in the GLB), face, rod, hook, world-space line. */
 function cloudParts(root: Entity): Omit<CloudVisual, 'face'> {
   const spin = engine.addEntity()
   Transform.create(spin, { parent: root })
   const body = gltfChild(spin, CLOUD_BODY_SRC)
   const bodyTf = Transform.getMutable(body)
-  bodyTf.position = Vector3.create(CLOUD_OFFSET_X, CLOUD_OFFSET_Y, CLOUD_OFFSET_Z)
+  bodyTf.position = Vector3.create(CLOUD_SIDE, CLOUD_OFFSET_Y, 0)
   bodyTf.scale = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
   const face = gltfChild(body, CLOUD_FACE_SRC)
   const rod = gltfChild(body, CLOUD_ROD_SRC)
-  Transform.getMutable(rod).scale = Vector3.create(ROD_SCALE_X, 1, 1)
   const hook = makeHook(spin)
   const tip = engine.addEntity()
   Transform.create(tip, {
@@ -506,7 +586,7 @@ function cloudParts(root: Entity): Omit<CloudVisual, 'face'> {
   })
   const line = makeStringLine(null, { radius: LINE_RADIUS, color: LINE_COLOR, segs: LINE_SEGS })
   hideStringLine(line)
-  return { root, spin, tip, hook, line, ents: [root, spin, body, face, rod, hook, tip, ...line.segs] }
+  return { root, spin, body, tip, hook, line, ents: [root, spin, body, face, rod, hook, tip, ...line.segs] }
 }
 
 /** Local rescue cloud parented to the pad: body, face, fishing rod, and hook. */
@@ -686,6 +766,8 @@ function spawnCarryDisguise(): void {
     eyeColor: rgb(avatar?.eyesColor),
     wearables: me?.wearables ?? [],
     emotes: me?.emotes ?? [],
+    expressionTriggerId: FALL_EMOTE_SRC,
+    expressionTriggerTimestamp: Date.now(),
   })
   standIn = e
   console.log(
@@ -819,6 +901,7 @@ function finish(how: FallRescueEnd, why: string): void {
   phase = 'land'
   phaseLeft = FALL_RESCUE.LAND_LOCK_S
   sendRescueEnd()
+  stopFallEmote()
   setFallMoveLock('walk')
   if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
   if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
@@ -859,6 +942,7 @@ function begin(p: Vec): void {
   // Interrupt first: cancelling a lunge rewrites InputModifier, then the freeze wins.
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
+  startFallEmote()
   playFallRescueSfx()
   splashAtCrossing(sample ? sample.p : null, p)
   // The catch itself does not move the player. Overview off so the follow camera rides the tween.
@@ -1103,6 +1187,7 @@ function tick(dt: number): void {
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
+  if (phase === 'grab' || phase === 'carry') tickFallEmote(step)
   if (p && phase === 'idle' && rearm) {
     // Feet crossing the visible sea. Phase !== idle and rearm prevent a second trip.
     if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) begin(p)
@@ -1136,6 +1221,7 @@ export function cancelFallRescue(why: string): void {
   slipAccum = 0
   despawnFloater()
   despawnPad()
+  stopFallEmote()
   setFallMoveLock('open')
 }
 
