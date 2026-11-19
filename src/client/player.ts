@@ -46,6 +46,13 @@ let spawnPads: Entity[] = []
 const MATCH_HOLD_MS = 6000
 let matchHoldUntil = 0
 let matchHoldPads: ReturnType<typeof earlySpawnPads> = []
+// Feet height of the spawn this hold was armed for. Team bases can sit on a
+// level below BASE_Y, so the drop check must compare against the real spawn,
+// not BASE_Y, or a player standing on their own base is "dropped" forever.
+let matchHoldSpawnY = BASE_Y
+// Snap-backs allowed per hold window (never an endless respawn loop).
+const MATCH_HOLD_MAX_SNAPS = 2
+let matchHoldSnaps = 0
 
 function armMatchHold(): void {
   installLobbyHoldFloor()
@@ -53,6 +60,7 @@ function armMatchHold(): void {
   ensureSpawnPads()
   matchHoldPads = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))
   matchHoldUntil = Date.now() + MATCH_HOLD_MS
+  matchHoldSnaps = 0
 }
 
 function overMatchHold(x: number, z: number): boolean {
@@ -101,7 +109,11 @@ function teleportHome(why: string): void {
     // above or below L0) before the tile mesh can hold the player. On mobile
     // the maze can report ready before GLB colliders actually hold, so keep
     // thick primitive slabs up for a short window after this teleport.
-    if (why !== 'fell') armMatchHold()
+    // A match-drop snap must not re-arm its own window (that looped forever).
+    if (why === 'match-drop') {
+      clearSpawnPads()
+      ensureSpawnPads()
+    } else if (why !== 'fell') armMatchHold()
     else {
       clearSpawnPads()
       ensureSpawnPads()
@@ -111,6 +123,7 @@ function teleportHome(why: string): void {
       ? { pos: assigned, look: { x: assigned.x, y: assigned.y, z: assigned.z + 8 } }
       : baseSpawn(isPlayingTeam(myTeam) ? myTeam : 1) // no team yet → RED base (scene.json default)
     pos = s.pos; look = s.look
+    if (why !== 'fell' && why !== 'match-drop') matchHoldSpawnY = pos.y
   }
   console.log(`[Player] teleport (${why}) → ${pos.x.toFixed(0)},${pos.y.toFixed(1)},${pos.z.toFixed(0)}`)
   // Fire-and-forget: movePlayerTo can reject if the player has left the scene.
@@ -190,8 +203,8 @@ export function initPlayerNet(): void {
       if (dropLock > 0) return
       const p = Transform.getOrNull(engine.PlayerEntity)?.position
       if (!p) return
-      if (p.y >= BASE_Y - 0.5) return
       if (isLobbyLayout()) {
+        if (p.y >= BASE_Y - 0.5) return
         if (!lobbyHoldContains(p.x, p.z)) return
         dropLock = 1
         teleportHome('lobby-drop')
@@ -200,7 +213,11 @@ export function initPlayerNet(): void {
       // Match-start only: if they tunneled the team floor before GLB
       // colliders arrived, snap back. Off the island, rescue is unchanged.
       if (Date.now() >= matchHoldUntil) return
+      if (matchHoldSnaps >= MATCH_HOLD_MAX_SNAPS) return
+      // Well below the spawn they were sent to, not merely below BASE_Y.
+      if (p.y >= Math.min(BASE_Y, matchHoldSpawnY) - 3) return
       if (!overMatchHold(p.x, p.z)) return
+      matchHoldSnaps++
       dropLock = 1
       teleportHome('match-drop')
     })
