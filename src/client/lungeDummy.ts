@@ -14,6 +14,7 @@ import { isOverviewActive } from './overviewCamera'
  */
 
 import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { isUpgradeCardsOpen } from './upgrades'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT,
@@ -320,7 +321,7 @@ export function initLungeDummy(): void {
   })
   engine.addSystem((dt: number) => {
     // Key 2 = respawn dummies only while the overview is closed (open: key 2 zooms out).
-    if (!isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
+    if (!isUpgradeCardsOpen() && !isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
     if (launchCooldown > 0) launchCooldown -= dt
     // Local sim copy for prediction: same walk graph / ramps as the server; never respawns here.
     const seed = getCurrentSeed()

@@ -26,6 +26,7 @@ import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { initPaintScore } from './paintScore'
 import { initOverdrive } from './overdrive'
+import { initUpgrades } from './upgrades'
 import { Team, teamName } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
@@ -63,6 +64,7 @@ export function initClientHandler(): void {
   })
   initPaintScore()
   initOverdrive()
+  initUpgrades()
   wireInbound()
   wireTeamAssigned()
   wireOutbound()
@@ -97,6 +99,12 @@ function wireInbound(): void {
   })
   room.onMessage('paintScore', ({ n }) => {
     events.emit('paint:score', { n: n ?? 0 })
+  })
+  room.onMessage('upgradeState', ({ charge, pending, earned, speed, paint, haste }) => {
+    events.emit('upgrade:state', {
+      charge: charge ?? 0, pending: pending ?? 0, earned: earned ?? 0,
+      speed: speed ?? 0, paint: paint ?? 0, haste: haste ?? 0,
+    })
   })
   room.onMessage('starSpawn', ({ i, x, y, z }) => {
     events.emit('star:spawn', { i: i ?? 0, x: x ?? 0, y: y ?? 0, z: z ?? 0 })

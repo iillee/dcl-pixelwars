@@ -35,6 +35,7 @@ import { signZoomScale } from '../shared/lobby'
 import { IS_SKY, LEVEL_Y_OFFSET } from '../maze/level'
 import { isLobbyLayout } from '../maze/rebuild'
 import { playUiClick } from './audio'
+import { isUpgradeCardsOpen } from './upgrades'
 
 // MARK: Tuning
 export const OV_PITCH_DEG = 35.26  // true isometric ≈ 35.26°
@@ -146,9 +147,9 @@ export function setupOverviewCamera(): void {
       playUiClick()
       toggleOverview()
     }
-    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && canOverviewZoomIn()) { playUiClick(); overviewZoomIn() }
-    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && canOverviewZoomOut()) { playUiClick(); overviewZoomOut() }
-    if (active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
+    if (!isUpgradeCardsOpen() && wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && canOverviewZoomIn()) { playUiClick(); overviewZoomIn() }
+    if (!isUpgradeCardsOpen() && wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && canOverviewZoomOut()) { playUiClick(); overviewZoomOut() }
+    if (!isUpgradeCardsOpen() && active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
       playUiClick()
       rotateOverview(1)
     }

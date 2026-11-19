@@ -23,10 +23,11 @@ const DEFAULT_RUN = 10
 
 let boosted = false
 let starMult = 1
+let upgradeMult = 1
 
 function applySpeed(): void {
   const paint = (boosted && OWN_PAINT_SPEED_MULT !== 1) ? OWN_PAINT_SPEED_MULT : 1
-  const mult = paint * starMult
+  const mult = paint * starMult * upgradeMult
   AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, {
     jogSpeed: DEFAULT_JOG * mult,
     runSpeed: DEFAULT_RUN * mult,
@@ -44,6 +45,14 @@ export function setStarSpeedMult(m: number): void {
   const next = Number.isFinite(m) && m > 0 ? m : 1
   if (next === starMult) return
   starMult = next
+  applySpeed()
+}
+
+/** Compose with the own-paint and star bonuses. 1 = no upgrade boost. Jog/run only. */
+export function setUpgradeSpeedMult(m: number): void {
+  const next = Number.isFinite(m) && m > 0 ? m : 1
+  if (next === upgradeMult) return
+  upgradeMult = next
   applySpeed()
 }
 

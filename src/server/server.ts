@@ -23,6 +23,8 @@ import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freez
 import { lungeKnock, burstKnock, spikeKnock, overdriveKnock } from '../shared/knocks'
 import { canSpawnStar, nextStarSpawnAt, overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir, pickStarSpawn, starHoldRemainingMs, starPickupWinner, type StarCell } from '../shared/overdrive'
 import { OverdriveBook } from './overdriveBook'
+import { UpgradeBook } from './upgradeBook'
+import { burstPaintRadiusCellsFor, hasteCooldownMult, upgradeChargeFor, upgradeKindFromId } from '../shared/upgrades'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
   loadFromStorage as loadLeaderboard,
@@ -46,7 +48,7 @@ import {
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   pvbBotCount, pvbHumanTeam,
   OVERDRIVE_TOUCH_RADIUS, OVERDRIVE_TOUCH_MAX_DY,
-  STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, STAR_HOVER_Y, STAR_COOLDOWN_MULT, SERVER_MIN_LUNGE_GAP_S,
+  STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, STAR_HOVER_Y, STAR_COOLDOWN_MULT, STAR_PICKUPS_ENABLED, SERVER_MIN_LUNGE_GAP_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHitsBot, burstBotInRange, burstDir } from '../shared/burst'
@@ -67,10 +69,10 @@ import { pvpBotFill, teamCountsTotal, teamName, smallestTeam, PLAYING_TEAMS } fr
 import { basesOn, baseThresholdVerdict, baseTimeoutVerdict, VICTORY_PROGRESS, type BaseSnapshot, type BaseVerdict } from '../shared/bases'
 import { baseProgress, baseSnapshot, clearBaseNetwork, markNetworkDirty, seedBaseTerritory, tickBaseGrowth } from './baseNetwork'
 
-// Ingest rate limit: 3x3 footprint at 10Hz = 90 ids max per tick. 100 is
-// the generous cap; anything beyond is either a bug or a cheater and we drop
+// Ingest rate limit: a 13-cell upgraded brush at 10Hz is 130 ids. 260 is
+// the generous cap (covers a leftover 5x5 star brush at 250 if re-enabled); anything beyond is either a bug or a cheater and we drop
 // the whole message rather than half-apply.
-const MAX_IDS_PER_TICK = 100
+const MAX_IDS_PER_TICK = 260
 
 // Cap on cell changes per paintDelta / snapshot message (see the
 // SATURATION DISCIPLINE note in shared/messages.ts).
@@ -118,6 +120,7 @@ export async function setupServer(): Promise<void> {
     if (!id.startsWith('bot:')) dirtyPaintScores.add(id)
   }
   const overdrive = new OverdriveBook()
+  const upgrades = new UpgradeBook()
   let starRoundStart = 0
   let starNextAt = 0
   const overdriveFeet = (id: string, now: number): { x: number; y: number; z: number } | null => {
@@ -214,6 +217,7 @@ export async function setupServer(): Promise<void> {
     }
   }
   const trySpawnStar = (now: number): void => {
+    if (!STAR_PICKUPS_ENABLED) return
     if (!matchLive() || !paintAllowed(roundFormat)) return
     if (!canSpawnStar({
       now, roundStartAt: starRoundStart, nextAt: starNextAt,
@@ -289,12 +293,30 @@ export async function setupServer(): Promise<void> {
       room.send('paintScore', { n }, { to: [id] })
     }
     dirtyPaintScores.clear()
+    flushUpgrades()
   }
   const sendPaintScoreTo = (id: string): void => {
     if (!id || id.startsWith('bot:')) return
     const n = roundCells.get(id) ?? 0
     lastSentPaintScore.set(id, n)
     room.send('paintScore', { n }, { to: [id] })
+  }
+  const sendUpgradeTo = (id: string): void => {
+    if (!id || id.startsWith('bot:')) return
+    room.send('upgradeState', upgrades.ownerState(id), { to: [id] })
+  }
+  const flushUpgrades = (): void => {
+    for (const id of upgrades.takeDirty()) sendUpgradeTo(id)
+  }
+  const clearUpgradesAndNotify = (): void => {
+    const ids = upgrades.clearRound()
+    for (const id of ids) sendUpgradeTo(id)
+  }
+  const abilityGapS = (id: string, base: number, now: number): number => {
+    let g = base
+    if (overdrive.isActive(id, now)) g *= STAR_COOLDOWN_MULT
+    g *= hasteCooldownMult(upgrades.level(id, 'haste'))
+    return g
   }
   const clearRoundCellsAndNotify = (): void => {
     const ids = new Set<string>()
@@ -305,6 +327,7 @@ export async function setupServer(): Promise<void> {
     for (const id of ids) room.send('paintScore', { n: 0 }, { to: [id] })
     lastSentPaintScore.clear()
     clearStars()
+    clearUpgradesAndNotify()
   }
   /** Team of each `bot:<id>` seen this round, including bots retired after scoring. */
   const botTeams = new Map<string, number>()
@@ -477,18 +500,27 @@ export async function setupServer(): Promise<void> {
   /** Nearest flips first. Returns how many cells changed team. `notify` echoes the tank to a human. */
   const paintCells = (painter: string, team: number, ids: string[], origin: string | null, notify: boolean): number => {
     if (!paintAllowed(roundFormat)) return 0
+    let gained = 0
+    let charge = 0
+    const credit = (id: string): boolean => {
+      const prev = teamOfCell(id)
+      if (!applyPaint(id, team, painter)) return false
+      gained++
+      charge += upgradeChargeFor(prev, team)
+      return true
+    }
     if (!economyOn()) {
-      let gained = 0
-      for (const id of ids) if (applyPaint(id, team, painter)) gained++
+      for (const id of ids) credit(id)
+      if (charge > 0) upgrades.gain(painter, charge)
       return gained
     }
     const before = walletOf(painter)
     const ordered = orderNearest(ids, origin)
     const plan = applyTank(ordered.map(id => ({ id, flip: wouldFlip(id, team) })), before)
-    let gained = 0
-    for (const id of plan.taken) if (applyPaint(id, team, painter)) gained++
+    for (const id of plan.taken) credit(id)
     setWallet(painter, plan.tank)
     if (notify && (plan.denied.length > 0 || plan.tank !== before)) sendWallet(painter, plan.tank, plan.denied)
+    if (charge > 0) upgrades.gain(painter, charge)
     return gained
   }
   let pvbRoundIndex = 0
@@ -607,6 +639,7 @@ export async function setupServer(): Promise<void> {
     clearTerritoryRegen()
     anvilsAwake(false)
     clearStars()
+    clearUpgradesAndNotify()
     if (!lobbyOpen) {
       lobbyOpen = true
       clearLobbyVotes()
@@ -883,6 +916,7 @@ export async function setupServer(): Promise<void> {
     const left = userId.toLowerCase()
     if (overdrive.isActive(left, Date.now())) endStar(left)
     overdrive.forget(left)
+    upgrades.forget(left)
     if (rescueRiders.delete(left)) {
       rescueStartAt.delete(left)
       room.send('rescueEnd', { who: left })
@@ -1001,6 +1035,16 @@ export async function setupServer(): Promise<void> {
 
   // Name capture — client sends once on join with PlayerIdentityData.name.
   // Server keeps the map in memory and patches existing leaderboard rows.
+  room.onMessage('upgradeSelect', ({ kind }, context) => {
+    const from = context?.from
+    if (!from || !matchLive()) return
+    const k = upgradeKindFromId(typeof kind === 'number' ? kind : -1)
+    if (!k) return
+    if (!upgrades.trySelect(from, k)) return
+    sendUpgradeTo(from)
+    console.log('[Server] upgradeSelect ' + from.slice(0, 8) + ' ' + k + ' earned=' + upgrades.stateOf(from).earned)
+  })
+
   room.onMessage('updateName', ({ name }, context) => {
     const from = context?.from
     if (!from) return
@@ -1180,7 +1224,7 @@ export async function setupServer(): Promise<void> {
     if (getTeam(from) === null) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
-    if (!lunges.start(from, id, Date.now(), overdrive.isActive(from, Date.now()) ? SERVER_MIN_LUNGE_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_LUNGE_GAP_S)) {
+    if (!lunges.start(from, id, Date.now(), abilityGapS(from, SERVER_MIN_LUNGE_GAP_S, Date.now()))) {
       console.log(`[Server] lungeStart ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
@@ -1256,7 +1300,8 @@ export async function setupServer(): Promise<void> {
   const paintBurstFootprint = (from: string, team: number, cell: string, x: number, y: number, z: number): string[] => {
     const graph = getWalkableGraph()
     const centre = graph ? burstCentre(graph, cell, { x, y, z }) : null
-    const fp = graph && centre ? burstFootprint(graph, centre) : []
+    const r = burstPaintRadiusCellsFor(upgrades.level(from, 'paint'))
+    const fp = graph && centre ? burstFootprint(graph, centre, undefined, r) : []
     // Empty tank: knockback still uses the full footprint; no cell changes.
     if (paintDry(from)) return fp
     const gained = paintCells(from, team, fp, centre, true)
@@ -1290,7 +1335,7 @@ export async function setupServer(): Promise<void> {
       // Lobby: the shockwave plays for everyone. It does not paint or hit.
       if (!bursts.matches(from, id)) {
         const now = Date.now()
-        if (now - (lastBurstAt.get(from) ?? 0) < (overdrive.isActive(from, now) ? SERVER_MIN_BURST_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_BURST_GAP_S) * 1000) return
+        if (now - (lastBurstAt.get(from) ?? 0) < (abilityGapS(from, SERVER_MIN_BURST_GAP_S, now)) * 1000) return
         lastBurstAt.set(from, now)
         const airborne = air !== 0
         bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
@@ -1311,7 +1356,7 @@ export async function setupServer(): Promise<void> {
       }
       return
     }
-    if (now - (lastBurstAt.get(from) ?? 0) < (overdrive.isActive(from, now) ? SERVER_MIN_BURST_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_BURST_GAP_S) * 1000) {
+    if (now - (lastBurstAt.get(from) ?? 0) < (abilityGapS(from, SERVER_MIN_BURST_GAP_S, now)) * 1000) {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
@@ -1400,7 +1445,7 @@ export async function setupServer(): Promise<void> {
       room.send('burstFired', { attacker: from, id, team, x, y, z, air: 0, lx: 0, ly: 0, lz: 0, dry: paintDry(from) })
       const graph = getWalkableGraph()
       const centre = graph ? burstCentre(graph, cell, origin) : null
-      const preview = graph && centre ? burstFootprint(graph, centre) : []
+      const preview = graph && centre ? burstFootprint(graph, centre, undefined, burstPaintRadiusCellsFor(upgrades.level(from, 'paint'))) : []
       radialBotShock(from, id, team, origin, face.x, face.z, now, preview)
     }
     const fp = paintBurstFootprint(from, team, cell, x, y, z)
@@ -1636,6 +1681,7 @@ export async function setupServer(): Promise<void> {
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
     sendPaintScoreTo(from)
+    sendUpgradeTo(from)
     sendStarSnapshotTo(from)
   })
 

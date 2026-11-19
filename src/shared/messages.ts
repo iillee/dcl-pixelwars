@@ -38,8 +38,9 @@ export const Messages = {
   // client-only for now), so it can't resolve position -> cell. Client
   // authors ids via worldToCellId locally; server trusts them for Phase 4.
   // Anti-cheat (position validation) is deferred to Phase 5 per the plan.
-  // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
-  // is 90 max; anything larger is dropped as suspicious).
+  // Rate limit: server caps at 260 ids per message (a 13-cell upgraded
+  // brush @ 10Hz is 130; a leftover 5x5 star brush is 250 worst-case, so
+  // 260 covers the upgrade brush and a leftover star 5x5. Larger batches are dropped).
   paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String), at: Schemas.String, y: Schemas.Number, g: Schemas.Int }),
 
   // Server → Client: broadcast of paint state changes accumulated since
@@ -67,6 +68,18 @@ export const Messages = {
   // Server → the painter only. Batched personal tiles-painted total for this round
   // (not one message per tile). Sent with the 5 Hz paint flush, on snapshot, and as 0 on reset.
   paintScore: Schemas.Map({ n: Schemas.Int }),
+
+  // Server → the player only. Authoritative upgrade charge, pending flag, and levels.
+  upgradeState: Schemas.Map({
+    charge: Schemas.Int,
+    pending: Schemas.Int,
+    earned: Schemas.Int,
+    speed: Schemas.Int,
+    paint: Schemas.Int,
+    haste: Schemas.Int,
+  }),
+  // Client → Server: pick one of the three cards (1 SPEED, 2 PAINT, 3 HASTE).
+  upgradeSelect: Schemas.Map({ kind: Schemas.Int }),
 
   // Server → everyone: a star orb appeared or disappeared. i is the orb id.
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),

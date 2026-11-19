@@ -55,6 +55,8 @@ export type Events = {
   // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
   'paint:wallet': { tank: number; denied: string[]; regen: number }
   'paint:score': { n: number }
+  'upgrade:state': { charge: number; pending: number; earned: number; speed: number; paint: number; haste: number }
+
   'star:spawn': { i: number; x: number; y: number; z: number }
   'star:despawn': { i: number }
   'star:hold': { id: string; until: number; ms: number }

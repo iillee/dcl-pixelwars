@@ -61,6 +61,7 @@ import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { isLocalOverdriveActive } from './overdrive'
+import { localHasteCooldownMult } from './upgrades'
 import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
@@ -73,6 +74,7 @@ type State = 'ready' | 'active' | 'recovery' | 'cooldown'
 let state: State = 'ready'
 let stateLeft = 0
 let cooldownLeft = 0
+let cooldownTotal = LUNGE_COOLDOWN_S
 let lungeId = 0
 let dir = { x: 0, z: 1 }
 let startPos: V3 = { x: 0, y: 0, z: 0 }
@@ -335,7 +337,7 @@ export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean
   const cd = Math.max(0, cooldownLeft)
   return {
     show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0 && !isMoveLocked(),
-    cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery' || isMoveLocked(),
+    cooldown: cd, cooldownFrac: cd / (cooldownTotal || LUNGE_COOLDOWN_S), recovering: state === 'recovery' || isMoveLocked(),
   }
 }
 
@@ -358,7 +360,8 @@ export function triggerLunge(): void {
   startPos = { x: t.position.x, y: t.position.y, z: t.position.z }
   prevPos = startPos
   state = 'active'; stateLeft = LUNGE_ACTIVE_S
-  cooldownLeft = LUNGE_COOLDOWN_S
+  cooldownTotal = LUNGE_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownLeft = cooldownTotal
   hitWindowLeft = LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S
   hitAny = false
   baseSpeed = Math.max(0, lastVel.x * dir.x + lastVel.z * dir.z)
@@ -576,7 +579,7 @@ export function initLunge(): void {
   })
 
   engine.addSystem((dt: number) => {
-    if (cooldownLeft > 0) cooldownLeft -= dt * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1)
+    if (cooldownLeft > 0) cooldownLeft -= dt
     lastHitAge += dt
     if (emoteLockLeft > 0) { emoteLockLeft -= dt; if (emoteLockLeft <= 0) { emoteLockLeft = 0; applyControl() } }
     if (lockLeft > 0) {

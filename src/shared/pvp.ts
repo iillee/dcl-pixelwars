@@ -676,6 +676,30 @@ export const STAR_COOLDOWN_MULT = 0.5
 export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
 /** Carrier theme + BGM duck. Off for now; flip to re-enable. The unpicked-star idle loop is separate. */
 export const STAR_THEME_ENABLED = false
+/** When false, no star orb, beacon, or idle sound is spawned. Pickup / hold code stays in place. */
+export const STAR_PICKUPS_ENABLED = false
+
+// ═══ Round upgrades (paint-earned, last until the round ends) ════════
+// Players spend upgrade charge (from tiles they convert) on up to three
+// round-long buffs. All of these are playtest values and easy to retune.
+/** Cumulative upgrade-charge thresholds for the 1st, 2nd, and 3rd upgrade. */
+export const UPGRADE_THRESHOLDS = [75, 175, 300] as const
+/** Max upgrades a player can select in one round. */
+export const UPGRADE_MAX = 3
+/** Max level of any single upgrade. */
+export const UPGRADE_LEVEL_MAX = 3
+/** Charge for converting a neutral (unpainted) tile. */
+export const UPGRADE_CHARGE_NEUTRAL = 1
+/** Charge for converting an enemy tile. */
+export const UPGRADE_CHARGE_ENEMY = 2
+/** Charge for a friendly tile (no conversion, no credit). */
+export const UPGRADE_CHARGE_FRIENDLY = 0
+/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog/run only; Dash distance is unchanged. */
+export const UPGRADE_SPEED_BONUS = [0, 0.15, 0.25, 0.30] as const
+/** Paint *area* bonus by level: 0, +20%, +35% total, +45% total. Applied as a tile-count approximation, not a raw radius bump. */
+export const UPGRADE_PAINT_AREA_BONUS = [0, 0.20, 0.35, 0.45] as const
+/** Dash and Burst cooldown reduction by level: 0, −15%, −25% total, −30% total. Future activations only. */
+export const UPGRADE_HASTE_REDUCTION = [0, 0.15, 0.25, 0.30] as const
 /** Horizontal reach (m) for a bump that launches an enemy. */
 export const OVERDRIVE_TOUCH_RADIUS = 2
 /** Vertical pad (m) for that bump. */

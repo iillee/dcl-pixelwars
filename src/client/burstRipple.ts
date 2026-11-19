@@ -27,6 +27,7 @@ import {
   DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
+import { localBurstPaintRadiusCells } from './upgrades'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
@@ -94,7 +95,7 @@ export function footprintAt(p: V3, cell: string): number {
   if (!g) return -1
   const centre = burstCentre(g, cell, p)
   if (!centre) return 0
-  return burstFootprint(g, centre).length
+  return burstFootprint(g, centre, undefined, localBurstPaintRadiusCells()).length
 }
 
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
@@ -106,7 +107,7 @@ export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!g) return
   const centre = burstCentre(g, cell, p)
   if (!centre) return
-  const cells = burstFootprint(g, centre)
+  const cells = burstFootprint(g, centre, undefined, localBurstPaintRadiusCells())
   const c0 = g.worldPos.get(centre)!
   let maxD = CELL_M
   for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }

@@ -12,6 +12,8 @@ import { playClaimSfx } from './client/audio'
 import { isMoveLocked } from './client/moveLock'
 import { isLocalOverdriveActive } from './client/overdrive'
 import { overdrivePaintRadiusCells, paintBrushOffsets } from './shared/overdrive'
+import { upgradePaintBrushOffsets } from './shared/upgrades'
+import { localPaintAreaMult } from './client/upgrades'
 import { BURST_STANCE_SLACK } from './shared/pvp'
 import { paintAllowed } from './shared/balloon'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
@@ -881,7 +883,8 @@ export function initPaintingSystem(
   stanceStep = STEP
   stanceLookup = lookupTile
   const GROUND_TOLERANCE = 0.4
-  // Paint footprint: 3x3 square by default. Overdrive widens it for the star's duration.
+  // Paint footprint: 3x3 square by default. Paint upgrades widen it by area;
+  // a live star still uses the 5x5 overdrive brush.
   const step = CELL / SIZE
   // Phase 4 Step 4: this system no longer touches cellTeam or materials.
   // It just enqueues candidate cell ids into the outbox; the server owns
@@ -904,7 +907,9 @@ export function initPaintingSystem(
     playerGrounded = y - center.groundY <= GROUND_TOLERANCE
     // Fall rescue holds paint off through the pickup and the walk-only land brace.
     if (!playerGrounded || isMoveLocked()) return
-    const OFFSETS = paintBrushOffsets(step, overdrivePaintRadiusCells(isLocalOverdriveActive()))
+    const OFFSETS = isLocalOverdriveActive()
+      ? paintBrushOffsets(step, overdrivePaintRadiusCells(true))
+      : upgradePaintBrushOffsets(step, localPaintAreaMult())
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue

@@ -24,6 +24,7 @@ const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/bgm-main.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
+const UPGRADE_READY_SRC = 'assets/sounds/pickup2.wav'
 /** flagtag's swoosh.mp3 — dash wind whoosh. */
 export const DASH_SRC = 'assets/sounds/swoosh.mp3'
 export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
@@ -31,6 +32,7 @@ export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
 let musicEnt: Entity = 0 as Entity
 let muteClickEnt: Entity = 0 as Entity
 let claimSfxEnt: Entity = 0 as Entity
+let upgradeReadySfxEnt: Entity = 0 as Entity
 let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
 let balloonPopSfxEnt: Entity = 0 as Entity
@@ -44,6 +46,8 @@ export function initAudio(): void {
   Transform.create(muteClickEnt, { parent: engine.CameraEntity })
   claimSfxEnt = engine.addEntity()
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
+  upgradeReadySfxEnt = engine.addEntity()
+  Transform.create(upgradeReadySfxEnt, { parent: engine.CameraEntity })
   initLungeSfx()
   initBurstSfx()
   initAirSpikeSfx()
@@ -126,6 +130,14 @@ export function playUiClick(): void {
  * so no additional throttle needed. Low volume so continuous painting
  * reads as a soft rhythmic sparkle, not a machine gun.
  */
+export function playUpgradeReadySfx(): void {
+  if (!upgradeReadySfxEnt) return
+  AudioSource.createOrReplace(upgradeReadySfxEnt, {
+    audioClipUrl: UPGRADE_READY_SRC,
+    playing: true, loop: false, volume: 0.7, global: true,
+  })
+}
+
 export function playClaimSfx(): void {
   if (!claimSfxEnt) return
   AudioSource.createOrReplace(claimSfxEnt, {

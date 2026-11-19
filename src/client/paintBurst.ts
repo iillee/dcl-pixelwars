@@ -68,11 +68,13 @@ import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
 import { isLocalOverdriveActive } from './overdrive'
+import { localHasteCooldownMult } from './upgrades'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = FLOAT_HEIGHT
 
 let cooldownLeft = 0
+let cooldownTotal = BURST_COOLDOWN_S
 let burstId = 0
 let knockForceEnt: Entity = 0 as Entity
 let diveForceEnt: Entity = 0 as Entity
@@ -452,7 +454,7 @@ export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean
   const enabled = isBurstEnabledNow() && localTeam() !== Team.None
   const cd = Math.max(0, cooldownLeft)
   const locked = isMoveLocked()
-  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S, recovering: locked }
+  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / (cooldownTotal || BURST_COOLDOWN_S), recovering: locked }
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
@@ -544,7 +546,8 @@ export function triggerBurst(): void {
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
-  cooldownLeft = BURST_COOLDOWN_S
+  cooldownTotal = BURST_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownLeft = cooldownTotal
   // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
   const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
@@ -778,7 +781,7 @@ export function initPaintBurst(): void {
         console.log('[Burst] dive landed — glider lock cleared')
       }
     }
-    if (cooldownLeft > 0) cooldownLeft -= dt * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1)
+    if (cooldownLeft > 0) cooldownLeft -= dt
     // Key and hotbar share this call, after the paint system has run. One press, one burst.
     if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {
       burstRequested = false
