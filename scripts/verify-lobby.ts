@@ -267,7 +267,7 @@ if (LOBBY_VOTE_MS !== 5_000) {
 }
 
 const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
-if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 10', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
+if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 10', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING...', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
   console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A TEAM and STARTING IN 10')
   process.exit(1)
 }
@@ -458,6 +458,10 @@ if (uiSrc.includes('hudVoteCountdown') || uiSrc.includes('voteSecs') || uiSrc.in
 }
 if (!readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('STARTING IN') || readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('PIXELWARS IS STARTING IN') || !lobbySrc.includes('hudVoteHeadline(left)')) {
   console.error('✗ the top lobby line should show STARTING IN N during the countdown')
+  process.exit(1)
+}
+if (!lobbySrc.includes('isLobbyStarting()') || !readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes("LOBBY_STATUS_STARTING = 'STARTING...'") || !lobbySrc.includes('return LOBBY_STATUS_STARTING')) {
+  console.error('✗ after the countdown hits 0 the status should stay STARTING... until the match, not fall back to CHOOSE A TEAM')
   process.exit(1)
 }
 if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {

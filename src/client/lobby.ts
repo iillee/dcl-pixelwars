@@ -7,10 +7,11 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, lobbyFeet, signBadgeY, signFaceZ, signTitlePlane, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
-import { gamePhase, inLobby, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
+import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, LOBBY_STATUS_STARTING, lobbyFeet, signBadgeY, signFaceZ, signTitlePlane, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
+import { gamePhase, inLobby, isLobbyStarting, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
+import { isMobile } from '@dcl/sdk/platform'
 import { isOverviewActive, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
@@ -201,6 +202,12 @@ function laySigns(): void {
   syncSignFacing()
 }
 
+/** Mobile signs are 1.5x the desktop size, in play and in overview. */
+function signWorldScale(): number {
+  const zoom = isOverviewActive() ? overviewSignScale() : 1
+  return zoom * (isMobile() ? 1.5 : 1)
+}
+
 function applySignPose(root: Entity): void {
   const bill = Billboard.getMutableOrNull(root)
   const tr = Transform.getMutableOrNull(root)
@@ -209,7 +216,7 @@ function applySignPose(root: Entity): void {
     if (bill && bill.billboardMode !== BillboardMode.BM_NONE) bill.billboardMode = BillboardMode.BM_NONE
     const cam = overviewSignRotation()
     tr.rotation = Quaternion.fromEulerDegrees(cam.pitch, cam.yaw, 0)
-    const s = overviewSignScale()
+    const s = signWorldScale()
     tr.scale = Vector3.create(s, s, s)
     return
   }
@@ -217,14 +224,15 @@ function applySignPose(root: Entity): void {
     bill.billboardMode = BillboardMode.BM_Y
     tr.rotation = Quaternion.Identity()
   }
-  tr.scale = Vector3.One()
+  const play = signWorldScale()
+  tr.scale = Vector3.create(play, play, play)
 }
 
 let loggedSignScale = Number.NaN
 
 function syncSignFacing(): void {
   const t = Date.now() / 1000
-  const scale = isOverviewActive() ? overviewSignScale() : 1
+  const scale = signWorldScale()
   for (let i = 0; i < signRoots.length; i++) {
     const root = signRoots[i]
     applySignPose(root)
@@ -234,7 +242,7 @@ function syncSignFacing(): void {
     const bob = Math.sin((t / SIGN_BOB_PERIOD_S) * Math.PI * 2 + i * 2.1) * SIGN_BOB_M * scale
     tr.position = Vector3.create(tr.position.x, signBaseY[i] + bob, tr.position.z)
   }
-  const shown = isOverviewActive() ? Math.round(overviewSignScale() * 100) / 100 : 1
+  const shown = Math.round(signWorldScale() * 100) / 100
   if (shown === loggedSignScale) return
   loggedSignScale = shown
   const where = isOverviewActive() ? `viewScale ${overviewViewScale().toFixed(1)}` : 'play'
@@ -409,6 +417,7 @@ export function hudClockText(matchSecs: number): string {
   }
   if (phase === 'summary') return 'END'
   if (phase === 'lobby' || phase === 'idle') {
+    if (isLobbyStarting()) return LOBBY_STATUS_STARTING
     const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteRemainingMs() / 1000)) : 0
     return hudVoteHeadline(left)
   }

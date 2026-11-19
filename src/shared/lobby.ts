@@ -365,9 +365,12 @@ export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
   return tied[0]
 }
 
-/** Top HUD line. Idle stays CHOOSE A TEAM; the countdown is just STARTING IN N. */
+/** Top HUD line. Idle stays CHOOSE A TEAM; the countdown is just STARTING IN N.
+ *  After the last second, hudClockText shows STARTING... until the match clock, so
+ *  a 0-second leftover does not fall back to CHOOSE A TEAM. */
 export const LOBBY_STATUS_IDLE = 'CHOOSE A TEAM'
 export const LOBBY_STATUS_COUNTDOWN = 'STARTING IN'
+export const LOBBY_STATUS_STARTING = 'STARTING...'
 export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
   const n = Math.max(0, Math.ceil(leftSecs))
   if (n <= 0) return LOBBY_STATUS_IDLE
