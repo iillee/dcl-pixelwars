@@ -14,7 +14,7 @@ import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_NAME, TEAM_RGB, PLAYING_TEAMS, isPlayingTeam, leadingTeams, rankedTeams, type TeamCoverage } from "./shared/team"
 import {
-  areaPct, cardBodyContentH, cardFrameH, rosterLayout, sortTeamRows, summaryPcts, summaryRank, standingsLayout, tablesLayout, tablesW, textW, textWSafe, titleFontFor,
+  areaPct, cardBodyContentH, cardFrameH, rosterLayout, sortTeamRows, summaryPcts, summaryRank, standingsLayout, tablesW, textW, textWSafe, titleFontFor,
   SUMMARY_BOLD_PX, SUMMARY_CARD_BODY_H, SUMMARY_CARD_GAP, SUMMARY_CARD_H, SUMMARY_CARD_HEAD_H, SUMMARY_CARD_W, SUMMARY_FIT, SUMMARY_FONT_MIN, SUMMARY_GAP, SUMMARY_HEAD_FONT, SUMMARY_HEAD_H, SUMMARY_PILL_FONT, SUMMARY_PILL_H, SUMMARY_PILL_W, SUMMARY_ROW_FONT, SUMMARY_ROW_H, SUMMARY_SUB_FONT, SUMMARY_TITLE_FONT, TITLE_WORD_GAP,
   type SummaryRow,
 } from "./shared/summaryLayout"
@@ -519,11 +519,8 @@ function PctOverlay(props: { red: number; blue: number; k: number; color: Color4
 function RoundSummary(p: number) {
   const b = getBanner()
   const cv = canvasSize()
-  const { k, stacked } = tablesLayout(b.owners as SummaryRow[], cv, SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP)
   const a = Math.max(0, Math.min(1, (p - 0.5) / 0.5)) // everything but the pill fades in over the second half
   const barH = BAR_FILL_H + BAR_BORDER * 2
-  const pw = lerp(barW(), tablesW(stacked) * k, p), ph = lerp(barH, SUMMARY_PILL_H * k, p)
-  const border = lerp(BAR_BORDER, SUMMARY_OUTLINE * k, p)
   const rows = (b.owners as SummaryRow[]).slice().sort((x, y) => y.cells - x.cells)
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
@@ -532,33 +529,49 @@ function RoundSummary(p: number) {
   const ranked = summaryRank(endCov)
   const leaders = b.kind === 'balloon' ? [] : ranked.leaders
   const order = b.kind === 'balloon' ? [...PLAYING_TEAMS] : ranked.order
+  const counts = order.map(team => rows.filter(r => r.team === team).length)
+  const hidePill = b.kind === 'balloon'
+  // Same compact panel as the mid-game standings (capped width, content-sized cards),
+  // reserved under the title so the block stays fully on screen at 16:9 and 21:9.
+  const lay = standingsLayout(counts, cv, SUMMARY_HEAD_H, { hidePill })
+  const { k, stacked, bodyCap, pillW, pillH, panelW, panelH } = lay
+  const pw = lerp(barW(), pillW, p), ph = lerp(barH, pillH, p)
+  const border = lerp(BAR_BORDER, SUMMARY_OUTLINE * k, p)
   const show = a > 0
   const headline = b.headline || (b.winner === 'TIE' || b.winner === '' ? "IT'S A TIE!" : b.winner === 'PLAYER' ? ((b.victorName || 'SOMEONE').toUpperCase() + ' WINS!') : (b.winner + ' WINS!'))
   const titleWords = headline.trim().split(/\s+/).filter(Boolean)
-  const titleF = titleFontFor(titleWords, k, cv.w * 0.86)
+  const titleF = titleFontFor(titleWords, 1, cv.w * 0.86)
+  const grid = (
+    <TeamCardGrid rows={rows} total={b.total} mvp={mvp} me={me} k={k} a={a} stacked={stacked} order={order} leaders={leaders} fitContent={true} bodyCap={bodyCap} />
+  )
   return (
     <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, flexDirection: 'column', alignItems: 'center', pointerFilter: show ? 'block' : 'none' }}
       onMouseDown={() => dismissSummary()}>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
       <UiEntity uiTransform={{ width: 1, height: BAR_TOP_PX * (1 - p), flexShrink: 0 }} />
       {/* Title only: team word + WINS!, a tight gap, and a subtle drop shadow so it stays readable over the sky. */}
-      <UiEntity uiTransform={{ width: '100%', height: SUMMARY_HEAD_H * k * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
+      <UiEntity uiTransform={{ width: '100%', height: SUMMARY_HEAD_H * a, flexShrink: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
         {show && (
-          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 10 * k } }}>
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', margin: { bottom: 10 } }}>
             <HeadlineRow text={headline} font={titleF} />
           </UiEntity>
         )}
       </UiEntity>
       {/* Territory pill: four team segments. Hidden for Balloon Battle. */}
-      {b.kind !== 'balloon' && (<UiEntity uiTransform={{ width: '100%', flexDirection: 'column', alignItems: 'center' }}>
-      <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pw} height={ph} border={border} track={p > 0.5 ? SUMMARY_INK : BAR_TRACK} innerBg={p > 0.5 ? SUMMARY_UNPAINTED : Color4.White()} showLabels={show} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={b.kind !== 'bases'} />
-      {show && (
-        <UiEntity uiTransform={{ margin: { top: SUMMARY_GAP * k } }}>
-          <TeamCardGrid rows={rows} total={b.total} mvp={mvp} me={me} k={k} a={a} stacked={stacked} order={order} leaders={leaders} />
+      {b.kind !== 'balloon' && (
+        <UiEntity uiTransform={{ width: panelW, height: show ? panelH : ph, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+          <UiEntity uiTransform={{ width: Math.max(pw, 1), height: ph + (show ? SUMMARY_GAP * k : 0), flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+            <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pw} height={ph} border={border} track={p > 0.5 ? SUMMARY_INK : BAR_TRACK} innerBg={p > 0.5 ? SUMMARY_UNPAINTED : Color4.White()} showLabels={show} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={b.kind !== 'bases'} />
+            <UiEntity uiTransform={{ width: pw, height: show ? SUMMARY_GAP * k : 0, flexShrink: 0 }} />
+          </UiEntity>
+          {show ? grid : null}
         </UiEntity>
       )}
-      </UiEntity>
-      )}
+      {b.kind === 'balloon' && show ? (
+        <UiEntity uiTransform={{ width: panelW, height: panelH, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+          {grid}
+        </UiEntity>
+      ) : null}
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
     </UiEntity>
   )

@@ -232,5 +232,30 @@ if (uiSrc.includes('tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }')
   console.error('✗ mid-game standings must not reuse the end-screen tablesLayout scale')
   process.exit(1)
 }
+if (uiSrc.includes('tablesLayout(b.owners') || !uiSrc.includes('standingsLayout(counts, cv, SUMMARY_HEAD_H')) {
+  console.error('✗ the end-screen team panels should use the compact mid-game standings layout')
+  process.exit(1)
+}
+const end16 = standingsLayout(midCounts, { w: 1920, h: 1080 }, SUMMARY_HEAD_H)
+const end21 = standingsLayout(midCounts, { w: 3440, h: 1440 }, SUMMARY_HEAD_H)
+const end720 = standingsLayout(midCounts, { w: 1280, h: 720 }, SUMMARY_HEAD_H)
+for (const [name, cv, lay] of [
+  ['end 16:9 1920×1080', { w: 1920, h: 1080 }, end16],
+  ['end 21:9 3440×1440', { w: 3440, h: 1440 }, end21],
+  ['end 16:9 1280×720', { w: 1280, h: 720 }, end720],
+] as const) {
+  if (lay.panelW > STANDINGS_MAX_W + 0.5) {
+    console.error(`✗ ${name}: panel width ${lay.panelW} exceeds max ${STANDINGS_MAX_W}`)
+    process.exit(1)
+  }
+  if (SUMMARY_HEAD_H + lay.panelH > cv.h - STANDINGS_BOTTOM + 0.5) {
+    console.error(`✗ ${name}: title + panel leaves the screen, h=${SUMMARY_HEAD_H + lay.panelH}`)
+    process.exit(1)
+  }
+}
+if (Math.abs(end16.panelW - end21.panelW) > 1 || Math.abs(end16.k - s16.k) > 0.01) {
+  console.error(`✗ the end-screen panel should match the mid-game size, end=${end16.panelW}/${end16.k} mid=${s16.panelW}/${s16.k}`)
+  process.exit(1)
+}
 
-console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; 4-team shares, rank, and winner flags; max ${SUMMARY_OWNERS_MAX} rows (scroll only then); mid-game panel capped at ${STANDINGS_MAX_W}px (16:9 and 21:9)`)
+console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; 4-team shares, rank, and winner flags; max ${SUMMARY_OWNERS_MAX} rows (scroll only then); mid-game and end-screen panels capped at ${STANDINGS_MAX_W}px (16:9 and 21:9)`)
