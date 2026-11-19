@@ -341,6 +341,10 @@ if (!src.includes('speed: 1')) {
   console.error('✗ the swell clip should play at a constant speed')
   process.exit(1)
 }
+if (!src.includes('GltfContainerLoadingState') || !src.includes('playSingleAnimation') || !src.includes('clipArmed')) {
+  console.error('✗ the CPU swell clock should start when the visible wave clip starts')
+  process.exit(1)
+}
 if (FOAM.rings || FOAM.whitecaps) {
   console.error('✗ sticker rings and whitecap blobs should stay off')
   process.exit(1)

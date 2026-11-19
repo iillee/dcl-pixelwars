@@ -224,6 +224,24 @@ function fallVelocity(p: Vec): Vec {
  * several meters ahead, or moving it later, is what emptied the rise.
  * No teleport: the rise leg is the lift, and the camera keeps its current aim.
  */
+/** Splash at the XZ where the feet crossed the live surface this frame. */
+function splashAtCrossing(prev: Vec | null, p: Vec): void {
+  let x = p.x
+  let z = p.z
+  if (prev) {
+    const line0 = liveTrigger(prev)
+    const line1 = liveTrigger(p)
+    const d0 = prev.y - line0
+    const d1 = p.y - line1
+    if (d0 >= 0 && d1 < 0 && d0 !== d1) {
+      const u = Math.max(0, Math.min(1, d0 / (d0 - d1)))
+      x = prev.x + (p.x - prev.x) * u
+      z = prev.z + (p.z - prev.z) * u
+    }
+  }
+  playWaterSplash(x, z, true)
+}
+
 function catchPoint(p: Vec, v: Vec): Vec {
   const fall = Math.max(0, -v.y)
   const drop = Math.min(
@@ -739,7 +757,7 @@ function begin(p: Vec): void {
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
   playFallRescueSfx()
-  playWaterSplash(hold.x, hold.z, true)
+  splashAtCrossing(sample ? sample.p : null, p)
   // The catch itself does not move the player. Overview off so the follow camera rides the tween.
   holdFallLine()
   exitOverview()

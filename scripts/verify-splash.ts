@@ -13,8 +13,12 @@ if (!indexSrc.includes('initWaterSplash()') || !indexSrc.includes("from './water
   console.error('✗ setupClient should start the splash pool')
   process.exit(1)
 }
-if (!rescueSrc.includes("import { playWaterSplash } from './waterSplash'") || !rescueSrc.includes('playWaterSplash(hold.x, hold.z, true)') || !rescueSrc.includes('playWaterSplash(catchP.x, catchP.z, false)')) {
+if (!rescueSrc.includes("import { playWaterSplash } from './waterSplash'") || !rescueSrc.includes('splashAtCrossing') || !rescueSrc.includes('playWaterSplash(catchP.x, catchP.z, false)')) {
   console.error('✗ a local trip and a remote rescue:start should each play one splash')
+  process.exit(1)
+}
+if (rescueSrc.includes('playWaterSplash(hold.x, hold.z')) {
+  console.error('✗ the local splash should fire where the feet cross the swell, not at the catch pad')
   process.exit(1)
 }
 const ownFn = (rescueSrc.match(/function onRemoteStart[\s\S]*?^function /m) || [''])[0]
@@ -44,6 +48,12 @@ if (!audioSrc.includes("assets/sounds/splash.mp3") || !audioSrc.includes('pitch'
 }
 if (!audioSrc.includes('global: false') || !audioSrc.includes('forFaller') || !audioSrc.includes('SPLASH_VOL_SELF')) {
   console.error('✗ the catch should play spatially, with a slightly louder copy for the faller')
+  process.exit(1)
+}
+
+const waterSrc = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
+if (!waterSrc.includes('GltfContainerLoadingState') || !waterSrc.includes('playSingleAnimation') || !waterSrc.includes('clipArmed')) {
+  console.error('✗ the CPU swell clock should start when the visible wave clip starts, not when the entity is created')
   process.exit(1)
 }
 if (existsSync(fileURLToPath(new URL('../assets/sounds/splash.mp3', import.meta.url)))) {

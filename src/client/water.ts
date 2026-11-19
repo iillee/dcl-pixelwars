@@ -11,7 +11,8 @@
  * enough to hide the parcel edge would also sit on the arena.
  */
 import {
-  engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
+  engine, Entity, Animator, GltfContainer, GltfContainerLoadingState, GltfNodeModifiers, LoadingState,
+  Material, MaterialTransparencyMode, MeshRenderer,
   TextureFilterMode, TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
@@ -29,15 +30,39 @@ const WATER_BOOT = Date.now()
 
 const swellClips: Entity[] = []
 let clipSeconds = 0
+/** False until the lead swell GLB is in and the wave clip has been restarted at t=0. */
+let clipArmed = false
 
 /** Clip time the swell meshes are actually showing. Fall checks use this so a crest you can see still counts. */
 export function waterVisualSeconds(): number {
   return clipSeconds
 }
 
-/** The clip starts at 0 and stays at speed 1. Chasing the wall clock made the swells lurch. */
+function swellClipReady(ent: Entity): boolean {
+  const st = GltfContainerLoadingState.getOrNull(ent)
+  if (!st) return false
+  return st.currentState === LoadingState.FINISHED
+    || st.currentState === LoadingState.FINISHED_WITH_ERROR
+    || st.currentState === LoadingState.NOT_FOUND
+}
+
+/**
+ * The `wave` clip only starts once the GLB has loaded. Ticking clipSeconds from
+ * entity create put the CPU surface ahead of the visible morph, so a splash
+ * often sat under a crest. Wait for the lead mesh, restart every wave clip at
+ * t=0, then advance at speed 1. Do not chase the wall clock (that lurched).
+ */
 function trackSwell(dt: number): void {
   const period = liveSwell().periodS
+  if (!clipArmed) {
+    const lead = swellClips[0]
+    if (!lead || !swellClipReady(lead)) return
+    for (const ent of swellClips) Animator.playSingleAnimation(ent, 'wave', true)
+    clipSeconds = 0
+    clipArmed = true
+    if (FOAM.rings || FOAM.whitecaps) setFoamSeconds(clipSeconds)
+    return
+  }
   clipSeconds = (clipSeconds + dt) % period
   if (FOAM.rings || FOAM.whitecaps) setFoamSeconds(clipSeconds)
 }
@@ -467,6 +492,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       for (const e of desktop) engine.removeEntity(e)
       swellClips.length = 0
       clipSeconds = 0
+      clipArmed = false
       addSwell(root, swellMesh('lite'), true)
       addFlat(root, WATER.flatLiteSrc)
     }
