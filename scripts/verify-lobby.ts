@@ -534,8 +534,12 @@ if (Math.abs(bluePlane.h - greenPlane.h) > 0.12 || signTitleScale() <= 0) {
   console.error('✗ all four titles should share one typographic scale')
   process.exit(1)
 }
-if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('SIGN_TITLE_UVS') || !lobbySrc.includes('setPlane(title, SIGN_TITLE_UVS)') || !lobbySrc.includes('0, 0, 1, 0, 1, 1, 0, 1') || lobbySrc.includes('fromEulerDegrees(0, 180, 0)')) {
-  console.error('✗ title plates should use the official upright plane UVs (no 180° yaw, no axis-swapped flip) and the PNG alpha')
+if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('MeshRenderer.setPlane(title)') || lobbySrc.includes('setPlane(title,') || lobbySrc.includes('SIGN_TITLE_UVS') || lobbySrc.includes('fromEulerDegrees(0, 180, 0)')) {
+  console.error('✗ title plates should use the explorer default plane UVs (no custom UV array, no 180° yaw) and the PNG alpha')
+  process.exit(1)
+}
+if (!lobbySrc.includes('Billboard.create(root, { billboardMode: BillboardMode.BM_Y })')) {
+  console.error('✗ every lobby sign should use the same BM_Y billboard on its root')
   process.exit(1)
 }
 if (SIGN_COUNT_FONT / 10 < SIGN_BADGE_H_M * 0.7 || SIGN_BADGE_H_M < 2 || SIGN_BADGE_H_M > 3.2) {

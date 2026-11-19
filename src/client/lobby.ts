@@ -42,17 +42,17 @@ const COUNT_BOX_W = SIGN_BADGE_W_M * 0.9
 const COUNT_BOX_H = SIGN_BADGE_H_M * 0.9
 const TITLE_INK = Color4.create(1, 1, 1, 1)
 /**
- * Official plane UV order (Materials docs): −Z is lower-left, lower-right,
- * upper-right, upper-left; +Z is lower-right, lower-left, upper-left, upper-right.
- * A 180° yaw made the camera see the +Z face (mirrored). Flipping U with the
- * front vertex order on both faces rotated the texture 90° and squashed it.
- * No extra yaw: the billboard already aims local −Z at the camera, so the
- * −Z face is upright, left-to-right, unmirrored, and at the plane's true aspect.
+ * Title planes use MeshRenderer.setPlane with no custom UVs. Unity explorer's
+ * PlaneFactory (dev) builds a two-sided quad whose front face (vertices 0–3,
+ * normal Vector3.back) already maps (0,0) at lower-left, (0,1) at upper-left,
+ * (1,1) at upper-right, (1,0) at lower-right. BillboardSystem BM_Y does
+ * LookRotation(sign - camera), so +Z points away from the camera and the
+ * camera sees that front face: upright, left-to-right, correct aspect.
+ * The Materials docs list corners as LL, LR, UR, UL, which is not the mesh
+ * vertex order (LL, UL, UR, LR). Feeding that array in 612e1fb rotated and
+ * squashed the letters. Leave the UV channel alone and do not yaw the title;
+ * every sign shares this same root billboard and identity title rotation.
  */
-const SIGN_TITLE_UVS = [
-  0, 0, 1, 0, 1, 1, 0, 1,
-  1, 0, 0, 0, 0, 1, 1, 1,
-]
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
@@ -144,7 +144,7 @@ function laySigns(): void {
     pill(root, width, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const titleSpec = signTitlePlane(teamTitle(m.id))
     const title = add(root, Vector3.create(0, TITLE_Y_M, face), Vector3.create(titleSpec.w, titleSpec.h, 1))
-    MeshRenderer.setPlane(title, SIGN_TITLE_UVS)
+    MeshRenderer.setPlane(title)
     const titleTex = Material.Texture.Common({
       src: titleSpec.src,
       wrapMode: TextureWrapMode.TWM_CLAMP,
