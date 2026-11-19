@@ -83,7 +83,10 @@ function aimString(ent: Entity, from: StringVec, to: StringVec, radius: number):
   _dir.x = dx / len
   _dir.y = dy / len
   _dir.z = dz / len
-  tf.rotation = Quaternion.fromToRotation(Vector3.Up(), _dir)
+  // fromToRotation(Up, Down) is a singularity and can leave a wildly scaled cylinder on screen.
+  if (_dir.y > 0.9999) tf.rotation = Quaternion.Identity()
+  else if (_dir.y < -0.9999) tf.rotation = Quaternion.fromEulerDegrees(180, 0, 0)
+  else tf.rotation = Quaternion.fromToRotation(Vector3.Up(), _dir)
 }
 
 /** Quadratic bezier from `from` through a lagged, sagged mid to `to`. */
@@ -117,6 +120,20 @@ export function placeStringLine(line: StringLine, from: StringVec, to: StringVec
     _from.x = _to.x
     _from.y = _to.y
     _from.z = _to.z
+  }
+}
+
+/** Park segments under the map so a stale or unready pose cannot leave a stray line in view. */
+export function hideStringLine(line: StringLine): void {
+  for (let i = 0; i < line.segs.length; i++) {
+    const tf = Transform.getMutable(line.segs[i])
+    tf.position.x = 0
+    tf.position.y = -2000
+    tf.position.z = 0
+    tf.scale.x = line.radius
+    tf.scale.y = 0.02
+    tf.scale.z = line.radius
+    tf.rotation = Quaternion.Identity()
   }
 }
 

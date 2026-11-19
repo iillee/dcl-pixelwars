@@ -63,10 +63,10 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
-  Billboard, BillboardMode,
   GltfContainer,
+  getWorldPosition,
 } from '@dcl/sdk/ecs'
-import { Color4, Vector3 } from '@dcl/sdk/math'
+import { Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { isMobile } from '@dcl/sdk/platform'
 import { getPlayer } from '@dcl/sdk/players'
@@ -88,7 +88,7 @@ import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
 import { RESCUE_PATH, rescueCloudPose, rescueHangAt, rescueHangY, rescueRiderFromCloud } from '../shared/rescuePath'
-import { makeStringLine, placeStringLine, type StringLine } from './stringLine'
+import { hideStringLine, makeStringLine, placeStringLine, type StringLine } from './stringLine'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -130,22 +130,34 @@ export const FALL_RESCUE = {
 }
 
 /**
- * Rescue-cloud visuals. The root stays over the rider and yaws to face the
- * camera; these shift the puff, hook, and coded line around that root.
+ * Rescue-cloud visuals. The root stays over the rider. A child `spin` yaws
+ * toward the camera each frame (Billboard on a child of the scaled pad was
+ * not reliable). These shift the puff, hook, and coded line around that spin.
  */
-/** Puff sits this far to the camera-right (local -X after the Y billboard). */
-const CLOUD_OFFSET_X = -0.80
-const CLOUD_OFFSET_Y = 0
+/** Puff sits this far to the camera-right (local -X after the Y yaw). */
+const CLOUD_OFFSET_X = -1.85
+const CLOUD_OFFSET_Y = 0.75
 const CLOUD_OFFSET_Z = 0
-/** Rod tip in body/model local space (glTF metres). */
-const ROD_TIP_LOCAL = { x: -1.18, y: -0.06, z: -0.46 }
-/** Hook below the cloud root, hanging over the rider's head. */
-const HOOK_Y = -0.78
-const HOOK_SCALE = Vector3.create(0.34, 0.34, 0.34)
-/** Coded fishing line, same construction as balloon strings. */
-const LINE_RADIUS = 0.016
+/** Uniform scale on the body (face and rod inherit it). */
+const CLOUD_SCALE = 1.25
+/**
+ * Authored rod-mesh tip in glTF metres, before the rod's X-mirror.
+ * Measured on cloud-rod.glb (min-X vertex): (-1.1985, -0.0492, -0.4557).
+ * A tip helper is parented to the rod at this point so world placement
+ * picks up the yaw, the body scale, and ROD_SCALE_X.
+ */
+const ROD_TIP_LOCAL = { x: -1.1985, y: -0.0492, z: -0.4557 }
+/** Negative X-scale swings the tip from the puff's far side toward the hook. */
+const ROD_SCALE_X = -1
+/** Hook below the cloud root, just above a ~1.8 m rider's head (world Y ~ 2.35, clear of the nametag). */
+const HOOK_Y = -0.30
+const HOOK_SCALE = Vector3.create(0.38, 0.38, 0.38)
+/** Coded fishing line, same construction as balloon strings, in world space. */
+const LINE_RADIUS = 0.018
 const LINE_SEGS = 4
-const LINE_SAG = 0.10
+const LINE_SAG = 0.04
+/** Hide the line if a stale or unready endpoint would stretch a segment across the view. */
+const LINE_MAX_M = 6
 const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
 const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
@@ -160,7 +172,17 @@ const HOOK_MAT = {
 }
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
-type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number }
+type CloudVisual = {
+  root: Entity
+  ents: Entity[]
+  spin: Entity
+  tip: Entity
+  hook: Entity
+  line: StringLine
+  /** When false, spin stays at identity so a child ride camera keeps the face. */
+  face: boolean
+}
+type Floater = CloudVisual & { mode: FloaterMode; peelLeft: number; waitLeft: number }
 type Vec = { x: number; y: number; z: number }
 type Leg = { from: Vec; to: Vec; ms: number }
 type Carry = { legs: Leg[]; index: number; legAt: number; beganAt: number }
@@ -429,40 +451,62 @@ function gltfChild(parent: Entity, src: string): Entity {
   return e
 }
 
-function lineFromTo(): { from: { x: number; y: number; z: number }; to: { x: number; y: number; z: number } } {
-  return {
-    from: {
-      x: CLOUD_OFFSET_X + ROD_TIP_LOCAL.x,
-      y: CLOUD_OFFSET_Y + ROD_TIP_LOCAL.y,
-      z: CLOUD_OFFSET_Z + ROD_TIP_LOCAL.z,
-    },
-    to: { x: 0, y: HOOK_Y, z: 0 },
+function setFaceCamera(c: CloudVisual | null, on: boolean): void {
+  if (!c) return
+  c.face = on
+  if (!on) Transform.getMutable(c.spin).rotation = Quaternion.Identity()
+}
+
+/** Yaw `spin` so local -Z faces the camera. The pad/anchor and the detached root stay identity, so local yaw is world yaw. */
+function yawSpinToCamera(spin: Entity): void {
+  const pos = getWorldPosition(engine, spin)
+  const cam = getWorldPosition(engine, engine.CameraEntity)
+  const dx = cam.x - pos.x
+  const dz = cam.z - pos.z
+  if (dx * dx + dz * dz < 1e-4) return
+  const yawDeg = Math.atan2(-dx, -dz) * (180 / Math.PI)
+  Transform.getMutable(spin).rotation = Quaternion.fromEulerDegrees(0, yawDeg, 0)
+}
+
+function updateCloudVisual(c: CloudVisual): void {
+  // A child ride camera is parented to the root and looks along -Z; do not yaw in front of it.
+  if (c.face && !(c === floater && cameraRide)) yawSpinToCamera(c.spin)
+  const tip = getWorldPosition(engine, c.tip)
+  const hook = getWorldPosition(engine, c.hook)
+  const root = getWorldPosition(engine, c.root)
+  const len = Math.hypot(tip.x - hook.x, tip.y - hook.y, tip.z - hook.z)
+  const tipR = Math.hypot(tip.x - root.x, tip.y - root.y, tip.z - root.z)
+  const hookR = Math.hypot(hook.x - root.x, hook.y - root.y, hook.z - root.z)
+  const ready = [tip.x, tip.y, tip.z, hook.x, hook.y, hook.z, root.x, root.y, root.z].every(Number.isFinite)
+  if (!ready || len > LINE_MAX_M || tipR > 8 || hookR > 8) {
+    hideStringLine(c.line)
+    return
   }
+  const scale = Transform.getOrNull(c.root)?.scale.y ?? 1
+  c.line.radius = LINE_RADIUS * Math.max(0.02, scale)
+  placeStringLine(c.line, tip, hook, 0, { sag: LINE_SAG * Math.max(0.02, scale), lagTau: 0 })
 }
 
-function attachCloudLine(root: Entity): StringLine {
-  const line = makeStringLine(root, { radius: LINE_RADIUS, color: LINE_COLOR, segs: LINE_SEGS })
-  const { from, to } = lineFromTo()
-  placeStringLine(line, from, to, 0, { sag: LINE_SAG, lagTau: 0 })
-  return line
-}
-
-function faceCamera(root: Entity, on: boolean): void {
-  const bill = Billboard.getMutableOrNull(root)
-  if (bill) bill.billboardMode = on ? BillboardMode.BM_Y : BillboardMode.BM_NONE
-  else if (on) Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
-}
-
-/** Lavender cloud: faceless body (ghost outline in the GLB), face, rod, hook, coded line. Root is ents[0]. */
-function cloudParts(root: Entity): Entity[] {
-  faceCamera(root, true)
-  const body = gltfChild(root, CLOUD_BODY_SRC)
-  Transform.getMutable(body).position = Vector3.create(CLOUD_OFFSET_X, CLOUD_OFFSET_Y, CLOUD_OFFSET_Z)
+/** Lavender cloud: faceless body (ghost outline in the GLB), face, mirrored rod, hook, world-space line. */
+function cloudParts(root: Entity): Omit<CloudVisual, 'face'> {
+  const spin = engine.addEntity()
+  Transform.create(spin, { parent: root })
+  const body = gltfChild(spin, CLOUD_BODY_SRC)
+  const bodyTf = Transform.getMutable(body)
+  bodyTf.position = Vector3.create(CLOUD_OFFSET_X, CLOUD_OFFSET_Y, CLOUD_OFFSET_Z)
+  bodyTf.scale = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
   const face = gltfChild(body, CLOUD_FACE_SRC)
   const rod = gltfChild(body, CLOUD_ROD_SRC)
-  const hook = makeHook(root)
-  const line = attachCloudLine(root)
-  return [root, body, face, rod, hook, ...line.segs]
+  Transform.getMutable(rod).scale = Vector3.create(ROD_SCALE_X, 1, 1)
+  const hook = makeHook(spin)
+  const tip = engine.addEntity()
+  Transform.create(tip, {
+    parent: rod,
+    position: Vector3.create(ROD_TIP_LOCAL.x, ROD_TIP_LOCAL.y, ROD_TIP_LOCAL.z)
+  })
+  const line = makeStringLine(null, { radius: LINE_RADIUS, color: LINE_COLOR, segs: LINE_SEGS })
+  hideStringLine(line)
+  return { root, spin, tip, hook, line, ents: [root, spin, body, face, rod, hook, tip, ...line.segs] }
 }
 
 /** Local rescue cloud parented to the pad: body, face, fishing rod, and hook. */
@@ -475,7 +519,7 @@ function spawnFloater(): void {
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
   })
-  floater = { root, ents: cloudParts(root), mode: 'in', peelLeft: 0, waitLeft: 0 }
+  floater = { ...cloudParts(root), face: true, mode: 'in', peelLeft: 0, waitLeft: 0 }
 }
 
 /** Constant-speed leg. No start point, so replacing it does not snap the entity. */
@@ -559,7 +603,7 @@ function startPath(start: Vec, trippedAt: number): void {
 }
 
 function releaseRideCamera(): void {
-  if (floater) faceCamera(floater.root, true)
+  if (floater) setFaceCamera(floater, true)
   const main = MainCamera.getMutableOrNull(engine.CameraEntity)
   if (main && rideCam !== null && main.virtualCameraEntity === rideCam) main.virtualCameraEntity = undefined
   if (rideCam) { engine.removeEntity(rideCam); rideCam = null }
@@ -662,8 +706,8 @@ function clearCarryDisguise(): void {
  */
 function startCameraRide(): void {
   if (!floater) { finish('snap', 'no cloud'); return }
-  // Child ride camera sits in front of the face; a Y billboard would fight it.
-  faceCamera(floater.root, false)
+  // Child ride camera sits in front of the face; a Y yaw would fight it.
+  setFaceCamera(floater, false)
   pinOverviewClosed(true)
   detachFloater()
   const live = Transform.getOrNull(floater.root)
@@ -881,11 +925,9 @@ function tickFloater(dt: number, line: number): void {
   if (floater.mode === 'in') {
     const u = 1 - Math.max(0, phaseLeft) / FALL_RESCUE.GRAB_S
     placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world, playerLocalXZ())
-    return
-  }
-  // Carry: the offset locked at grab end rides the parent. Do not write Transform.
-  if (floater.mode === 'hang') return
-  if (floater.mode === 'wait') {
+  } else if (floater.mode === 'hang') {
+    // Carry: the offset locked at grab end rides the parent. Do not write the root Transform.
+  } else if (floater.mode === 'wait') {
     placeFloater(FALL_RESCUE.HANG_Y, 1, world)
     floater.waitLeft -= dt
     const liveY = playerPos()?.y
@@ -893,12 +935,13 @@ function tickFloater(dt: number, line: number): void {
       floater.mode = 'peel'
       floater.peelLeft = FALL_RESCUE.PEEL_S
     }
-    return
+  } else {
+    floater.peelLeft -= dt
+    const u = 1 - Math.max(0, floater.peelLeft) / FALL_RESCUE.PEEL_S
+    placeFloater(FALL_RESCUE.HANG_Y + u * FALL_RESCUE.PEEL_RISE, 1 - u, world)
+    if (floater.peelLeft <= 0) despawnFloater()
   }
-  floater.peelLeft -= dt
-  const u = 1 - Math.max(0, floater.peelLeft) / FALL_RESCUE.PEEL_S
-  placeFloater(FALL_RESCUE.HANG_Y + u * FALL_RESCUE.PEEL_RISE, 1 - u, world)
-  if (floater.peelLeft <= 0) despawnFloater()
+  if (floater) updateCloudVisual(floater)
 }
 
 // ─── Clouds for everyone else ───────────────────────────────────────
@@ -909,10 +952,8 @@ const REMOTE_MISSING_S = 3
 /** Past the broadcast trip, drop the cloud if rescueEnd never arrives. */
 const REMOTE_TIMEOUT_SLACK_S = 3
 
-type RemoteCloud = {
+type RemoteCloud = CloudVisual & {
   who: string
-  root: Entity
-  ents: Entity[]
   mobile: boolean
   catch: Vec
   base: Vec
@@ -1005,7 +1046,7 @@ function onRemoteStart(m: {
   const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y, rescueHangY(who))
   Transform.create(root, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(0.2, 0.2, 0.2) })
   remotes.set(who, {
-    who, root, ents: cloudParts(root), mobile: m.mobile !== 0,
+    ...cloudParts(root), face: true, who, mobile: m.mobile !== 0,
     catch: catchP, base: { x: m.bx, y: m.by, z: m.bz },
     grab: m.grab, rise: m.rise, cruise: m.cruise, descend: m.descend,
     started: Date.now(), pos, seen: false, missing: 0,
@@ -1026,23 +1067,24 @@ function tickRemotes(dt: number): void {
     if (c.mobile) {
       const pose = mobileCloudPose(c, age)
       placeRemote(c, pose.pos, pose.scale)
-      continue
+    } else {
+      const feet = remoteFeet(c.who)
+      if (feet) {
+        c.missing = 0
+        const target = hangAt(feet)
+        if (!c.seen) { c.seen = true; c.pos = target }
+        else {
+          const u = 1 - Math.exp(-dt / REMOTE_FOLLOW_S)
+          c.pos = lerp(c.pos, target, u)
+        }
+      } else if (c.seen) {
+        c.missing += dt
+        if (c.missing > REMOTE_MISSING_S) { clearRemote(who, 'avatar left'); continue }
+      } else c.pos = hangAt(c.catch)
+      const u = Math.min(1, age / Math.max(0.05, c.grab))
+      placeRemote(c, c.pos, 0.2 + 0.8 * u)
     }
-    const feet = remoteFeet(who)
-    if (feet) {
-      c.missing = 0
-      const target = hangAt(feet)
-      if (!c.seen) { c.seen = true; c.pos = target }
-      else {
-        const u = 1 - Math.exp(-dt / REMOTE_FOLLOW_S)
-        c.pos = lerp(c.pos, target, u)
-      }
-    } else if (c.seen) {
-      c.missing += dt
-      if (c.missing > REMOTE_MISSING_S) { clearRemote(who, 'avatar left'); continue }
-    } else c.pos = hangAt(c.catch)
-    const u = Math.min(1, age / Math.max(0.05, c.grab))
-    placeRemote(c, c.pos, 0.2 + 0.8 * u)
+    updateCloudVisual(c)
   }
 }
 
