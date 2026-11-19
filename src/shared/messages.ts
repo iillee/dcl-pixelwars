@@ -183,7 +183,7 @@ export const Messages = {
   roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
 
   // Server → Clients (broadcast): every active player's team. Sent on
-  // join, leave and round reset. Clients use it to paint red/blue
+  // join, leave and round reset. Clients use it to paint team
   // AvatarNametag plates on each avatar (client/nametags.ts).
   teamRoster: Schemas.Map({
     entries: Schemas.Array(Schemas.Map({ userId: Schemas.String, team: Schemas.Int })),

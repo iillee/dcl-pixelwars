@@ -45,9 +45,9 @@
 
 import {
   engine, Entity, Transform, AvatarShape, AvatarNametag, Tween, EasingFunction,
-  GltfContainer, LightSource, Animator,
+  GltfContainer, LightSource, Animator, Billboard, BillboardMode, TextShape, TextAlignMode,
 } from '@dcl/sdk/ecs'
-import { Vector3, Quaternion, Color3 } from '@dcl/sdk/math'
+import { Vector3, Quaternion, Color3, Color4 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { remoteRiderFeet } from './fallRescue'
 import { rescueAllowsSnapshotInterp, snapsAfterRescueRelease } from '../shared/rescuePath'
@@ -60,7 +60,7 @@ import {
 import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, knockFaceYaw, KNOCK_FACE_HOLD_S, BOT_ANIM_JUMP, BOT_ANIM_DOUBLE, BOT_ANIM_GLIDE, type GhostClip } from '../shared/botAnim'
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
 import { burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
-import { Team, TEAM_RGB } from '../shared/team'
+import { Team, TEAM_NAME, TEAM_RGB, isPlayingTeam } from '../shared/team'
 import { applyBotBodyForTeam, clearBotBodyColor, onBotBodyThemeChange } from './botBody'
 import { teamPlatesHidden } from './nametags'
 import { resolveSupport } from '../shared/anvilSim'
@@ -205,6 +205,7 @@ interface BotVisual {
   team: number
   kind: VisualKind
   light: Entity | null
+  plate: Entity | null
   glider: Entity | null
   gliderScale: number
   pose: number
@@ -300,17 +301,53 @@ function paintLight(entity: Entity, team: number): void {
 }
 
 function paintPlate(entity: Entity, team: number, _id: number): void {
-  const red = team === Team.Red
-  if (teamPlatesHidden()) {
+  if (teamPlatesHidden() || !isPlayingTeam(team)) {
     AvatarNametag.deleteFrom(entity)
     return
   }
   const bg = rgb(team)
   AvatarNametag.createOrReplace(entity, {
-    label: red ? 'RED' : 'BLUE',
+    label: TEAM_NAME[team],
     labelColor: Color3.White(),
     backgroundColor: bg,
     borderColor: bg,
+  })
+}
+
+/** World-sized team word above a ghost. AvatarNametag is ignored without AvatarShape. */
+const PLATE_LOCAL_Y = Math.max(profile.lightLocalY, profile.knotLocalY) + 0.55
+
+function clearGhostPlate(rec: { plate: Entity | null }): void {
+  if (!rec.plate) return
+  engine.removeEntity(rec.plate)
+  rec.plate = null
+}
+
+function paintGhostPlate(rec: { root: Entity; team: number; plate: Entity | null }): void {
+  if (teamPlatesHidden() || !isPlayingTeam(rec.team)) {
+    clearGhostPlate(rec)
+    return
+  }
+  if (!rec.plate) {
+    rec.plate = engine.addEntity()
+    const inv = 1 / GHOST_SCALE
+    Transform.create(rec.plate, {
+      parent: rec.root,
+      position: Vector3.create(0, PLATE_LOCAL_Y, 0),
+      scale: Vector3.create(inv, inv, inv),
+    })
+    Billboard.create(rec.plate, { billboardMode: BillboardMode.BM_Y })
+  }
+  const c = TEAM_RGB[rec.team]
+  TextShape.createOrReplace(rec.plate, {
+    text: TEAM_NAME[rec.team],
+    fontSize: 2.4,
+    fontSrc: 'Lilita One',
+    textColor: Color4.create(c.r, c.g, c.b, 1),
+    outlineWidth: 0.12,
+    outlineColor: Color4.create(0, 0, 0, 1),
+    textAlign: TextAlignMode.TAM_MIDDLE_CENTER,
+    textWrapping: false,
   })
 }
 
@@ -348,6 +385,7 @@ function destroyBot(id: number): void {
   destroyBotFace(id)
   if (rec.glider) engine.removeEntity(rec.glider)
   if (rec.light) engine.removeEntity(rec.light)
+  clearGhostPlate(rec)
   AvatarNametag.deleteFrom(rec.root)
   AvatarShape.deleteFrom(rec.root)
   Tween.deleteFrom(rec.root)
@@ -398,12 +436,13 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     holdWalker(root, pos)
   }
 
-  return {
+  const rec: BotVisual = {
     root,
     id,
     team,
     kind,
     light,
+    plate: null,
     glider: null,
     gliderScale: 0,
     pose: 0,
@@ -430,6 +469,8 @@ function createBotVisual(team: number, pos: Vector3, id: number, kind: VisualKin
     knockBlend: 0,
     localKnockUntil: 0,
   }
+  if (kind === 'ghost') paintGhostPlate(rec)
+  return rec
 }
 
 function pickGhostClip(rec: BotVisual): GhostClip {
@@ -674,6 +715,8 @@ export function initBotVisual(): void {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
           applyCustomBotBody(rec.root, b.team)
+          rec.team = b.team
+          paintGhostPlate(rec)
         } else {
           paintAvatar(rec.root, b.team, rec.id)
         }

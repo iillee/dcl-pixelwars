@@ -869,5 +869,18 @@ if (!nametags.includes("events.on('lobby:floor'") || !nametags.includes('isLobby
   console.error('✗ team nametags should clear on the lobby floor, including leftover plates')
   process.exit(1)
 }
+if (!nametags.includes('isPlayingTeam(team)') || nametags.includes('team !== Team.Red && team !== Team.Blue') || !nametags.includes('TEAM_NAME[team]')) {
+  console.error('✗ player nametags should use every playing team, not only red and blue')
+  process.exit(1)
+}
+const bots = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+if (!bots.includes('TEAM_NAME[team]') || !bots.includes('paintGhostPlate') || !bots.includes('isPlayingTeam(rec.team)')) {
+  console.error('✗ bot team plates should label every playing team, including ghosts')
+  process.exit(1)
+}
+if (bots.includes("label: red ? 'RED' : 'BLUE'") || bots.includes("label: team === Team.Red ? 'RED' : 'BLUE'")) {
+  console.error('✗ bot plates must not hard-code a red/blue label')
+  process.exit(1)
+}
 
 console.log('✓ lobby layout, team choice, and match gates')

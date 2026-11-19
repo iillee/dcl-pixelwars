@@ -1,5 +1,5 @@
 /**
- * nametags.ts — red/blue team plates above every avatar (PO V1 Week 1).
+ * nametags.ts — team plates above every avatar.
  *
  * The server broadcasts `teamRoster` (all active players + team) on join,
  * leave and round reset. AvatarNametag is client-local and never relayed,
@@ -18,7 +18,7 @@ import { engine, Entity, PlayerIdentityData, AvatarNametag } from '@dcl/sdk/ecs'
 import { Color3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { isLobbyLayout } from '../maze/rebuild'
-import { Team, TEAM_RGB } from '../shared/team'
+import { Team, TEAM_NAME, TEAM_RGB, isPlayingTeam } from '../shared/team'
 
 const teamByUser = new Map<string, Team>() // lowercased userId → team
 // What we last wrote per entity, so we only touch the component on change.
@@ -54,13 +54,13 @@ function applyPass(): void {
   for (const [entity, pid] of engine.getEntitiesWith(PlayerIdentityData)) {
     const uid = pid.address.toLowerCase()
     const team = teamByUser.get(uid)
-    if (team !== Team.Red && team !== Team.Blue) continue
+    if (team === undefined || !isPlayingTeam(team)) continue
     seen.add(entity)
     const key = `${uid}:${team}`
     if (applied.get(entity) === key) continue
     const bg = color(team)
     AvatarNametag.createOrReplace(entity, {
-      label: team === Team.Red ? 'RED' : 'BLUE',
+      label: TEAM_NAME[team],
       labelColor: Color3.White(),
       backgroundColor: bg,
       borderColor: bg,
