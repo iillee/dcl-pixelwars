@@ -21,6 +21,7 @@ import {
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { paintedHud } from "./client/paintScore"
+import { DesktopUpgradeExtras, MobileUpgradeRow, UpgradeOverlay } from "./client/upgradeUi"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -671,6 +672,7 @@ function PaintedHud() {
           <Label value={hudBold(countText)} fontSize={font} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
+      <DesktopUpgradeExtras pillWidth={width} topBtn={TOP_BTN} gap={TOP_GAP} />
     </UiEntity>
   )
 }
@@ -915,6 +917,7 @@ export const uiMenu = () => (
                 </UiEntity>
               )
             })()}
+            <MobileUpgradeRow />
           </UiEntity>
         </UiEntity>
       )
@@ -1060,6 +1063,7 @@ export const uiMenu = () => (
         <Label value={lagHudLine()} fontSize={16} color={Color4.White()} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 22 }} />
       </UiEntity>
     ) : null}
+    <UpgradeOverlay />
     {/* Load splash: last child = top-most layer. */}
     <SplashScreen />
   </UiEntity>
