@@ -18,7 +18,7 @@ import { inLobby } from './phase'
 
 const READY_NOTICE_MS = 1800
 const SELECT_NOTICE_MS = 1400
-const FLASH_MS = 450
+export const FLASH_MS = 450
 const HIGHLIGHT_MS = 380
 
 let state: UpgradeState = emptyUpgrade()
@@ -160,6 +160,8 @@ export type UpgradeHud = {
   highlight: UpgradeKind | null
   notice: string
   flash: boolean
+  /** When the ready-flash ends and the scale pulse may start (ms). */
+  flashUntil: number
 }
 
 export function getUpgradeHud(): UpgradeHud {
@@ -178,6 +180,7 @@ export function getUpgradeHud(): UpgradeHud {
     highlight: highlightKind && now < highlightUntil ? highlightKind : null,
     notice: now < noticeUntil ? notice : '',
     flash: now < flashUntil,
+    flashUntil,
   }
 }
 

@@ -21,7 +21,7 @@ import {
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { paintedHud } from "./client/paintScore"
-import { DesktopUpgradeExtras, MobileUpgradeRow, UpgradeOverlay } from "./client/upgradeUi"
+import { DesktopUpgradeExtras, MobileUpgradeRow, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -639,7 +639,8 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
 /** Personal tiles-painted total. Parked to the right of mute as an overlay
  *  so the centered eye / timer / mute cluster never shifts. The pill's left
  *  edge stays put and the width grows right with the digit count. Hidden in
- *  the lobby, summary, and standings. */
+ *  the lobby, summary, and standings. When an upgrade is ready the pill
+ *  turns gold and pulses in place (click / tap opens the cards). */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const { n } = paintedHud()
@@ -657,21 +658,11 @@ function PaintedHud() {
         width,
         height: TOP_BTN,
         flexShrink: 0,
+        overflow: 'visible',
         pointerFilter: 'none',
       }}
     >
-      <UiEntity
-        uiTransform={{
-          width, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
-          borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: TILE_RING,
-        }}
-        uiBackground={{ color: HOTBAR_TILE_BG }}
-      >
-        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
-          uiBackground={{ color: PANEL_LIGHT }}>
-          <Label value={hudBold(countText)} fontSize={font} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-        </UiEntity>
-      </UiEntity>
+      <PaintedCountPill width={width} height={TOP_BTN} font={font} countText={countText} ink={SUMMARY_INK} />
       <DesktopUpgradeExtras pillWidth={width} topBtn={TOP_BTN} gap={TOP_GAP} />
     </UiEntity>
   )
