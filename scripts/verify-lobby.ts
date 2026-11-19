@@ -336,8 +336,8 @@ if (countedTeam('proto', aged + 2_000) !== 2) {
 }
 const blueClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
 const blueStep = stepLobby(blueClock, ['proto'], aged + 2_000)
-if (blueStep.log !== 'start' || blueStep.next.countdownEnds !== aged + 2_000 + LOBBY_VOTE_MS) {
-  console.error(`✗ a sticky blue pick did not start the ${LOBBY_VOTE_MS}ms countdown (${blueStep.log})`)
+if (blueStep.log !== '' || blueStep.next.countdownEnds !== 0) {
+  console.error(`✗ walking off every team zone should not start the countdown (${blueStep.log} ends ${blueStep.next.countdownEnds})`)
   process.exit(1)
 }
 const blueTallied = tallyTeams(['proto'], aged + 2_000)
@@ -345,13 +345,35 @@ if (blueTallied.blue !== 1 || blueTallied.red !== 0) {
   console.error(`✗ sticky blue tally leaked into red (${blueTallied.red}/${blueTallied.blue})`)
   process.exit(1)
 }
-const blueDone = stepLobby(blueStep.next, ['proto'], aged + 2_000 + LOBBY_VOTE_MS)
-if (blueDone.log !== 'resolve') {
-  console.error(`✗ a sticky blue pick did not resolve at ${LOBBY_VOTE_MS}ms (${blueDone.log})`)
+
+// Countdown follows live occupancy, not the sticky pick: step on blue, then off.
+if (!noteLobbyPos('proto', blueX, 190, blueZ, aged + 3_000)) {
+  console.error('✗ server rejected a return to blue')
+  process.exit(1)
+}
+const onBlue = stepLobby(blueClock, ['proto'], aged + 3_000)
+if (onBlue.log !== 'start' || onBlue.next.countdownEnds !== aged + 3_000 + LOBBY_VOTE_MS) {
+  console.error(`✗ standing in blue should start the ${LOBBY_VOTE_MS}ms countdown (${onBlue.log})`)
+  process.exit(1)
+}
+if (!noteLobbyPos('proto', hubX, 190, hubZ, aged + 4_000)) {
+  console.error('✗ server rejected walking off blue to the hub')
+  process.exit(1)
+}
+const offBlue = stepLobby(onBlue.next, ['proto'], aged + 4_000)
+if (offBlue.log !== 'close' || offBlue.next.countdownEnds !== 0) {
+  console.error(`✗ leaving every team zone should stop and reset the timer (${offBlue.log} ends ${offBlue.next.countdownEnds})`)
+  process.exit(1)
+}
+if (countedTeam('proto') !== 2) {
+  console.error('✗ walking off blue should keep the sticky pick')
+  process.exit(1)
+}
+if (hudVoteHeadline(0) !== 'CHOOSE A TEAM') {
+  console.error(`✗ after the timer resets the status should be CHOOSE A TEAM (${hudVoteHeadline(0)})`)
   process.exit(1)
 }
 clearLobbyVotes()
-
 const onTint = voteTintPose(LOBBY_TEAMS[0].cell, MAZE_ORIGIN, CELL)
 if (voteTeamAt(onTint.x, onTint.z, MAZE_ORIGIN, CELL) !== 1) {
   console.error('✗ the red tint pose should count as red')

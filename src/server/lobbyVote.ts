@@ -191,6 +191,21 @@ export function lobbyVerdict(present: string[], now: number): { counts: VoteCoun
   return { counts, zone: 'abstain', why: 'abstain' }
 }
 
+/** Fresh sample currently standing in a team zone, or 0 if they are off every zone. */
+export function standingTeam(id: string, now: number): TeamChoice | 0 {
+  const s = samples.get(keyOf(id))
+  if (!s || now - s.at > LOBBY_SAMPLE_MS) return 0
+  return voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL)
+}
+
+/** True when at least one counted id is physically in a team zone right now. Sticky picks do not count. */
+export function anyoneStandingInTeamZone(present: string[], now: number): boolean {
+  for (const id of voterIds(present)) {
+    if (standingTeam(id, now)) return true
+  }
+  return false
+}
+
 export type LobbyClock = {
   wantFull: boolean
   countdownEnds: number
@@ -200,8 +215,10 @@ export type LobbyClock = {
   emptySince: number
 }
 
-/** One scoring tick. The countdown is LOBBY_VOTE_MS, started by the first team choice.
- *  Everyone being in a zone does not close it early. No choices leaves it idle. */
+/** One scoring tick. The countdown is LOBBY_VOTE_MS, started only while someone
+ *  is standing in a team zone. Sticky picks are kept for assignment, but walking
+ *  off every zone stops and resets the timer. Everyone in a zone does not close it early. */
+
 export function stepLobby(s: LobbyClock, present: string[], now: number): { next: LobbyClock; log: '' | 'close' | 'start' | 'resolve' } {
   const next: LobbyClock = { ...s }
   const voters = voterIds(present)
@@ -215,20 +232,15 @@ export function stepLobby(s: LobbyClock, present: string[], now: number): { next
     }
     return { next, log: '' }
   }
-  const teams = tallyTeams(voters, now)
-  const any = teams.red + teams.blue + teams.green + teams.yellow > 0
+  const any = anyoneStandingInTeamZone(present, now)
   if (next.countdownEnds > 0) {
     if (any) { next.hadVotes = true; next.emptySince = 0 }
-    else if (next.hadVotes) {
-      if (next.emptySince === 0) next.emptySince = now
-      // One stale frame used to cancel the countdown immediately.
-      if (now - next.emptySince >= 2000) {
-        next.countdownEnds = 0
-        next.hadVotes = false
-        next.wantFull = false
-        next.emptySince = 0
-        return { next, log: 'close' }
-      }
+    else {
+      next.countdownEnds = 0
+      next.hadVotes = false
+      next.wantFull = false
+      next.emptySince = 0
+      return { next, log: 'close' }
     }
     if (now >= next.countdownEnds) return { next, log: 'resolve' }
     return { next, log: '' }
