@@ -24,7 +24,7 @@ import {
 import { Color3, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { type GhostClip } from '../shared/botAnim'
-import {
+import { BOT_STAR_EYES,
   FACE_MIN_S,
   botIdFromActor,
   latchFace,
@@ -168,6 +168,7 @@ export function setBotFace(id: number, expr: BotFaceExpr, minS = FACE_MIN_S[expr
 
 /** Swap to the star-eyes face while this bot holds the star; revert when it ends. */
 export function setBotStarFace(id: number, on: boolean): void {
+  if (!BOT_STAR_EYES) return
   const rec = faces.get(id)
   if (!rec || rec.starred === on) return
   rec.starred = on

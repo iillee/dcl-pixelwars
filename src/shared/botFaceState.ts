@@ -15,6 +15,9 @@ import { BOT_ANIM_FALL, BOT_ANIM_GLIDE, type GhostClip } from './botAnim'
 
 export type BotFaceExpr = 'idle' | 'dash' | 'burst' | 'hit' | 'fall' | 'glide' | 'star'
 
+/** Swap a starred bot to the star-eyes face. Off for now; flip to re-enable. */
+export const BOT_STAR_EYES = false
+
 export const FACE_PRIORITY: Record<BotFaceExpr, number> = {
   star: 6,
   hit: 5,
@@ -89,7 +92,7 @@ export function resolveBotFace(args: {
   }
   for (const key of Object.keys(latches) as BotFaceExpr[]) consider(key)
   if (motion) consider(motion)
-  if (args.starred) consider('star')
+  if (BOT_STAR_EYES && args.starred) consider('star')
   return { expr, latches }
 }
 

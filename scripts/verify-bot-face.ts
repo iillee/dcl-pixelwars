@@ -13,7 +13,7 @@ import {
   BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO,
 } from '../src/shared/botAnim'
 import {
-  FACE_MIN_S, FACE_PRIORITY, botIdFromActor, faceFromMotion, latchFace,
+  BOT_STAR_EYES, FACE_MIN_S, FACE_PRIORITY, botIdFromActor, faceFromMotion, latchFace,
   resolveBotFace, type BotFaceExpr, type FaceLatches,
 } from '../src/shared/botFaceState'
 import { LUNGE_ACTIVE_S, DASH_DURATION_S } from '../src/shared/pvp'
@@ -77,13 +77,19 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
   seen.add(r.expr)
 
   const rStar = resolveBotFace({ nowMs: 0, pose: 0, st: 0, clip: 'idle', latches: {}, starred: true })
-  expect(rStar.expr, 'star', 'starred bot uses the star-eyes face')
-  seen.add(rStar.expr)
+  if (BOT_STAR_EYES) {
+    expect(rStar.expr, 'star', 'starred bot uses the star-eyes face')
+    seen.add(rStar.expr)
+  } else {
+    expect(rStar.expr, 'idle', 'star-eyes are off; a starred bot keeps its normal face')
+  }
 
-  const all: BotFaceExpr[] = ['idle', 'dash', 'burst', 'hit', 'fall', 'glide', 'star']
+  const all: BotFaceExpr[] = BOT_STAR_EYES
+    ? ['idle', 'dash', 'burst', 'hit', 'fall', 'glide', 'star']
+    : ['idle', 'dash', 'burst', 'hit', 'fall', 'glide']
   const missing = all.filter(e => !seen.has(e))
   if (missing.length) fail(`unreachable faces: ${missing.join(', ')}`)
-  else ok('each face state is reachable (idle, dash, burst, hit, fall, glide, star)')
+  else ok('each face state is reachable (idle, dash, burst, hit, fall, glide' + (BOT_STAR_EYES ? ', star)' : ') — star-eyes stay behind BOT_STAR_EYES'))
 }
 
 // ── Priority: hit > glide > fall > burst > dash > idle ──────────────
@@ -113,10 +119,15 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
   ok('priority is hit > glide > fall > burst > dash > idle')
 
   r = resolveBotFace({ nowMs: now, pose: 0, st: 0, clip: 'idle', latches: latchFace({}, 'hit', now), starred: true })
-  expect(r.expr, 'star', 'star-eyes stay on while the bot holds the star, even over hit')
+  if (BOT_STAR_EYES) {
+    expect(r.expr, 'star', 'star-eyes stay on while the bot holds the star, even over hit')
+  } else {
+    expect(r.expr, 'hit', 'with BOT_STAR_EYES off, a starred bot keeps the hit face')
+  }
   r = resolveBotFace({ nowMs: now, pose: 0, st: 0, clip: 'idle', latches: latchFace({}, 'hit', now), starred: false })
   expect(r.expr, 'hit', 'clearing starred restores the normal priority, including hit')
-  ok('star-eyes win while held and revert when the star ends')
+  if (FACE_PRIORITY.star <= FACE_PRIORITY.hit) fail('star priority should still outrank hit so the flag can be flipped')
+  ok(BOT_STAR_EYES ? 'star-eyes win while held and revert when the star ends' : 'BOT_STAR_EYES is off; star-eyes code remains ready to re-enable')
 }
 
 // ── 2 Hz latch: dash / hit / burst stay up across a quiet packet ────
@@ -198,6 +209,7 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
     [face.includes('tickBotFace') && visual.includes('tickBotFace(rec.id, rec.pose, rec.st)'), 'the draw loop ticks the face with pose and wire state'],
     [face.includes('export function setBotStarFace') && face.includes("star: 'assets/images/bots/faces/star.png'"), 'botFace can swap the star-eyes texture'],
     [readFileSync(new URL('../src/client/overdrive.ts', import.meta.url), 'utf8').includes('setBotStarFace('), 'overdrive turns star-eyes on and off with the hold'],
+    [face.includes('if (!BOT_STAR_EYES) return') && BOT_STAR_EYES === false, 'BOT_STAR_EYES is false, so setBotStarFace is a no-op'],
   ]
   for (const [pass, msg] of checks) {
     if (!pass) fail(msg)
