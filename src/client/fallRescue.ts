@@ -63,7 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
-  GltfContainer,
+  GltfContainer, Billboard, BillboardMode,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
@@ -396,6 +396,8 @@ const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
 /** GLB width is ~1.77 m at scale 1, close to the old three-puff cluster. Underside sits at the root, like the placeholder. */
 const CLOUD_SCALE = 1
+/** Visual center of cloud-body.glb (Body mesh AABB Y), before CLOUD_SCALE. The billboard pivots here. */
+const BODY_CENTER_Y = 0.6083
 
 function gltfChild(parent: Entity, src: string, pos: Vector3, scale: Vector3): Entity {
   const e = engine.addEntity()
@@ -407,10 +409,18 @@ function gltfChild(parent: Entity, src: string, pos: Vector3, scale: Vector3): E
 /** Lavender body + face in place of the placeholder puffs; same stem and hook. Root is ents[0]. */
 function cloudParts(root: Entity): Entity[] {
   const s = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
-  const body = gltfChild(root, CLOUD_BODY_SRC, Vector3.create(0, 0, 0), s)
+  // Billboard on a child at the puff's visual center so it yaws in place.
+  // Body is shifted down so the underside stays at the root (over the hook).
+  // Face is authored on the GLB's -Z; BM_Y points local -Z at the camera, so no Y flip.
+  const cy = BODY_CENTER_Y * CLOUD_SCALE
+  const spin = engine.addEntity()
+  Transform.create(spin, { parent: root, position: Vector3.create(0, cy, 0) })
+  Billboard.create(spin, { billboardMode: BillboardMode.BM_Y })
+  const body = gltfChild(spin, CLOUD_BODY_SRC, Vector3.create(0, -cy, 0), s)
   const face = gltfChild(body, CLOUD_FACE_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
   return [
     root,
+    spin,
     body,
     face,
     makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT),
