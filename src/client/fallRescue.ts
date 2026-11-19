@@ -127,14 +127,6 @@ export const FALL_RESCUE = {
   RIDE_HANDOFF_S: 0.75,
 }
 
-const HOOK_MAT = {
-  albedoColor: Color4.create(1, 0.86, 0.25, 1),
-  emissiveColor: Color4.create(1, 0.75, 0.15, 1),
-  emissiveIntensity: 4,
-  roughness: 0.4,
-  metallic: 0,
-  castShadows: false,
-}
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
 type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number }
@@ -383,21 +375,20 @@ function detachFloater(): void {
   })
 }
 
-function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' | 'box', mat: typeof HOOK_MAT): Entity {
-  const e = engine.addEntity()
-  Transform.create(e, { parent, position: pos, scale })
-  if (shape === 'sphere') MeshRenderer.setSphere(e)
-  else MeshRenderer.setBox(e)
-  Material.setPbrMaterial(e, mat)
-  return e
-}
-
 const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
 /** GLB width is ~1.77 m at scale 1, close to the old three-puff cluster. Underside sits at the root, like the placeholder. */
 const CLOUD_SCALE = 1
 /** Visual center of cloud-body.glb (Body mesh AABB Y), before CLOUD_SCALE. The billboard pivots here. */
 const BODY_CENTER_Y = 0.6083
+/** Static line from the puff underside to the hook point over the head. Tune these; nothing updates them per frame. */
+const LINE_TOP_Y = 0
+const LINE_BOTTOM_Y = -0.78
+const LINE_LENGTH = LINE_TOP_Y - LINE_BOTTOM_Y
+const LINE_RADIUS = 0.018
+const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
+/** End bead at LINE_BOTTOM_Y, in the line color. 0 hides it. */
+const LINE_BEAD_R = 0.05
 
 function gltfChild(parent: Entity, src: string, pos: Vector3, scale: Vector3): Entity {
   const e = engine.addEntity()
@@ -406,7 +397,33 @@ function gltfChild(parent: Entity, src: string, pos: Vector3, scale: Vector3): E
   return e
 }
 
-/** Lavender body + face in place of the placeholder puffs; same stem and hook. Root is ents[0]. */
+/** Fixed vertical cylinder from LINE_TOP_Y to LINE_BOTTOM_Y, parented to the motion root. */
+function makeLine(parent: Entity): Entity {
+  const len = Math.max(0.04, LINE_LENGTH)
+  const e = engine.addEntity()
+  Transform.create(e, {
+    parent,
+    position: Vector3.create(0, (LINE_TOP_Y + LINE_BOTTOM_Y) / 2, 0),
+    scale: Vector3.create(LINE_RADIUS, len, LINE_RADIUS),
+  })
+  MeshRenderer.setCylinder(e)
+  Material.setPbrMaterial(e, { albedoColor: LINE_COLOR, roughness: 1, metallic: 0, castShadows: false })
+  return e
+}
+
+function makeBead(parent: Entity): Entity {
+  const e = engine.addEntity()
+  Transform.create(e, {
+    parent,
+    position: Vector3.create(0, LINE_BOTTOM_Y, 0),
+    scale: Vector3.create(LINE_BEAD_R, LINE_BEAD_R, LINE_BEAD_R),
+  })
+  MeshRenderer.setSphere(e)
+  Material.setPbrMaterial(e, { albedoColor: LINE_COLOR, roughness: 1, metallic: 0, castShadows: false })
+  return e
+}
+
+/** Lavender body + face, with a static line and a small end bead. Root is ents[0]. */
 function cloudParts(root: Entity): Entity[] {
   const s = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
   // Billboard on a child at the puff's visual center so it yaws in place.
@@ -418,17 +435,13 @@ function cloudParts(root: Entity): Entity[] {
   Billboard.create(spin, { billboardMode: BillboardMode.BM_Y })
   const body = gltfChild(spin, CLOUD_BODY_SRC, Vector3.create(0, -cy, 0), s)
   const face = gltfChild(body, CLOUD_FACE_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
-  return [
-    root,
-    spin,
-    body,
-    face,
-    makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT),
-    makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT),
-  ]
+  const line = makeLine(root)
+  const ents = [root, spin, body, face, line]
+  if (LINE_BEAD_R > 0) ents.push(makeBead(root))
+  return ents
 }
 
-/** Local cloud parented to the pad: body, face, a stem, and a hook. No character model. */
+/** Local cloud parented to the pad: body, face, and a static line. No character model. */
 function spawnFloater(): void {
   if (!anchor) return
   despawnFloater()
