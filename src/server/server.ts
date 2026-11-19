@@ -20,7 +20,9 @@ import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullStat
 import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
-import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
+import { lungeKnock, burstKnock, spikeKnock, overdriveKnock } from '../shared/knocks'
+import { overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir } from '../shared/overdrive'
+import { OverdriveBook } from './overdriveBook'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
   loadFromStorage as loadLeaderboard,
@@ -43,6 +45,7 @@ import {
   burstEnabledForRound, SERVER_MIN_BURST_GAP_S, SERVER_BURST_LAND_WINDOW_S, BURST_RADIUS, BURST_HIT_MAX_DY, BURST_PAINT_MAX_DY,
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   pvbBotCount, pvbHumanTeam,
+  OVERDRIVE_TOUCH_RADIUS, OVERDRIVE_TOUCH_MAX_DY,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHitsBot, burstBotInRange, burstDir } from '../shared/burst'
@@ -111,7 +114,78 @@ export async function setupServer(): Promise<void> {
   const addRoundCells = (id: string, n: number): void => {
     if (n <= 0) return
     roundCells.set(id, (roundCells.get(id) ?? 0) + n)
-    if (!id.startsWith('bot:')) dirtyPaintScores.add(id)
+    if (!id.startsWith('bot:')) {
+      dirtyPaintScores.add(id)
+      overdrive.paintedGain(id, n, Date.now())
+    }
+  }
+  const overdrive = new OverdriveBook()
+  const overdriveFeet = (id: string, now: number): { x: number; y: number; z: number } | null => {
+    const f = botAim.get(id.toLowerCase())
+    if (!f || !overdriveFeetFresh(f.t, now)) return null
+    return f
+  }
+  const sendOverdriveStateTo = (id: string, now = Date.now()): void => {
+    if (!id || id.startsWith('bot:')) return
+    room.send('overdriveState', overdrive.ownerState(id, now), { to: [id] })
+  }
+  const flushOverdriveState = (now = Date.now()): void => {
+    for (const id of overdrive.takeDirty()) sendOverdriveStateTo(id, now)
+  }
+  const broadcastAura = (id: string, until: number): void => {
+    room.send('overdriveAura', { id, until })
+  }
+  const endOverdrive = (id: string): void => {
+    broadcastAura(id, 0)
+    sendOverdriveStateTo(id)
+  }
+  const tickOverdrive = (now: number): void => {
+    for (const id of overdrive.expire(now)) endOverdrive(id)
+    if (!matchLive()) return
+    for (const { id, until } of overdrive.actives(now)) {
+      void until
+      const team = getTeam(id)
+      if (team === null) continue
+      const atk = overdriveFeet(id, now)
+      if (!atk) continue
+      for (const e of rosterEntries()) {
+        const vic = e.userId.toLowerCase()
+        if (vic === id || e.team === team) continue
+        if (overdrive.isActive(vic, now)) continue
+        if (rescueRiders.has(vic)) continue
+        const ft = overdriveFeet(vic, now)
+        if (!ft) continue
+        const distH = Math.hypot(ft.x - atk.x, ft.z - atk.z)
+        const distY = Math.abs(ft.y - atk.y)
+        if (!overdriveCanTouch({
+          attacker: id, victim: vic, attackerTeam: team, victimTeam: e.team,
+          distH, distY, lastHitAt: overdrive.lastHitAt(id, vic), now,
+          attackerActive: true, victimImmune: overdrive.isActive(vic, now),
+        })) continue
+        const dir = overdriveTouchDir(atk.x, atk.z, ft.x, ft.z)
+        overdrive.rememberHit(id, vic, now)
+        noteHit(id, vic)
+        room.send('overdriveImpact', { attacker: id, target: vic, dx: dir.x, dz: dir.z })
+        console.log('[Server] overdrive ' + id.slice(0, 8) + ' launched ' + vic.slice(0, 8))
+      }
+      for (const b of getBotHitPoints()) {
+        if (b.team === team) continue
+        const key = 'bot:' + b.id
+        const distH = Math.hypot(b.x - atk.x, b.z - atk.z)
+        const distY = Math.abs(b.y - atk.y)
+        if (!overdriveCanTouch({
+          attacker: id, victim: key, attackerTeam: team, victimTeam: b.team,
+          distH, distY, lastHitAt: overdrive.lastHitAt(id, key), now,
+          attackerActive: true, victimImmune: false,
+        })) continue
+        const dir = overdriveTouchDir(atk.x, atk.z, b.x, b.z)
+        if (!hitBot(b.id, atk.x, atk.y, atk.z, OVERDRIVE_TOUCH_RADIUS, OVERDRIVE_TOUCH_MAX_DY, () => overdriveKnock(dir.x, dir.z))) continue
+        overdrive.rememberHit(id, key, now)
+        noteHit(id, key)
+        room.send('overdriveImpact', { attacker: id, target: key, dx: dir.x, dz: dir.z })
+        console.log('[Server] overdrive ' + id.slice(0, 8) + ' launched ' + key)
+      }
+    }
   }
   const flushPaintScores = (): void => {
     for (const id of dirtyPaintScores) {
@@ -121,6 +195,7 @@ export async function setupServer(): Promise<void> {
       room.send('paintScore', { n }, { to: [id] })
     }
     dirtyPaintScores.clear()
+    flushOverdriveState()
   }
   const sendPaintScoreTo = (id: string): void => {
     if (!id || id.startsWith('bot:')) return
@@ -136,6 +211,12 @@ export async function setupServer(): Promise<void> {
     dirtyPaintScores.clear()
     for (const id of ids) room.send('paintScore', { n: 0 }, { to: [id] })
     lastSentPaintScore.clear()
+    const odIds = overdrive.clearRound()
+    for (const id of odIds) {
+      ids.add(id)
+      room.send('overdriveState', { charge: 0, ready: 0, active: 0, until: 0 }, { to: [id] })
+      room.send('overdriveAura', { id, until: 0 })
+    }
   }
   /** Team of each `bot:<id>` seen this round, including bots retired after scoring. */
   const botTeams = new Map<string, number>()
@@ -707,6 +788,8 @@ export async function setupServer(): Promise<void> {
     bursts.forget(userId)
     lastBurstAt.delete(userId)
     const left = userId.toLowerCase()
+    if (overdrive.isActive(left, Date.now())) broadcastAura(left, 0)
+    overdrive.forget(left)
     if (rescueRiders.delete(left)) {
       rescueStartAt.delete(left)
       room.send('rescueEnd', { who: left })
@@ -814,6 +897,8 @@ export async function setupServer(): Promise<void> {
     if (typeof at === 'string' && at) {
       if (refillAtDepot()) noteDepotFeet(from, at)
       else noteRegenStance(from, at, typeof y === 'number' && isFinite(y) ? y : NaN, g === 1)
+      const pos = getWalkableGraph()?.worldPos.get(at)
+      if (pos) botAim.set(from.toLowerCase(), { x: pos[0], y: typeof y === 'number' && isFinite(y) ? y : pos[1], z: pos[2], t: Date.now() })
     }
     if (gained > 0) {
       leaderboardIncrement(from, gained)
@@ -855,6 +940,7 @@ export async function setupServer(): Promise<void> {
     beginLagFrame(dt)
     const tBots = Date.now()
     if (isRoundActive()) tickBots(dt)
+    tickOverdrive(Date.now())
     noteLagSection('bots', tBots)
     if (economyOn()) {
       if (refillAtDepot()) {
@@ -981,6 +1067,7 @@ export async function setupServer(): Promise<void> {
     }
     const hits = dashWindowTargets.get(from)!
     if (hits.has(victim.userId) || hits.size >= SERVER_MAX_HITS_PER_DASH) return
+    if (overdrive.isActive(victim.userId, now)) return
     hits.add(victim.userId)
     markActive(from)
     console.log(`[Server] dashImpact ${from.slice(0, 8)} → ${victim.userId.slice(0, 8)}`)
@@ -1030,6 +1117,7 @@ export async function setupServer(): Promise<void> {
       }
       victimId = victim.userId
     }
+    if (!victimId.startsWith('bot:') && overdrive.isActive(victimId, Date.now())) return
     const verdict = lunges.hit(from, id, victimId, Date.now())
     if (verdict !== 'ok') {
       console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`)
@@ -1257,6 +1345,7 @@ export async function setupServer(): Promise<void> {
   room.onMessage('anvilStrike', ({ i, x, y, z }, context) => {
     const from = context?.from
     if (!from || !matchLive() || ![x, y, z].every(isFinite)) return
+    if (overdrive.isActive(from, Date.now())) return
     const hit = tryAnvilPlayerStrike(from, i, x, y, z)
     if (!hit) return
     if (hit.attacker && hit.attacker !== from && getTeam(hit.attacker) !== null && getTeam(hit.attacker) !== getTeam(from)) {
@@ -1272,11 +1361,26 @@ export async function setupServer(): Promise<void> {
     const by = anvilCredit(i)
     if (by && by !== from && getTeam(by) !== null && getTeam(by) !== getTeam(from)) noteHit(by, from)
   })
+  room.onMessage('overdriveUse', (_m, context) => {
+    const from = context?.from
+    if (!from || !matchLive() || getTeam(from) === null) return
+    const now = Date.now()
+    if (!overdrive.tryUse(from, now)) {
+      sendOverdriveStateTo(from, now)
+      return
+    }
+    const until = overdrive.ownerState(from, now).until
+    broadcastAura(from.toLowerCase(), until)
+    sendOverdriveStateTo(from, now)
+    console.log('[Server] overdriveUse ' + from.slice(0, 8) + ' until ' + until)
+  })
   room.onMessage('playerFell', (_m, context) => {
     const from = context?.from
     if (!from || !matchLive() || getTeam(from) === null) return
     const by = noteFell(from)
     onBalloonFall(from)
+    if (overdrive.onDeath(from)) endOverdrive(from.toLowerCase())
+    else sendOverdriveStateTo(from)
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
   // Relay the rider's cloud so every other client can show it. who is the
@@ -1373,6 +1477,7 @@ export async function setupServer(): Promise<void> {
     }
     const victim = rosterEntries().find(e => e.userId.toLowerCase() === want)
     if (!victim || victim.team === attackerTeam || victim.userId === from) return
+    if (overdrive.isActive(victim.userId, Date.now())) return
     const verdict = bursts.hit(from, id, victim.userId, Date.now())
     if (verdict !== 'ok') { console.log(`[Server] burstHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`); return }
     noteHit(from, victim.userId)
@@ -1451,6 +1556,10 @@ export async function setupServer(): Promise<void> {
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
     sendPaintScoreTo(from)
+    sendOverdriveStateTo(from)
+    for (const { id, until } of overdrive.actives(Date.now())) {
+      room.send('overdriveAura', { id, until }, { to: [from] })
+    }
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:

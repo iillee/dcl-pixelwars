@@ -29,6 +29,7 @@ import { isMobile } from '@dcl/sdk/platform'
 import { LUNGE_MODE, BURST_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
 import { getBurstHud, requestBurst } from './paintBurst'
+import { getOverdriveHud, requestOverdrive } from './overdrive'
 
 export const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -63,12 +64,12 @@ type Geo = {
 const DESKTOP: Geo = { slot: 72, icon: 40, bottom: 30, halfRow: 80, tipH: 71, tipBorder: 3, tipPadX: 14, tipFont: 20, bridgeInner: 56, bridgeW: 50, tuck: 48 }
 const MOBILE: Geo = { slot: 112, icon: 64, bottom: 0, halfRow: 128, tipH: 112, tipBorder: 4, tipPadX: 20, tipFont: 32, bridgeInner: 90, bridgeW: 80, tuck: 72 }
 
-type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean }
+type Hud = { show: boolean; enabled: boolean; ready: boolean; cooldown: number; cooldownFrac: number; text?: string; recovering?: boolean; fillColor?: Color4; pulse?: boolean }
 /** Walk-only brace. Slot tint only — no LOCK label, ring, disc, or volume mesh. */
 const LOCK_TINT = Color4.create(1, 0.78, 0.35, 1)
 
 export function KeyHint(props: { label: string }) {
-  if (isMobile()) return null
+  if (isMobile() || !props.label) return null
   return (
     <Label
       key={`ui_pvp_key_${props.label}`}
@@ -80,10 +81,12 @@ export function KeyHint(props: { label: string }) {
   )
 }
 
-function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; g: Geo }) {
+function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; iconSrc?: string; onPress: () => void; g: Geo; centerText?: boolean }) {
   const { hud, g } = props
   const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
-  const border = !hud.enabled ? DIM_BORDER : hud.ready ? GOLD_BORDER : WHITE_BORDER
+  const pulse = hud.pulse ? (0.7 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 180))) : 1
+  const border = !hud.enabled ? DIM_BORDER : (hud.ready || hud.pulse) ? Color4.create(GOLD_BORDER.r, GOLD_BORDER.g, GOLD_BORDER.b, pulse) : WHITE_BORDER
+  const fillCol = hud.fillColor ?? GOLD_FILL
   return (
     <UiEntity
       key={`ui_pvp_slot_${props.id}`}
@@ -107,7 +110,7 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
           <UiEntity
             key={`ui_pvp_fill_${props.id}`}
             uiTransform={{ width: '100%', height: `${Math.round(fill * 100)}%`, borderRadius: RADIUS_SM }}
-            uiBackground={{ color: GOLD_FILL }}
+            uiBackground={{ color: fillCol }}
           />
         </UiEntity>
       )}
@@ -122,14 +125,15 @@ function Slot(props: { id: string; keyLabel: string; hud: Hud; glyph?: string; i
         />
       ) : null}
       {hud.text ? (
-        // Burst: charge progress ('7/10') or active seconds ('2s'), bottom of the slot.
         <Label
           key={`ui_pvp_text_${props.id}`}
           value={`<b>${hud.text}</b>`}
-          fontSize={Math.round(g.slot * 0.18)}
-          color={fill > 0.2 ? BLACK : WHITE}
+          fontSize={Math.round(g.slot * (props.centerText ? 0.22 : 0.18))}
+          color={hud.fillColor ? ((hud.fillColor.r > 0.7 && hud.fillColor.g > 0.6) ? BLACK : WHITE) : (fill > 0.2 ? BLACK : WHITE)}
           textAlign="middle-center"
-          uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(g.slot * 0.06), left: 0 }, width: '100%', height: Math.round(g.slot * 0.22) }}
+          uiTransform={props.centerText
+            ? { positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%' }
+            : { positionType: 'absolute', position: { bottom: Math.round(g.slot * 0.06), left: 0 }, width: '100%', height: Math.round(g.slot * 0.22) }}
         />
       ) : null}
       {!props.iconSrc ? (
@@ -210,10 +214,12 @@ const CIRCLE_ICON_FRAC = 0.72 // icon size as a fraction of the circle diameter
 const CIRCLE_READY = Color4.create(1.0, 0.78, 0.15, 1) // gold ring while ready
 const CIRCLE_INK = Color4.create(0.13, 0.13, 0.15, 1)
 
-function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: () => void; bottom: number }) {
+function CircleButton(props: { id: string; hud: Hud; iconSrc?: string; onPress: () => void; bottom: number; centerText?: boolean }) {
   const { hud } = props
   const cooling = hud.enabled && !hud.ready && hud.cooldown > 0
-  const ring = hud.ready ? CIRCLE_READY : CIRCLE_INK
+  const fill = !hud.enabled ? 0 : hud.ready ? 1 : Math.max(0, Math.min(1, 1 - hud.cooldownFrac))
+  const pulse = hud.pulse ? (0.7 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 180))) : 1
+  const ring = (hud.ready || hud.pulse) ? Color4.create(CIRCLE_READY.r, CIRCLE_READY.g, CIRCLE_READY.b, pulse) : CIRCLE_INK
   const iconCol = !hud.enabled || cooling ? Color4.create(0, 0, 0, 0.25) : Color4.create(0, 0, 0, 1)
   return (
     <UiEntity key={`ui_pvp_circle_${props.id}`}
@@ -221,12 +227,19 @@ function CircleButton(props: { id: string; hud: Hud; iconSrc: string; onPress: (
         borderRadius: CIRCLE_D / 2, borderWidth: CIRCLE_RING, borderColor: ring, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
       uiBackground={{ color: hud.recovering ? LOCK_TINT : PANEL_LIGHT }}
       onMouseDown={props.onPress}>
-      <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), height: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), pointerFilter: 'none' }}
-        uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />
-      {cooling && <Label value={`${Math.ceil(hud.cooldown)}`} fontSize={Math.round(CIRCLE_D * 0.4)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
+      {fill > 0 && hud.fillColor && (
+        <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CIRCLE_RING, bottom: CIRCLE_RING, left: CIRCLE_RING, right: CIRCLE_RING }, borderRadius: (CIRCLE_D - CIRCLE_RING * 2) / 2, flexDirection: 'column', justifyContent: 'flex-end', pointerFilter: 'none' }}>
+          <UiEntity uiTransform={{ width: '100%', height: `${Math.round(fill * 100)}%`, borderRadius: (CIRCLE_D - CIRCLE_RING * 2) / 2 }} uiBackground={{ color: hud.fillColor }} />
+        </UiEntity>
+      )}
+      {props.iconSrc ? (
+        <UiEntity uiTransform={{ width: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), height: Math.round(CIRCLE_D * CIRCLE_ICON_FRAC), pointerFilter: 'none' }}
+          uiBackground={{ textureMode: 'stretch', texture: { src: props.iconSrc }, color: iconCol }} />
+      ) : null}
+      {cooling && !props.centerText && <Label value={`${Math.ceil(hud.cooldown)}`} fontSize={Math.round(CIRCLE_D * 0.4)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
         uiTransform={{ positionType: 'absolute', position: { top: 0, left: 0 }, width: '100%', height: '100%', pointerFilter: 'none' }} />}
-      {hud.text ? <Label value={hud.text} fontSize={Math.round(CIRCLE_D * 0.14)} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
-        uiTransform={{ positionType: 'absolute', position: { bottom: Math.round(CIRCLE_D * 0.08), left: 0 }, width: '100%', height: Math.round(CIRCLE_D * 0.18), pointerFilter: 'none' }} /> : null}
+      {hud.text ? <Label value={hud.text} fontSize={Math.round(CIRCLE_D * (props.centerText ? 0.2 : 0.14))} color={CIRCLE_INK} textAlign="middle-center" textWrap="nowrap"
+        uiTransform={{ positionType: 'absolute', position: props.centerText ? { top: 0, left: 0 } : { bottom: Math.round(CIRCLE_D * 0.08), left: 0 }, width: '100%', height: props.centerText ? '100%' : Math.round(CIRCLE_D * 0.18), pointerFilter: 'none' }} /> : null}
     </UiEntity>
   )
 }
@@ -240,21 +253,26 @@ function roundLabel(lunge: Hud, bomb: Hud): string {
 export function AbilityHotbar() {
   const lunge = getLungeHud()
   const bomb = getBurstHud()
-  if (!lunge.show && !bomb.show) return null
+  const overdrive = getOverdriveHud()
+  if (!lunge.show && !bomb.show && !overdrive.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
+  const nSlots = (lunge.show ? 1 : 0) + (overdrive.show ? 1 : 0) + (bomb.show ? 1 : 0)
+  const geo: Geo = { ...g, halfRow: (nSlots * (g.slot + SLOT_MARGIN_X * 2)) / 2 }
   const label = roundLabel(lunge, bomb)
   const lungeTip = lunge.show && lunge.ready
   const bombTip = bomb.show && bomb.ready
   // Paint order = snowdrift: bridge + tooltips first (behind), slots last (on top)
   // where the chip kisses the button edge. Tooltips on the outer sides.
   if (mobile) {
-    // Mobile: circle buttons in a column on the native jump button's centre line, Lunge just above jump, Burst above it.
+    // Mobile: circle buttons in a column on the native jump button's centre line.
+    // Lunge just above jump, Overdrive between Dash and Burst, Burst above that.
     const cb = (n: number) => JUMP_CY_BOTTOM + JUMP_D / 2 + CIRCLE_GAP + n * (CIRCLE_D + CIRCLE_GAP)
     return (
       <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
         {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} bottom={cb(0)} />}
-        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={requestBurst} bottom={cb(1)} />}
+        {overdrive.show && <CircleButton id="overdrive" hud={overdrive} onPress={requestOverdrive} bottom={cb(1)} centerText />}
+        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={requestBurst} bottom={cb(lunge.show && overdrive.show ? 2 : 1)} />}
       </UiEntity>
     )
   }
@@ -263,12 +281,12 @@ export function AbilityHotbar() {
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={triggerLunge} g={g} />}
-      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={requestBurst} g={g} />}
+      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={triggerLunge} g={geo} />}
+      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={requestBurst} g={geo} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
-          positionType: 'absolute', position: { bottom: g.bottom, left: 0 }, width: '100%',
+          positionType: 'absolute', position: { bottom: geo.bottom, left: 0 }, width: '100%',
           flexDirection: 'column', alignItems: 'center', pointerFilter: 'none',
         }}
       >
@@ -282,8 +300,9 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={g} />}
-          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={g} />}
+          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={geo} />}
+          {overdrive.show && <Slot id="overdrive" keyLabel="" hud={overdrive} onPress={requestOverdrive} g={geo} centerText />}
+          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={geo} />}
         </UiEntity>
       </UiEntity>
     </UiEntity>

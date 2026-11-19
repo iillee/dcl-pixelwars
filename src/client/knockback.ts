@@ -31,7 +31,9 @@ type BotLookup = { team: (id: string) => Team; feet: (id: string) => { x: number
 let botLookup: BotLookup | null = null
 export function registerBotLookup(l: BotLookup): void { botLookup = l }
 export function botFeet(id: string): { x: number; y: number; z: number } | null { return botLookup?.feet(id.toLowerCase()) ?? null }
-export function isKnockbackImmune(): boolean { return immuneLeft > 0 }
+let overdriveImmuneFn: () => boolean = () => false
+export function setOverdriveImmuneCheck(fn: () => boolean): void { overdriveImmuneFn = fn }
+export function isKnockbackImmune(): boolean { return immuneLeft > 0 || overdriveImmuneFn() }
 
 export function myAddress(): string {
   return (PlayerIdentityData.getOrNull(engine.PlayerEntity)?.address ?? '').toLowerCase()

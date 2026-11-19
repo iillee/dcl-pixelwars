@@ -25,6 +25,7 @@ import { engine, PlayerIdentityData, AvatarBase, Transform } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { initPaintScore } from './paintScore'
+import { initOverdrive } from './overdrive'
 import { Team, teamName } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
@@ -61,6 +62,7 @@ export function initClientHandler(): void {
     room.send('presencePing', {})
   })
   initPaintScore()
+  initOverdrive()
   wireInbound()
   wireTeamAssigned()
   wireOutbound()
@@ -95,6 +97,17 @@ function wireInbound(): void {
   })
   room.onMessage('paintScore', ({ n }) => {
     events.emit('paint:score', { n: n ?? 0 })
+  })
+  room.onMessage('overdriveState', (s) => {
+    events.emit('overdrive:state', {
+      charge: s.charge ?? 0, ready: s.ready ?? 0, active: s.active ?? 0, until: s.until ?? 0,
+    })
+  })
+  room.onMessage('overdriveAura', ({ id, until }) => {
+    events.emit('overdrive:aura', { id: id ?? '', until: until ?? 0 })
+  })
+  room.onMessage('overdriveImpact', ({ attacker, target, dx, dz }) => {
+    events.emit('overdrive:impact', { attacker: attacker ?? '', target: target ?? '', dx: dx ?? 0, dz: dz ?? 0 })
   })
 
   room.onMessage('snapshot', ({ entries, red, blue, green, yellow, total, seed, layout, seq, format, phase }) => {

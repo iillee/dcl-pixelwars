@@ -653,6 +653,28 @@ export const ANVIL_HIT_WINDOW_MS = 2000
 export const ANVIL_HITTER_IMMUNE_MS = 400
 /** Extra metres allowed on a client-reported player contact (RTT / snapshot lag). */
 export const ANVIL_HIT_REPORT_SLACK = 0.8
+
+// ═══ Overdrive / star power ═════════════════════════════════════════
+// Fills from the personal paint counter. Click the hotbar slot to activate.
+// A 3-minute round and a 3x3 brush: a focused painter often lands ~80–250
+// conversions, so 200 tiles is about one star mid-to-late for an aggressive
+// player, and rare for someone who mostly walks their own colour.
+export const OVERDRIVE_TILES = 200
+/** How long the star lasts once activated (ms). */
+export const OVERDRIVE_MS = 6000
+/** Horizontal reach (m) for a bump that launches an enemy. */
+export const OVERDRIVE_TOUCH_RADIUS = 2
+/** Vertical pad (m) for that bump. */
+export const OVERDRIVE_TOUCH_MAX_DY = 1.5
+/** Same victim cannot be launched again until this many ms pass. */
+export const OVERDRIVE_HIT_WINDOW_MS = 800
+/** Movement-paint brush radius multiplier (1 = 3x3, 2 = 5x5). */
+export const OVERDRIVE_PAINT_RADIUS_MULT = 2
+/** Knock impulse. Defaults to the anvil hit so a bump carries across the floor. */
+export const OVERDRIVE_KNOCK = ANVIL_HIT_KNOCK
+export const OVERDRIVE_LIFT = ANVIL_HIT_LIFT
+/** Last-known feet older than this are ignored for touch tests (ms). */
+export const OVERDRIVE_FEET_STALE_MS = 1000
 /** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
  *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot
  *  for that hit arrives (or PREDICT_TIMEOUT_S passes: e.g. the hit was rejected); then the render

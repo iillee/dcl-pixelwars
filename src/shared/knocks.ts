@@ -11,7 +11,7 @@ import {
   LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT, LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S,
   AIR_SPIKE_DOWN, AIR_SPIKE_OUT, AIR_SPIKE_FORCE, AIR_SPIKE_FORCE_S, AIR_SPIKE_GROUND_OUT, AIR_SPIKE_GROUND_LIFT,
-  ANVIL_HIT_KNOCK, ANVIL_HIT_LIFT,
+  ANVIL_HIT_KNOCK, ANVIL_HIT_LIFT, OVERDRIVE_KNOCK, OVERDRIVE_LIFT,
 } from './pvp'
 
 /** Log how far each knock carries its victim ("[KnockTrace] ..."), on the human victim's client and
@@ -19,7 +19,7 @@ import {
 export const KNOCK_TRACE = true
 
 export type KnockV3 = { x: number; y: number; z: number }
-export type KnockKind = 'lunge' | 'burst' | 'spike' | 'anvil'
+export type KnockKind = 'lunge' | 'burst' | 'spike' | 'anvil' | 'overdrive'
 export type KnockSpec = {
   kind: KnockKind
   /** One-shot impulse. */
@@ -90,6 +90,16 @@ export function anvilKnock(dx: number, dz: number): KnockSpec {
   return {
     kind: 'anvil',
     impulse: { x: dx * ANVIL_HIT_KNOCK, y: ANVIL_HIT_LIFT, z: dz * ANVIL_HIT_KNOCK },
+    forceDir: { x: dx, y: 0, z: dz }, force: 0, forceS: 0,
+    lockS: lock,
+  }
+}
+
+/** Star-power bump: same carry as a launched anvil, along the attacker→victim line. */
+export function overdriveKnock(dx: number, dz: number): KnockSpec {
+  return {
+    kind: 'overdrive',
+    impulse: { x: dx * OVERDRIVE_KNOCK, y: OVERDRIVE_LIFT, z: dz * OVERDRIVE_KNOCK },
     forceDir: { x: dx, y: 0, z: dz }, force: 0, forceS: 0,
     lockS: lock,
   }

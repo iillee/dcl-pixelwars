@@ -10,6 +10,8 @@ import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
 import { isMoveLocked } from './client/moveLock'
+import { isLocalOverdriveActive } from './client/overdrive'
+import { overdrivePaintRadiusCells, paintBrushOffsets } from './shared/overdrive'
 import { BURST_STANCE_SLACK } from './shared/pvp'
 import { paintAllowed } from './shared/balloon'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
@@ -879,14 +881,8 @@ export function initPaintingSystem(
   stanceStep = STEP
   stanceLookup = lookupTile
   const GROUND_TOLERANCE = 0.4
-  // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
-  // in world meters; one cell is CELL / SIZE = 2m.
+  // Paint footprint: 3x3 square by default. Overdrive widens it for the star's duration.
   const step = CELL / SIZE
-  const OFFSETS: Array<[number, number]> = [
-    [-step, -step], [0, -step], [step, -step],
-    [-step,     0], [0,     0], [step,     0],
-    [-step,  step], [0,  step], [step,  step],
-  ]
   // Phase 4 Step 4: this system no longer touches cellTeam or materials.
   // It just enqueues candidate cell ids into the outbox; the server owns
   // team attribution and echoes back paintDelta, which is what actually
@@ -908,6 +904,7 @@ export function initPaintingSystem(
     playerGrounded = y - center.groundY <= GROUND_TOLERANCE
     // Fall rescue holds paint off through the pickup and the walk-only land brace.
     if (!playerGrounded || isMoveLocked()) return
+    const OFFSETS = paintBrushOffsets(step, overdrivePaintRadiusCells(isLocalOverdriveActive()))
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue

@@ -55,6 +55,9 @@ export type Events = {
   // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
   'paint:wallet': { tank: number; denied: string[]; regen: number }
   'paint:score': { n: number }
+  'overdrive:state': { charge: number; ready: number; active: number; until: number }
+  'overdrive:aura': { id: string; until: number }
+  'overdrive:impact': { attacker: string; target: string; dx: number; dz: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.
   // Same shape family as paint:delta, but semantically "authoritative
