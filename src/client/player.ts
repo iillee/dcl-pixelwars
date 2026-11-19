@@ -23,7 +23,7 @@ import { isLobbyLayout, isMazeReady } from '../maze/rebuild'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
-import { earlySpawnPads } from '../shared/lobby'
+import { earlySpawnPads, padContains } from '../shared/lobby'
 import { clearLobbyHoldFloor, installLobbyHoldFloor, lobbyHoldContains } from '../lobbyHoldFloor'
 import { Team, isPlayingTeam } from '../shared/team'
 import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn } from '../maze/generator'
@@ -38,6 +38,29 @@ const CLASSIC_CAMERA_TARGET = { x: 88, y: 2, z: 96 }
 
 let myTeam: Team = Team.None
 let spawnPads: Entity[] = []
+// After a lobby-to-match teleport, GLB colliders can still be late on mobile
+// even once isMazeReady() is true (the reveal cascade finished, the physics
+// meshes may not have). Keep the primitive hold floors up and snap a drop
+// back for this long, then clear — well before a mid-match fall should reach
+// the water / rescue.
+const MATCH_HOLD_MS = 6000
+let matchHoldUntil = 0
+let matchHoldPads: ReturnType<typeof earlySpawnPads> = []
+
+function armMatchHold(): void {
+  installLobbyHoldFloor()
+  clearSpawnPads()
+  ensureSpawnPads()
+  matchHoldPads = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))
+  matchHoldUntil = Date.now() + MATCH_HOLD_MS
+}
+
+function overMatchHold(x: number, z: number): boolean {
+  for (const p of matchHoldPads) {
+    if (padContains({ ...p, sx: p.sx + 4, sz: p.sz + 4 }, x, z)) return true
+  }
+  return lobbyHoldContains(x, z)
+}
 
 function clearSpawnPads(): void {
   for (const e of spawnPads) engine.removeEntity(e)
@@ -71,9 +94,14 @@ function teleportHome(why: string): void {
     look = { x: c.x, y: c.y, z: c.z + 8 }
   } else if (IS_SKY) {
     // Put a temporary collider under the current team floors (which may sit
-    // above or below L0) before the tile mesh can hold the player.
-    clearSpawnPads()
-    ensureSpawnPads()
+    // above or below L0) before the tile mesh can hold the player. On mobile
+    // the maze can report ready before GLB colliders actually hold, so keep
+    // thick primitive slabs up for a short window after this teleport.
+    if (why !== 'fell') armMatchHold()
+    else {
+      clearSpawnPads()
+      ensureSpawnPads()
+    }
     const assigned = why === 'fell' ? assignedRescueHome() : null
     const s = assigned
       ? { pos: assigned, look: { x: assigned.x, y: assigned.y, z: assigned.z + 8 } }
@@ -141,10 +169,12 @@ export function initPlayerNet(): void {
     ensureSpawnPads()
     engine.addSystem(() => {
       if (isLobbyLayout() || !isMazeReady()) return
+      if (Date.now() < matchHoldUntil) return
       if (spawnPads.length) {
         clearSpawnPads()
         console.log('[Player] maze ready → spawn pads removed')
       }
+      if (matchHoldUntil) matchHoldUntil = 0
       clearLobbyHoldFloor()
     })
     // If the avatar still tunnels through the lobby (thin or late colliders
@@ -152,15 +182,23 @@ export function initPlayerNet(): void {
     // Off the island they are allowed to fall; rescue is unchanged.
     let dropLock = 0
     engine.addSystem((dt: number) => {
-      if (!isLobbyLayout()) return
       dropLock = Math.max(0, dropLock - dt)
       if (dropLock > 0) return
       const p = Transform.getOrNull(engine.PlayerEntity)?.position
       if (!p) return
       if (p.y >= BASE_Y - 0.5) return
-      if (!lobbyHoldContains(p.x, p.z)) return
+      if (isLobbyLayout()) {
+        if (!lobbyHoldContains(p.x, p.z)) return
+        dropLock = 1
+        teleportHome('lobby-drop')
+        return
+      }
+      // Match-start only: if they tunneled the team floor before GLB
+      // colliders arrived, snap back. Off the island, rescue is unchanged.
+      if (Date.now() >= matchHoldUntil) return
+      if (!overMatchHold(p.x, p.z)) return
       dropLock = 1
-      teleportHome('lobby-drop')
+      teleportHome('match-drop')
     })
   }
 
