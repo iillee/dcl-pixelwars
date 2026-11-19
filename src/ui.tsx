@@ -635,24 +635,19 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
   )
 }
 
-/** Personal tiles-painted total. A mute-sized pill parked to the right of
- *  mute as an overlay, so the centered eye / timer / mute cluster (and the
- *  territory bar under it) never shifts. Hidden in the lobby, summary, and
- *  standings. */
+/** Personal tiles-painted total. Parked to the right of mute as an overlay
+ *  so the centered eye / timer / mute cluster never shifts. The pill's left
+ *  edge stays put and the width grows right with the digit count. Hidden in
+ *  the lobby, summary, and standings. */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const { n } = paintedHud()
   const countText = String(n)
   const mob = isMobile()
-  const cv = UiCanvasInformation.getOrNull(engine.RootEntity)
-  const uiW = cv && cv.height > 0 ? (cv.width / cv.height) * 1080 : 1280
-  const wrapperLeft = (uiW - MATCH_TOP_W) / 2 + (MATCH_TOP_W - TOP_BTN)
-  const inset = 8
-  let width = TOP_BTN
-  let left = TOP_BTN + TOP_GAP
-  const maxRight = uiW - inset
-  if (wrapperLeft + left + width > maxRight) left = Math.max(TOP_BTN + 4, maxRight - width - wrapperLeft)
-  if (wrapperLeft + left + width > maxRight) width = Math.max(52, maxRight - wrapperLeft - left)
+  const font = mob ? 22 : 26
+  const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
+  const width = Math.max(TOP_BTN, Math.ceil(textWSafe(countText, font) + 16 + frame))
+  const left = TOP_BTN + TOP_GAP
   return (
     <UiEntity
       uiTransform={{
@@ -673,7 +668,7 @@ function PaintedHud() {
       >
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
           uiBackground={{ color: PANEL_LIGHT }}>
-          <Label value={hudBold(countText)} fontSize={mob ? 22 : 26} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+          <Label value={hudBold(countText)} fontSize={font} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
     </UiEntity>
