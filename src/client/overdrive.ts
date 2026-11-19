@@ -8,7 +8,7 @@ import { events } from '../shared/events'
 import { room } from '../shared/messages'
 import { BOT_AIM_REPORT_HZ, STAR_MS, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pvp'
 import { overdriveKnock } from '../shared/knocks'
-import { playClaimSfx, playDashSfx, playDashHitSfx } from './audio'
+import { playClaimSfx, playDashSfx, playDashHitSfx, setMusicDucked } from './audio'
 import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
 import { setBotStarFace, clearBotStarFaces } from './botFace'
 import { getBotVisualEntity, playBotKnock } from './botVisual'
@@ -53,6 +53,7 @@ function setLocal(endAt: number): void {
   active = live ? 1 : 0
   until = live ? endAt : 0
   applyLocalSpeed()
+  setMusicDucked(live)
   if (live && !was) {
     playDashSfx()
     playClaimSfx()
@@ -134,7 +135,7 @@ function ensureGlow(id: string, endAt: number): void {
   LightSource.create(light, { type: LightSource.Type.Point({}), color: Color3.create(1, 0.8, 0.25), intensity: 80, range: 7 })
   const music = engine.addEntity()
   Transform.create(music, { parent: attach, position: Vector3.create(0, 1.2, 0) })
-  AudioSource.create(music, { audioClipUrl: STAR_THEME_SRC, playing: true, loop: true, volume: THEME_VOL, global: false })
+  AudioSource.create(music, { audioClipUrl: STAR_THEME_SRC, playing: true, loop: false, volume: THEME_VOL, global: false })
   const sparks: Entity[] = []
   for (let i = 0; i < SPARK_N; i++) {
     const spark = engine.addEntity()

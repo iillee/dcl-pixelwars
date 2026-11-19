@@ -666,14 +666,14 @@ export const STAR_PICKUP_MAX_DY = 2
 export const STAR_SPAWN_CLEAR_M = 8
 export const STAR_HOVER_Y = 1.1
 export const STAR_ORB_DIAMETER = 0.6
-/** How long the star lasts once picked up (ms). */
-export const STAR_MS = 20000
+/** How long the star lasts once picked up (ms). Matches the star theme (~23.01 s). */
+export const STAR_MS = 23000
 /** Jog/run multiplier via AvatarLocomotionSettings while the star is held. */
 export const STAR_SPEED_MULT = 1.4
 /** Client cooldown ticks and server min-gaps are multiplied by this while starred. */
 export const STAR_COOLDOWN_MULT = 0.5
-/** Spatial loop on the starred player. Placeholder until a dedicated track is dropped in. */
-export const STAR_THEME_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
+/** Spatial star theme on the carrier. Played once; duration matches STAR_MS. */
+export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
 /** Horizontal reach (m) for a bump that launches an enemy. */
 export const OVERDRIVE_TOUCH_RADIUS = 2
 /** Vertical pad (m) for that bump. */

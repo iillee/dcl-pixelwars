@@ -16,7 +16,7 @@ import {
   OVERDRIVE_PAINT_RADIUS_MULT, OVERDRIVE_KNOCK, OVERDRIVE_LIFT,
   ANVIL_HIT_KNOCK, ANVIL_HIT_LIFT,
   STAR_MS, STAR_SPAWN_GRACE_MS, STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, STAR_MAX_ACTIVE,
-  STAR_PICKUP_RADIUS, STAR_PICKUP_MAX_DY, STAR_SPAWN_CLEAR_M, STAR_SPEED_MULT, STAR_COOLDOWN_MULT,
+  STAR_PICKUP_RADIUS, STAR_PICKUP_MAX_DY, STAR_SPAWN_CLEAR_M, STAR_SPEED_MULT, STAR_COOLDOWN_MULT, STAR_THEME_SRC,
 } from '../src/shared/pvp'
 import { overdriveKnock } from '../src/shared/knocks'
 
@@ -29,7 +29,7 @@ function check(name: string, ok: boolean): void {
 const t0 = 1_000_000
 let painted = 0
 
-check('STAR_MS is 20 seconds', STAR_MS === 20000)
+check('STAR_MS is 23 seconds, matching the star theme', STAR_MS === 23000)
 check('spawn window is 20-35s', STAR_SPAWN_MIN_MS === 20000 && STAR_SPAWN_MAX_MS === 35000)
 check('at most one orb', STAR_MAX_ACTIVE === 1)
 check('pickup radius is 1.2m', STAR_PICKUP_RADIUS === 1.2)
@@ -71,7 +71,7 @@ check('too high is ignored', starPickupWinner([{ id: 'p', isBot: false, distH: 0
 let hold = emptyStarHold()
 painted = 40
 hold = grantStarHold(t0, STAR_MS)
-check('grant starts a 20s star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
+check('grant starts a STAR_MS star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
 check('star expires after STAR_MS', !isStarActive(expireStarHold(hold, t0 + STAR_MS + 1), t0 + STAR_MS + 1))
 check('painted total is unchanged by grant or expire', painted === 40)
 
@@ -142,6 +142,7 @@ check('the client applies overdrive knock to the local player and to bots', odSr
 check('the STAR seconds chip is gone', !uiSrc.includes('starHudSeconds') && !/STAR \$\{/.test(uiSrc) && !uiSrc.includes('starLabel'))
 check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIFE') && odSrc.includes('SPARK_GOLD') && !odSrc.includes('SPARK_ORBIT') && odSrc.includes('fade = 1 - t'))
 check('the client starts the hold from remaining ms on its own clock', odSrc.includes('resolveStarHoldEnd(endAt, remainingMs, now)'))
+check('star theme is the 23s track, played once, no loop', STAR_THEME_SRC === 'assets/sounds/star-theme.mp3' && odSrc.includes('loop: false') && odSrc.includes('setMusicDucked(live)'))
 
 // End-to-end: expire the book, spawn a new orb, and claim it as the same player,
 // including the starHold payload the server would send and the client's resolver.

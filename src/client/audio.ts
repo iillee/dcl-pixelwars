@@ -35,6 +35,7 @@ let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
 let balloonPopSfxEnt: Entity = 0 as Entity
 let musicMuted = true
+let musicDucked = false
 let playStartMs = 0
 let pausedPositionSec = 0
 
@@ -196,23 +197,32 @@ export function playDashHitSfx(): void {
   })
 }
 
-export function toggleMusic(): void {
-  playUiClick()
+function applyMusicPlayback(): void {
   const a = AudioSource.getMutableOrNull(musicEnt) as
     { volume: number; playing: boolean; currentTime?: number } | null
   if (!a) return
-  if (!musicMuted) {
-    // Pause: bank the elapsed play time and stop.
-    pausedPositionSec += (Date.now() - playStartMs) / 1000
+  const shouldPlay = !musicMuted && !musicDucked
+  if (a.playing && !shouldPlay) {
+    if (!musicMuted) pausedPositionSec += (Date.now() - playStartMs) / 1000
     a.playing = false
-    musicMuted = true
-  } else {
-    // Resume: seek first, THEN flip playing on.
+  } else if (!a.playing && shouldPlay) {
     a.currentTime = pausedPositionSec
     a.playing = true
     playStartMs = Date.now()
-    musicMuted = false
   }
+}
+
+/** Pause the BGM (keeping mute + playback position) while the local star theme plays. */
+export function setMusicDucked(on: boolean): void {
+  if (on === musicDucked) return
+  musicDucked = on
+  applyMusicPlayback()
+}
+
+export function toggleMusic(): void {
+  playUiClick()
+  musicMuted = !musicMuted
+  applyMusicPlayback()
 }
 
 /** Paint Burst shockwave (synthesized by scripts/make-burst-sfx.py: low thump + whoosh + click).
