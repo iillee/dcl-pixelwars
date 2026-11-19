@@ -4,7 +4,7 @@
  * The file pivot is at the base; the child is offset so bob/spin turn
  * around the visual center.
  */
-import { engine, Entity, Transform, GltfContainer, LightSource, MeshRenderer, Material, Billboard, BillboardMode, MaterialTransparencyMode } from '@dcl/sdk/ecs'
+import { engine, Entity, Transform, GltfContainer, LightSource, MeshRenderer, Material, Billboard, BillboardMode, MaterialTransparencyMode, AudioSource } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { STAR_ORB_DIAMETER } from '../shared/pvp'
 
@@ -34,6 +34,8 @@ const BEACON_PULSE_SPEED = 2.5
 const BEACON_PULSE_RANGE = 0.15
 const GRADIENT_TEX = 'assets/images/star-beacon-gradient.png'
 const ALPHA_TEX = 'assets/images/star-beacon-alpha.png'
+export const STAR_IDLE_SRC = 'assets/sounds/star-idle.mp3'
+const STAR_IDLE_VOL = 1
 
 type Rec = { root: Entity; spin: Entity; inner: Entity; outer: Entity; parts: Entity[]; baseY: number; clock: number }
 const orbs = new Map<number, Rec>()
@@ -41,7 +43,15 @@ let wired = false
 
 export function hasStarOrbs(): boolean { return orbs.size > 0 }
 
+function stopIdle(rec: Rec): void {
+  for (const e of rec.parts) {
+    const src = AudioSource.getMutableOrNull(e)
+    if (src) src.playing = false
+  }
+}
+
 function removeRec(rec: Rec): void {
+  stopIdle(rec)
   for (const e of rec.parts) {
     try { engine.removeEntity(e) } catch (err) { /* already gone */ }
   }
@@ -131,6 +141,16 @@ export function showStarOrb(i: number, x: number, y: number, z: number): void {
   const inner = makeBeacon(root, true)
   const outer = makeBeacon(root, false)
   parts.push(inner, outer)
+  const hum = engine.addEntity()
+  Transform.create(hum, { parent: root })
+  AudioSource.create(hum, {
+    audioClipUrl: STAR_IDLE_SRC,
+    playing: true,
+    loop: true,
+    volume: STAR_IDLE_VOL,
+    global: false,
+  })
+  parts.push(hum)
   orbs.set(i, { root, spin, inner, outer, parts, baseY: y, clock: 0 })
 }
 
