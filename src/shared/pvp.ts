@@ -313,7 +313,7 @@ export const BURST_TILE_DOWN_S = 0.2
 export const BURST_TILE_SIZE = 1.9
 export const BURST_TILE_THICK = 0.3
 /** Pooled slab entities shared by all bursts (cap; extra cells are skipped). */
-export const BURST_TILE_POOL = 280
+export const BURST_TILE_POOL = 180
 /** Dash (lunge) trail: the 3×3 paint swath around the dashing avatar pops (edges first), plus cells
  *  straight ahead (DASH_TILE_AHEAD) so the bump reaches the front paint. Smaller than Burst, but the
  *  rise/settle is long enough that the forward tiles are still in the wave (client/burstRipple.ts dashPop). */
@@ -386,41 +386,6 @@ export const LUNGE_SLASH_FLIP = false
 
 /** Debug overlay (client): hitbox spheres, lunge dir, hit marks, knock dir, state log. */
 export const LUNGE_DEBUG = false
-
-// ─── Hold-to-charge (Lunge + Burst) ─────────────────────────────────
-/** Hold the action this long, while stationary, to charge. A tap fires the normal action. */
-export const CHARGE_MS = 3000
-/** Charged lunge impulse and target distance multiplier. */
-export const DASH_CHARGE_MULT = 2
-/** Charged Burst paint-radius multiplier, in cells. 1.6 × 5 = 8 cells (17 m knock).
- *  2× would be 10 cells / 21 m, which is huge, so the base (5 / 11 m) is left alone. */
-export const BURST_CHARGE_MULT = 1.6
-/** Horizontal speed (m/s) above this, mid-hold, fires the uncharged action immediately.
- *  Below walk (1.5). Idle jitter stays under this. */
-export const CHARGE_STILL_SPEED = 1.0
-/** Server: max horizontal metres from charge-start to fire for a charged accept. */
-export const CHARGE_STILL_M = 1.2
-/** Server: allow this much less than CHARGE_MS to cover send latency. */
-export const CHARGE_SLACK_MS = 200
-
-export function burstPaintRadiusCells(charged: boolean): number {
-  const r = charged ? BURST_PAINT_RADIUS_CELLS * BURST_CHARGE_MULT : BURST_PAINT_RADIUS_CELLS
-  return Math.max(1, Math.round(r))
-}
-/** Knock / shockwave radius (m) for a charged or normal Burst. Same formula as BURST_RADIUS. */
-export function burstRadiusM(charged: boolean): number {
-  return burstPaintRadiusCells(charged) * 2 + 1
-}
-export function lungeImpulseOf(charged: boolean): number {
-  return charged ? LUNGE_IMPULSE * DASH_CHARGE_MULT : LUNGE_IMPULSE
-}
-/** True when a server-timestamped hold is long enough and close enough to the start feet. */
-export function chargeAccepted(heldMs: number, distM: number, wantCharged: boolean): boolean {
-  if (!wantCharged) return false
-  if (heldMs < CHARGE_MS - CHARGE_SLACK_MS) return false
-  if (distM > CHARGE_STILL_M) return false
-  return true
-}
 
 // ─── A. Attacker movement ───────────────────────────────────────────
 /** Active lunge time (s). Hits only count in this window (+ grace). */

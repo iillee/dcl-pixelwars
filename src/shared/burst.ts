@@ -35,17 +35,17 @@ export function burstPressIsAir(lift: number, vy: number, paintGrounded = false)
 /** Ground shockwave vs a bot's server feet. The cylinder is the same one players use.
  *  A bot standing on a cell this burst paints is also hit: the footprint already stayed
  *  on one level, and a ramp run can put those feet just past BURST_HIT_MAX_DY. */
-export function shockwaveHitsBot(origin: V3, feet: V3, onFootprint: boolean, radius = BURST_RADIUS): boolean {
-  if (inBurst(origin, feet, radius + 1)) return true
+export function shockwaveHitsBot(origin: V3, feet: V3, onFootprint: boolean): boolean {
+  if (inBurst(origin, feet, BURST_RADIUS + 1)) return true
   if (!onFootprint) return false
-  return Math.hypot(feet.x - origin.x, feet.z - origin.z) <= radius + 2
+  return Math.hypot(feet.x - origin.x, feet.z - origin.z) <= BURST_RADIUS + 2
     && Math.abs(feet.y - origin.y) <= BURST_HIT_MAX_DY + 2.5
 }
 
 /** Client reported a bot hit from the rendered feet. Server feet can lag that draw
  *  (snapshot interpolation), so the same slack a lunge uses is allowed. Air keeps
  *  the "attacker is above" gate so a sideways report is not a spike. */
-export function burstBotInRange(origin: V3, feet: V3, air: boolean, radius = BURST_RADIUS): boolean {
+export function burstBotInRange(origin: V3, feet: V3, air: boolean): boolean {
   if (air) {
     return inAirSpike(
       origin, feet,
@@ -54,7 +54,7 @@ export function burstBotInRange(origin: V3, feet: V3, air: boolean, radius = BUR
       Math.max(0.35, AIR_SPIKE_MIN_ABOVE - 0.5),
     )
   }
-  return inBurst(origin, feet, radius + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 2)
+  return inBurst(origin, feet, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 2)
 }
 
 /** Air spike volume: attacker is clearly above the target, inside a short vertical cylinder.
@@ -151,20 +151,14 @@ export class BurstLedger {
     fx: number; fz: number; landed: boolean; landAt: number
     ox: number; oy: number; oz: number; hasOrigin: boolean
     cells: string[]
-    chg: number
   }>()
   /** `air`: 0 ground radial (painted on burstUse), 1 airborne spike (painted once on landing).
    *  `fx, fz` is the press facing, kept for the landing shockwave's overlap fallback. */
-  start(from: string, id: number, now: number, air = 0, fx = 0, fz = 1, chg = 0): void {
+  start(from: string, id: number, now: number, air = 0, fx = 0, fz = 1): void {
     this.last.set(from, {
       id, at: now, hits: new Set(), air, painted: false, fx, fz, landed: false, landAt: now,
-      ox: 0, oy: 0, oz: 0, hasOrigin: false, cells: [], chg: chg ? 1 : 0,
+      ox: 0, oy: 0, oz: 0, hasOrigin: false, cells: [],
     })
-  }
-  /** 1 when the server accepted this burst as charged. */
-  charged(from: string, id: number): boolean {
-    const l = this.last.get(from)
-    return !!l && l.id === id && l.chg === 1
   }
   /** Feet the shockwave is judged from. Ground press, then the landing sample once that opens. */
   place(from: string, id: number, o: V3): void {
