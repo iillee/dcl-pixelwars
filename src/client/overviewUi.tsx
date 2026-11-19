@@ -10,6 +10,7 @@
 
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
+import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
 import { playUiClick } from './audio'
 import { KeyHint, RADIUS, BORDER_W, GOLD_BORDER, SLOT_BG, PANEL_LIGHT, TILE_RING } from './abilityHotbar'
 import {
@@ -67,12 +68,12 @@ export function TileButton(props: { id: string; onPress: () => void; children?: 
 export const TOP_BTN = SMALL
 export const TOP_GAP = 8
 
-function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void; keyLabel?: string }) {
+function SmallButton(props: { id: string; kind: 'in' | 'out' | 'rot'; enabled: boolean; onPress: () => void; keyLabel?: string; stack?: boolean }) {
   return (
     <UiEntity
       key={props.id}
       uiTransform={{
-        width: SMALL, height: SMALL, margin: { right: ROW_GAP }, borderRadius: RADIUS, pointerFilter: 'block',
+        width: SMALL, height: SMALL, margin: props.stack ? { bottom: ROW_GAP } : { right: ROW_GAP }, borderRadius: RADIUS, pointerFilter: 'block',
         // Hotbar key-tile frame: light rim, dark ring, PANEL_LIGHT fill.
         borderWidth: BORDER_W, borderColor: GOLD_BORDER, padding: TILE_RING,
       }}
@@ -118,31 +119,36 @@ export function OverviewEyeInline() {
   )
 }
 
-/** Overview buttons in a row to the LEFT of the eye, away from the timer.
- *  `inline`: in-flow sibling so the top bar recenters and the row stays on screen
- *  (portrait mobile included). Otherwise absolutely parked to the left of the eye slot. */
+/** Overview buttons parked to the LEFT of the eye as an overlay. The eye /
+ *  timer / mute cluster does not shift. On a narrow canvas the three buttons
+ *  stack so they stay fully on screen. */
 export function OverviewRow(props: { desktop?: boolean; besideEye?: boolean; inline?: boolean } = {}) {
   if (!isOverviewActive()) return null
-  const transform = props.inline
-    ? { flexDirection: 'row' as const, alignItems: 'flex-start' as const, margin: { right: ROW_GAP }, pointerFilter: 'none' as const, flexShrink: 0 }
-    : {
-        positionType: 'absolute' as const,
-        position: props.desktop
-          ? { top: 0, right: props.besideEye ? SMALL : 200 + TOP_GAP + SMALL }
-          : { top: 0, right: SMALL + ROW_GAP },
-        flexDirection: 'row' as const,
-        alignItems: 'flex-start' as const,
-        pointerFilter: 'none' as const,
-      }
+  const c = UiCanvasInformation.getOrNull(engine.RootEntity)
+  const uiW = c && c.height > 0 ? (c.width / c.height) * 1080 : 1280
+  const clusterW = SMALL + TOP_GAP + 200 + TOP_GAP + SMALL
+  const eyeLeft = (uiW - clusterW) / 2
+  const rowW = SMALL * 3 + ROW_GAP * 2
+  const stack = eyeLeft < rowW + ROW_GAP + 8
+  const usedW = stack ? SMALL : rowW
+  let right = SMALL + ROW_GAP
+  const rowLeft = eyeLeft - right + SMALL - usedW
+  if (rowLeft < 8) right = Math.max(0, eyeLeft + SMALL - usedW - 8)
   return (
     <UiEntity
       key="ui_overview_row"
-      uiTransform={transform}
+      uiTransform={{
+        positionType: 'absolute',
+        position: { top: 0, right },
+        flexDirection: stack ? 'column' : 'row',
+        alignItems: 'flex-end',
+        pointerFilter: 'none',
+      }}
     >
       {/* Open left of the eye on every layout: + − rotate, rotate next to the eye. */}
-      <SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} keyLabel={props.desktop ? '1' : undefined} />
-      <SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} keyLabel={props.desktop ? '2' : undefined} />
-      <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} keyLabel={props.desktop ? '3' : undefined} />
+      <SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} keyLabel={props.desktop ? '1' : undefined} stack={stack} />
+      <SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} keyLabel={props.desktop ? '2' : undefined} stack={stack} />
+      <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} keyLabel={props.desktop ? '3' : undefined} stack={stack} />
     </UiEntity>
   )
 }

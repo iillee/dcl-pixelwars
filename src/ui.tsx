@@ -141,6 +141,11 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const mix = (c: Color4, t: Color4, k: number) => Color4.create(lerp(c.r, t.r, k), lerp(c.g, t.g, k), lerp(c.b, t.b, k), 1)
 const withA = (c: Color4, a: number) => Color4.create(c.r, c.g, c.b, c.a * a)
 
+/** Same weight as the desktop Dash/Burst tip labels in abilityHotbar.tsx. */
+function hudBold(text: string): string {
+  return '<b>' + text + '</b>'
+}
+
 /** Canvas size in UI units (falls back to 1280×720 before the renderer reports it). */
 function canvasSize(): { w: number; h: number } {
   const c = UiCanvasInformation.getOrNull(engine.RootEntity)
@@ -669,11 +674,11 @@ function PaintedHud() {
       >
         <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
           uiBackground={{ color: PANEL_LIGHT }}>
-          <Label value={countText} fontSize={mob ? 22 : 26} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+          <Label value={hudBold(countText)} fontSize={mob ? 22 : 26} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
       {plusText !== '' && (
-        <Label value={plusText} fontSize={mob ? 14 : 16} color={SUMMARY_MVP} textAlign="middle-center" textWrap="nowrap"
+        <Label value={hudBold(plusText)} fontSize={mob ? 14 : 16} color={SUMMARY_MVP} font="sans-serif" textAlign="middle-center" textWrap="nowrap"
           uiTransform={{ positionType: 'absolute', position: { top: -8, right: 2 }, height: 18, pointerFilter: 'none' }} />
       )}
     </UiEntity>
@@ -786,7 +791,7 @@ export const uiMenu = () => (
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
       const lobbyFont = isMobile() ? 16 : 22
       // One fixed width for both lobby states, snug around the longer line plus a little padding.
-      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 10', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 10', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
       return (
         <UiEntity
           uiTransform={{
@@ -796,13 +801,13 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
-            {/* Mobile + desktop, lobby + match: eye | timer | mute. View controls sit in-flow
-                to the left of the eye on mobile so they stay on screen and never slide under the clock. */}
+            {/* Mobile + desktop, lobby + match: eye | timer | mute. View controls overlay to
+                the left of the eye so the top bar never shifts. */}
             {isMobile() ? (
             lobby ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
-              <OverviewRow inline />
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { right: TOP_GAP } }}>
+                <OverviewRow />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
@@ -815,7 +820,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 32 }} />
+                  <Label value={hudBold(hudClockText(secs))} fontSize={16} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 32 }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
@@ -827,8 +832,8 @@ export const uiMenu = () => (
             </UiEntity>
             ) : (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-              <OverviewRow inline />
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
+                <OverviewRow />
                 <OverviewEye />
               </UiEntity>
               <UiEntity
@@ -840,7 +845,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }}>
-                  <Label value={hudClockText(secs)} fontSize={36} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+                  <Label value={hudBold(hudClockText(secs))} fontSize={36} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
@@ -869,7 +874,7 @@ export const uiMenu = () => (
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-                  <Label value={hudClockText(secs)} fontSize={22} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 36 }} />
+                  <Label value={hudBold(hudClockText(secs))} fontSize={22} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 36 }} />
                 </UiEntity>
               </UiEntity>
               <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
@@ -894,7 +899,7 @@ export const uiMenu = () => (
               >
                 <UiEntity uiTransform={{ positionType: 'absolute', position: { top: CLOCK_RING, bottom: CLOCK_RING, left: CLOCK_RING, right: CLOCK_RING }, borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, pointerFilter: 'none' }}
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
-                <Label value={hudClockText(secs)} fontSize={42} color={SUMMARY_INK} textAlign="middle-center" />
+                <Label value={hudBold(hudClockText(secs))} fontSize={42} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" />
               </UiEntity>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
                 <TileButton id="ui_match_mute" onPress={toggleMusic}>
