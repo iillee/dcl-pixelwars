@@ -14,8 +14,8 @@ const FLOOR_UP = 0.6
 
 export type Feet = { x: number; y: number; z: number }
 
-/** 3x3 walkable stamp around a graph cell, same footprint as a player paintTick. */
-export function stampAround(graph: WalkableGraph, stepId: string): string[] {
+/** Walkable stamp around a graph cell. radiusCells 1 is the default 3x3; 2 is 5x5. */
+export function stampAround(graph: WalkableGraph, stepId: string, radiusCells = 1): string[] {
   const colonIdx = stepId.indexOf(':')
   if (colonIdx < 0) return graph.nodes.has(stepId) ? [stepId] : []
   const prefix = stepId.slice(0, colonIdx + 1)
@@ -23,9 +23,10 @@ export function stampAround(graph: WalkableGraph, stepId: string): string[] {
   const col = parseInt(colStr, 10)
   const row = parseInt(rowStr, 10)
   if (!Number.isFinite(col) || !Number.isFinite(row)) return []
+  const r = Math.max(0, Math.floor(radiusCells))
   const stamp: string[] = []
-  for (let dc = -1; dc <= 1; dc++) {
-    for (let dr = -1; dr <= 1; dr++) {
+  for (let dc = -r; dc <= r; dc++) {
+    for (let dr = -r; dr <= r; dr++) {
       const nid = `${prefix}${col + dc},${row + dr}`
       if (graph.nodes.has(nid)) stamp.push(nid)
     }
@@ -48,7 +49,7 @@ export function cellAt(graph: WalkableGraph, p: Feet, maxD = 1.25): string | nul
  * 3x3 stamps along a movement segment. Samples only count when the feet are
  * on a walkable floor, so a dash that leaves the arena stops painting.
  */
-export function cellsAlongPath(graph: WalkableGraph, rampTiles: Placed[], from: Feet, to: Feet): string[] {
+export function cellsAlongPath(graph: WalkableGraph, rampTiles: Placed[], from: Feet, to: Feet, radiusCells = 1): string[] {
   const out = new Set<string>()
   const dist = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z)
   const steps = Math.max(1, Math.ceil(dist / SAMPLE_M))
@@ -62,7 +63,7 @@ export function cellsAlongPath(graph: WalkableGraph, rampTiles: Placed[], from: 
     if (graphFloorAt(graph, rampTiles, p.x, p.z, p.y, 0.99, FLOOR_UP) === null) continue
     const id = cellAt(graph, p)
     if (!id) continue
-    for (const c of stampAround(graph, id)) out.add(c)
+    for (const c of stampAround(graph, id, radiusCells)) out.add(c)
   }
   return [...out]
 }

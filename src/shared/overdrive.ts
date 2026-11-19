@@ -60,7 +60,6 @@ export function overdriveCanTouch(opts: {
   if (!opts.attackerActive) return false
   if (opts.victimImmune) return false
   if (!opts.attacker || !opts.victim || opts.attacker === opts.victim) return false
-  if (opts.attacker.startsWith('bot:')) return false
   if (opts.attackerTeam === opts.victimTeam) return false
   if (opts.distH > OVERDRIVE_TOUCH_RADIUS || opts.distY > OVERDRIVE_TOUCH_MAX_DY) return false
   if (opts.now - opts.lastHitAt < OVERDRIVE_HIT_WINDOW_MS) return false
@@ -109,9 +108,9 @@ export function pickStarSpawn(cells: readonly StarCell[], avoid: readonly { x: n
   return pool[Math.floor(rand() * pool.length)]
 }
 
-/** First human in range wins. Closest, then lower id, so a tie is stable. Bots never win. */
+/** First in range wins. Closest, then lower id, so a tie is stable. Bots and humans both count. */
 export function starPickupWinner(touches: readonly { id: string; isBot: boolean; distH: number; distY: number }[], radius = STAR_PICKUP_RADIUS, maxDy = STAR_PICKUP_MAX_DY): string | null {
-  const ok = touches.filter(t => !t.isBot && !!t.id && t.distH <= radius && t.distY <= maxDy)
+  const ok = touches.filter(t => !!t.id && t.distH <= radius && t.distY <= maxDy)
   if (!ok.length) return null
   const ranked = ok.slice().sort((a, b) => a.distH - b.distH || a.id.localeCompare(b.id))
   return ranked[0].id

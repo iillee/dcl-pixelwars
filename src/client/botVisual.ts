@@ -838,6 +838,11 @@ export function initBotVisual(): void {
   })
 }
 
+/** The drawn root entity for a bot, or null if it is not on screen. */
+export function getBotVisualEntity(id: number): Entity | null {
+  return bots.get(id)?.root ?? null
+}
+
 /** Where each bot is drawn right now (id, smoothed feet, facing, and the body entity). */
 export function getBotRenderPositions(): Array<{ id: number; team: number; pos: Vector3; yawDeg: number; entity: Entity }> {
   const out: Array<{ id: number; team: number; pos: Vector3; yawDeg: number; entity: Entity }> = []

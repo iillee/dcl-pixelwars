@@ -1,6 +1,6 @@
 /**
  * overdriveBook.ts — server book for star pickups and the active holder.
- * Bots never pick up or receive the star.
+ * Humans and bots can both hold the star.
  */
 import { STAR_MS } from '../shared/pvp'
 import {
@@ -21,7 +21,7 @@ export class OverdriveBook {
   }
 
   grant(id: string, now: number): number {
-    if (!id || id.startsWith('bot:')) return 0
+    if (!id) return 0
     if (isStarActive(this.get(id), now)) return this.get(id).activeUntil
     const hold = grantStarHold(now, STAR_MS)
     this.holds.set(keyOf(id), hold)
@@ -29,14 +29,14 @@ export class OverdriveBook {
   }
 
   onDeath(id: string, now = Date.now()): boolean {
-    if (!id || id.startsWith('bot:')) return false
+    if (!id) return false
     const was = isStarActive(this.get(id), now)
     this.holds.set(keyOf(id), emptyStarHold())
     return was
   }
 
   isActive(id: string, now: number): boolean {
-    if (!id || id.startsWith('bot:')) return false
+    if (!id) return false
     return isStarActive(this.get(id), now)
   }
 

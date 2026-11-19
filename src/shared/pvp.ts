@@ -656,7 +656,7 @@ export const ANVIL_HIT_REPORT_SLACK = 0.8
 
 // ═══ Star pickup ════════════════════════════════════════════════════
 // One orb on the floor at a time, after a short grace at round start.
-// The first human to touch it gets the star. Bots never pick it up.
+// The first player or bot to touch it gets the star.
 export const STAR_SPAWN_GRACE_MS = 8000
 export const STAR_SPAWN_MIN_MS = 20000
 export const STAR_SPAWN_MAX_MS = 35000

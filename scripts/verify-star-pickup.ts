@@ -55,11 +55,13 @@ check('spawn returns null when every cell is blocked', pickStarSpawn(cells, [{ x
 const close = { id: 'p-close', isBot: false, distH: 0.4, distY: 0.2 }
 const far = { id: 'p-far', isBot: false, distH: 1.0, distY: 0.2 }
 const bot = { id: 'bot:1', isBot: true, distH: 0.1, distY: 0 }
-check('closest human wins the pickup', starPickupWinner([far, close, bot]) === 'p-close')
+check('closest contestant wins, even if it is a bot', starPickupWinner([far, close, bot]) === 'bot:1')
+check('a closer human still beats a farther bot', starPickupWinner([close, { ...bot, distH: 1.1 }]) === 'p-close')
 const tieA = { id: 'aaa', isBot: false, distH: 0.5, distY: 0 }
 const tieB = { id: 'bbb', isBot: false, distH: 0.5, distY: 0 }
 check('ties break by lower id', starPickupWinner([tieB, tieA]) === 'aaa')
-check('bots never win a pickup', starPickupWinner([bot]) === null)
+check('bots can win a pickup', starPickupWinner([bot]) === 'bot:1')
+check('equal distance still breaks by lower id across bot and human', starPickupWinner([bot, { id: 'p-same', isBot: false, distH: 0.1, distY: 0 }]) === 'bot:1')
 check('out of range is ignored', starPickupWinner([{ id: 'p', isBot: false, distH: STAR_PICKUP_RADIUS + 0.01, distY: 0 }]) === null)
 check('too high is ignored', starPickupWinner([{ id: 'p', isBot: false, distH: 0.2, distY: STAR_PICKUP_MAX_DY + 0.01 }]) === null)
 
@@ -71,7 +73,9 @@ check('star expires after STAR_MS', !isStarActive(expireStarHold(hold, t0 + STAR
 check('painted total is unchanged by grant or expire', painted === 40)
 
 const book = new OverdriveBook()
-check('bots cannot be granted the star', book.grant('bot:3', t0) === 0 && !book.isActive('bot:3', t0 + 1))
+const botUntil = book.grant('bot:3', t0)
+check('book grants a bot the star', botUntil === t0 + STAR_MS && book.isActive('bot:3', t0 + 1))
+check('bot death ends the star', book.onDeath('bot:3', t0 + 20) && !book.isActive('bot:3', t0 + 20))
 const until = book.grant('p1', t0)
 check('book grants a human the star', until === t0 + STAR_MS && book.isActive('p1', t0 + 1))
 check('book will not grant a second star to the same holder', book.grant('p1', t0 + 10) === until)
@@ -95,6 +99,7 @@ check('touch too high is not', !overdriveCanTouch({ ...touchBase, distY: OVERDRI
 check('teammates are not launched', !overdriveCanTouch({ ...touchBase, victimTeam: 1 }))
 check('self is not launched', !overdriveCanTouch({ ...touchBase, victim: 'a' }))
 check('inactive star does not launch', !overdriveCanTouch({ ...touchBase, attackerActive: false }))
+check('a starred bot can launch a human', overdriveCanTouch({ ...touchBase, attacker: 'bot:3' }))
 check('immune victim is not launched', !overdriveCanTouch({ ...touchBase, victimImmune: true }))
 check('same victim is not relaunched inside the window', !overdriveCanTouch({ ...touchBase, lastHitAt: t0 - OVERDRIVE_HIT_WINDOW_MS + 1 }))
 check('same victim can be launched after the window', overdriveCanTouch({ ...touchBase, lastHitAt: t0 - OVERDRIVE_HIT_WINDOW_MS }))

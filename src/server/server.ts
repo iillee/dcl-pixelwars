@@ -121,6 +121,11 @@ export async function setupServer(): Promise<void> {
   let starRoundStart = 0
   let starNextAt = 0
   const overdriveFeet = (id: string, now: number): { x: number; y: number; z: number } | null => {
+    if (id.startsWith('bot:')) {
+      const bid = parseInt(id.slice(4), 10)
+      const b = getBotHitPoints().find(p => p.id === bid)
+      return b ? { x: b.x, y: b.y, z: b.z } : null
+    }
     const f = botAim.get(id.toLowerCase())
     if (!f || !overdriveFeetFresh(f.t, now)) return null
     return f
@@ -180,6 +185,10 @@ export async function setupServer(): Promise<void> {
         if (!ft) continue
         touches.push({ id: vid, isBot: false, distH: Math.hypot(ft.x - orb.x, ft.z - orb.z), distY: Math.abs(ft.y - orb.y) })
       }
+      for (const b of getBotHitPoints()) {
+        const vid = 'bot:' + b.id
+        touches.push({ id: vid, isBot: true, distH: Math.hypot(b.x - orb.x, b.z - orb.z), distY: Math.abs(b.y - orb.y) })
+      }
       const winner = starPickupWinner(touches)
       if (!winner) continue
       overdrive.removeOrb(orb.i)
@@ -203,6 +212,12 @@ export async function setupServer(): Promise<void> {
   }
   const tickOverdrive = (now: number): void => {
     for (const id of overdrive.expire(now)) endStar(id, now)
+    for (const { id } of overdrive.actives(now)) {
+      if (!id.startsWith('bot:')) continue
+      const bid = parseInt(id.slice(4), 10)
+      if (getBotPositions().some(b => b.id === bid)) continue
+      if (overdrive.onDeath(id, now)) endStar(id, now)
+    }
     tryPickupStars(now)
     trySpawnStar(now)
     if (!matchLive()) return
@@ -310,6 +325,7 @@ export async function setupServer(): Promise<void> {
       const who = `bot:${id}`
       const by = noteFell(who)
       onBalloonFall(who)
+      if (overdrive.onDeath(who)) endStar(who)
       room.send('rescueStart', { who, x: at.x, y: at.y, z: at.z, bx: base.x, by: base.y, bz: base.z, mobile: 1, ...RESCUE_TIMES })
       console.log(`[Server] ghost ${id} fell${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
     },
@@ -319,6 +335,8 @@ export async function setupServer(): Promise<void> {
     },
     // Combat: bots attack with players' broadcasts; each victim's client judges
     // the hit on its own screen and knocks itself, as against a player.
+    starHold: (id) => overdrive.isActive('bot:' + id, Date.now()),
+    starOrbs: () => overdrive.liveOrbs(),
     humans: () => {
       const now = Date.now()
       const out: Array<{ id: string; team: number; x: number; y: number; z: number }> = []
@@ -1177,7 +1195,7 @@ export async function setupServer(): Promise<void> {
       }
       victimId = victim.userId
     }
-    if (!victimId.startsWith('bot:') && overdrive.isActive(victimId, Date.now())) return
+    if (overdrive.isActive(victimId, Date.now())) return
     const verdict = lunges.hit(from, id, victimId, Date.now())
     if (verdict !== 'ok') {
       console.log(`[Server] lungeHit ${from.slice(0, 8)} #${id} rejected: ${verdict}`)
@@ -1510,6 +1528,7 @@ export async function setupServer(): Promise<void> {
         return
       }
       const key = `bot:${bid}`
+      if (overdrive.isActive(key, Date.now())) return
       // Claim before the knock so a spike and the landing shockwave cannot both land.
       if (bursts.hit(from, id, key, Date.now()) !== 'ok') return
       const ux = dx / len, uz = dz / len

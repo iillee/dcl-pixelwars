@@ -10,7 +10,7 @@ import { BOT_AIM_REPORT_HZ, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pv
 import { overdriveKnock } from '../shared/knocks'
 import { playClaimSfx, playDashSfx, playDashHitSfx } from './audio'
 import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
-import { playBotKnock } from './botVisual'
+import { getBotVisualEntity, playBotKnock } from './botVisual'
 import { setStarSpeedMult } from './speed'
 import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
 
@@ -59,12 +59,25 @@ function setLocal(endAt: number): void {
   }
 }
 
-function findAvatar(id: string): { entity: Entity; avatarId: string | null } | null {
+function botIdOf(id: string): number | null {
+  if (!id.startsWith('bot:')) return null
+  const n = parseInt(id.slice(4), 10)
+  return Number.isFinite(n) ? n : null
+}
+
+type StarAnchor = { kind: 'avatar'; avatarId: string | null } | { kind: 'bot'; entity: Entity }
+
+function findStarAnchor(id: string): StarAnchor | null {
+  const bid = botIdOf(id)
+  if (bid !== null) {
+    const entity = getBotVisualEntity(bid)
+    return entity ? { kind: 'bot', entity } : null
+  }
   const want = id.toLowerCase()
   const me = myAddress()
-  if (me && want === me) return { entity: engine.PlayerEntity, avatarId: null }
+  if (me && want === me) return { kind: 'avatar', avatarId: null }
   for (const [entity, pid] of engine.getEntitiesWith(PlayerIdentityData)) {
-    if ((pid.address || '').toLowerCase() === want) return { entity, avatarId: pid.address }
+    if ((pid.address || '').toLowerCase() === want) return { kind: 'avatar', avatarId: pid.address }
   }
   return null
 }
@@ -97,12 +110,27 @@ function sparkMat(pulse: number) {
 
 function ensureGlow(id: string, endAt: number): void {
   let rec = glows.get(id)
-  if (rec) { rec.until = endAt; return }
-  const who = findAvatar(id)
+  if (rec) {
+    rec.until = endAt
+    const bid = botIdOf(id)
+    if (bid !== null) {
+      const ent = getBotVisualEntity(bid)
+      const t = Transform.getOrNull(rec.attach)
+      if (ent && t && t.parent === ent) return
+      dropGlow(id)
+      rec = undefined as unknown as GlowRec
+    } else return
+  }
+  const who = findStarAnchor(id)
   if (!who) return
   const attach = engine.addEntity()
-  if (who.avatarId) AvatarAttach.create(attach, { avatarId: who.avatarId, anchorPointId: AAPT_POSITION })
-  else AvatarAttach.create(attach, { anchorPointId: AAPT_POSITION })
+  if (who.kind === 'bot') {
+    Transform.create(attach, { parent: who.entity })
+  } else if (who.avatarId) {
+    AvatarAttach.create(attach, { avatarId: who.avatarId, anchorPointId: AAPT_POSITION })
+  } else {
+    AvatarAttach.create(attach, { anchorPointId: AAPT_POSITION })
+  }
   const ball = engine.addEntity()
   Transform.create(ball, { parent: attach, position: Vector3.create(0, GLOW_Y, 0), scale: Vector3.create(GLOW_SCALE, GLOW_SCALE, GLOW_SCALE) })
   MeshRenderer.setSphere(ball)

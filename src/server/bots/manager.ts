@@ -34,6 +34,7 @@ import { graphFloorAt } from '../../shared/anvilSim'
 import { planBotLungeAim } from '../../shared/botDash'
 import { pickCombatTarget, type CombatCandidate } from '../../shared/botCombat'
 import { cellsAlongPath, stampAround } from '../../shared/botPaint'
+import { overdrivePaintRadiusCells } from '../../shared/overdrive'
 import { KnockSpec, lungeKnock, burstKnock, spikeKnock } from '../../shared/knocks'
 import { inBurst, inAirSpike, burstFootprint, burstDir } from '../../shared/burst'
 import {
@@ -44,6 +45,7 @@ import {
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, SERVER_LUNGE_BOT_SLACK,
   botRecoveryEnabled, RoundFormat,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
+  STAR_SPEED_MULT, STAR_COOLDOWN_MULT,
 } from '../../shared/pvp'
 import { PLAYING_TEAMS, addTeamCount, emptyTeamCounts, pvpBotFill, teamCountsTotal, teamName as sharedTeamName, type TeamCounts } from '../../shared/team'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
@@ -111,6 +113,10 @@ export interface ManagerDeps {
   paintedCells?: () => Array<{ id: string; team: number }>
   /** Live round format: recovery (jump / double / glide-home) is on in every mode. */
   format?: () => RoundFormat
+  /** True while this bot is holding the star. */
+  starHold?: (id: number) => boolean
+  /** Live star orbs, so a nearby bot can steer toward one. */
+  starOrbs?: () => Array<{ x: number; y: number; z: number; cell: string }>
 }
 
 let deps: ManagerDeps | null = null
@@ -528,7 +534,7 @@ export function tickBots(dtSec: number): void {
     fillSense(b)
     fight(b, dtSec)
     if (b.body.ownDashPaint()) {
-      const cells = cellsAlongPath(graph, rampTiles, prev, b.body.pos)
+      const cells = cellsAlongPath(graph, rampTiles, prev, b.body.pos, overdrivePaintRadiusCells(!!deps?.starHold?.(b.botId)))
       const at = cellNear(b.body.pos) ?? cells[0] ?? b.currentCell
       for (const nid of orderNearest(cells, at)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
@@ -563,7 +569,7 @@ export function tickBots(dtSec: number): void {
       // Paint the full 3x3 stamp around the stepped cell (matches human
       // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
       // off-corridor positions are filtered.
-      const stamp = stampAround(graph, stepId)
+      const stamp = stampAround(graph, stepId, overdrivePaintRadiusCells(!!deps?.starHold?.(b.botId)))
       for (const nid of orderNearest(stamp, stepId)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
   }
@@ -706,9 +712,31 @@ function separate(b: LiveBot, pos: V3): V3 {
   return { x: nx, y: pos.y, z: nz }
 }
 
+const STAR_SEEK_M = 24
+function botStarred(id: number): boolean { return !!deps?.starHold?.(id) }
+function seekStar(b: LiveBot): boolean {
+  if (b.body.inRescue() || b.combat.windup || b.combat.dive || b.combat.sweep) return false
+  const orbs = deps?.starOrbs?.() ?? []
+  if (!orbs.length) return false
+  const p = b.body.pos
+  let best: { cell: string } | null = null
+  let bestD = STAR_SEEK_M
+  for (const o of orbs) {
+    if (Math.abs(o.y - p.y) > 4) continue
+    const d = Math.hypot(o.x - p.x, o.z - p.z)
+    if (d < bestD) { bestD = d; best = o }
+  }
+  if (!best || best.cell === b.currentCell) return false
+  if (b.goalOf() === best.cell) return true
+  b.chase(best.cell)
+  return true
+}
 function fight(b: LiveBot, dt: number): void {
   const c = b.combat
-  c.lungeCd -= dt; c.burstCd -= dt; c.chaseLeft -= dt; c.think -= dt
+  const starred = botStarred(b.botId)
+  b.setStarSpeedMul(starred ? STAR_SPEED_MULT : 1)
+  const cdRate = starred && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1
+  c.lungeCd -= dt * cdRate; c.burstCd -= dt * cdRate; c.chaseLeft -= dt; c.think -= dt
   const humans = deps?.humans?.() ?? []
   if (c.sweep) {
     c.sweep.left -= dt
@@ -755,6 +783,8 @@ function fight(b: LiveBot, dt: number): void {
   const best = tgt ? Math.hypot(tgt.x - p.x, tgt.z - p.z) : engage
   c.chaseHuman = tgt ? tgt.id : null
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
+  const melee = !!tgt && (best <= BOT_LUNGE_RANGE || inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC))
+  if (!melee && seekStar(b)) return
   if (!tgt) {
     // Nobody to fight: Burst for paint, like a player does, where most of the footprint isn't ours yet.
     if (!can.burst || c.burstCd > 0 || !deps) return
