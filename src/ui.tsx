@@ -693,10 +693,9 @@ export const uiMenu = () => (
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
-      const lobbyClock = hudClockText(secs)
       const lobbyFont = isMobile() ? 16 : 22
-      // Fit the box to the current line (CHOOSE A TEAM or PIXELWARS IS STARTING IN N) with a little side padding.
-      const lobbyPillW = Math.ceil(textWSafe(lobbyClock, lobbyFont) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+      // One fixed width for both lobby states, snug around the longer line plus a little padding.
+      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 10', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
       return (
         <UiEntity
           uiTransform={{

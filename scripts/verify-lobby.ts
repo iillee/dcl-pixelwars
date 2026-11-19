@@ -265,16 +265,22 @@ if (LOBBY_VOTE_MS !== 10_000) {
   console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
+
+const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 10', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
+  console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A TEAM and STARTING IN 10')
+  process.exit(1)
+}
 if (hudVoteHeadline() !== 'CHOOSE A TEAM' || hudVoteHeadline(0, 'pvp') !== 'CHOOSE A TEAM') {
   console.error(`✗ the top lobby line should stay CHOOSE A TEAM when no countdown is running (${hudVoteHeadline()})`)
   process.exit(1)
 }
-if (hudVoteHeadline(5) !== 'PIXELWARS IS STARTING IN 5' || hudVoteHeadline(10, 'bases') !== 'PIXELWARS IS STARTING IN 10' || hudVoteHeadline(3, 'prototype') !== 'PIXELWARS IS STARTING IN 3' || hudVoteHeadline(1, 'balloon') !== 'PIXELWARS IS STARTING IN 1') {
-  console.error(`✗ the countdown should always read PIXELWARS IS STARTING IN N (${hudVoteHeadline(5)})`)
+if (hudVoteHeadline(5) !== 'STARTING IN 5' || hudVoteHeadline(10, 'bases') !== 'STARTING IN 10' || hudVoteHeadline(3, 'prototype') !== 'STARTING IN 3' || hudVoteHeadline(1, 'balloon') !== 'STARTING IN 1') {
+  console.error(`✗ the countdown should always read STARTING IN N (${hudVoteHeadline(5)})`)
   process.exit(1)
 }
-if (hudVoteHeadline(5, 'tie') !== 'PIXELWARS IS STARTING IN 5' || hudVoteHeadline(8, '') !== 'PIXELWARS IS STARTING IN 8') {
-  console.error(`✗ a tied or empty lead should still name Pixelwars (${hudVoteHeadline(5, 'tie')})`)
+if (hudVoteHeadline(5, 'tie') !== 'STARTING IN 5' || hudVoteHeadline(8, '') !== 'STARTING IN 8') {
+  console.error(`✗ a tied or empty lead should still read STARTING IN N (${hudVoteHeadline(5, 'tie')})`)
   process.exit(1)
 }
 
@@ -423,13 +429,13 @@ if (lobbySrc.includes('SECS_FONT') || lobbySrc.includes('`${left}s`')) {
   console.error('✗ billboards should keep the vote count and drop the countdown')
   process.exit(1)
 }
-const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+
 if (uiSrc.includes('hudVoteCountdown') || uiSrc.includes('voteSecs') || uiSrc.includes('fontSize={78}')) {
   console.error('✗ the lobby countdown should live in the top headline, not as a second line under the pill')
   process.exit(1)
 }
-if (!readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('PIXELWARS IS STARTING IN') || !lobbySrc.includes('hudVoteHeadline(left)')) {
-  console.error('✗ the top lobby line should show PIXELWARS IS STARTING IN N during the countdown')
+if (!readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('STARTING IN') || readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes('PIXELWARS IS STARTING IN') || !lobbySrc.includes('hudVoteHeadline(left)')) {
+  console.error('✗ the top lobby line should show STARTING IN N during the countdown')
   process.exit(1)
 }
 if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
@@ -528,8 +534,8 @@ if (Math.abs(bluePlane.h - greenPlane.h) > 0.12 || signTitleScale() <= 0) {
   console.error('✗ all four titles should share one typographic scale')
   process.exit(1)
 }
-if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('SIGN_TITLE_UVS') || !lobbySrc.includes('setPlane(title, SIGN_TITLE_UVS)')) {
-  console.error('✗ title plates should flip UVs to un-mirror the word and use the PNG alpha so the black backing does not show')
+if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('SIGN_TITLE_UVS') || !lobbySrc.includes('setPlane(title, SIGN_TITLE_UVS)') || !lobbySrc.includes('0, 0, 1, 0, 1, 1, 0, 1') || lobbySrc.includes('fromEulerDegrees(0, 180, 0)')) {
+  console.error('✗ title plates should use the official upright plane UVs (no 180° yaw, no axis-swapped flip) and the PNG alpha')
   process.exit(1)
 }
 if (SIGN_COUNT_FONT / 10 < SIGN_BADGE_H_M * 0.7 || SIGN_BADGE_H_M < 2 || SIGN_BADGE_H_M > 3.2) {
@@ -714,8 +720,8 @@ if (pickWinner(balloonTie, 0) !== 'pvp' || pickWinner(balloonTie, 1) !== 'balloo
   console.error('✗ a balloon/pvp tie should pick from the world-sync seq, not the previous mode')
   process.exit(1)
 }
-if (hudVoteHeadline(4, voteLead(balloonTie)) !== 'PIXELWARS IS STARTING IN 4') {
-  console.error('✗ a tied countdown should still read PIXELWARS IS STARTING IN N')
+if (hudVoteHeadline(4, voteLead(balloonTie)) !== 'STARTING IN 4') {
+  console.error('✗ a tied countdown should still read STARTING IN N')
   process.exit(1)
 }
 if (!stillAfk(0, LOBBY_AFK_MS) || stillAfk(0, LOBBY_AFK_MS - 1)) {

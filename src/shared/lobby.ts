@@ -359,11 +359,13 @@ export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
   return tied[0]
 }
 
-/** Top HUD line. Countdown is always Classic Pixelwars. Idle stays CHOOSE A TEAM. */
+/** Top HUD line. Idle stays CHOOSE A TEAM; the countdown is just STARTING IN N. */
+export const LOBBY_STATUS_IDLE = 'CHOOSE A TEAM'
+export const LOBBY_STATUS_COUNTDOWN = 'STARTING IN'
 export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
   const n = Math.max(0, Math.ceil(leftSecs))
-  if (n <= 0) return 'CHOOSE A TEAM'
-  return `PIXELWARS IS STARTING IN ${n}`
+  if (n <= 0) return LOBBY_STATUS_IDLE
+  return `${LOBBY_STATUS_COUNTDOWN} ${n}`
 }
 
 

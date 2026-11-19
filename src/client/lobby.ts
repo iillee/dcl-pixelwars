@@ -41,9 +41,16 @@ const SUB_BOX_W = 20
 const COUNT_BOX_W = SIGN_BADGE_W_M * 0.9
 const COUNT_BOX_H = SIGN_BADGE_H_M * 0.9
 const TITLE_INK = Color4.create(1, 1, 1, 1)
-/** Default plane UVs with U flipped, so a 180° yaw toward the camera does not mirror the letters. */
+/**
+ * Official plane UV order (Materials docs): −Z is lower-left, lower-right,
+ * upper-right, upper-left; +Z is lower-right, lower-left, upper-left, upper-right.
+ * A 180° yaw made the camera see the +Z face (mirrored). Flipping U with the
+ * front vertex order on both faces rotated the texture 90° and squashed it.
+ * No extra yaw: the billboard already aims local −Z at the camera, so the
+ * −Z face is upright, left-to-right, unmirrored, and at the plane's true aspect.
+ */
 const SIGN_TITLE_UVS = [
-  1, 0, 0, 0, 0, 1, 1, 1,
+  0, 0, 1, 0, 1, 1, 0, 1,
   1, 0, 0, 0, 0, 1, 1, 1,
 ]
 const tints: Entity[] = []
@@ -136,9 +143,7 @@ function laySigns(): void {
     pill(root, width + SIGN_LIP_PAD_W, SIGN_H_M + SIGN_LIP_PAD_H, SIGN_LIP_DEPTH_M, Vector3.create(0, 0, SIGN_LIP_Z), lip)
     pill(root, width, SIGN_H_M, 0.7, Vector3.Zero(), slab)
     const titleSpec = signTitlePlane(teamTitle(m.id))
-    // 180° yaw puts the plane front on local −Z (toward the camera). That also
-    // mirrors U, so the UVs are flipped horizontally to keep the word readable.
-    const title = add(root, Vector3.create(0, TITLE_Y_M, face), Vector3.create(titleSpec.w, titleSpec.h, 1), Quaternion.fromEulerDegrees(0, 180, 0))
+    const title = add(root, Vector3.create(0, TITLE_Y_M, face), Vector3.create(titleSpec.w, titleSpec.h, 1))
     MeshRenderer.setPlane(title, SIGN_TITLE_UVS)
     const titleTex = Material.Texture.Common({
       src: titleSpec.src,
