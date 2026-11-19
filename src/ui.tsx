@@ -20,7 +20,7 @@ import {
 } from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
-import { paintedHud } from "./client/paintScore"
+import { paintedHud, paintTileFill } from "./client/paintScore"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -615,32 +615,64 @@ function bannerHeadline(): string {
   return (b.headline || (b.winner === 'TIE' ? "IT'S A TIE!" : `${b.winner} WINS!`)).replace(/!$/, '')
 }
 
-/** Compact personal tiles-painted total, centered under the territory bar so it stays
- *  clear of the eye, timer, mute, and scoreboard. Same light-pill language as the clock. */
+/** Shared vertical pill used by the Prototype paint tank and the tiles-painted tracker. */
+function SideFillTrack(props: { trackW: number; trackH: number; pad: number; radius: number; innerR: number; fillH: number; fillColor: any; empty: boolean }) {
+  const { trackW, trackH, pad, radius, innerR, fillH, fillColor, empty } = props
+  return (
+    <UiEntity
+      uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
+      uiBackground={{ color: Color4.create(0, 0, 0, empty ? 0.72 : 0.5) }}
+    >
+      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <UiEntity uiTransform={{ width: '100%', height: fillH, borderRadius: innerR }} uiBackground={{ color: fillColor }} />
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
+/** Personal tiles-painted total, as a left-side vertical bar matching the Paint Economy tank.
+ *  Sits mid-height so it stays clear of the mobile joystick (bottom-left) and Dash/Burst/jump (right). */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const { n, plus } = paintedHud()
   const mob = isMobile()
-  const font = mob ? 14 : 18
-  const h = mob ? 28 : 34
-  const padX = mob ? 12 : 16
-  const label = `PAINTED: ${n}`
-  const w = Math.ceil(textWSafe(label, font) + padX * 2 + (plus > 0 ? textWSafe(`+${plus}`, font) + 8 : 0))
+  const cv = canvasSize()
+  const trackH = mob ? 168 : 240
+  const trackW = mob ? 28 : 36
+  const pad = 3
+  const radius = trackW / 2
+  const innerW = trackW - pad * 2
+  const innerH = trackH - pad * 2
+  const innerR = innerW / 2
+  const fill = paintTileFill(n)
+  const fillH = n <= 0 ? 0 : Math.max(innerW, Math.round(innerH * fill))
+  const team = painterTeam()
+  const teamColor = isPlayingTeam(team) ? barColor(team) : BAR_RED
+  const countText = String(n)
+  const plusText = plus > 0 ? '+' + plus : ''
+  const font = mob ? 16 : 20
+  const plusFont = mob ? 14 : 16
+  const headH = mob ? 44 : 52
+  const top = Math.max(16, Math.round((cv.h - trackH - headH) / 2))
   return (
-    <UiEntity uiTransform={{ margin: { top: 6 }, height: h, flexShrink: 0, pointerFilter: 'none', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
-      <UiEntity
-        uiTransform={{
-          width: w, height: h, borderRadius: HOTBAR_RADIUS, borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
-          padding: TILE_RING, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
-        }}
-        uiBackground={{ color: HOTBAR_TILE_BG }}
-      >
-        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, padding: { left: padX - TILE_RING, right: padX - TILE_RING }, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}
-          uiBackground={{ color: PANEL_LIGHT }}>
-          <Label value={label} fontSize={font} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ height: '100%' }} />
-          {plus > 0 && <Label value={`+${plus}`} fontSize={font} color={SUMMARY_MVP} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: '100%', margin: { left: 8 } }} />}
+    <UiEntity
+      uiTransform={{
+        positionType: 'absolute',
+        position: { top, left: mob ? 10 : 22 },
+        width: 72,
+        height: trackH + headH,
+        flexDirection: 'column',
+        alignItems: 'center',
+        pointerFilter: 'none',
+      }}
+    >
+      <UiEntity uiTransform={{ width: 72, height: headH, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', margin: { bottom: 8 } }}>
+        <UiEntity uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', height: mob ? 22 : 26 }}>
+          <Label value={countText} fontSize={font} color={Color4.White()} textAlign="bottom-center" textWrap="nowrap" uiTransform={{ height: mob ? 22 : 26 }} />
+          {plusText !== '' && <Label value={plusText} fontSize={plusFont} color={SUMMARY_MVP} textAlign="bottom-left" textWrap="nowrap" uiTransform={{ height: mob ? 20 : 24, margin: { left: 4 } }} />}
         </UiEntity>
       </UiEntity>
+      <SideFillTrack trackW={trackW} trackH={trackH} pad={pad} radius={radius} innerR={innerR} fillH={fillH} fillColor={teamColor} empty={n <= 0} />
     </UiEntity>
   )
 }
@@ -679,14 +711,7 @@ function PaintTankBar() {
       }}
     >
       <Label value={empty ? 'NO PAINT' : filling ? (PAINT_REFILL_MODE === 'depot' ? 'REFILL' : 'RECHARGE') : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16, margin: { bottom: 8 } }} />
-      <UiEntity
-        uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
-        uiBackground={{ color: Color4.create(0, 0, 0, empty ? 0.72 : 0.5) }}
-      >
-        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
-          <UiEntity uiTransform={{ width: '100%', height: fillH, borderRadius: innerR }} uiBackground={{ color: fillColor }} />
-        </UiEntity>
-      </UiEntity>
+      <SideFillTrack trackW={trackW} trackH={trackH} pad={pad} radius={radius} innerR={innerR} fillH={fillH} fillColor={fillColor} empty={empty} />
     </UiEntity>
   )
 }
@@ -744,6 +769,7 @@ function BasesChargeHud() {
 export const uiMenu = () => (
   <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 } }}>
     <PaintTankBar />
+    <PaintedHud />
 
     {/* ─── Top-left: mute button ─────────────────────────────────────── */}
     {/* Mute button lives inside the timer panel below, pinned to its right edge. */}
@@ -886,7 +912,6 @@ export const uiMenu = () => (
                 </UiEntity>
               )
             })()}
-            <PaintedHud />
           </UiEntity>
         </UiEntity>
       )
