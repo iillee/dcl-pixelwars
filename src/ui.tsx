@@ -641,9 +641,8 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
  *  standings. */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
-  const { n, plus } = paintedHud()
+  const { n } = paintedHud()
   const countText = String(n)
-  const plusText = plus > 0 ? '+' + plus : ''
   const mob = isMobile()
   const cv = UiCanvasInformation.getOrNull(engine.RootEntity)
   const uiW = cv && cv.height > 0 ? (cv.width / cv.height) * 1080 : 1280
@@ -677,10 +676,6 @@ function PaintedHud() {
           <Label value={hudBold(countText)} fontSize={mob ? 22 : 26} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
-      {plusText !== '' && (
-        <Label value={hudBold(plusText)} fontSize={mob ? 14 : 16} color={SUMMARY_MVP} font="sans-serif" textAlign="middle-center" textWrap="nowrap"
-          uiTransform={{ positionType: 'absolute', position: { top: -8, right: 2 }, height: 18, pointerFilter: 'none' }} />
-      )}
     </UiEntity>
   )
 }

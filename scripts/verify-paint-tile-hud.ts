@@ -18,7 +18,7 @@ check(ui.includes('position: { top, right:'), 'the paint tank stays on the right
 check(!ui.includes('position: { top, left:'), 'the tile tracker is no longer a left-side bar')
 check(ui.includes('<PaintedHud />') && ui.includes('id="ui_top_mute"') && ui.includes('id="ui_match_mute"'), 'the tile count is mounted next to the match mute buttons')
 check(ui.includes('position: { top: 0, left }') && ui.includes('TOP_BTN + TOP_GAP'), 'the tile pill is absolutely parked to the right of mute')
-check(ui.includes('countText') && ui.includes('plusText') && ui.includes('SUMMARY_MVP'), 'the pill always shows the number and keeps the +N pop')
+check(ui.includes('countText') && !ui.includes('plusText'), 'the pill shows the tile number and no longer has the +N pop')
 check(!ui.includes('value={`${n`}'), 'the paint tank still has no numeric readout')
 check(!ui.includes('<PaintedHud />\n') || ui.split('<PaintedHud />').length === 3, 'PaintedHud is only mounted beside the two match mute buttons')
 
