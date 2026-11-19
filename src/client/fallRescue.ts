@@ -63,7 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
-  GltfContainer, Billboard, BillboardMode,
+  GltfContainer, Billboard, BillboardMode, VisibilityComponent,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
@@ -307,6 +307,7 @@ function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: 
 
 function despawnFloater(): void {
   if (!floater) return
+  stopCloudFace(floater.root)
   for (let i = floater.ents.length - 1; i >= 0; i--) engine.removeEntity(floater.ents[i])
   floater = null
 }
@@ -377,6 +378,25 @@ function detachFloater(): void {
 
 const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
+const CLOUD_FACE_BLINK_SRC = 'assets/models/cloud-face-blink.glb'
+const CLOUD_FACE_LAUGH_SRC = 'assets/models/cloud-face-laugh.glb'
+/** Closed-eye flash length (seconds). */
+const FACE_BLINK_MIN_S = 0.12
+const FACE_BLINK_MAX_S = 0.15
+/** Gap between later blinks. */
+const FACE_BLINK_EVERY_MIN_S = 2.5
+const FACE_BLINK_EVERY_MAX_S = 4.5
+/** First blink is sooner so a ~5s rescue is likely to show one. */
+const FACE_BLINK_FIRST_MIN_S = 0.5
+const FACE_BLINK_FIRST_MAX_S = 1.6
+/** Open-mouth laugh length (seconds). */
+const FACE_LAUGH_S = 1.2
+/** Gap between later laughs. */
+const FACE_LAUGH_EVERY_MIN_S = 6
+const FACE_LAUGH_EVERY_MAX_S = 10
+/** First laugh is earlier so it can land during a typical carry. */
+const FACE_LAUGH_FIRST_MIN_S = 2.2
+const FACE_LAUGH_FIRST_MAX_S = 3.8
 /** GLB width is ~1.77 m at scale 1, close to the old three-puff cluster. Underside sits at the root, like the placeholder. */
 const CLOUD_SCALE = 1
 /** Visual center of cloud-body.glb (Body mesh AABB Y), before CLOUD_SCALE. The billboard pivots here. */
@@ -423,7 +443,7 @@ function makeBead(parent: Entity): Entity {
   return e
 }
 
-/** Lavender body + face, with a static line and a small end bead. Root is ents[0]. */
+/** Lavender body + three swappable faces, with a static line and a small end bead. Root is ents[0]. */
 function cloudParts(root: Entity): Entity[] {
   const s = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
   // Billboard on a child at the puff's visual center so it yaws in place.
@@ -434,11 +454,91 @@ function cloudParts(root: Entity): Entity[] {
   Transform.create(spin, { parent: root, position: Vector3.create(0, cy, 0) })
   Billboard.create(spin, { billboardMode: BillboardMode.BM_Y })
   const body = gltfChild(spin, CLOUD_BODY_SRC, Vector3.create(0, -cy, 0), s)
-  const face = gltfChild(body, CLOUD_FACE_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const normal = gltfChild(body, CLOUD_FACE_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const blink = gltfChild(body, CLOUD_FACE_BLINK_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const laugh = gltfChild(body, CLOUD_FACE_LAUGH_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
   const line = makeLine(root)
-  const ents = [root, spin, body, face, line]
+  const ents = [root, spin, body, normal, blink, laugh, line]
   if (LINE_BEAD_R > 0) ents.push(makeBead(root))
+  startCloudFace(root, normal, blink, laugh)
   return ents
+}
+
+type FaceKind = 'normal' | 'blink' | 'laugh'
+type CloudFace = {
+  normal: Entity
+  blink: Entity
+  laugh: Entity
+  kind: FaceKind
+  blinkIn: number
+  blinkLeft: number
+  laughIn: number
+  laughLeft: number
+}
+const cloudFaces = new Map<Entity, CloudFace>()
+
+function randRange(a: number, b: number): number {
+  return a + Math.random() * (b - a)
+}
+
+function showCloudFace(f: CloudFace, kind: FaceKind): void {
+  if (f.kind === kind) return
+  VisibilityComponent.getMutable(f.normal).visible = kind === 'normal'
+  VisibilityComponent.getMutable(f.blink).visible = kind === 'blink'
+  VisibilityComponent.getMutable(f.laugh).visible = kind === 'laugh'
+  f.kind = kind
+}
+
+/** All three face GLBs are children of the body; only one is visible at a time. */
+function startCloudFace(root: Entity, normal: Entity, blink: Entity, laugh: Entity): void {
+  VisibilityComponent.create(normal, { visible: true })
+  VisibilityComponent.create(blink, { visible: false })
+  VisibilityComponent.create(laugh, { visible: false })
+  cloudFaces.set(root, {
+    normal, blink, laugh, kind: 'normal',
+    blinkIn: randRange(FACE_BLINK_FIRST_MIN_S, FACE_BLINK_FIRST_MAX_S),
+    blinkLeft: 0,
+    laughIn: randRange(FACE_LAUGH_FIRST_MIN_S, FACE_LAUGH_FIRST_MAX_S),
+    laughLeft: 0,
+  })
+}
+
+function stopCloudFace(root: Entity): void {
+  cloudFaces.delete(root)
+}
+
+function tickCloudFaces(dt: number): void {
+  for (const f of cloudFaces.values()) {
+    // A laugh never starts during a blink: both only begin from the normal face.
+    if (f.kind === 'laugh') {
+      f.laughLeft -= dt
+      if (f.laughLeft <= 0) {
+        showCloudFace(f, 'normal')
+        f.laughIn = randRange(FACE_LAUGH_EVERY_MIN_S, FACE_LAUGH_EVERY_MAX_S)
+        if (f.blinkIn < 0.4) f.blinkIn = randRange(0.4, 1.2)
+      }
+      continue
+    }
+    if (f.kind === 'blink') {
+      f.blinkLeft -= dt
+      if (f.blinkLeft <= 0) {
+        showCloudFace(f, 'normal')
+        f.blinkIn = randRange(FACE_BLINK_EVERY_MIN_S, FACE_BLINK_EVERY_MAX_S)
+      }
+      continue
+    }
+    f.laughIn -= dt
+    f.blinkIn -= dt
+    if (f.laughIn <= 0) {
+      showCloudFace(f, 'laugh')
+      f.laughLeft = FACE_LAUGH_S
+      continue
+    }
+    if (f.blinkIn <= 0) {
+      showCloudFace(f, 'blink')
+      f.blinkLeft = randRange(FACE_BLINK_MIN_S, FACE_BLINK_MAX_S)
+    }
+  }
 }
 
 /** Local cloud parented to the pad: body, face, and a static line. No character model. */
@@ -941,6 +1041,7 @@ function clearRemote(who: string, why = ''): void {
   const key = who.toLowerCase()
   const c = remotes.get(key)
   if (!c) return
+  stopCloudFace(c.root)
   for (let i = c.ents.length - 1; i >= 0; i--) engine.removeEntity(c.ents[i])
   remotes.delete(key)
   if (why) console.log(`[FallRescue] remote cloud done ${key.slice(0, 8)} (${why})`)
@@ -1022,6 +1123,7 @@ function tickRemotes(dt: number): void {
 function tick(dt: number): void {
   // A background hitch shouldn't skip the whole pickup and drop on the same frame.
   const step = Math.min(dt, 0.1)
+  tickCloudFaces(step)
   tickRemotes(step)
   const p = playerPos()
   const line = liveTrigger(p)
@@ -1074,7 +1176,7 @@ export function cancelFallRescue(why: string): void {
 function preloadRescueCloud(): void {
   const root = engine.addEntity()
   Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
-  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC]) {
+  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC, CLOUD_FACE_BLINK_SRC, CLOUD_FACE_LAUGH_SRC]) {
     const e = engine.addEntity()
     Transform.create(e, { parent: root })
     GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
