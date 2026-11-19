@@ -768,15 +768,14 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
-            {/* Match (mobile + desktop): eye | timer | mute. Lobby keeps its existing layouts. */}
+            {/* Mobile + desktop, lobby + match: eye | timer | mute. View controls sit in-flow
+                to the left of the eye on mobile so they stay on screen and never slide under the clock. */}
             {isMobile() ? (
             lobby ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
-              <UiEntity uiTransform={{ flexDirection: 'row', margin: { right: TOP_GAP } }}>
-                <TileButton id="ui_top_mute" onPress={toggleMusic}>
-                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-                </TileButton>
+              <OverviewRow inline />
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { right: TOP_GAP } }}>
+                <OverviewEye />
               </UiEntity>
               <UiEntity
                 uiTransform={{
@@ -791,15 +790,17 @@ export const uiMenu = () => (
                   <Label value={hudClockText(secs)} fontSize={16} color={SUMMARY_INK} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 32 }} />
                 </UiEntity>
               </UiEntity>
-              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
-                <OverviewRow />
-                <OverviewEye />
+              <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
+                <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
             </UiEntity>
             ) : (
-            <UiEntity uiTransform={{ width: MATCH_TOP_W, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+              <OverviewRow inline />
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <OverviewRow />
                 <OverviewEye />
               </UiEntity>
               <UiEntity

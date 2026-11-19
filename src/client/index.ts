@@ -150,9 +150,11 @@ export async function setupClient(): Promise<void> {
   initLobby()
   initBalloons()
   initBaseBeams()
-  // Cross exists before the first frame the player can fall. The server
-  // also starts in the lobby and sends roundReset; this is the local floor
-  // so join does not wait on that message. A match clock replaces it.
+  // Lobby GLBs go up now. A primitive hold floor was already created in
+  // main() before this bundle loaded, so a mobile join has something to
+  // stand on if these colliders are still coming in. The server also
+  // starts in the lobby and sends roundReset; this is the local floor so
+  // join does not wait on that message. A match clock replaces it.
   rebuildMaze(1, 'lobby', 'boot')
   setHoldMazeSeed(true)
   setupTouchControls()

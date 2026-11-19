@@ -24,6 +24,7 @@ import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
 import { earlySpawnPads } from '../shared/lobby'
+import { clearLobbyHoldFloor, installLobbyHoldFloor, lobbyHoldContains } from '../lobbyHoldFloor'
 import { Team, isPlayingTeam } from '../shared/team'
 import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
@@ -94,7 +95,9 @@ export function initPlayerNet(): void {
   })
   events.on('lobby:floor', () => {
     // Pads first, so the teleport lands on a floor if the mesh collider
-    // is not ready on this frame.
+    // is not ready on this frame. Re-install the early hold floor in case
+    // a previous match cleared it.
+    installLobbyHoldFloor()
     ensureSpawnPads()
     teleportHome('lobby')
   })
@@ -134,12 +137,30 @@ export function initPlayerNet(): void {
   // through the lobby and until the match floor has finished growing, then
   // come back the next time the lobby is laid.
   if (IS_SKY) {
+    installLobbyHoldFloor()
     ensureSpawnPads()
     engine.addSystem(() => {
-      if (!spawnPads.length) return
       if (isLobbyLayout() || !isMazeReady()) return
-      clearSpawnPads()
-      console.log('[Player] maze ready → spawn pads removed')
+      if (spawnPads.length) {
+        clearSpawnPads()
+        console.log('[Player] maze ready → spawn pads removed')
+      }
+      clearLobbyHoldFloor()
+    })
+    // If the avatar still tunnels through the lobby (thin or late colliders
+    // on mobile), snap them back only while they are over the lobby footprint.
+    // Off the island they are allowed to fall; rescue is unchanged.
+    let dropLock = 0
+    engine.addSystem((dt: number) => {
+      if (!isLobbyLayout()) return
+      dropLock = Math.max(0, dropLock - dt)
+      if (dropLock > 0) return
+      const p = Transform.getOrNull(engine.PlayerEntity)?.position
+      if (!p) return
+      if (p.y >= BASE_Y - 0.5) return
+      if (!lobbyHoldContains(p.x, p.z)) return
+      dropLock = 1
+      teleportHome('lobby-drop')
     })
   }
 

@@ -5,7 +5,7 @@
  * gold when active), restyled to the pixelwars HUD: same dark panel colour
  * and 18 px radius as the timer. Hidden behind a small eye (from
  * dcl-snowdrift) under the timer's star; the eye opens the buttons as a row
- * to the LEFT of the timer.
+ * to the LEFT of the eye, away from the timer and score.
  */
 
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
@@ -118,22 +118,31 @@ export function OverviewEyeInline() {
   )
 }
 
-/** Overview buttons in a row popping out to the LEFT of the eye button (absolute inside the eye's slot). */
-export function OverviewRow(props: { desktop?: boolean; besideEye?: boolean } = {}) {
+/** Overview buttons in a row to the LEFT of the eye, away from the timer.
+ *  `inline`: in-flow sibling so the top bar recenters and the row stays on screen
+ *  (portrait mobile included). Otherwise absolutely parked to the left of the eye slot. */
+export function OverviewRow(props: { desktop?: boolean; besideEye?: boolean; inline?: boolean } = {}) {
   if (!isOverviewActive()) return null
+  const transform = props.inline
+    ? { flexDirection: 'row' as const, alignItems: 'flex-start' as const, margin: { right: ROW_GAP }, pointerFilter: 'none' as const, flexShrink: 0 }
+    : {
+        positionType: 'absolute' as const,
+        position: props.desktop
+          ? { top: 0, right: props.besideEye ? SMALL : 200 + TOP_GAP + SMALL }
+          : { top: 0, right: SMALL + ROW_GAP },
+        flexDirection: 'row' as const,
+        alignItems: 'flex-start' as const,
+        pointerFilter: 'none' as const,
+      }
   return (
     <UiEntity
       key="ui_overview_row"
-      uiTransform={{
-        positionType: 'absolute', position: props.desktop ? { top: 0, right: props.besideEye ? SMALL : 200 + TOP_GAP + SMALL } /* desktop: left of the eye */ : { top: 0, left: SMALL + ROW_GAP }, // mobile: grows right of the eye
-        flexDirection: 'row', alignItems: 'flex-start', pointerFilter: 'none',
-      }}
+      uiTransform={transform}
     >
-      {/* Mobile (grows right of the eye): rotate first, next to the eye; desktop keeps + − rotate. */}
-      {!props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} />}
-      {<SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} keyLabel={props.desktop ? '1' : undefined} />}
-      {<SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} keyLabel={props.desktop ? '2' : undefined} />}
-      {props.desktop && <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} keyLabel="3" />}
+      {/* Open left of the eye on every layout: + − rotate, rotate next to the eye. */}
+      <SmallButton id="ov_in" kind="in" enabled={canOverviewZoomIn()} onPress={overviewZoomIn} keyLabel={props.desktop ? '1' : undefined} />
+      <SmallButton id="ov_out" kind="out" enabled={canOverviewZoomOut()} onPress={overviewZoomOut} keyLabel={props.desktop ? '2' : undefined} />
+      <SmallButton id="ov_rot" kind="rot" enabled={true} onPress={() => rotateOverview(1)} keyLabel={props.desktop ? '3' : undefined} />
     </UiEntity>
   )
 }

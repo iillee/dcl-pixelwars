@@ -18,6 +18,7 @@
 // First: per-system try/catch so one throwing system can't stall the frame + comms.
 import './shared/safeSystems'
 import { isServer } from '@dcl/sdk/network'
+import { installLobbyHoldFloor } from './lobbyHoldFloor'
 
 // Shared modules MUST be static imports so their component/message
 // registrations run BEFORE the engine seals (which happens as soon as main()
@@ -42,6 +43,10 @@ export async function main() {
   }
 
   console.log('[Main] 🎮 CLIENT MODE')
+  // Primitive lobby floor first, before the rest of the client bundle
+  // loads. On mobile the avatar is already at the scene spawn while that
+  // import is in flight, and GLB tile colliders are not ready yet.
+  installLobbyHoldFloor()
   const { setupClient } = await import('./client')
   await setupClient()
 }
