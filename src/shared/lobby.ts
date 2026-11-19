@@ -119,7 +119,7 @@ export function placedLobbyEnds(): TeamDef[] {
 
 /** Full start window, in one place. Starts when the first team is chosen.
  *  Standing in a zone does not end it early, and an empty lobby does not start it. */
-export const LOBBY_VOTE_MS = 10_000
+export const LOBBY_VOTE_MS = 5_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
  *  The vote tint and the trigger both use this rectangle, pulled in by VOTE_TINT_INSET_M. */
 export const VOTE_FLOOR_WIDTH = 20 / 32

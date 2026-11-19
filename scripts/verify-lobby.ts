@@ -261,8 +261,8 @@ if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
   console.error(`✗ idle phase with this sample did not start the ${LOBBY_VOTE_MS}ms countdown (${step.log} ends ${step.next.countdownEnds})`)
   process.exit(1)
 }
-if (LOBBY_VOTE_MS !== 10_000) {
-  console.error(`✗ the vote window should be 10s, got ${LOBBY_VOTE_MS}ms`)
+if (LOBBY_VOTE_MS !== 5_000) {
+  console.error(`✗ the vote window should be 5s, got ${LOBBY_VOTE_MS}ms`)
   process.exit(1)
 }
 
@@ -284,7 +284,7 @@ if (hudVoteHeadline(5, 'tie') !== 'STARTING IN 5' || hudVoteHeadline(8, '') !== 
   process.exit(1)
 }
 
-const early = stepLobby(step.next, ['0xabc'], aged + 5_000)
+const early = stepLobby(step.next, ['0xabc'], aged + 2_000)
 if (early.log === 'resolve' || early.log === 'close') {
   console.error(`✗ the vote closed before ${LOBBY_VOTE_MS}ms (${early.log})`)
   process.exit(1)
