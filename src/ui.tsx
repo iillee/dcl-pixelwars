@@ -719,6 +719,8 @@ export const uiMenu = () => (
 
     {/* ─── Top-center: countdown timer + coverage pill ───────────────── */}
     {(() => {
+      // Keep the lobby / match HUD from sitting on top of the win screen.
+      if (getSummaryProgress() >= 0) return null
       const secs = getCountdownSeconds()
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
@@ -968,7 +970,7 @@ export const uiMenu = () => (
         Rendered before the banner so the banner stays on top. */}
 
     {/* ─── Bottom centre: PvP hotbar, Lunge (E) + Paint Bomb (F). */}
-    <AbilityHotbar />
+    {getSummaryProgress() >= 0 ? null : <AbilityHotbar />}
 
     {/* ─── Top centre under the coverage pill: lunge test-dummy reset chip. */}
 

@@ -12,6 +12,7 @@ import {
   TITLE_WORD_GAP,
 } from '../src/shared/summaryLayout'
 import { Team } from '../src/shared/team'
+import { SUMMARY_GROW_S, SUMMARY_SHRINK_S, summaryProgressAt } from '../src/shared/roundTiming'
 
 const top = SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP
 const desk = tablesLayout([], { w: 1280, h: 720 }, top)
@@ -263,6 +264,96 @@ for (const [name, cv, lay] of [
 }
 if (Math.abs(end16.panelW - end21.panelW) > 1 || Math.abs(end16.k - s16.k) > 0.01) {
   console.error(`✗ the end-screen panel should match the mid-game size, end=${end16.panelW}/${end16.k} mid=${s16.panelW}/${s16.k}`)
+  process.exit(1)
+}
+
+{
+  const shown = 1_000_000
+  if (summaryProgressAt(shown, 0, 0) !== -1) {
+    console.error('✗ no clock means no summary')
+    process.exit(1)
+  }
+  if (summaryProgressAt(shown, shown, 0) !== 0) {
+    console.error('✗ just opened should be 0')
+    process.exit(1)
+  }
+  const midGrow = shown + (SUMMARY_GROW_S * 1000) / 2
+  const mid = summaryProgressAt(midGrow, shown, 0)
+  if (!(mid > 0 && mid < 1)) {
+    console.error(`✗ mid-grow should be between 0 and 1, got ${mid}`)
+    process.exit(1)
+  }
+  const afterGrow = shown + SUMMARY_GROW_S * 1000
+  if (summaryProgressAt(afterGrow, shown, 0) !== 1) {
+    console.error('✗ fully open after grow')
+    process.exit(1)
+  }
+  if (summaryProgressAt(shown + 60_000, shown, 0) !== 1) {
+    console.error('✗ summary should stay fully open a minute later if not dismissed')
+    process.exit(1)
+  }
+  if (summaryProgressAt(shown + 600_000, shown, 0) !== 1) {
+    console.error('✗ summary should stay fully open after 10 minutes if not dismissed')
+    process.exit(1)
+  }
+
+  const closed = shown + 20_000
+  if (summaryProgressAt(closed, shown, closed) !== 1) {
+    console.error('✗ a click should start the shrink from fully open')
+    process.exit(1)
+  }
+  const midShrink = closed + (SUMMARY_SHRINK_S * 1000) / 2
+  const shrinking = summaryProgressAt(midShrink, shown, closed)
+  if (!(shrinking > 0 && shrinking < 1)) {
+    console.error(`✗ mid-shrink should be between 0 and 1, got ${shrinking}`)
+    process.exit(1)
+  }
+  const afterShrink = closed + SUMMARY_SHRINK_S * 1000
+  if (summaryProgressAt(afterShrink, shown, closed) !== -1) {
+    console.error('✗ summary should be gone after the shrink')
+    process.exit(1)
+  }
+  if (summaryProgressAt(afterShrink + 5_000, shown, closed) !== -1) {
+    console.error('✗ summary should stay gone after the shrink')
+    process.exit(1)
+  }
+}
+
+{
+  const roundSrc = readFileSync(new URL('../src/round.ts', import.meta.url), 'utf8')
+  if (/if (banner\.visible && Date\.now\(\) - banner\.shownAtMs > BANNER_DURATION_MS)/.test(roundSrc)) {
+    console.error('✗ getBanner must not auto-hide on BANNER_DURATION_MS')
+    process.exit(1)
+  }
+  if (/shownAtMs \+ BANNER_DURATION_MS/.test(roundSrc)) {
+    console.error('✗ summary must not use the old duration clock to close')
+    process.exit(1)
+  }
+  const reset = roundSrc.match(/events\.on\('round:reset'[\s\S]*?\n  \}\)/)
+  if (!reset) {
+    console.error('✗ round:reset handler is missing')
+    process.exit(1)
+  }
+  if (!/if \(layout === 'lobby'\) return/.test(reset[0])) {
+    console.error('✗ a lobby reset must not clear the summary')
+    process.exit(1)
+  }
+  if (!/clearSummary\(\)/.test(reset[0])) {
+    console.error('✗ the next-round reset must clear the summary')
+    process.exit(1)
+  }
+  if (reset[0].indexOf("if (layout === 'lobby') return") > reset[0].indexOf('clearSummary()')) {
+    console.error('✗ lobby early-return must come before clearSummary')
+    process.exit(1)
+  }
+}
+
+if (!uiSrc.includes('if (getSummaryProgress() >= 0) return null')) {
+  console.error('✗ top lobby / match HUD should hide while the summary is up')
+  process.exit(1)
+}
+if (!uiSrc.includes('getSummaryProgress() >= 0 ? null : <AbilityHotbar')) {
+  console.error('✗ the ability hotbar should hide while the summary is up')
   process.exit(1)
 }
 

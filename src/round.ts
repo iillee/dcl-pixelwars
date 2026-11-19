@@ -20,7 +20,7 @@ export {
   getRoundEndMs,
 } from './shared/roundTiming'
 
-import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S } from './shared/roundTiming'
+import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S, summaryProgressAt } from './shared/roundTiming'
 import { type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
 import { gamePhase } from './client/phase'
@@ -37,37 +37,42 @@ export function formatMMSS(secs: number): string {
 }
 
 // ─── Round-end banner state ──────────────────────────────────────────
-// Set by index.ts when a round boundary is crossed; read by ui.tsx. The
-// banner shows the just-finished round's coverage % for BANNER_DURATION_MS,
-// which overlaps the maze grow-in so the transition reads as "results →
-// new arena" rather than a dead pause.
+// Set when a round ends; read by ui.tsx. Scores on the banner are a snapshot
+// of that round, so they stay put when the lobby swap clears live coverage.
+// The overlay stays up until the player clicks it away or the next match starts
+// (not on a timer, and not when the floor goes back to the lobby).
 
-
-// Round-end summary timing lives in shared/roundTiming (server waits the same SUMMARY_MS).
-/** Dim backdrop + banner state live exactly as long as the summary animation. */
+/** Kept for older call sites; the summary is no longer dismissed by this duration. */
 export const BANNER_DURATION_MS = (SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S) * 1000
 
-/** Click on the summary: skip the rest of the hold and shrink away now. */
+let dismissedAtMs = 0
+
+/** Click on the summary: shrink it away now. Does nothing if it is not up. */
 export function dismissSummary(nowMs: number = Date.now()): void {
-  const holdEnd = banner.shownAtMs + (SUMMARY_GROW_S + SUMMARY_HOLD_S) * 1000
-  if (banner.shownAtMs > 0 && nowMs < holdEnd) banner.shownAtMs -= holdEnd - Math.max(nowMs, banner.shownAtMs + SUMMARY_GROW_S * 1000)
+  if (banner.shownAtMs === 0 || dismissedAtMs > 0) return
+  dismissedAtMs = nowMs
 }
 
-/** Whole seconds until the summary closes (for the "back in Ns" line). */
-export function summarySecondsLeft(nowMs: number = Date.now()): number {
-  return Math.max(0, Math.ceil((banner.shownAtMs + BANNER_DURATION_MS - nowMs) / 1000))
+/** Whole seconds until a timed close (none — the summary stays until click or the next round). */
+export function summarySecondsLeft(_nowMs: number = Date.now()): number {
+  return 0
 }
 
-/** 0 = normal bar, 1 = fully expanded square; -1 = summary not running. Ease-in-out. */
 export function getSummaryProgress(nowMs: number = Date.now()): number {
-  if (banner.shownAtMs === 0) return -1
-  const t = (nowMs - banner.shownAtMs) / 1000
-  const total = SUMMARY_GROW_S + SUMMARY_HOLD_S + SUMMARY_SHRINK_S
-  if (t < 0 || t >= total) return -1
-  const lin = t < SUMMARY_GROW_S ? t / SUMMARY_GROW_S
-    : t < SUMMARY_GROW_S + SUMMARY_HOLD_S ? 1
-    : 1 - (t - SUMMARY_GROW_S - SUMMARY_HOLD_S) / SUMMARY_SHRINK_S
-  return lin * lin * (3 - 2 * lin)
+  return summaryProgressAt(nowMs, banner.shownAtMs, dismissedAtMs)
+}
+
+/** Drop the overlay immediately. Next-round start uses this; the lobby swap must not. */
+export function clearSummary(): void {
+  banner.visible = false
+  banner.shownAtMs = 0
+  dismissedAtMs = 0
+}
+
+function openBannerClock(): void {
+  banner.visible = true
+  banner.shownAtMs = Date.now()
+  dismissedAtMs = 0
 }
 
 interface BannerState {
@@ -153,7 +158,7 @@ export function showRoundEndBanner(red: number, blue: number, total: number, gre
   banner.winner = headline.endsWith(' WINS!') ? headline.slice(0, -6) : 'TIE'
   banner.victorName = ''
   banner.kind = 'paint'
-  banner.shownAtMs = Date.now()
+  openBannerClock()
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''
   banner.myCells = banner.personal ? pendingCells : 0
@@ -164,8 +169,8 @@ export function showRoundEndBanner(red: number, blue: number, total: number, gre
 }
 
 export function getBanner(): BannerState {
-  // Auto-hide after the display window.
-  if (banner.visible && Date.now() - banner.shownAtMs > BANNER_DURATION_MS) {
+  // Stay visible until the shrink-on-click finishes or clearSummary() runs.
+  if (banner.visible && dismissedAtMs > 0 && getSummaryProgress() < 0) {
     banner.visible = false
   }
   return banner
@@ -189,8 +194,9 @@ export function initRoundNet(): void {
     if (banner.visible && banner.owners.length === 0) banner.owners = owners
   })
   events.on('round:result', ({ cells, teamCells, team }) => setRoundResult(cells, teamCells, team))
-  // Scores arrive on round:ended. The banner keeps its own timer. The lobby
-  // roundReset that follows swaps the floor and does not dismiss this screen.
+  // Scores arrive on round:ended and are frozen on the banner. The lobby
+  // roundReset that follows swaps the floor and must not dismiss this screen
+  // or rewrite those scores.
   events.on('round:ended', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victorName }) => {
     const snap = lastMatchCoverage()
     const red = finalRed
@@ -214,6 +220,7 @@ export function initRoundNet(): void {
   events.on('round:reset', ({ seed, format, layout }) => {
     console.log(`[Client] roundReset seed=${seed} format=${format} layout=${layout ?? 'arena'}`)
     if (layout === 'lobby') return
+    clearSummary()
     armFormatSplash(format, seed, true)
   })
 }
@@ -257,7 +264,7 @@ export function showBalloonBanner(name: string): void {
   banner.headline = name ? (name.toUpperCase() + ' WINS!') : "IT'S A TIE!"
   banner.victorName = name
   banner.kind = 'balloon'
-  banner.shownAtMs = Date.now()
+  openBannerClock()
   banner.personal = ''
   banner.myCells = 0
   banner.total = 0
@@ -287,7 +294,7 @@ export function showBasesBanner(red: number, blue: number, threshold: number): v
   banner.headline = red > blue ? 'RED WINS!' : blue > red ? 'BLUE WINS!' : "IT'S A TIE!"
   banner.victorName = ''
   banner.kind = 'bases'
-  banner.shownAtMs = Date.now()
+  openBannerClock()
   banner.personal = ''
   banner.myCells = 0
   banner.total = threshold
