@@ -77,8 +77,8 @@ import { isLobbyLayout } from '../maze/rebuild'
 import { lobbyFeet } from '../shared/lobby'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
-import { LOOK } from '../shared/waterLook'
-import { waterVisualSeconds } from './water'
+import { LOOK, resolvedWaterY } from '../shared/waterLook'
+import { waterClipArmed, waterVisualSeconds } from './water'
 import { Team, isPlayingTeam } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { playWaterSplash } from './waterSplash'
@@ -86,7 +86,7 @@ import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
-import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
+import { RESCUE_PATH, rescueCloudPose, rescueHangAt, rescueHangY, rescueRiderFromCloud } from '../shared/rescuePath'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -193,6 +193,10 @@ let assignedHome: Vec | null = null
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 /** Visible sea at these feet, or the pre-water line when the sea is off. */
 function liveTrigger(p: { x: number; z: number } | null | undefined): number {
+  // Until the wave clip is running the visible mesh sits at rest (mean Y).
+  // waterVisualSeconds() is 0 in that window, which can be a trough under the
+  // visible surface — the first fall then goes through the water.
+  if (LOOK.sea && !waterClipArmed()) return resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
   if (!p) return fallTriggerY(0, 0, waterVisualSeconds())
   return fallTriggerY(p.x, p.z, waterVisualSeconds())
 }
@@ -308,8 +312,8 @@ function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: 
   const tr = Transform.getMutable(floater.root)
   const s = Math.max(0.02, scale)
   tr.scale = Vector3.create(s, s, s)
-  const x = localXZ?.x ?? 0
-  const z = localXZ?.z ?? 0
+  const x = (localXZ?.x ?? 0) + FALL_RESCUE.CLOUD_SHIFT_X
+  const z = (localXZ?.z ?? 0) + FALL_RESCUE.CLOUD_SHIFT_Z
   if (anchor && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(x, yOff, z)
   else if (world) tr.position = Vector3.create(world.x + x, world.y + yOff, world.z + z)
 }
@@ -384,8 +388,8 @@ function detachFloater(): void {
   })
 }
 
-/** Hook ball at the rod line tip. Same local point as the placeholder, so HANG_Y is unchanged. */
-const HOOK_LOCAL = Vector3.create(0, -0.78, 0)
+/** Hook ball at the rod line tip. Offset opposite the puff so it hangs over the head. HANG_Y is unchanged. */
+const HOOK_LOCAL = Vector3.create(RESCUE_PATH.HOOK_X, RESCUE_PATH.HOOK_Y, RESCUE_PATH.HOOK_Z)
 const HOOK_SCALE = Vector3.create(0.34, 0.34, 0.34)
 
 function makeHook(parent: Entity): Entity {
@@ -521,7 +525,7 @@ function mountRideCamera(): void {
   releaseRideCamera()
   rideLook = engine.addEntity()
   // Below the puff, toward the stand-in's head, so the rider stays in frame.
-  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(0, -0.4, 0.2) })
+  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(FALL_RESCUE.HOOK_X, -0.4, 0.2) })
   rideCam = engine.addEntity()
   Transform.create(rideCam, { parent: floater.root, position: Vector3.create(0, 1.8, -6) })
   VirtualCamera.create(rideCam, {
@@ -883,7 +887,7 @@ export function remoteRiderFeet(who: string): Vec | null {
   const age = (Date.now() - c.started) / 1000
   if (age < c.grab || age > c.grab + c.rise + c.cruise + c.descend) return null
   const p = Transform.getOrNull(c.root)?.position
-  return p ? { x: p.x, y: p.y - rescueHangY(c.who), z: p.z } : null
+  return p ? rescueRiderFromCloud({ x: p.x, y: p.y, z: p.z }, rescueHangY(c.who)) : null
 }
 
 function remoteFeet(who: string): Vec | null {
@@ -896,7 +900,7 @@ function remoteFeet(who: string): Vec | null {
 }
 
 function hangAt(p: Vec, extraY = 0, hangY = FALL_RESCUE.HANG_Y): Vec {
-  return { x: p.x, y: p.y + hangY + extraY, z: p.z }
+  return rescueHangAt(p, extraY, hangY)
 }
 
 /** Mobile riders and bots: the cloud flies the three legs (the server moves a bot along the same path). */
@@ -1044,6 +1048,17 @@ export function cancelFallRescue(why: string): void {
   setFallMoveLock('open')
 }
 
+/** Hidden instances so the first trip does not hitch while the three cloud GLBs decode. */
+function preloadRescueCloud(): void {
+  const root = engine.addEntity()
+  Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
+  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC, CLOUD_ROD_SRC]) {
+    const e = engine.addEntity()
+    Transform.create(e, { parent: root })
+    GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+  }
+}
+
 /**
  * `endRescue('snap')` is the single base teleport (they slipped off).
  * `endRescue('carry')` means the panel already delivered them — emit player:respawned, do not movePlayerTo.
@@ -1054,6 +1069,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   installed = true
   onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
+  preloadRescueCloud()
   events.on('rescue:start', onRemoteStart)
   events.on('rescue:end', ({ who }) => clearRemote(who, 'ended'))
   engine.addSystem(tick)

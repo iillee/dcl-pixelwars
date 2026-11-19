@@ -38,6 +38,11 @@ export function waterVisualSeconds(): number {
   return clipSeconds
 }
 
+/** True once the lead swell GLB has loaded and the wave clip is running. */
+export function waterClipArmed(): boolean {
+  return clipArmed
+}
+
 function swellClipReady(ent: Entity): boolean {
   const st = GltfContainerLoadingState.getOrNull(ent)
   if (!st) return false
