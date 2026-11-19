@@ -63,6 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
+  GltfContainer,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
@@ -126,14 +127,9 @@ export const FALL_RESCUE = {
   RIDE_HANDOFF_S: 0.75,
 }
 
-const CLOUD_MAT = {
-  albedoColor: Color4.create(0.75, 0.92, 1, 1),
-  emissiveColor: Color4.create(0.55, 0.85, 1, 1),
-  emissiveIntensity: 3,
-  roughness: 0.35,
-  metallic: 0,
-  castShadows: false,
-}
+const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
+const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
+const CLOUD_ROD_SRC = 'assets/models/cloud-rod.glb'
 const HOOK_MAT = {
   albedoColor: Color4.create(1, 0.86, 0.25, 1),
   emissiveColor: Color4.create(1, 0.75, 0.15, 1),
@@ -388,28 +384,38 @@ function detachFloater(): void {
   })
 }
 
-function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' | 'box', mat: typeof CLOUD_MAT): Entity {
+/** Hook ball at the rod line tip. Same local point as the placeholder, so HANG_Y is unchanged. */
+const HOOK_LOCAL = Vector3.create(0, -0.78, 0)
+const HOOK_SCALE = Vector3.create(0.34, 0.34, 0.34)
+
+function makeHook(parent: Entity): Entity {
   const e = engine.addEntity()
-  Transform.create(e, { parent, position: pos, scale })
-  if (shape === 'sphere') MeshRenderer.setSphere(e)
-  else MeshRenderer.setBox(e)
-  Material.setPbrMaterial(e, mat)
+  Transform.create(e, { parent, position: HOOK_LOCAL, scale: HOOK_SCALE })
+  MeshRenderer.setSphere(e)
+  Material.setPbrMaterial(e, HOOK_MAT)
   return e
 }
 
-/** Same white cloud the rider sees: body, two puffs, stem, hook. Root is ents[0]. */
-function cloudParts(root: Entity): Entity[] {
-  return [
-    root,
-    makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT),
-    makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT),
-  ]
+function gltfChild(parent: Entity, src: string): Entity {
+  const e = engine.addEntity()
+  Transform.create(e, { parent })
+  GltfContainer.create(e, {
+    src,
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
+  })
+  return e
 }
 
-/** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
+/** Lavender cloud the rider sees: faceless body (ghost outline in the GLB), face, rod, hook. Root is ents[0]. */
+function cloudParts(root: Entity): Entity[] {
+  const body = gltfChild(root, CLOUD_BODY_SRC)
+  const face = gltfChild(body, CLOUD_FACE_SRC)
+  const rod = gltfChild(body, CLOUD_ROD_SRC)
+  return [root, body, face, rod, makeHook(root)]
+}
+
+/** Local rescue cloud parented to the pad: body, face, fishing rod, and hook. */
 function spawnFloater(): void {
   if (!anchor) return
   despawnFloater()
