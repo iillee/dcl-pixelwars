@@ -29,7 +29,6 @@ import { isMobile } from '@dcl/sdk/platform'
 import { LUNGE_MODE, BURST_MODE } from '../shared/pvp'
 import { getLungeHud, triggerLunge } from './lunge'
 import { getBurstHud, requestBurst } from './paintBurst'
-import { getOverdriveHud, requestOverdrive } from './overdrive'
 
 export const SLOT_BG = Color4.create(0.08, 0.08, 0.10, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
@@ -253,11 +252,10 @@ function roundLabel(lunge: Hud, bomb: Hud): string {
 export function AbilityHotbar() {
   const lunge = getLungeHud()
   const bomb = getBurstHud()
-  const overdrive = getOverdriveHud()
-  if (!lunge.show && !bomb.show && !overdrive.show) return null
+  if (!lunge.show && !bomb.show) return null
   const g = isMobile() ? MOBILE : DESKTOP
   const mobile = isMobile()
-  const nSlots = (lunge.show ? 1 : 0) + (overdrive.show ? 1 : 0) + (bomb.show ? 1 : 0)
+  const nSlots = (lunge.show ? 1 : 0) + (bomb.show ? 1 : 0)
   const geo: Geo = { ...g, halfRow: (nSlots * (g.slot + SLOT_MARGIN_X * 2)) / 2 }
   const label = roundLabel(lunge, bomb)
   const lungeTip = lunge.show && lunge.ready
@@ -266,13 +264,12 @@ export function AbilityHotbar() {
   // where the chip kisses the button edge. Tooltips on the outer sides.
   if (mobile) {
     // Mobile: circle buttons in a column on the native jump button's centre line.
-    // Lunge just above jump, Overdrive between Dash and Burst, Burst above that.
+    // Lunge just above jump, Burst above that.
     const cb = (n: number) => JUMP_CY_BOTTOM + JUMP_D / 2 + CIRCLE_GAP + n * (CIRCLE_D + CIRCLE_GAP)
     return (
       <UiEntity key="ui_pvp_root" uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}>
         {lunge.show && <CircleButton id="lunge" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} bottom={cb(0)} />}
-        {overdrive.show && <CircleButton id="overdrive" hud={overdrive} onPress={requestOverdrive} bottom={cb(1)} centerText />}
-        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={requestBurst} bottom={cb(lunge.show && overdrive.show ? 2 : 1)} />}
+        {bomb.show && <CircleButton id="burst" hud={bomb} iconSrc="assets/images/burst_solid.png" onPress={requestBurst} bottom={cb(lunge.show ? 1 : 0)} />}
       </UiEntity>
     )
   }
@@ -301,7 +298,6 @@ export function AbilityHotbar() {
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
           {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={geo} />}
-          {overdrive.show && <Slot id="overdrive" keyLabel="" hud={overdrive} onPress={requestOverdrive} g={geo} centerText />}
           {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={geo} />}
         </UiEntity>
       </UiEntity>

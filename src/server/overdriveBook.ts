@@ -1,62 +1,51 @@
 /**
- * overdriveBook.ts — server-side star-power bookkeeping for human players.
- * Bots never receive charge or activation.
+ * overdriveBook.ts — server book for star pickups and the active holder.
+ * Bots never pick up or receive the star.
  */
-import { OVERDRIVE_TILES } from '../shared/pvp'
+import { STAR_MS } from '../shared/pvp'
 import {
-  accrueOverdriveCharge, emptyOverdrive, expireOverdrive, isOverdriveActive, isOverdriveReady,
-  resetOverdriveOnDeath, tryActivateOverdrive, type OverdriveState,
+  emptyStarHold, expireStarHold, grantStarHold, isStarActive,
+  type StarHold, type StarOrb,
 } from '../shared/overdrive'
 
 const keyOf = (id: string) => id.toLowerCase()
 
 export class OverdriveBook {
-  private states = new Map<string, OverdriveState>()
+  private holds = new Map<string, StarHold>()
   private lastHit = new Map<string, number>()
-  private dirty = new Set<string>()
+  private orbs = new Map<number, StarOrb>()
+  private nextOrb = 1
 
-  private get(id: string): OverdriveState {
-    return this.states.get(keyOf(id)) ?? emptyOverdrive()
+  private get(id: string): StarHold {
+    return this.holds.get(keyOf(id)) ?? emptyStarHold()
   }
 
-  private set(id: string, state: OverdriveState): void {
-    const k = keyOf(id)
-    this.states.set(k, state)
-    this.dirty.add(k)
+  grant(id: string, now: number): number {
+    if (!id || id.startsWith('bot:')) return 0
+    if (isStarActive(this.get(id), now)) return this.get(id).activeUntil
+    const hold = grantStarHold(now, STAR_MS)
+    this.holds.set(keyOf(id), hold)
+    return hold.activeUntil
   }
 
-  paintedGain(id: string, gained: number, now: number): void {
-    if (!id || id.startsWith('bot:') || gained <= 0) return
-    this.set(id, accrueOverdriveCharge(this.get(id), gained, now))
-  }
-
-  tryUse(id: string, now: number): boolean {
+  onDeath(id: string, now = Date.now()): boolean {
     if (!id || id.startsWith('bot:')) return false
-    const result = tryActivateOverdrive(this.get(id), now)
-    if (!result.ok) return false
-    this.set(id, result.state)
-    return true
-  }
-
-  /** Returns true if a running star was cancelled. */
-  onDeath(id: string): boolean {
-    if (!id || id.startsWith('bot:')) return false
-    const was = isOverdriveActive(this.get(id), Date.now())
-    this.set(id, resetOverdriveOnDeath(this.get(id)))
+    const was = isStarActive(this.get(id), now)
+    this.holds.set(keyOf(id), emptyStarHold())
     return was
   }
 
   isActive(id: string, now: number): boolean {
     if (!id || id.startsWith('bot:')) return false
-    return isOverdriveActive(this.get(id), now)
+    return isStarActive(this.get(id), now)
   }
 
   expire(now: number): string[] {
     const ended: string[] = []
-    for (const [id, state] of this.states) {
-      const next = expireOverdrive(state, now)
-      if (next === state) continue
-      this.set(id, next)
+    for (const [id, hold] of this.holds) {
+      const next = expireStarHold(hold, now)
+      if (next === hold) continue
+      this.holds.set(id, next)
       ended.push(id)
     }
     return ended
@@ -64,21 +53,14 @@ export class OverdriveBook {
 
   actives(now: number): Array<{ id: string; until: number }> {
     const out: Array<{ id: string; until: number }> = []
-    for (const [id, state] of this.states) {
-      if (isOverdriveActive(state, now)) out.push({ id, until: state.activeUntil })
+    for (const [id, hold] of this.holds) {
+      if (isStarActive(hold, now)) out.push({ id, until: hold.activeUntil })
     }
     return out
   }
 
-  ownerState(id: string, now: number): { charge: number; ready: number; active: number; until: number } {
-    const s = expireOverdrive(this.get(id), now)
-    const active = isOverdriveActive(s, now)
-    return {
-      charge: s.charge,
-      ready: !active && s.charge >= OVERDRIVE_TILES ? 1 : 0,
-      active: active ? 1 : 0,
-      until: active ? s.activeUntil : 0,
-    }
+  holderActive(now: number): boolean {
+    return this.actives(now).length > 0
   }
 
   rememberHit(attacker: string, victim: string, now: number): void {
@@ -89,24 +71,39 @@ export class OverdriveBook {
     return this.lastHit.get(`${keyOf(attacker)}|${keyOf(victim)}`) ?? 0
   }
 
-  takeDirty(): string[] {
-    const ids = [...this.dirty]
-    this.dirty.clear()
-    return ids
+  addOrb(pos: { x: number; y: number; z: number; cell: string }): StarOrb {
+    const orb: StarOrb = { i: this.nextOrb++, x: pos.x, y: pos.y, z: pos.z, cell: pos.cell }
+    this.orbs.set(orb.i, orb)
+    return orb
   }
 
-  clearRound(): string[] {
-    const ids = new Set<string>([...this.states.keys(), ...this.dirty])
-    this.states.clear()
+  removeOrb(i: number): StarOrb | null {
+    const orb = this.orbs.get(i) ?? null
+    if (orb) this.orbs.delete(i)
+    return orb
+  }
+
+  liveOrbs(): StarOrb[] { return [...this.orbs.values()] }
+  orbCount(): number { return this.orbs.size }
+  getOrb(i: number): StarOrb | undefined { return this.orbs.get(i) }
+
+  clearOrbs(): StarOrb[] {
+    const all = this.liveOrbs()
+    this.orbs.clear()
+    return all
+  }
+
+  clearRound(): { holders: string[]; orbs: StarOrb[] } {
+    const holders = [...this.holds.keys()]
+    const orbs = this.clearOrbs()
+    this.holds.clear()
     this.lastHit.clear()
-    this.dirty.clear()
-    return [...ids]
+    return { holders, orbs }
   }
 
   forget(id: string): void {
     const k = keyOf(id)
-    this.states.delete(k)
-    this.dirty.delete(k)
+    this.holds.delete(k)
     for (const hit of [...this.lastHit.keys()]) {
       if (hit.startsWith(k + '|') || hit.endsWith('|' + k)) this.lastHit.delete(hit)
     }

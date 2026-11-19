@@ -44,7 +44,7 @@ import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE, LUNGE_STICK_FORCE,
-  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
+  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, STAR_COOLDOWN_MULT, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
@@ -60,6 +60,7 @@ import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { isLocalOverdriveActive } from './overdrive'
 import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
@@ -575,7 +576,7 @@ export function initLunge(): void {
   })
 
   engine.addSystem((dt: number) => {
-    if (cooldownLeft > 0) cooldownLeft -= dt
+    if (cooldownLeft > 0) cooldownLeft -= dt * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1)
     lastHitAge += dt
     if (emoteLockLeft > 0) { emoteLockLeft -= dt; if (emoteLockLeft <= 0) { emoteLockLeft = 0; applyControl() } }
     if (lockLeft > 0) {

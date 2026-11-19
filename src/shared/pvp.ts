@@ -654,14 +654,26 @@ export const ANVIL_HITTER_IMMUNE_MS = 400
 /** Extra metres allowed on a client-reported player contact (RTT / snapshot lag). */
 export const ANVIL_HIT_REPORT_SLACK = 0.8
 
-// ═══ Overdrive / star power ═════════════════════════════════════════
-// Fills from the personal paint counter. Click the hotbar slot to activate.
-// A 3-minute round and a 3x3 brush: a focused painter often lands ~80–250
-// conversions, so 200 tiles is about one star mid-to-late for an aggressive
-// player, and rare for someone who mostly walks their own colour.
-export const OVERDRIVE_TILES = 200
-/** How long the star lasts once activated (ms). */
-export const OVERDRIVE_MS = 6000
+// ═══ Star pickup ════════════════════════════════════════════════════
+// One orb on the floor at a time, after a short grace at round start.
+// The first human to touch it gets the star. Bots never pick it up.
+export const STAR_SPAWN_GRACE_MS = 8000
+export const STAR_SPAWN_MIN_MS = 20000
+export const STAR_SPAWN_MAX_MS = 35000
+export const STAR_MAX_ACTIVE = 1
+export const STAR_PICKUP_RADIUS = 1.2
+export const STAR_PICKUP_MAX_DY = 2
+export const STAR_SPAWN_CLEAR_M = 8
+export const STAR_HOVER_Y = 1.1
+export const STAR_ORB_DIAMETER = 0.6
+/** How long the star lasts once picked up (ms). */
+export const STAR_MS = 8000
+/** Jog/run multiplier via AvatarLocomotionSettings while the star is held. */
+export const STAR_SPEED_MULT = 1.4
+/** Client cooldown ticks and server min-gaps are multiplied by this while starred. */
+export const STAR_COOLDOWN_MULT = 0.5
+/** Spatial loop on the starred player. Placeholder until a dedicated track is dropped in. */
+export const STAR_THEME_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
 /** Horizontal reach (m) for a bump that launches an enemy. */
 export const OVERDRIVE_TOUCH_RADIUS = 2
 /** Vertical pad (m) for that bump. */

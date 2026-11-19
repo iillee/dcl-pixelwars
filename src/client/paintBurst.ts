@@ -33,7 +33,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, STAR_COOLDOWN_MULT, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
@@ -67,6 +67,7 @@ import { hitsOpen, inLobby, paintOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { isLocalOverdriveActive } from './overdrive'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = FLOAT_HEIGHT
@@ -777,7 +778,7 @@ export function initPaintBurst(): void {
         console.log('[Burst] dive landed — glider lock cleared')
       }
     }
-    if (cooldownLeft > 0) cooldownLeft -= dt
+    if (cooldownLeft > 0) cooldownLeft -= dt * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1)
     // Key and hotbar share this call, after the paint system has run. One press, one burst.
     if (burstRequested || inputSystem.isTriggered(InputAction.IA_SECONDARY, PointerEventType.PET_DOWN)) {
       burstRequested = false

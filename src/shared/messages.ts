@@ -68,13 +68,11 @@ export const Messages = {
   // (not one message per tile). Sent with the 5 Hz paint flush, on snapshot, and as 0 on reset.
   paintScore: Schemas.Map({ n: Schemas.Int }),
 
-  // Client → Server: click the Overdrive slot (or request activation). Server
-  // accepts only when charge is full and no star is already running.
-  overdriveUse: Schemas.Map({}),
-  // Server → the owner: charge, ready/active flags, and active-until timestamp.
-  overdriveState: Schemas.Map({ charge: Schemas.Int, ready: Schemas.Int, active: Schemas.Int, until: Schemas.Number }),
-  // Server → everyone: who is glowing, and until when (0 = ended).
-  overdriveAura: Schemas.Map({ id: Schemas.String, until: Schemas.Number }),
+  // Server → everyone: a star orb appeared or disappeared. i is the orb id.
+  starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  starDespawn: Schemas.Map({ i: Schemas.Int }),
+  // Server → everyone: who is holding the star, and until when (0 = ended).
+  starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number }),
   // Server → everyone: accepted star bump. The victim applies overdriveKnock.
   overdriveImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 

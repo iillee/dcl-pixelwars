@@ -98,13 +98,14 @@ function wireInbound(): void {
   room.onMessage('paintScore', ({ n }) => {
     events.emit('paint:score', { n: n ?? 0 })
   })
-  room.onMessage('overdriveState', (s) => {
-    events.emit('overdrive:state', {
-      charge: s.charge ?? 0, ready: s.ready ?? 0, active: s.active ?? 0, until: s.until ?? 0,
-    })
+  room.onMessage('starSpawn', ({ i, x, y, z }) => {
+    events.emit('star:spawn', { i: i ?? 0, x: x ?? 0, y: y ?? 0, z: z ?? 0 })
   })
-  room.onMessage('overdriveAura', ({ id, until }) => {
-    events.emit('overdrive:aura', { id: id ?? '', until: until ?? 0 })
+  room.onMessage('starDespawn', ({ i }) => {
+    events.emit('star:despawn', { i: i ?? 0 })
+  })
+  room.onMessage('starHold', ({ id, until }) => {
+    events.emit('star:hold', { id: id ?? '', until: until ?? 0 })
   })
   room.onMessage('overdriveImpact', ({ attacker, target, dx, dz }) => {
     events.emit('overdrive:impact', { attacker: attacker ?? '', target: target ?? '', dx: dx ?? 0, dz: dz ?? 0 })

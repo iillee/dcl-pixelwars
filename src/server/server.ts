@@ -21,7 +21,7 @@ import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock, overdriveKnock } from '../shared/knocks'
-import { overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir } from '../shared/overdrive'
+import { canSpawnStar, nextStarSpawnAt, overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir, pickStarSpawn, starPickupWinner, type StarCell } from '../shared/overdrive'
 import { OverdriveBook } from './overdriveBook'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -46,6 +46,7 @@ import {
   AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, BOT_AIM_STALE_S,
   pvbBotCount, pvbHumanTeam,
   OVERDRIVE_TOUCH_RADIUS, OVERDRIVE_TOUCH_MAX_DY,
+  STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, STAR_HOVER_Y, STAR_COOLDOWN_MULT, SERVER_MIN_LUNGE_GAP_S,
 } from '../shared/pvp'
 import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHitsBot, burstBotInRange, burstDir } from '../shared/burst'
@@ -114,33 +115,96 @@ export async function setupServer(): Promise<void> {
   const addRoundCells = (id: string, n: number): void => {
     if (n <= 0) return
     roundCells.set(id, (roundCells.get(id) ?? 0) + n)
-    if (!id.startsWith('bot:')) {
-      dirtyPaintScores.add(id)
-      overdrive.paintedGain(id, n, Date.now())
-    }
+    if (!id.startsWith('bot:')) dirtyPaintScores.add(id)
   }
   const overdrive = new OverdriveBook()
+  let starRoundStart = 0
+  let starNextAt = 0
   const overdriveFeet = (id: string, now: number): { x: number; y: number; z: number } | null => {
     const f = botAim.get(id.toLowerCase())
     if (!f || !overdriveFeetFresh(f.t, now)) return null
     return f
   }
-  const sendOverdriveStateTo = (id: string, now = Date.now()): void => {
+  const starCells = (): StarCell[] => {
+    const g = getWalkableGraph()
+    if (!g) return []
+    const out: StarCell[] = []
+    for (const [id, p] of g.worldPos) out.push({ id, x: p[0], y: p[1], z: p[2] })
+    return out
+  }
+  const starAvoid = (now: number): Array<{ x: number; z: number }> => {
+    const avoid: Array<{ x: number; z: number }> = []
+    for (const f of botAim.values()) {
+      if (overdriveFeetFresh(f.t, now)) avoid.push({ x: f.x, z: f.z })
+    }
+    for (const b of getBotHitPoints()) avoid.push({ x: b.x, z: b.z })
+    return avoid
+  }
+  const scheduleNextStar = (now: number): void => {
+    if (matchLive() && paintAllowed(roundFormat)) {
+      starNextAt = nextStarSpawnAt(now, STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, Math.random)
+    } else starNextAt = 0
+  }
+  const endStar = (id: string, now = Date.now()): void => {
+    room.send('starHold', { id, until: 0 })
+    scheduleNextStar(now)
+  }
+  const clearStars = (): void => {
+    const { holders, orbs } = overdrive.clearRound()
+    for (const o of orbs) room.send('starDespawn', { i: o.i })
+    for (const id of holders) room.send('starHold', { id, until: 0 })
+    starRoundStart = 0
+    starNextAt = 0
+  }
+  const armStarRound = (now: number): void => {
+    clearStars()
+    starRoundStart = now
+    starNextAt = now
+  }
+  const sendStarSnapshotTo = (id: string, now = Date.now()): void => {
     if (!id || id.startsWith('bot:')) return
-    room.send('overdriveState', overdrive.ownerState(id, now), { to: [id] })
+    for (const o of overdrive.liveOrbs()) {
+      room.send('starSpawn', { i: o.i, x: o.x, y: o.y, z: o.z }, { to: [id] })
+    }
+    for (const h of overdrive.actives(now)) {
+      room.send('starHold', { id: h.id, until: h.until }, { to: [id] })
+    }
   }
-  const flushOverdriveState = (now = Date.now()): void => {
-    for (const id of overdrive.takeDirty()) sendOverdriveStateTo(id, now)
+  const tryPickupStars = (now: number): void => {
+    if (!matchLive() || !paintAllowed(roundFormat)) return
+    for (const orb of overdrive.liveOrbs()) {
+      const touches: Array<{ id: string; isBot: boolean; distH: number; distY: number }> = []
+      for (const e of rosterEntries()) {
+        const vid = e.userId.toLowerCase()
+        const ft = overdriveFeet(vid, now)
+        if (!ft) continue
+        touches.push({ id: vid, isBot: false, distH: Math.hypot(ft.x - orb.x, ft.z - orb.z), distY: Math.abs(ft.y - orb.y) })
+      }
+      const winner = starPickupWinner(touches)
+      if (!winner) continue
+      overdrive.removeOrb(orb.i)
+      room.send('starDespawn', { i: orb.i })
+      const until = overdrive.grant(winner, now)
+      room.send('starHold', { id: winner, until })
+      console.log('[Server] star pickup ' + winner.slice(0, 8) + ' orb=' + orb.i + ' until ' + until)
+    }
   }
-  const broadcastAura = (id: string, until: number): void => {
-    room.send('overdriveAura', { id, until })
-  }
-  const endOverdrive = (id: string): void => {
-    broadcastAura(id, 0)
-    sendOverdriveStateTo(id)
+  const trySpawnStar = (now: number): void => {
+    if (!matchLive() || !paintAllowed(roundFormat)) return
+    if (!canSpawnStar({
+      now, roundStartAt: starRoundStart, nextAt: starNextAt,
+      activeOrbs: overdrive.orbCount(), holderActive: overdrive.holderActive(now),
+    })) return
+    const cell = pickStarSpawn(starCells(), starAvoid(now))
+    if (!cell) { starNextAt = now + 2000; return }
+    const orb = overdrive.addOrb({ x: cell.x, y: cell.y + STAR_HOVER_Y, z: cell.z, cell: cell.id })
+    room.send('starSpawn', { i: orb.i, x: orb.x, y: orb.y, z: orb.z })
+    console.log('[Server] star spawn ' + orb.i + ' cell=' + orb.cell)
   }
   const tickOverdrive = (now: number): void => {
-    for (const id of overdrive.expire(now)) endOverdrive(id)
+    for (const id of overdrive.expire(now)) endStar(id, now)
+    tryPickupStars(now)
+    trySpawnStar(now)
     if (!matchLive()) return
     for (const { id, until } of overdrive.actives(now)) {
       void until
@@ -195,7 +259,6 @@ export async function setupServer(): Promise<void> {
       room.send('paintScore', { n }, { to: [id] })
     }
     dirtyPaintScores.clear()
-    flushOverdriveState()
   }
   const sendPaintScoreTo = (id: string): void => {
     if (!id || id.startsWith('bot:')) return
@@ -211,12 +274,7 @@ export async function setupServer(): Promise<void> {
     dirtyPaintScores.clear()
     for (const id of ids) room.send('paintScore', { n: 0 }, { to: [id] })
     lastSentPaintScore.clear()
-    const odIds = overdrive.clearRound()
-    for (const id of odIds) {
-      ids.add(id)
-      room.send('overdriveState', { charge: 0, ready: 0, active: 0, until: 0 }, { to: [id] })
-      room.send('overdriveAura', { id, until: 0 })
-    }
+    clearStars()
   }
   /** Team of each `bot:<id>` seen this round, including bots retired after scoring. */
   const botTeams = new Map<string, number>()
@@ -515,6 +573,7 @@ export async function setupServer(): Promise<void> {
     clearDepots()
     clearTerritoryRegen()
     anvilsAwake(false)
+    clearStars()
     if (!lobbyOpen) {
       lobbyOpen = true
       clearLobbyVotes()
@@ -735,6 +794,7 @@ export async function setupServer(): Promise<void> {
     pendingFinal = { red: 0, blue: 0, green: 0, yellow: 0, total: 0 }
     console.log(`[Server] round ${seed} started format=${roundFormat} humanTeam=${humanTeamLabel} bots=${plannedBots} (activeHumans=${activeHumanCount()})`)
     sendRoundClock()
+    armStarRound(Date.now())
   }
 
   room.onMessage('lagPing', ({ t }, context) => {
@@ -788,7 +848,7 @@ export async function setupServer(): Promise<void> {
     bursts.forget(userId)
     lastBurstAt.delete(userId)
     const left = userId.toLowerCase()
-    if (overdrive.isActive(left, Date.now())) broadcastAura(left, 0)
+    if (overdrive.isActive(left, Date.now())) endStar(left)
     overdrive.forget(left)
     if (rescueRiders.delete(left)) {
       rescueStartAt.delete(left)
@@ -1087,7 +1147,7 @@ export async function setupServer(): Promise<void> {
     if (getTeam(from) === null) return
     const len = Math.hypot(dx, dz)
     if (!isFinite(len) || len < 1e-3 || ![x, y, z].every(isFinite)) return
-    if (!lunges.start(from, id, Date.now())) {
+    if (!lunges.start(from, id, Date.now(), overdrive.isActive(from, Date.now()) ? SERVER_MIN_LUNGE_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_LUNGE_GAP_S)) {
       console.log(`[Server] lungeStart ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
@@ -1197,7 +1257,7 @@ export async function setupServer(): Promise<void> {
       // Lobby: the shockwave plays for everyone. It does not paint or hit.
       if (!bursts.matches(from, id)) {
         const now = Date.now()
-        if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) return
+        if (now - (lastBurstAt.get(from) ?? 0) < (overdrive.isActive(from, now) ? SERVER_MIN_BURST_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_BURST_GAP_S) * 1000) return
         lastBurstAt.set(from, now)
         const airborne = air !== 0
         bursts.start(from, id, now, airborne ? 1 : 0, fx, fz)
@@ -1218,7 +1278,7 @@ export async function setupServer(): Promise<void> {
       }
       return
     }
-    if (now - (lastBurstAt.get(from) ?? 0) < SERVER_MIN_BURST_GAP_S * 1000) {
+    if (now - (lastBurstAt.get(from) ?? 0) < (overdrive.isActive(from, now) ? SERVER_MIN_BURST_GAP_S * STAR_COOLDOWN_MULT : SERVER_MIN_BURST_GAP_S) * 1000) {
       console.log(`[Server] burstUse ${from.slice(0, 8)} rejected: cooldown`)
       return
     }
@@ -1361,26 +1421,12 @@ export async function setupServer(): Promise<void> {
     const by = anvilCredit(i)
     if (by && by !== from && getTeam(by) !== null && getTeam(by) !== getTeam(from)) noteHit(by, from)
   })
-  room.onMessage('overdriveUse', (_m, context) => {
-    const from = context?.from
-    if (!from || !matchLive() || getTeam(from) === null) return
-    const now = Date.now()
-    if (!overdrive.tryUse(from, now)) {
-      sendOverdriveStateTo(from, now)
-      return
-    }
-    const until = overdrive.ownerState(from, now).until
-    broadcastAura(from.toLowerCase(), until)
-    sendOverdriveStateTo(from, now)
-    console.log('[Server] overdriveUse ' + from.slice(0, 8) + ' until ' + until)
-  })
   room.onMessage('playerFell', (_m, context) => {
     const from = context?.from
     if (!from || !matchLive() || getTeam(from) === null) return
     const by = noteFell(from)
     onBalloonFall(from)
-    if (overdrive.onDeath(from)) endOverdrive(from.toLowerCase())
-    else sendOverdriveStateTo(from)
+    if (overdrive.onDeath(from)) endStar(from.toLowerCase())
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
   // Relay the rider's cloud so every other client can show it. who is the
@@ -1556,10 +1602,7 @@ export async function setupServer(): Promise<void> {
     if (basesOn(roundFormat) && isRoundActive()) sendBaseState(lastBaseSnap, from)
     sendRoundClock(from) // late joiners: current round + time left (or idle)
     sendPaintScoreTo(from)
-    sendOverdriveStateTo(from)
-    for (const { id, until } of overdrive.actives(Date.now())) {
-      room.send('overdriveAura', { id, until }, { to: [from] })
-    }
+    sendStarSnapshotTo(from)
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:

@@ -71,9 +71,9 @@ export function knockDir(attacker: V3, target: V3, dx: number, dz: number): { x:
  */
 export class LungeLedger {
   private last = new Map<string, { id: number; at: number; hits: Set<string> }>()
-  start(from: string, id: number, now: number): boolean {
+  start(from: string, id: number, now: number, minGapS = SERVER_MIN_LUNGE_GAP_S): boolean {
     const prev = this.last.get(from)
-    if (prev && now - prev.at < SERVER_MIN_LUNGE_GAP_S * 1000) return false
+    if (prev && now - prev.at < minGapS * 1000) return false
     this.last.set(from, { id, at: now, hits: new Set() })
     return true
   }

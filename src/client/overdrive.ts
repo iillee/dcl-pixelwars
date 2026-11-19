@@ -1,67 +1,61 @@
 /**
- * overdrive.ts — client mirror of server star power: HUD, glow, knock, and feet.
- * The server owns charge, activation, touch knocks, and immunity.
+ * overdrive.ts — client mirror of the star pickup: glow, trail, music, knock, feet.
+ * The server owns spawn, pickup, touch knocks, and immunity. No local prediction.
  */
-import { engine, Entity, Transform, AvatarAttach, Material, MaterialTransparencyMode, MeshRenderer, PlayerIdentityData } from '@dcl/sdk/ecs'
-import { Color4, Vector3 } from '@dcl/sdk/math'
+import { engine, Entity, Transform, AvatarAttach, Material, MaterialTransparencyMode, MeshRenderer, LightSource, Billboard, BillboardMode, AudioSource, PlayerIdentityData } from '@dcl/sdk/ecs'
+import { Color3, Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { room } from '../shared/messages'
-import { OVERDRIVE_TILES, OVERDRIVE_MS, BOT_AIM_REPORT_HZ } from '../shared/pvp'
+import { BOT_AIM_REPORT_HZ, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pvp'
 import { overdriveKnock } from '../shared/knocks'
-import { TEAM_RGB, isPlayingTeam } from '../shared/team'
-import { playDashSfx, playDashHitSfx } from './audio'
-import { applyKnock, isKnockbackImmune, myAddress, localTeam, setOverdriveImmuneCheck } from './knockback'
+import { playClaimSfx, playDashSfx, playDashHitSfx } from './audio'
+import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
 import { playBotKnock } from './botVisual'
+import { setStarSpeedMult } from './speed'
+import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
 
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
 const GLOW_SCALE = 1.85
+const SPARK_SRC = 'assets/images/star_white.png'
+const SPARK_N = 5
+const THEME_VOL = 0.5
 
-let charge = 0
-let ready = 0
 let active = 0
 let until = 0
-type GlowRec = { attach: Entity; ball: Entity; until: number }
+type GlowRec = { attach: Entity; ball: Entity; light: Entity; music: Entity; sparks: Entity[]; until: number }
 const auras = new Map<string, number>()
 const glows = new Map<string, GlowRec>()
 let knockForceEnt: Entity | null = null
 let wired = false
 let feetClock = 0
+let sparkClock = 0
 
 export function isLocalOverdriveActive() {
   return active === 1 && until > Date.now()
 }
 
-export function requestOverdrive() {
-  if (ready !== 1 || isLocalOverdriveActive()) return
-  try { room.send('overdriveUse', {}) } catch (err) { console.log('[Overdrive] use send failed', err) }
+/** Seconds left on the local star, or 0. Used by the compact HUD timer. */
+export function starHudSeconds(): number {
+  const now = Date.now()
+  if (active !== 1 || until <= now) return 0
+  return (until - now) / 1000
 }
 
-export function getOverdriveHud() {
+function applyLocalSpeed(): void {
+  setStarSpeedMult(isLocalOverdriveActive() ? STAR_SPEED_MULT : 1)
+}
+
+function setLocal(endAt: number): void {
   const now = Date.now()
-  const live = active === 1 && until > now
-  const isReady = !live && ready === 1
-  const team = localTeam()
-  const rgb = isPlayingTeam(team) ? TEAM_RGB[team] : { r: 1, g: 1, b: 1 }
-  const pulse = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(now / 180))
-  let fill = OVERDRIVE_TILES > 0 ? Math.max(0, Math.min(1, charge / OVERDRIVE_TILES)) : 0
-  let text = charge + '/' + OVERDRIVE_TILES
-  if (isReady) { fill = 1; text = 'READY' }
-  if (live) {
-    fill = Math.max(0, Math.min(1, (until - now) / OVERDRIVE_MS))
-    text = Math.max(1, Math.ceil((until - now) / 1000)) + 's'
-  }
-  const fillColor = Color4.create(rgb.r, rgb.g, rgb.b, (isReady || live) ? pulse : 0.95)
-  return {
-    show: true,
-    enabled: isPlayingTeam(team),
-    ready: isReady,
-    cooldown: live ? (until - now) / 1000 : 0,
-    cooldownFrac: 1 - fill,
-    text,
-    recovering: false,
-    fillColor,
-    pulse: isReady || live,
+  const was = isLocalOverdriveActive()
+  const live = typeof endAt === 'number' && isFinite(endAt) && endAt > now
+  active = live ? 1 : 0
+  until = live ? endAt : 0
+  applyLocalSpeed()
+  if (live && !was) {
+    playDashSfx()
+    playClaimSfx()
   }
 }
 
@@ -87,6 +81,20 @@ function glowMat(pulse: number) {
   }
 }
 
+function sparkMat(pulse: number) {
+  const a = 0.45 + 0.4 * pulse
+  return {
+    texture: Material.Texture.Common({ src: SPARK_SRC }),
+    emissiveTexture: Material.Texture.Common({ src: SPARK_SRC }),
+    albedoColor: Color4.create(1, 0.92, 0.45, a),
+    emissiveColor: Color4.create(1, 0.88, 0.35, 1),
+    emissiveIntensity: 2.4 + pulse,
+    roughness: 1,
+    metallic: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+  }
+}
+
 function ensureGlow(id: string, endAt: number): void {
   let rec = glows.get(id)
   if (rec) { rec.until = endAt; return }
@@ -99,15 +107,41 @@ function ensureGlow(id: string, endAt: number): void {
   Transform.create(ball, { parent: attach, position: Vector3.create(0, GLOW_Y, 0), scale: Vector3.create(GLOW_SCALE, GLOW_SCALE, GLOW_SCALE) })
   MeshRenderer.setSphere(ball)
   Material.setPbrMaterial(ball, glowMat(1))
-  rec = { attach, ball, until: endAt }
+  const light = engine.addEntity()
+  Transform.create(light, { parent: attach, position: Vector3.create(0, GLOW_Y, 0) })
+  LightSource.create(light, { type: LightSource.Type.Point({}), color: Color3.create(1, 0.8, 0.25), intensity: 80, range: 7 })
+  const music = engine.addEntity()
+  Transform.create(music, { parent: attach, position: Vector3.create(0, 1.2, 0) })
+  AudioSource.create(music, { audioClipUrl: STAR_THEME_SRC, playing: true, loop: true, volume: THEME_VOL, global: false })
+  const sparks: Entity[] = []
+  for (let i = 0; i < SPARK_N; i++) {
+    const spark = engine.addEntity()
+    const ang = (i / SPARK_N) * Math.PI * 2
+    Transform.create(spark, {
+      parent: attach,
+      position: Vector3.create(Math.cos(ang) * 0.35, 0.7, Math.sin(ang) * 0.35),
+      scale: Vector3.create(0.22, 0.22, 0.22),
+    })
+    MeshRenderer.setPlane(spark)
+    Billboard.create(spark, { billboardMode: BillboardMode.BM_ALL })
+    Material.setPbrMaterial(spark, sparkMat(1))
+    sparks.push(spark)
+  }
+  rec = { attach, ball, light, music, sparks, until: endAt }
   glows.set(id, rec)
 }
 
 function dropGlow(id: string): void {
   const rec = glows.get(id)
   if (!rec) return
-  try { engine.removeEntity(rec.ball) } catch (err) { /* already gone */ }
-  try { engine.removeEntity(rec.attach) } catch (err) { /* already gone */ }
+  const src = AudioSource.getMutableOrNull(rec.music)
+  if (src) src.playing = false
+  for (const e of rec.sparks) {
+    try { engine.removeEntity(e) } catch (err) { /* already gone */ }
+  }
+  for (const e of [rec.ball, rec.light, rec.music, rec.attach]) {
+    try { engine.removeEntity(e) } catch (err) { /* already gone */ }
+  }
   glows.delete(id)
 }
 
@@ -116,35 +150,35 @@ function clearGlows() {
   auras.clear()
 }
 
-function setLocal(next: { charge: number; ready: number; active: number; until: number }): void {
-  charge = Math.max(0, Math.floor(next.charge || 0))
-  ready = next.ready ? 1 : 0
-  active = next.active ? 1 : 0
-  until = typeof next.until === 'number' && isFinite(next.until) ? next.until : 0
+function applyHold(id: string, endAt: number): void {
+  const who = (id || '').toLowerCase()
+  if (!who) return
+  const now = Date.now()
+  if (!endAt || endAt <= now) {
+    auras.delete(who)
+    dropGlow(who)
+    if (who === myAddress()) setLocal(0)
+    return
+  }
+  auras.set(who, endAt)
+  ensureGlow(who, endAt)
+  if (who === myAddress()) setLocal(endAt)
 }
 
 export function initOverdrive() {
   if (wired) return
   wired = true
+  initStarOrbs()
   knockForceEnt = engine.addEntity()
   setOverdriveImmuneCheck(() => isLocalOverdriveActive())
-  events.on('overdrive:state', (s) => setLocal(s))
-  events.on('overdrive:aura', ({ id, until: endAt }) => {
-    const who = (id || '').toLowerCase()
-    if (!who) return
-    if (!endAt || endAt <= Date.now()) {
-      auras.delete(who)
-      dropGlow(who)
-      if (who === myAddress()) setLocal({ charge, ready: 0, active: 0, until: 0 })
-      return
-    }
-    auras.set(who, endAt)
-    ensureGlow(who, endAt)
-    if (who === myAddress()) {
-      setLocal({ charge: 0, ready: 0, active: 1, until: endAt })
-      playDashSfx()
-    }
+  events.on('star:spawn', ({ i, x, y, z }) => {
+    if (!Number.isFinite(i) || ![x, y, z].every(n => typeof n === 'number' && isFinite(n))) return
+    showStarOrb(i, x, y, z)
   })
+  events.on('star:despawn', ({ i }) => {
+    if (Number.isFinite(i)) hideStarOrb(i)
+  })
+  events.on('star:hold', ({ id, until: endAt }) => applyHold(id, endAt))
   events.on('overdrive:impact', ({ attacker, target, dx, dz }) => {
     const me = myAddress()
     const want = (target || '').toLowerCase()
@@ -161,25 +195,45 @@ export function initOverdrive() {
     console.log('[Overdrive] launched by ' + (attacker || '').slice(0, 8))
   })
   events.on('round:reset', () => {
-    setLocal({ charge: 0, ready: 0, active: 0, until: 0 })
+    setLocal(0)
     clearGlows()
+    clearStarOrbs()
   })
   events.on('lobby:floor', () => {
-    setLocal({ charge: 0, ready: 0, active: 0, until: 0 })
+    setLocal(0)
     clearGlows()
+    clearStarOrbs()
   })
   engine.addSystem((dt) => {
     const now = Date.now()
     const pulse = 0.5 + 0.5 * Math.sin(now / 180)
+    sparkClock += dt
+    if (isLocalOverdriveActive() && until <= now) setLocal(0)
+    for (const [id, endAt] of [...auras]) {
+      if (endAt <= now) {
+        auras.delete(id)
+        dropGlow(id)
+        if (id === myAddress()) setLocal(0)
+        continue
+      }
+      if (!glows.has(id)) ensureGlow(id, endAt)
+    }
     for (const [id, rec] of glows) {
       if (rec.until <= now) { dropGlow(id); auras.delete(id); continue }
       const s = GLOW_SCALE * (0.92 + 0.12 * pulse)
       const t = Transform.getMutableOrNull(rec.ball)
       if (t) t.scale = Vector3.create(s, s, s)
       Material.setPbrMaterial(rec.ball, glowMat(pulse))
+      rec.sparks.forEach((spark, i) => {
+        const ang = (i / SPARK_N) * Math.PI * 2 + sparkClock * 1.6
+        const lift = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(sparkClock * 3 + i))
+        const st = Transform.getMutableOrNull(spark)
+        if (st) st.position = Vector3.create(Math.cos(ang) * 0.4, lift, Math.sin(ang) * 0.4)
+        Material.setPbrMaterial(spark, sparkMat(0.5 + 0.5 * Math.sin(sparkClock * 5 + i)))
+      })
     }
-    // While a star is live, send feet so the server can test touches even without ghosts.
-    const needFeet = isLocalOverdriveActive() || auras.size > 0
+    // While an orb or a star is live, send feet so the server can test pickup and touches.
+    const needFeet = isLocalOverdriveActive() || auras.size > 0 || hasStarOrbs()
     if (!needFeet) return
     feetClock += dt
     if (feetClock < 1 / Math.max(BOT_AIM_REPORT_HZ, 10)) return

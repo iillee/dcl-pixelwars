@@ -22,23 +22,29 @@ const DEFAULT_JOG = 8
 const DEFAULT_RUN = 10
 
 let boosted = false
+let starMult = 1
+
+function applySpeed(): void {
+  const paint = (boosted && OWN_PAINT_SPEED_MULT !== 1) ? OWN_PAINT_SPEED_MULT : 1
+  const mult = paint * starMult
+  AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, {
+    jogSpeed: DEFAULT_JOG * mult,
+    runSpeed: DEFAULT_RUN * mult,
+  })
+}
 
 function setBoost(on: boolean): void {
   if (on === boosted) return
   boosted = on
-  if (on && OWN_PAINT_SPEED_MULT !== 1) {
-    AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, {
-      jogSpeed: DEFAULT_JOG * OWN_PAINT_SPEED_MULT,
-      runSpeed: DEFAULT_RUN * OWN_PAINT_SPEED_MULT,
-    })
-  } else {
-    // Write explicit defaults rather than deleting the component, so a
-    // client that ignores removal can't keep the boost stuck on.
-    AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, {
-      jogSpeed: DEFAULT_JOG,
-      runSpeed: DEFAULT_RUN,
-    })
-  }
+  applySpeed()
+}
+
+/** Compose with the own-paint bonus. 1 = no star boost. */
+export function setStarSpeedMult(m: number): void {
+  const next = Number.isFinite(m) && m > 0 ? m : 1
+  if (next === starMult) return
+  starMult = next
+  applySpeed()
 }
 
 export function initSpeedBonus(): void {
