@@ -21,10 +21,10 @@ import { spawnStarPickupPop } from './starPickupPop'
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
 const SPARK_SRC = 'assets/images/star_white.png'
-const SPARK_N = 36
+const SPARK_N = 12
 const SPARK_LIFE = 1.15
 const SPARK_RISE_H = 3.6
-const SPARK_START_Y = 0.4
+const SPARK_START_Y = 1.9
 const SPARK_SPREAD = 0.32
 const SPARK_SIZE = 0.75
 const SPARK_GOLD = { r: 255 / 255, g: 213 / 255, b: 74 / 255 }

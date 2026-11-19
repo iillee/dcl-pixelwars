@@ -143,7 +143,7 @@ check('the STAR seconds chip is gone', !uiSrc.includes('starHudSeconds') && !/ST
 check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIFE') && odSrc.includes('SPARK_GOLD') && !odSrc.includes('SPARK_ORBIT') && odSrc.includes('fade = 1 - t'))
 check('the client starts the hold from remaining ms on its own clock', odSrc.includes('resolveStarHoldEnd(endAt, remainingMs, now)'))
 check('star theme track is kept but disabled, and BGM is not ducked', STAR_THEME_SRC === 'assets/sounds/star-theme.mp3' && STAR_THEME_ENABLED === false && odSrc.includes('STAR_THEME_ENABLED && live'))
-check('star sparkles are bigger, higher, and more plentiful', /const SPARK_N = 3[0-9]/.test(odSrc) && /const SPARK_RISE_H = 3\.[0-9]/.test(odSrc) && /const SPARK_SIZE = 0\.(7|8)/.test(odSrc))
+check('star sparkles start above the head, stay large, and are not dense', /const SPARK_N = 1[0-2]/.test(odSrc) && odSrc.includes('const SPARK_START_Y = 1.9') && /const SPARK_RISE_H = 3\.[0-9]/.test(odSrc) && /const SPARK_SIZE = 0\.(7|8)/.test(odSrc))
 const popSrc = readFileSync(new URL('../src/client/starPickupPop.ts', import.meta.url), 'utf8')
 check('star pickup pop ports flagtag head-bounce timings and offsets', popSrc.includes('coinPickupSystem.ts') && popSrc.includes('spawnHeadBounce') && popSrc.includes('duration: 200') && popSrc.includes('duration: 350') && popSrc.includes('EF_EASEOUTQUAD') && popSrc.includes('EF_EASEINQUAD') && popSrc.includes('0, 0.5, 0') && popSrc.includes('0, 2.0, 0') && popSrc.includes('0, 0.8, 0') && popSrc.includes('POP_DURATION = 0.6'))
 check('star pickup plays flagtag flag pickup sound', popSrc.includes('assets/sounds/pickup2.wav') && popSrc.includes('volume: 2') && odSrc.includes('spawnStarPickupPop('))
