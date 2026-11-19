@@ -46,6 +46,7 @@ import { playBalloonPopSfx } from './audio'
 import { setMoveLock, getMoveLock } from './moveLock'
 import { isFallRescueActive } from './fallRescue'
 import { enterOverview } from './overviewCamera'
+import { makeStringLine, placeStringLine } from './stringLine'
 
 type Rgb = { r: number; g: number; b: number }
 type Vec = { x: number; y: number; z: number }
@@ -121,6 +122,7 @@ const STRING_SEGS = 4
 const STRING_SAG = 0.14
 /** Midpoint trails the balloon so the string bends as it moves. */
 const STRING_LAG_TAU = 0.16
+const STRING_COLOR = Color4.create(0.85, 0.85, 0.82, 1)
 
 
 type Balloon = {
@@ -417,36 +419,10 @@ function aimString(ent: Entity, from: Vec, to: Vec): void {
 
 /** Quadratic bezier from the knot through a lagged, sagged mid to the balloon. */
 function placeString(segs: Entity[], lag: Vec, ready: { lagReady: boolean }, from: Vec, to: Vec, dt: number): void {
-  const midX = (from.x + to.x) * 0.5
-  const midZ = (from.z + to.z) * 0.5
-  const midY = (from.y + to.y) * 0.5 - STRING_SAG
-  if (!ready.lagReady) {
-    lag.x = midX
-    lag.y = midY
-    lag.z = midZ
-    ready.lagReady = true
-  } else {
-    const k = 1 - Math.exp(-Math.max(0, dt) / STRING_LAG_TAU)
-    lag.x += (midX - lag.x) * k
-    lag.y += (midY - lag.y) * k
-    lag.z += (midZ - lag.z) * k
-  }
-  _from.x = from.x
-  _from.y = from.y
-  _from.z = from.z
-  for (let i = 1; i <= STRING_SEGS; i++) {
-    const t = i / STRING_SEGS
-    const u = 1 - t
-    _to.x = u * u * from.x + 2 * u * t * lag.x + t * t * to.x
-    _to.y = u * u * from.y + 2 * u * t * lag.y + t * t * to.y
-    _to.z = u * u * from.z + 2 * u * t * lag.z + t * t * to.z
-    aimString(segs[i - 1], _from, _to)
-    _from.x = _to.x
-    _from.y = _to.y
-    _from.z = _to.z
-  }
+  const line = { segs, lagMid: lag, lagReady: ready.lagReady, radius: STRING_R }
+  placeStringLine(line, from, to, dt, { sag: STRING_SAG, lagTau: STRING_LAG_TAU })
+  ready.lagReady = line.lagReady
 }
-
 function paintBalloon(ent: Entity, a = BALLOON_ALPHA): void {
   Material.setPbrMaterial(ent, balloonMat(a))
 }
@@ -507,11 +483,8 @@ function makeString(parent: Entity | null): Entity {
 }
 
 function makeStringSegs(parent: Entity | null): Entity[] {
-  const segs: Entity[] = []
-  for (let i = 0; i < STRING_SEGS; i++) segs.push(makeString(parent))
-  return segs
+  return makeStringLine(parent, { radius: STRING_R, color: STRING_COLOR, segs: STRING_SEGS }).segs
 }
-
 function spawnBalloon(i: number, at: Vec, parent: Entity | null): Balloon {
   const root = makeBalloon(parent, at)
   const segs = makeStringSegs(parent)

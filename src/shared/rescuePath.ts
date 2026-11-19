@@ -37,16 +37,6 @@ export const RESCUE_PATH = {
   CRUISE_CLEAR: 8,
   /** Panel surface above the base feet (baseSpawn y). Removing the panel is the drop. */
   ARRIVE_ABOVE: 1.5,
-  /**
-   * Cloud root XZ relative to the rider's feet, toward the fishing rod (-X).
-   * The hook is opposite that shift so it hangs over the head, not under the puff.
-   */
-  CLOUD_SHIFT_X: -0.70,
-  CLOUD_SHIFT_Z: 0,
-  /** Hook on the cloud root, opposite the shift, 0.78 m below the root. */
-  HOOK_X: 0.70,
-  HOOK_Y: -0.78,
-  HOOK_Z: 0,
 }
 
 export type RescueVec = { x: number; y: number; z: number }
@@ -70,18 +60,18 @@ export function rescueHangY(who?: string): number {
 
 export function rescueHangAt(p: RescueVec, extraY = 0, hangY = RESCUE_PATH.HANG_Y): RescueVec {
   return {
-    x: p.x + RESCUE_PATH.CLOUD_SHIFT_X,
+    x: p.x,
     y: p.y + hangY + extraY,
-    z: p.z + RESCUE_PATH.CLOUD_SHIFT_Z,
+    z: p.z,
   }
 }
 
-/** Rider feet under a cloud-root pose (the hook sits over the head). */
+/** Rider feet under a cloud-root pose (the hook hangs on the root's Y axis). */
 export function rescueRiderFromCloud(cloud: RescueVec, hangY = RESCUE_PATH.HANG_Y): RescueVec {
   return {
-    x: cloud.x - RESCUE_PATH.CLOUD_SHIFT_X,
+    x: cloud.x,
     y: cloud.y - hangY,
-    z: cloud.z - RESCUE_PATH.CLOUD_SHIFT_Z,
+    z: cloud.z,
   }
 }
 

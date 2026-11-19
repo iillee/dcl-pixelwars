@@ -63,6 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
+  Billboard, BillboardMode,
   GltfContainer,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
@@ -87,6 +88,7 @@ import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
 import { RESCUE_PATH, rescueCloudPose, rescueHangAt, rescueHangY, rescueRiderFromCloud } from '../shared/rescuePath'
+import { makeStringLine, placeStringLine, type StringLine } from './stringLine'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -127,6 +129,24 @@ export const FALL_RESCUE = {
   RIDE_HANDOFF_S: 0.75,
 }
 
+/**
+ * Rescue-cloud visuals. The root stays over the rider and yaws to face the
+ * camera; these shift the puff, hook, and coded line around that root.
+ */
+/** Puff sits this far to the camera-right (local -X after the Y billboard). */
+const CLOUD_OFFSET_X = -0.80
+const CLOUD_OFFSET_Y = 0
+const CLOUD_OFFSET_Z = 0
+/** Rod tip in body/model local space (glTF metres). */
+const ROD_TIP_LOCAL = { x: -1.18, y: -0.06, z: -0.46 }
+/** Hook below the cloud root, hanging over the rider's head. */
+const HOOK_Y = -0.78
+const HOOK_SCALE = Vector3.create(0.34, 0.34, 0.34)
+/** Coded fishing line, same construction as balloon strings. */
+const LINE_RADIUS = 0.016
+const LINE_SEGS = 4
+const LINE_SAG = 0.10
+const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
 const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
 const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
 const CLOUD_ROD_SRC = 'assets/models/cloud-rod.glb'
@@ -312,8 +332,8 @@ function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: 
   const tr = Transform.getMutable(floater.root)
   const s = Math.max(0.02, scale)
   tr.scale = Vector3.create(s, s, s)
-  const x = (localXZ?.x ?? 0) + FALL_RESCUE.CLOUD_SHIFT_X
-  const z = (localXZ?.z ?? 0) + FALL_RESCUE.CLOUD_SHIFT_Z
+  const x = localXZ?.x ?? 0
+  const z = localXZ?.z ?? 0
   if (anchor && (phase === 'grab' || phase === 'carry')) tr.position = Vector3.create(x, yOff, z)
   else if (world) tr.position = Vector3.create(world.x + x, world.y + yOff, world.z + z)
 }
@@ -388,9 +408,7 @@ function detachFloater(): void {
   })
 }
 
-/** Hook ball at the rod line tip. Offset opposite the puff so it hangs over the head. HANG_Y is unchanged. */
-const HOOK_LOCAL = Vector3.create(RESCUE_PATH.HOOK_X, RESCUE_PATH.HOOK_Y, RESCUE_PATH.HOOK_Z)
-const HOOK_SCALE = Vector3.create(0.34, 0.34, 0.34)
+const HOOK_LOCAL = Vector3.create(0, HOOK_Y, 0)
 
 function makeHook(parent: Entity): Entity {
   const e = engine.addEntity()
@@ -411,12 +429,40 @@ function gltfChild(parent: Entity, src: string): Entity {
   return e
 }
 
-/** Lavender cloud the rider sees: faceless body (ghost outline in the GLB), face, rod, hook. Root is ents[0]. */
+function lineFromTo(): { from: { x: number; y: number; z: number }; to: { x: number; y: number; z: number } } {
+  return {
+    from: {
+      x: CLOUD_OFFSET_X + ROD_TIP_LOCAL.x,
+      y: CLOUD_OFFSET_Y + ROD_TIP_LOCAL.y,
+      z: CLOUD_OFFSET_Z + ROD_TIP_LOCAL.z,
+    },
+    to: { x: 0, y: HOOK_Y, z: 0 },
+  }
+}
+
+function attachCloudLine(root: Entity): StringLine {
+  const line = makeStringLine(root, { radius: LINE_RADIUS, color: LINE_COLOR, segs: LINE_SEGS })
+  const { from, to } = lineFromTo()
+  placeStringLine(line, from, to, 0, { sag: LINE_SAG, lagTau: 0 })
+  return line
+}
+
+function faceCamera(root: Entity, on: boolean): void {
+  const bill = Billboard.getMutableOrNull(root)
+  if (bill) bill.billboardMode = on ? BillboardMode.BM_Y : BillboardMode.BM_NONE
+  else if (on) Billboard.create(root, { billboardMode: BillboardMode.BM_Y })
+}
+
+/** Lavender cloud: faceless body (ghost outline in the GLB), face, rod, hook, coded line. Root is ents[0]. */
 function cloudParts(root: Entity): Entity[] {
+  faceCamera(root, true)
   const body = gltfChild(root, CLOUD_BODY_SRC)
+  Transform.getMutable(body).position = Vector3.create(CLOUD_OFFSET_X, CLOUD_OFFSET_Y, CLOUD_OFFSET_Z)
   const face = gltfChild(body, CLOUD_FACE_SRC)
   const rod = gltfChild(body, CLOUD_ROD_SRC)
-  return [root, body, face, rod, makeHook(root)]
+  const hook = makeHook(root)
+  const line = attachCloudLine(root)
+  return [root, body, face, rod, hook, ...line.segs]
 }
 
 /** Local rescue cloud parented to the pad: body, face, fishing rod, and hook. */
@@ -513,6 +559,7 @@ function startPath(start: Vec, trippedAt: number): void {
 }
 
 function releaseRideCamera(): void {
+  if (floater) faceCamera(floater.root, true)
   const main = MainCamera.getMutableOrNull(engine.CameraEntity)
   if (main && rideCam !== null && main.virtualCameraEntity === rideCam) main.virtualCameraEntity = undefined
   if (rideCam) { engine.removeEntity(rideCam); rideCam = null }
@@ -525,7 +572,7 @@ function mountRideCamera(): void {
   releaseRideCamera()
   rideLook = engine.addEntity()
   // Below the puff, toward the stand-in's head, so the rider stays in frame.
-  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(FALL_RESCUE.HOOK_X, -0.4, 0.2) })
+  Transform.create(rideLook, { parent: floater.root, position: Vector3.create(0, -0.4, 0.2) })
   rideCam = engine.addEntity()
   Transform.create(rideCam, { parent: floater.root, position: Vector3.create(0, 1.8, -6) })
   VirtualCamera.create(rideCam, {
@@ -615,6 +662,8 @@ function clearCarryDisguise(): void {
  */
 function startCameraRide(): void {
   if (!floater) { finish('snap', 'no cloud'); return }
+  // Child ride camera sits in front of the face; a Y billboard would fight it.
+  faceCamera(floater.root, false)
   pinOverviewClosed(true)
   detachFloater()
   const live = Transform.getOrNull(floater.root)
