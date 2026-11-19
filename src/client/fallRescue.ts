@@ -63,7 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
-  GltfContainer, Billboard, BillboardMode, VisibilityComponent,
+  GltfContainer, Billboard, BillboardMode,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
@@ -381,22 +381,22 @@ const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
 const CLOUD_FACE_BLINK_SRC = 'assets/models/cloud-face-blink.glb'
 const CLOUD_FACE_LAUGH_SRC = 'assets/models/cloud-face-laugh.glb'
 /** Closed-eye flash length (seconds). */
-const FACE_BLINK_MIN_S = 0.12
-const FACE_BLINK_MAX_S = 0.15
+const FACE_BLINK_MIN_S = 0.15
+const FACE_BLINK_MAX_S = 0.2
 /** Gap between later blinks. */
-const FACE_BLINK_EVERY_MIN_S = 2.5
-const FACE_BLINK_EVERY_MAX_S = 4.5
+const FACE_BLINK_EVERY_MIN_S = 1.0
+const FACE_BLINK_EVERY_MAX_S = 2.0
 /** First blink is sooner so a ~5s rescue is likely to show one. */
-const FACE_BLINK_FIRST_MIN_S = 0.5
-const FACE_BLINK_FIRST_MAX_S = 1.6
+const FACE_BLINK_FIRST_MIN_S = 0.3
+const FACE_BLINK_FIRST_MAX_S = 0.8
 /** Open-mouth laugh length (seconds). */
-const FACE_LAUGH_S = 1.2
+const FACE_LAUGH_S = 1.0
 /** Gap between later laughs. */
-const FACE_LAUGH_EVERY_MIN_S = 6
-const FACE_LAUGH_EVERY_MAX_S = 10
+const FACE_LAUGH_EVERY_MIN_S = 2.5
+const FACE_LAUGH_EVERY_MAX_S = 4.0
 /** First laugh is earlier so it can land during a typical carry. */
-const FACE_LAUGH_FIRST_MIN_S = 2.2
-const FACE_LAUGH_FIRST_MAX_S = 3.8
+const FACE_LAUGH_FIRST_MIN_S = 1.2
+const FACE_LAUGH_FIRST_MAX_S = 2.0
 /** GLB width is ~1.77 m at scale 1, close to the old three-puff cluster. Underside sits at the root, like the placeholder. */
 const CLOUD_SCALE = 1
 /** Visual center of cloud-body.glb (Body mesh AABB Y), before CLOUD_SCALE. The billboard pivots here. */
@@ -483,17 +483,26 @@ function randRange(a: number, b: number): number {
 
 function showCloudFace(f: CloudFace, kind: FaceKind): void {
   if (f.kind === kind) return
-  VisibilityComponent.getMutable(f.normal).visible = kind === 'normal'
-  VisibilityComponent.getMutable(f.blink).visible = kind === 'blink'
-  VisibilityComponent.getMutable(f.laugh).visible = kind === 'laugh'
+  // Scale swap, not VisibilityComponent: some clients ignore visibility on
+  // a GltfContainer, which left every face stacked and nothing visibly changing.
+  setFaceShown(f.normal, kind === 'normal')
+  setFaceShown(f.blink, kind === 'blink')
+  setFaceShown(f.laugh, kind === 'laugh')
   f.kind = kind
 }
 
 /** All three face GLBs are children of the body; only one is visible at a time. */
+function setFaceShown(e: Entity, on: boolean): void {
+  const t = Transform.getMutableOrNull(e)
+  if (!t) return
+  const k = on ? 1 : 0
+  t.scale = Vector3.create(k, k, k)
+}
+
 function startCloudFace(root: Entity, normal: Entity, blink: Entity, laugh: Entity): void {
-  VisibilityComponent.create(normal, { visible: true })
-  VisibilityComponent.create(blink, { visible: false })
-  VisibilityComponent.create(laugh, { visible: false })
+  setFaceShown(normal, true)
+  setFaceShown(blink, false)
+  setFaceShown(laugh, false)
   cloudFaces.set(root, {
     normal, blink, laugh, kind: 'normal',
     blinkIn: randRange(FACE_BLINK_FIRST_MIN_S, FACE_BLINK_FIRST_MAX_S),
