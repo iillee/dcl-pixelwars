@@ -674,6 +674,8 @@ export const STAR_SPEED_MULT = 1.4
 export const STAR_COOLDOWN_MULT = 0.5
 /** Spatial star theme on the carrier. Played once; duration matches STAR_MS. */
 export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
+/** Carrier theme + BGM duck. Off for now; flip to re-enable. The unpicked-star idle loop is separate. */
+export const STAR_THEME_ENABLED = false
 /** Horizontal reach (m) for a bump that launches an enemy. */
 export const OVERDRIVE_TOUCH_RADIUS = 2
 /** Vertical pad (m) for that bump. */

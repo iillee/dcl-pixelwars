@@ -6,7 +6,7 @@ import { engine, Entity, Transform, AvatarAttach, Material, MaterialTransparency
 import { Color3, Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { room } from '../shared/messages'
-import { BOT_AIM_REPORT_HZ, STAR_MS, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pvp'
+import { BOT_AIM_REPORT_HZ, STAR_MS, STAR_SPEED_MULT, STAR_THEME_SRC, STAR_THEME_ENABLED } from '../shared/pvp'
 import { overdriveKnock } from '../shared/knocks'
 import { playClaimSfx, playDashSfx, playDashHitSfx, setMusicDucked } from './audio'
 import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
@@ -20,11 +20,12 @@ import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } fr
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
 const SPARK_SRC = 'assets/images/star_white.png'
-const SPARK_N = 10
-const SPARK_LIFE = 1
-const SPARK_RISE_H = 1.25
-const SPARK_START_Y = 0.45
-const SPARK_SPREAD = 0.18
+const SPARK_N = 36
+const SPARK_LIFE = 1.15
+const SPARK_RISE_H = 3.6
+const SPARK_START_Y = 0.4
+const SPARK_SPREAD = 0.32
+const SPARK_SIZE = 0.75
 const SPARK_GOLD = { r: 255 / 255, g: 213 / 255, b: 74 / 255 }
 const THEME_VOL = 0.5
 
@@ -53,7 +54,7 @@ function setLocal(endAt: number): void {
   active = live ? 1 : 0
   until = live ? endAt : 0
   applyLocalSpeed()
-  setMusicDucked(live)
+  setMusicDucked(STAR_THEME_ENABLED && live)
   if (live && !was) {
     playDashSfx()
     playClaimSfx()
@@ -95,7 +96,7 @@ function sparkMat(alpha: number) {
     emissiveTexture: Material.Texture.Common({ src: SPARK_SRC }),
     albedoColor: Color4.create(c.r, c.g, c.b, a),
     emissiveColor: Color4.create(c.r, c.g, c.b, 1),
-    emissiveIntensity: 2.2 * a,
+    emissiveIntensity: 6.5 * a,
     roughness: 1,
     metallic: 0,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
@@ -132,10 +133,12 @@ function ensureGlow(id: string, endAt: number): void {
   }
   const light = engine.addEntity()
   Transform.create(light, { parent: attach, position: Vector3.create(0, GLOW_Y, 0) })
-  LightSource.create(light, { type: LightSource.Type.Point({}), color: Color3.create(1, 0.8, 0.25), intensity: 80, range: 7 })
+  LightSource.create(light, { type: LightSource.Type.Point({}), color: Color3.create(1, 0.88, 0.3), intensity: 160, range: 18 })
   const music = engine.addEntity()
   Transform.create(music, { parent: attach, position: Vector3.create(0, 1.2, 0) })
-  AudioSource.create(music, { audioClipUrl: STAR_THEME_SRC, playing: true, loop: false, volume: THEME_VOL, global: false })
+  if (STAR_THEME_ENABLED) {
+    AudioSource.create(music, { audioClipUrl: STAR_THEME_SRC, playing: true, loop: false, volume: THEME_VOL, global: false })
+  }
   const sparks: Entity[] = []
   for (let i = 0; i < SPARK_N; i++) {
     const spark = engine.addEntity()
@@ -143,7 +146,7 @@ function ensureGlow(id: string, endAt: number): void {
     Transform.create(spark, {
       parent: attach,
       position: Vector3.create(Math.cos(ang) * SPARK_SPREAD, SPARK_START_Y, Math.sin(ang) * SPARK_SPREAD),
-      scale: Vector3.create(0.28, 0.28, 0.28),
+      scale: Vector3.create(SPARK_SIZE, SPARK_SIZE, SPARK_SIZE),
     })
     MeshRenderer.setPlane(spark)
     Billboard.create(spark, { billboardMode: BillboardMode.BM_ALL })
@@ -269,7 +272,7 @@ export function initOverdrive() {
         const lift = SPARK_START_Y + t * SPARK_RISE_H
         const ang = (i / SPARK_N) * Math.PI * 2
         const st = Transform.getMutableOrNull(spark)
-        const size = 0.28 * (0.75 + 0.25 * fade)
+        const size = SPARK_SIZE * (0.75 + 0.25 * fade)
         if (st) {
           st.position = Vector3.create(Math.cos(ang) * SPARK_SPREAD, lift, Math.sin(ang) * SPARK_SPREAD)
           st.scale = Vector3.create(size, size, size)

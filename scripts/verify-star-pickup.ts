@@ -16,7 +16,7 @@ import {
   OVERDRIVE_PAINT_RADIUS_MULT, OVERDRIVE_KNOCK, OVERDRIVE_LIFT,
   ANVIL_HIT_KNOCK, ANVIL_HIT_LIFT,
   STAR_MS, STAR_SPAWN_GRACE_MS, STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, STAR_MAX_ACTIVE,
-  STAR_PICKUP_RADIUS, STAR_PICKUP_MAX_DY, STAR_SPAWN_CLEAR_M, STAR_SPEED_MULT, STAR_COOLDOWN_MULT, STAR_THEME_SRC,
+  STAR_PICKUP_RADIUS, STAR_PICKUP_MAX_DY, STAR_SPAWN_CLEAR_M, STAR_SPEED_MULT, STAR_COOLDOWN_MULT, STAR_THEME_SRC, STAR_THEME_ENABLED,
 } from '../src/shared/pvp'
 import { overdriveKnock } from '../src/shared/knocks'
 
@@ -142,7 +142,8 @@ check('the client applies overdrive knock to the local player and to bots', odSr
 check('the STAR seconds chip is gone', !uiSrc.includes('starHudSeconds') && !/STAR \$\{/.test(uiSrc) && !uiSrc.includes('starLabel'))
 check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIFE') && odSrc.includes('SPARK_GOLD') && !odSrc.includes('SPARK_ORBIT') && odSrc.includes('fade = 1 - t'))
 check('the client starts the hold from remaining ms on its own clock', odSrc.includes('resolveStarHoldEnd(endAt, remainingMs, now)'))
-check('star theme is the 23s track, played once, no loop', STAR_THEME_SRC === 'assets/sounds/star-theme.mp3' && odSrc.includes('loop: false') && odSrc.includes('setMusicDucked(live)'))
+check('star theme track is kept but disabled, and BGM is not ducked', STAR_THEME_SRC === 'assets/sounds/star-theme.mp3' && STAR_THEME_ENABLED === false && odSrc.includes('STAR_THEME_ENABLED && live'))
+check('star sparkles are bigger, higher, and more plentiful', /const SPARK_N = 3[0-9]/.test(odSrc) && /const SPARK_RISE_H = 3\.[0-9]/.test(odSrc) && /const SPARK_SIZE = 0\.(7|8)/.test(odSrc))
 
 // End-to-end: expire the book, spawn a new orb, and claim it as the same player,
 // including the starHold payload the server would send and the client's resolver.
