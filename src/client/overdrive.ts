@@ -1,5 +1,5 @@
 /**
- * overdrive.ts — client mirror of the star pickup: glow, trail, music, knock, feet.
+ * overdrive.ts — client mirror of the star pickup: sparkles, light, music, knock, feet.
  * The server owns spawn, pickup, touch knocks, and immunity. No local prediction.
  */
 import { engine, Entity, Transform, AvatarAttach, Material, MaterialTransparencyMode, MeshRenderer, LightSource, Billboard, BillboardMode, AudioSource, PlayerIdentityData } from '@dcl/sdk/ecs'
@@ -17,7 +17,6 @@ import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } fr
 
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
-const GLOW_SCALE = 1.85
 const SPARK_SRC = 'assets/images/star_white.png'
 const SPARK_ORBIT = 8
 const SPARK_RISE = 4
@@ -26,7 +25,7 @@ const THEME_VOL = 0.5
 
 let active = 0
 let until = 0
-type GlowRec = { attach: Entity; ball: Entity; light: Entity; music: Entity; sparks: Entity[]; until: number }
+type GlowRec = { attach: Entity; light: Entity; music: Entity; sparks: Entity[]; until: number }
 const auras = new Map<string, number>()
 const glows = new Map<string, GlowRec>()
 let knockForceEnt: Entity | null = null
@@ -62,6 +61,10 @@ function setLocal(endAt: number): void {
   }
 }
 
+function localStarExpired(now = Date.now()): boolean {
+  return active === 1 && until > 0 && until <= now
+}
+
 function botIdOf(id: string): number | null {
   if (!id.startsWith('bot:')) return null
   const n = parseInt(id.slice(4), 10)
@@ -83,18 +86,6 @@ function findStarAnchor(id: string): StarAnchor | null {
     if ((pid.address || '').toLowerCase() === want) return { kind: 'avatar', avatarId: pid.address }
   }
   return null
-}
-
-function glowMat(pulse: number) {
-  const a = 0.22 + 0.16 * pulse
-  return {
-    albedoColor: Color4.create(1, 0.85, 0.25, a),
-    emissiveColor: Color4.create(1, 0.82, 0.25, 1),
-    emissiveIntensity: 3.2 + 1.4 * pulse,
-    roughness: 1,
-    metallic: 0,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-  }
 }
 
 function sparkMat(pulse: number) {
@@ -122,7 +113,12 @@ function ensureGlow(id: string, endAt: number): void {
       if (ent && t && t.parent === ent) return
       dropGlow(id)
       rec = undefined as unknown as GlowRec
-    } else return
+    } else {
+      // A leftover rec from a previous hold would skip creating a new aura
+      // (music already stopped, sparkles gone) so the second pickup looked dead.
+      dropGlow(id)
+      rec = undefined as unknown as GlowRec
+    }
   }
   const who = findStarAnchor(id)
   if (!who) return
@@ -134,10 +130,6 @@ function ensureGlow(id: string, endAt: number): void {
   } else {
     AvatarAttach.create(attach, { anchorPointId: AAPT_POSITION })
   }
-  const ball = engine.addEntity()
-  Transform.create(ball, { parent: attach, position: Vector3.create(0, GLOW_Y, 0), scale: Vector3.create(GLOW_SCALE, GLOW_SCALE, GLOW_SCALE) })
-  MeshRenderer.setSphere(ball)
-  Material.setPbrMaterial(ball, glowMat(1))
   const light = engine.addEntity()
   Transform.create(light, { parent: attach, position: Vector3.create(0, GLOW_Y, 0) })
   LightSource.create(light, { type: LightSource.Type.Point({}), color: Color3.create(1, 0.8, 0.25), intensity: 80, range: 7 })
@@ -158,7 +150,7 @@ function ensureGlow(id: string, endAt: number): void {
     Material.setPbrMaterial(spark, sparkMat(1))
     sparks.push(spark)
   }
-  rec = { attach, ball, light, music, sparks, until: endAt }
+  rec = { attach, light, music, sparks, until: endAt }
   glows.set(id, rec)
 }
 
@@ -170,7 +162,7 @@ function dropGlow(id: string): void {
   for (const e of rec.sparks) {
     try { engine.removeEntity(e) } catch (err) { /* already gone */ }
   }
-  for (const e of [rec.ball, rec.light, rec.music, rec.attach]) {
+  for (const e of [rec.light, rec.music, rec.attach]) {
     try { engine.removeEntity(e) } catch (err) { /* already gone */ }
   }
   glows.delete(id)
@@ -192,16 +184,24 @@ function applyHold(id: string, endAt: number): void {
   if (!who) return
   const now = Date.now()
   if (!endAt || endAt <= now) {
+    const cur = auras.get(who)
+    // A delayed until:0 from a previous hold must not clear a newer grant.
+    if (cur && cur > now) return
     auras.delete(who)
     dropGlow(who)
     setBotStarFromId(who, false)
     if (who === myAddress()) setLocal(0)
     return
   }
+  const prev = auras.get(who)
   auras.set(who, endAt)
-  ensureGlow(who, endAt)
+  const rec = glows.get(who)
+  if (!rec || rec.until !== endAt) {
+    dropGlow(who)
+    ensureGlow(who, endAt)
+  }
   setBotStarFromId(who, true)
-  if (who === myAddress()) setLocal(endAt)
+  if (who === myAddress() && (prev !== endAt || !isLocalOverdriveActive())) setLocal(endAt)
 }
 
 export function initOverdrive() {
@@ -247,7 +247,7 @@ export function initOverdrive() {
     const now = Date.now()
     const pulse = 0.5 + 0.5 * Math.sin(now / 180)
     sparkClock += dt
-    if (isLocalOverdriveActive() && until <= now) setLocal(0)
+    if (localStarExpired(now)) setLocal(0)
     for (const [id, endAt] of [...auras]) {
       if (endAt <= now) {
         auras.delete(id)
@@ -260,11 +260,13 @@ export function initOverdrive() {
       setBotStarFromId(id, true)
     }
     for (const [id, rec] of glows) {
-      if (rec.until <= now) { dropGlow(id); auras.delete(id); setBotStarFromId(id, false); continue }
-      const s = GLOW_SCALE * (0.92 + 0.12 * pulse)
-      const t = Transform.getMutableOrNull(rec.ball)
-      if (t) t.scale = Vector3.create(s, s, s)
-      Material.setPbrMaterial(rec.ball, glowMat(pulse))
+      if (rec.until <= now) {
+        dropGlow(id)
+        auras.delete(id)
+        setBotStarFromId(id, false)
+        if (id === myAddress()) setLocal(0)
+        continue
+      }
       rec.sparks.forEach((spark, i) => {
         const rise = i >= SPARK_ORBIT
         const k = rise ? (i - SPARK_ORBIT) / SPARK_RISE : i / SPARK_ORBIT

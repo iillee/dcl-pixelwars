@@ -26,7 +26,7 @@ function check(name: string, ok: boolean): void {
 const t0 = 1_000_000
 let painted = 0
 
-check('STAR_MS is 8 seconds', STAR_MS === 8000)
+check('STAR_MS is 12 seconds', STAR_MS === 12000)
 check('spawn window is 20-35s', STAR_SPAWN_MIN_MS === 20000 && STAR_SPAWN_MAX_MS === 35000)
 check('at most one orb', STAR_MAX_ACTIVE === 1)
 check('pickup radius is 1.2m', STAR_PICKUP_RADIUS === 1.2)
@@ -68,7 +68,7 @@ check('too high is ignored', starPickupWinner([{ id: 'p', isBot: false, distH: 0
 let hold = emptyStarHold()
 painted = 40
 hold = grantStarHold(t0, STAR_MS)
-check('grant starts an 8s star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
+check('grant starts a 12s star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
 check('star expires after STAR_MS', !isStarActive(expireStarHold(hold, t0 + STAR_MS + 1), t0 + STAR_MS + 1))
 check('painted total is unchanged by grant or expire', painted === 40)
 
@@ -78,10 +78,22 @@ check('book grants a bot the star', botUntil === t0 + STAR_MS && book.isActive('
 check('bot death ends the star', book.onDeath('bot:3', t0 + 20) && !book.isActive('bot:3', t0 + 20))
 const until = book.grant('p1', t0)
 check('book grants a human the star', until === t0 + STAR_MS && book.isActive('p1', t0 + 1))
-check('book will not grant a second star to the same holder', book.grant('p1', t0 + 10) === until)
+check('book will not grant a second star to the same holder while the first is still active', book.grant('p1', t0 + 10) === until)
 painted = 99
 check('death ends the star', book.onDeath('p1', t0 + 20) && !book.isActive('p1', t0 + 20))
 check('death does not clear the painted total', painted === 99)
+
+const again = new OverdriveBook()
+const firstUntil = again.grant('p1', t0)
+check('first of two pickups is granted', firstUntil === t0 + STAR_MS && again.isActive('p1', t0 + 1))
+check('no second grant while the first hold is live', again.grant('p1', t0 + STAR_MS - 1) === firstUntil)
+const ended = again.expire(t0 + STAR_MS + 1)
+check('expire clears the first hold', ended.includes('p1') && !again.isActive('p1', t0 + STAR_MS + 1) && !again.holderActive(t0 + STAR_MS + 1))
+const t2 = t0 + STAR_MS + 1
+const secondUntil = again.grant('p1', t2)
+check('same player can pick up a second star after the first expires', secondUntil === t2 + STAR_MS && secondUntil !== firstUntil && again.isActive('p1', t2 + 1))
+check('the second hold also lasts STAR_MS', again.isActive('p1', t2 + STAR_MS - 1) && !again.isActive('p1', t2 + STAR_MS + 1))
+
 book.grant('p1', t0)
 const orb = book.addOrb({ x: 1, y: 2, z: 3, cell: 'c1' })
 check('book tracks a live orb', book.orbCount() === 1 && book.getOrb(orb.i)?.cell === 'c1')

@@ -22,7 +22,7 @@ const GOLD = Color3.create(1, 0.78, 0.2)
 const GOLD4 = Color4.create(1, 0.82, 0.25, 1)
 // Small short yellow beacon, same textures as the Base Charge pillar, tinted #FFE04A.
 const BEACON_COLOR = { r: 255 / 255, g: 224 / 255, b: 74 / 255 }
-const BEACON_H = 4.2
+const BEACON_H = 5.4
 const BEACON_Y = 0.25 + BEACON_H / 2
 const BEACON_INNER_W = 0.28
 const BEACON_OUTER_W = 0.95
@@ -32,8 +32,8 @@ const BEACON_EMISSIVE_IN = 0.55
 const BEACON_EMISSIVE_OUT = 0.28
 const BEACON_PULSE_SPEED = 2.5
 const BEACON_PULSE_RANGE = 0.15
-const GRADIENT_TEX = 'assets/images/beacon-gradient.png'
-const ALPHA_TEX = 'assets/images/beacon-alpha.png'
+const GRADIENT_TEX = 'assets/images/star-beacon-gradient.png'
+const ALPHA_TEX = 'assets/images/star-beacon-alpha.png'
 
 type Rec = { root: Entity; spin: Entity; inner: Entity; outer: Entity; parts: Entity[]; baseY: number; clock: number }
 const orbs = new Map<number, Rec>()
