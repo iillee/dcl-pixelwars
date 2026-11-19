@@ -88,7 +88,11 @@ function teleportHome(why: string): void {
   // movePlayerTo is async: don't treat the pre-teleport height as a new fall.
   holdFallLine()
   let pos = CLASSIC_SPAWN, look = CLASSIC_CAMERA_TARGET
-  if (IS_SKY && (why === 'lobby' || isLobbyLayout())) {
+  // A mid-match / force join can arrive while the local floor is still the
+  // lobby. Sending those teleports to lobbyStand leaves the player hanging
+  // in the air as if they were still voting. Match destinations must go to
+  // the team base even if the arena mesh has not swapped yet.
+  if (IS_SKY && (why === 'lobby' || why === 'lobby-drop' || (isLobbyLayout() && why !== 'match' && why !== 'team assigned' && why !== 'round reset' && why !== 'match-drop'))) {
     const c = lobbyStand()
     pos = c
     look = { x: c.x, y: c.y, z: c.z + 8 }
