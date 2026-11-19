@@ -480,6 +480,14 @@ function logCloudRig(
 }
 
 function updateCloudVisual(c: CloudVisual): void {
+  try {
+    updateCloudVisualUnsafe(c)
+  } catch (err) {
+    console.log('[FallRescue] cloud visual failed', err)
+  }
+}
+
+function updateCloudVisualUnsafe(c: CloudVisual): void {
   if (c.face && !(c === floater && cameraRide)) yawSpinToCamera(c.spin)
   // Hang point is the puff underside on the yaw axis, directly above the hook.
   const from = getWorldPosition(engine, c.hang)
@@ -505,9 +513,13 @@ let fallEmoteRetrig = 0
 function startFallEmote(): void {
   fallEmoteOn = true
   fallEmoteRetrig = FALL_EMOTE_RETRIG_S
-  void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(err =>
+  try {
+    void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(err =>
+      console.log('[FallRescue] fall emote failed', err)
+    )
+  } catch (err) {
     console.log('[FallRescue] fall emote failed', err)
-  )
+  }
 }
 
 function stopFallEmote(): void {
@@ -522,7 +534,11 @@ function tickFallEmote(dt: number): void {
   fallEmoteRetrig -= dt
   if (fallEmoteRetrig > 0) return
   fallEmoteRetrig = FALL_EMOTE_RETRIG_S
-  void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(() => {})
+  try {
+    void triggerSceneEmote({ src: FALL_EMOTE_SRC, loop: true }).catch(() => {})
+  } catch {
+    /* a visual-emote failure must not stop the rescue tick */
+  }
 }
 
 /** Lavender cloud: faceless body (ghost outline in the GLB), face, hook, world-space line. */
@@ -896,7 +912,6 @@ function begin(p: Vec): void {
   // Interrupt first: cancelling a lunge rewrites InputModifier, then the freeze wins.
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
-  startFallEmote()
   playFallRescueSfx()
   splashAtCrossing(sample ? sample.p : null, p)
   // The catch itself does not move the player. Overview off so the follow camera rides the tween.
@@ -932,6 +947,9 @@ function tickPhase(dt: number): void {
         floater.mode = 'hang'
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
       }
+      // After they are on the pad. Starting the emote at the catch hitch-decoded
+      // the GLB and let the first fall tunnel through the panel.
+      startFallEmote()
       logGrabAlignment()
       if (cameraRide) { startCameraRide(); return }
       const live = pad ? Transform.getOrNull(pad) : null
@@ -1183,7 +1201,7 @@ export function cancelFallRescue(why: string): void {
 function preloadRescueCloud(): void {
   const root = engine.addEntity()
   Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
-  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC]) {
+  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC, FALL_EMOTE_SRC]) {
     const e = engine.addEntity()
     Transform.create(e, { parent: root })
     GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
