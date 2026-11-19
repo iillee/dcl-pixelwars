@@ -54,11 +54,11 @@ export const OV_FOV_DEG   = 24
  *
  * Mobile starts at the closest. Desktop starts at 29 in a match: one plus click
  * reaches 7, minus reaches 60, then 90. In the lobby, both start fully zoomed
- * out (desktop 90, mobile 40). The table is latched when overview opens:
+ * out (desktop 90, mobile 25 — the old farthest mobile step of 40 is gone). The table is latched when overview opens:
  * isMobile() resolves async, and a live re-read would compare a desktop scale
  * to the mobile max and disable minus.
  */
-const MOBILE_ZOOM_SCALES = [5, 15, 25, 40]
+const MOBILE_ZOOM_SCALES = [5, 15, 25]
 const DESKTOP_ZOOM_SCALES = [7, 29, 60, 90]
 const DESKTOP_DEFAULT_SCALE = 29
 /** Only steps above this use the wide camera, so 60 keeps its clamped look. */
