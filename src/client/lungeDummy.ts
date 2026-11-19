@@ -9,28 +9,31 @@ import { isOverviewActive } from './overviewCamera'
  *    our OWN hits, predicts the knock locally at once (ANVIL_PREDICT_*, shared/anvilSim.ts) until
  *    the server's snapshot for it arrives / times out, then blends to the server state;
  *  - key 2 asks the server to re-roll all anvils (anvilRespawn);
- *  - victim-side anvil launch: a moving anvil touching the LOCAL player launches them
- *    (ANVIL_LAUNCH_*), once per anvil slide, with cooldown and respawn protection.
+ *  - launched anvil contact: if a launched anvil touches the LOCAL player, report anvilStrike;
+ *    the server validates and broadcasts anvilImpact, and the victim applies the knock.
  */
 
-import { engine, Entity, GltfContainer, ColliderLayer, Transform, Physics, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT,
-  ANVIL_LAUNCH_ENABLED, ANVIL_LAUNCH_MIN_SPEED, ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, ANVIL_LAUNCH_COOLDOWN_S,
+  ANVIL_HIT_MIN_SPEED, ANVIL_HIT_RADIUS, ANVIL_HIT_MAX_DY,
   ANVIL_PREDICT_ENABLED, ANVIL_PREDICT_TIMEOUT_S, ANVIL_PREDICT_CLOSE_M, ANVIL_BLEND_S, ANVIL_BLEND_FAR_S, ANVIL_SNAP_M, ANVIL_PREDICT_CONFIRMED_MAX_S,
   BURST_KNOCKBACK, LUNGE_KNOCKBACK,
   ANVIL_PUSH_REACH, ANVIL_PUSH_FACING, ANVIL_PUSH_SEND_HZ,
 } from '../shared/pvp'
+import { anvilKnock } from '../shared/knocks'
 import { AnvilWorld } from '../shared/anvilSim'
 import { buildWalkableGraph } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, type Placed } from '../maze/generator'
 import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
+import { events } from '../shared/events'
 import { room } from '../shared/messages'
-import { isKnockbackImmune, safePhysics } from './knockback'
+import { applyKnock, isKnockbackImmune, myAddress } from './knockback'
 import { hitsOpen } from './phase'
 import { startKnockLock } from './lunge'
 import { playDashHitSfx } from './audio'
+import { playBotKnock } from './botVisual'
 
 /** Anvil model (Creator Hub asset pack). GLB bounds: x −0.50…0.63, y 0…0.77 (origin at its
  *  base), z ±0.35 m. Scaled ×ANVIL_SCALE → ≈1.7 × 1.15 × 1.06 m; ANVIL_OFFSET_X centres the
@@ -182,34 +185,45 @@ function reconcile(d: Dummy, i: number, slide: number): void {
   }
 }
 
-// Anvil launch contact volume: anvil ≈ 1.7 × 1.15 × 1.06 m around the feet point + player radius.
-const ANVIL_LAUNCH_REACH = 0.85 + 0.4 // horizontal, m
-const ANVIL_LAUNCH_BELOW = 0.5
-const ANVIL_LAUNCH_ABOVE = 1.2
+const STRIKE_SEND_HZ = 10
+const lastStrikeAt = new Map<number, number>()
 let launchCooldown = 0
+let knockForceEnt: Entity = 0 as Entity
 
-/** Moving shared anvil touching the local player → launch them (victim-side). */
+/** Launched anvil touching the local player → ask the server. Knock waits for anvilImpact. */
 function checkLaunch(d: Dummy, i: number, dt: number): void {
   if (d.launchGraceS > 0) { d.launchGraceS -= dt; return }
-  // Dedupe key: server slide id, or a marker for the slide we're predicting (carried over on reconcile).
   const key = d.predicted ? -2 - d.predictSlide : d.slide
-  if (!ANVIL_LAUNCH_ENABLED || !d.alive || !(d.moving || d.predicted) || d.launchedSlide === key || launchCooldown > 0 || isKnockbackImmune()) return
+  if (!d.alive || !(d.moving || d.predicted) || d.launchedSlide === key || launchCooldown > 0 || isKnockbackImmune()) return
   const v = d.predicted ? predictWorld.anvils[i].vel : d.vel
   const speed = Math.hypot(v.x, v.z)
-  if (speed < ANVIL_LAUNCH_MIN_SPEED) return
+  if (speed < ANVIL_HIT_MIN_SPEED) return
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   if (!p) return
   const dx = p.x - d.pos.x, dz = p.z - d.pos.z, dy = p.y - d.pos.y
-  if (Math.hypot(dx, dz) > ANVIL_LAUNCH_REACH || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
-  let ux = v.x / speed, uz = v.z / speed
-  if (!isFinite(ux) || !isFinite(uz)) { const l = Math.hypot(dx, dz) || 1; ux = dx / l; uz = dz / l }
-  d.launchedSlide = key
-  launchCooldown = ANVIL_LAUNCH_COOLDOWN_S
+  if (Math.hypot(dx, dz) > ANVIL_HIT_RADIUS || Math.abs(dy) > ANVIL_HIT_MAX_DY) return
+  const now = Date.now()
+  if (now - (lastStrikeAt.get(i) ?? 0) < 1000 / STRIKE_SEND_HZ) return
+  lastStrikeAt.set(i, now)
+  room.send('anvilStrike', { i, x: p.x, y: p.y, z: p.z })
+}
+
+function onAnvilImpact(i: number, attacker: string, target: string, dx: number, dz: number): void {
+  if (target.startsWith('bot:')) {
+    const id = parseInt(target.slice(4), 10)
+    if (Number.isFinite(id)) playBotKnock(id, dx, dz, 'anvil')
+    return
+  }
+  const me = myAddress()
+  if (!me || target !== me) return
+  if (isKnockbackImmune()) return
+  const d = dummies[i]
+  if (d) d.launchedSlide = d.predicted ? -2 - d.predictSlide : d.slide
+  launchCooldown = 1
   startKnockLock()
-  safePhysics('anvil launch', () => Physics.applyImpulseToPlayer(Vector3.create(ux * ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, uz * ANVIL_LAUNCH_IMPULSE)))
+  applyKnock(anvilKnock(dx, dz), knockForceEnt, 'anvil launch')
   playDashHitSfx()
-  room.send('anvilLaunched', { i })
-  console.log(`[Dummy ${i}] launched the player at ${speed.toFixed(1)} m/s`)
+  console.log(`[Dummy ${i}] launched the local player by ${attacker.slice(0, 8) || '?'}`)
 }
 
 /** Slow push: holding a move key while facing into an anvil we touch → anvilPush intent (server moves it). */
@@ -230,7 +244,7 @@ function checkPush(dt: number): void {
     if (!d.alive || d.predicted) return
     const dx = d.pos.x - t.position.x, dz = d.pos.z - t.position.z, dy = t.position.y - d.pos.y
     const dist = Math.hypot(dx, dz)
-    if (dist > ANVIL_PUSH_REACH || dist < 1e-3 || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
+    if (dist > ANVIL_PUSH_REACH || dist < 1e-3 || Math.abs(dy) > ANVIL_HIT_MAX_DY) return
     if ((fx * dx + fz * dz) / dist < ANVIL_PUSH_FACING) return
     room.send('anvilPush', { i, dx: fx, dz: fz, x: t.position.x, z: t.position.z, run: inputSystem.isPressed(InputAction.IA_WALK) ? 0 : 1 })
   })
@@ -268,6 +282,8 @@ function render(d: Dummy, i: number, dt: number): void {
 
 export function initLungeDummy(): void {
   if (!LUNGE_TEST_DUMMY) return
+  knockForceEnt = engine.addEntity()
+  events.on('anvil:impact', ({ i, attacker, target, dx, dz }) => onAnvilImpact(i, attacker, target, dx, dz))
   for (let i = 0; i < LUNGE_DUMMY_COUNT; i++) {
     const ent = engine.addEntity()
     Transform.create(ent, { position: HIDDEN })

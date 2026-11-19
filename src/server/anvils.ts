@@ -8,10 +8,15 @@
 import { engine } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { AnvilWorld } from '../shared/anvilSim'
-import { LUNGE_TEST_DUMMY, ANVIL_PUSH_SPEED, ANVIL_PUSH_RUN_MULT, ANVIL_PUSH_REACH, ANVIL_PUSH_SEND_HZ } from '../shared/pvp'
+import { anvilKnock } from '../shared/knocks'
+import { anvilStrikeAccepted, anvilStrikeDir } from '../shared/anvilHit'
+import {
+  LUNGE_TEST_DUMMY, ANVIL_PUSH_SPEED, ANVIL_PUSH_RUN_MULT, ANVIL_PUSH_REACH, ANVIL_PUSH_SEND_HZ,
+  ANVIL_HIT_RADIUS, ANVIL_HIT_MAX_DY, ANVIL_HIT_REPORT_SLACK,
+} from '../shared/pvp'
 import { getPlacedTilesInOrder, teleportPairs } from '../maze/generator'
 import { IS_SKY } from '../maze/level'
-import { getWalkableGraph } from './bots/manager'
+import { getBotHitPoints, getWalkableGraph, hitBot } from './bots/manager'
 
 const ANVIL_SYNC_HZ = 10
 const ANVIL_KEEPALIVE_S = 2
@@ -24,6 +29,76 @@ let wasMoving = false
 let clock = 0
 let keepAlive = 0
 const lastRespawnReq = new Map<string, number>()
+
+/** One launch per accepted lunge/burst hit on an anvil (keyed by anvil index + slide). */
+type Launch = { at: number; by: string; slide: number; hit: Set<string> }
+const launches = new Map<number, Launch>()
+
+function launchOf(i: number): Launch | null {
+  const a = world.anvils[i]
+  const L = launches.get(i)
+  if (!a || !a.alive || !L || L.slide !== a.slide) return null
+  return L
+}
+
+function launchVel(i: number): { x: number; y: number; z: number; speed: number } | null {
+  const a = world.anvils[i]
+  if (!a) return null
+  const pv = world.pushVel(a)
+  const x = a.vel.x + pv.x, z = a.vel.z + pv.z
+  return { x, y: a.vel.y, z, speed: Math.hypot(x, z) }
+}
+
+function tryStrike(i: number, victim: string, x: number, y: number, z: number, radius: number): { attacker: string; dx: number; dz: number } | null {
+  const a = world.anvils[i]
+  const L = launchOf(i)
+  const v = launchVel(i)
+  if (!a || !L || !v) return null
+  const now = Date.now()
+  const ok = anvilStrikeAccepted({
+    alive: a.alive,
+    heldMs: now - L.at,
+    speed: v.speed,
+    distH: Math.hypot(x - a.pos.x, z - a.pos.z),
+    distY: y - a.pos.y,
+    radius,
+    victim,
+    hitter: L.by,
+    alreadyHit: L.hit.has(victim),
+  })
+  if (!ok) return null
+  const dir = anvilStrikeDir(v.x, v.z, x - a.pos.x, z - a.pos.z)
+  L.hit.add(victim)
+  return { attacker: L.by, dx: dir.x, dz: dir.z }
+}
+
+/** Client-reported contact: the reporter is the victim. Slack covers snapshot / RTT lag. */
+export function tryAnvilPlayerStrike(from: string, i: number, x: number, y: number, z: number): { attacker: string; dx: number; dz: number } | null {
+  if (!from || ![x, y, z].every(isFinite) || !world.anvils[i]) return null
+  return tryStrike(i, from.toLowerCase(), x, y, z, ANVIL_HIT_RADIUS + ANVIL_HIT_REPORT_SLACK)
+}
+
+function tickBotStrikes(): void {
+  const bots = getBotHitPoints()
+  if (bots.length === 0) return
+  for (let i = 0; i < world.anvils.length; i++) {
+    const a = world.anvils[i]
+    if (!a || !launchOf(i)) continue
+    for (const b of bots) {
+      const hit = tryStrike(i, `bot:${b.id}`, b.x, b.y, b.z, ANVIL_HIT_RADIUS)
+      if (!hit) continue
+      const ok = hitBot(b.id, a.pos.x, a.pos.y, a.pos.z, ANVIL_HIT_RADIUS + 0.05, ANVIL_HIT_MAX_DY, () => anvilKnock(hit.dx, hit.dz))
+      if (!ok) {
+        // Range or immunity rejected the body knock; let a later tick retry.
+        launchOf(i)?.hit.delete(`bot:${b.id}`)
+        continue
+      }
+      room.send('anvilImpact', { i, attacker: hit.attacker, target: `bot:${b.id}`, dx: hit.dx, dz: hit.dz })
+      console.log(`[Server] anvil ${i} launched bot:${b.id} by ${hit.attacker.slice(0, 8)}`)
+    }
+  }
+}
+
 
 function send(): void {
   room.send('anvilState', {
@@ -44,9 +119,13 @@ export function anvilsMazeChanged(): void {
   dirty = true
 }
 
-/** Accepted hit from server.ts. */
-export function anvilsHit(i: number, dx: number, dz: number, mult: number): void {
-  if (world.hit(i, dx, dz, mult)) { dirty = true; console.log(`[Server] anvil ${i} hit ×${mult.toFixed(2)}`) }
+/** Accepted hit from server.ts. Starts a launch window credited to `from`. */
+export function anvilsHit(i: number, dx: number, dz: number, mult: number, from = ''): void {
+  if (!world.hit(i, dx, dz, mult)) return
+  const a = world.anvils[i]
+  launches.set(i, { at: Date.now(), by: from.toLowerCase(), slide: a.slide, hit: new Set() })
+  dirty = true
+  console.log(`[Server] anvil ${i} hit ×${mult.toFixed(2)} by ${from.slice(0, 8) || '?'}`)
 }
 
 /** Slow push intent from a player at (x, z). Validated: near the anvil, rate-limited; speed is server-side. */
@@ -87,6 +166,7 @@ export function anvilsAwake(on: boolean): void {
     a.vel.y = 0
     a.vel.z = 0
   }
+  launches.clear()
   dirty = true
   send()
 }
@@ -98,6 +178,7 @@ export function initAnvils(): void {
     const before = world.anvils.map(a => a.alive)
     world.tick(dt)
     if (world.anvils.some((a, i) => a.alive !== before[i])) dirty = true // fell / respawned
+    tickBotStrikes()
     const moving = world.anvils.some(a => world.isMoving(a))
     clock += dt; keepAlive += dt
     if (clock < 1 / ANVIL_SYNC_HZ) return

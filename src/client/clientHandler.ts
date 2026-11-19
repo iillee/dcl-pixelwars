@@ -191,6 +191,9 @@ function wireInbound(): void {
   room.onMessage('lungeImpact', ({ attacker, id, target, dx, dz }) => {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
+  room.onMessage('anvilImpact', ({ i, attacker, target, dx, dz }) => {
+    events.emit('anvil:impact', { i, attacker, target, dx, dz })
+  })
 
   room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz, dry }) => {
     events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz, dry: dry ? 1 : 0 })

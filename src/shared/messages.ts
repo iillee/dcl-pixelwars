@@ -272,8 +272,12 @@ export const Messages = {
   anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, ct: Schemas.Number }),
   // Client → Server: key 2, re-roll all anvils.
   anvilRespawn: Schemas.Map({ n: Schemas.Int }),
-  // Client → Server (round stats): anvil i launched me / I fell off and respawned.
+  // Client → Server (round stats, legacy): anvil i launched me.
   anvilLaunched: Schemas.Map({ i: Schemas.Int }),
+  // Client → Server: a launched anvil i is touching me at (x,y,z). Server validates and may broadcast anvilImpact.
+  anvilStrike: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Server → Clients: accepted anvil strike. Player targets knock themselves; bot:<id> plays the bot knock.
+  anvilImpact: Schemas.Map({ i: Schemas.Int, attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   playerFell: Schemas.Map({}),
   // Server -> Clients: Balloon Battle counts (full book) and one pop.
   balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),

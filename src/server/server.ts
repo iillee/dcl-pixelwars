@@ -48,7 +48,7 @@ import { LungeLedger } from '../shared/lunge'
 import { BurstLedger, burstFootprint, burstCentre, inAirSpike, inBurst, shockwaveHitsBot, burstBotInRange, burstDir } from '../shared/burst'
 import { bombCells, bombFloorY } from './paintBomb'
 import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statIds, clearRoundStats } from './roundStats'
-import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake } from './anvils'
+import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake, tryAnvilPlayerStrike } from './anvils'
 import { LOBBY_VOTE_MS, assignLobbyTeams, modeById, teamIdOf, type ModeId } from '../shared/lobby'
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
 import { clearLobbyVotes, countedTeam, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, snapshotLobbyChoices, stepLobby, tallyTeams } from './lobbyVote'
@@ -1217,9 +1217,22 @@ export async function setupServer(): Promise<void> {
     }
     console.log(`[Server] anvilHit #${id} anvil ${i} ok proc=${proc}ms ct=${ct || 0}`)
     noteAnvilTouch(i, from)
-    anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1)
+    anvilsHit(i, dx / len, dz / len, kind === 1 ? BURST_KNOCKBACK / LUNGE_KNOCKBACK : 1, from)
   })
   room.onMessage('anvilPush', ({ i, dx, dz, x, z, run }, context) => { if (context?.from && matchLive()) { noteAnvilTouch(i, context.from); anvilsPush(context.from, i, dx, dz, x, z, run === 1) } })
+  // Victim reports contact with a launched anvil. Server checks speed, window, range, once-per-launch,
+  // and hitter immunity, then broadcasts the knock. The victim applies it on anvilImpact.
+  room.onMessage('anvilStrike', ({ i, x, y, z }, context) => {
+    const from = context?.from
+    if (!from || !matchLive() || ![x, y, z].every(isFinite)) return
+    const hit = tryAnvilPlayerStrike(from, i, x, y, z)
+    if (!hit) return
+    if (hit.attacker && hit.attacker !== from && getTeam(hit.attacker) !== null && getTeam(hit.attacker) !== getTeam(from)) {
+      noteHit(hit.attacker, from)
+    }
+    room.send('anvilImpact', { i, attacker: hit.attacker, target: from.toLowerCase(), dx: hit.dx, dz: hit.dz })
+    console.log(`[Server] anvil ${i} launched ${from.slice(0, 8)} by ${hit.attacker.slice(0, 8) || '?'}`)
+  })
   // Round stats (server/roundStats.ts): the victim's client reports an anvil launch and its own falls.
   room.onMessage('anvilLaunched', ({ i }, context) => {
     const from = context?.from

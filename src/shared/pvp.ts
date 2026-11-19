@@ -635,14 +635,24 @@ export const LUNGE_TEST_DUMMY = true
 export const LUNGE_DUMMY_COUNT = 2
 /** A dummy that falls off respawns at a random tile centre after this delay (s). */
 export const LUNGE_DUMMY_RESPAWN_S = 1
-/** Anvil launch: a SLIDING anvil dummy (horizontal speed ≥ MIN_SPEED m/s) that touches the local
- *  player launches them (impulse along the anvil's travel + big lift) — meant to throw you off the
- *  arena. Client-local like the dummies. Once per anvil per slide; COOLDOWN_S between launches. */
-export const ANVIL_LAUNCH_ENABLED = true
-export const ANVIL_LAUNCH_MIN_SPEED = 3
-export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 108)
-export const ANVIL_LAUNCH_LIFT = 45
-export const ANVIL_LAUNCH_COOLDOWN_S = 1
+/** Anvil weapon: a launched anvil (hit by a lunge/burst, still above MIN_SPEED, inside
+ *  WINDOW_MS) that touches a player or bot knocks them along its travel + LIFT. Server
+ *  authoritative. A resting or slow-pushed anvil does nothing. The hitter is immune to
+ *  their own anvil for HITTER_IMMUNE_MS. Each victim once per launch. */
+export const ANVIL_HIT_MIN_SPEED = 4
+/** Horizontal contact radius (m): anvil footprint (~0.85) + player radius + a little slack. */
+export const ANVIL_HIT_RADIUS = 1.5
+/** Vertical pad (m) around the anvil's feet. */
+export const ANVIL_HIT_MAX_DY = 1.5
+/** Horizontal impulse on the victim. Lunge knock is 108; this is meant to carry across the arena. */
+export const ANVIL_HIT_KNOCK = 260
+export const ANVIL_HIT_LIFT = 52
+/** A launch can deal damage for this long after the accepted lunge/burst hit. */
+export const ANVIL_HIT_WINDOW_MS = 2000
+/** The player who just knocked the anvil cannot be launched by it for this long. */
+export const ANVIL_HITTER_IMMUNE_MS = 400
+/** Extra metres allowed on a client-reported player contact (RTT / snapshot lag). */
+export const ANVIL_HIT_REPORT_SLACK = 0.8
 /** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
  *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot
  *  for that hit arrives (or PREDICT_TIMEOUT_S passes: e.g. the hit was rejected); then the render

@@ -136,6 +136,7 @@ export type Events = {
   // Broadcast: a lunge started / an accepted lunge hit. Subscriber: client/lunge.
   'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number; dry: number }
   'lunge:impact': { attacker: string; id: number; target: string; dx: number; dz: number }
+  'anvil:impact': { i: number; attacker: string; target: string; dx: number; dz: number }
 
   // Paint Burst. Subscriber: client/paintBurst.
   'burst:fired': { attacker: string; id: number; team: Team; x: number; y: number; z: number; air: number; lx: number; ly: number; lz: number; dry: number }
