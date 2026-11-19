@@ -104,8 +104,8 @@ function wireInbound(): void {
   room.onMessage('starDespawn', ({ i }) => {
     events.emit('star:despawn', { i: i ?? 0 })
   })
-  room.onMessage('starHold', ({ id, until }) => {
-    events.emit('star:hold', { id: id ?? '', until: until ?? 0 })
+  room.onMessage('starHold', ({ id, until, ms }) => {
+    events.emit('star:hold', { id: id ?? '', until: until ?? 0, ms: typeof ms === 'number' && isFinite(ms) ? ms : 0 })
   })
   room.onMessage('overdriveImpact', ({ attacker, target, dx, dz }) => {
     events.emit('overdrive:impact', { attacker: attacker ?? '', target: target ?? '', dx: dx ?? 0, dz: dz ?? 0 })

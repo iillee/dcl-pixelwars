@@ -6,21 +6,25 @@ import { engine, Entity, Transform, AvatarAttach, Material, MaterialTransparency
 import { Color3, Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { room } from '../shared/messages'
-import { BOT_AIM_REPORT_HZ, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pvp'
+import { BOT_AIM_REPORT_HZ, STAR_MS, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pvp'
 import { overdriveKnock } from '../shared/knocks'
 import { playClaimSfx, playDashSfx, playDashHitSfx } from './audio'
 import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
 import { setBotStarFace, clearBotStarFaces } from './botFace'
 import { getBotVisualEntity, playBotKnock } from './botVisual'
 import { setStarSpeedMult } from './speed'
+import { localStarEndAt } from '../shared/overdrive'
 import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
 
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
 const SPARK_SRC = 'assets/images/star_white.png'
-const SPARK_ORBIT = 8
-const SPARK_RISE = 4
-const SPARK_N = SPARK_ORBIT + SPARK_RISE
+const SPARK_N = 10
+const SPARK_LIFE = 1
+const SPARK_RISE_H = 1.25
+const SPARK_START_Y = 0.45
+const SPARK_SPREAD = 0.18
+const SPARK_GOLD = { r: 255 / 255, g: 213 / 255, b: 74 / 255 }
 const THEME_VOL = 0.5
 
 let active = 0
@@ -35,13 +39,6 @@ let sparkClock = 0
 
 export function isLocalOverdriveActive() {
   return active === 1 && until > Date.now()
-}
-
-/** Seconds left on the local star, or 0. Used by the compact HUD timer. */
-export function starHudSeconds(): number {
-  const now = Date.now()
-  if (active !== 1 || until <= now) return 0
-  return (until - now) / 1000
 }
 
 function applyLocalSpeed(): void {
@@ -88,14 +85,15 @@ function findStarAnchor(id: string): StarAnchor | null {
   return null
 }
 
-function sparkMat(pulse: number) {
-  const a = 0.45 + 0.4 * pulse
+function sparkMat(alpha: number) {
+  const a = Math.max(0, Math.min(1, alpha))
+  const c = SPARK_GOLD
   return {
     texture: Material.Texture.Common({ src: SPARK_SRC }),
     emissiveTexture: Material.Texture.Common({ src: SPARK_SRC }),
-    albedoColor: Color4.create(1, 0.92, 0.45, a),
-    emissiveColor: Color4.create(1, 0.88, 0.35, 1),
-    emissiveIntensity: 2.4 + pulse,
+    albedoColor: Color4.create(c.r, c.g, c.b, a),
+    emissiveColor: Color4.create(c.r, c.g, c.b, 1),
+    emissiveIntensity: 2.2 * a,
     roughness: 1,
     metallic: 0,
     transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
@@ -142,8 +140,8 @@ function ensureGlow(id: string, endAt: number): void {
     const ang = (i / SPARK_N) * Math.PI * 2
     Transform.create(spark, {
       parent: attach,
-      position: Vector3.create(Math.cos(ang) * 0.45, 0.7, Math.sin(ang) * 0.45),
-      scale: Vector3.create(0.3, 0.3, 0.3),
+      position: Vector3.create(Math.cos(ang) * SPARK_SPREAD, SPARK_START_Y, Math.sin(ang) * SPARK_SPREAD),
+      scale: Vector3.create(0.28, 0.28, 0.28),
     })
     MeshRenderer.setPlane(spark)
     Billboard.create(spark, { billboardMode: BillboardMode.BM_ALL })
@@ -179,11 +177,15 @@ function setBotStarFromId(id: string, on: boolean): void {
   if (bid !== null) setBotStarFace(bid, on)
 }
 
-function applyHold(id: string, endAt: number): void {
+function applyHold(id: string, endAt: number, remainingMs?: number): void {
   const who = (id || '').toLowerCase()
   if (!who) return
   const now = Date.now()
-  if (!endAt || endAt <= now) {
+  const ms = typeof remainingMs === 'number' && isFinite(remainingMs)
+    ? remainingMs
+    : (endAt > 0 ? STAR_MS : 0)
+  const localEnd = localStarEndAt(now, ms)
+  if (!localEnd) {
     const cur = auras.get(who)
     // A delayed until:0 from a previous hold must not clear a newer grant.
     if (cur && cur > now) return
@@ -194,14 +196,14 @@ function applyHold(id: string, endAt: number): void {
     return
   }
   const prev = auras.get(who)
-  auras.set(who, endAt)
+  auras.set(who, localEnd)
   const rec = glows.get(who)
-  if (!rec || rec.until !== endAt) {
+  if (!rec || rec.until !== localEnd) {
     dropGlow(who)
-    ensureGlow(who, endAt)
+    ensureGlow(who, localEnd)
   }
   setBotStarFromId(who, true)
-  if (who === myAddress() && (prev !== endAt || !isLocalOverdriveActive())) setLocal(endAt)
+  if (who === myAddress() && (prev !== localEnd || !isLocalOverdriveActive())) setLocal(localEnd)
 }
 
 export function initOverdrive() {
@@ -217,7 +219,7 @@ export function initOverdrive() {
   events.on('star:despawn', ({ i }) => {
     if (Number.isFinite(i)) hideStarOrb(i)
   })
-  events.on('star:hold', ({ id, until: endAt }) => applyHold(id, endAt))
+  events.on('star:hold', ({ id, until: endAt, ms }) => applyHold(id, endAt, ms))
   events.on('overdrive:impact', ({ attacker, target, dx, dz }) => {
     const me = myAddress()
     const want = (target || '').toLowerCase()
@@ -245,7 +247,6 @@ export function initOverdrive() {
   })
   engine.addSystem((dt) => {
     const now = Date.now()
-    const pulse = 0.5 + 0.5 * Math.sin(now / 180)
     sparkClock += dt
     if (localStarExpired(now)) setLocal(0)
     for (const [id, endAt] of [...auras]) {
@@ -268,20 +269,17 @@ export function initOverdrive() {
         continue
       }
       rec.sparks.forEach((spark, i) => {
-        const rise = i >= SPARK_ORBIT
-        const k = rise ? (i - SPARK_ORBIT) / SPARK_RISE : i / SPARK_ORBIT
-        const ang = k * Math.PI * 2 + sparkClock * (rise ? 2.3 : 1.55)
-        const radius = rise ? 0.22 : 0.55
-        const lift = rise
-          ? 0.35 + ((sparkClock * 0.9 + k) % 1.5)
-          : 0.65 + 0.4 * Math.sin(sparkClock * 2.5 + i)
+        const t = (sparkClock / SPARK_LIFE + i / SPARK_N) % 1
+        const fade = 1 - t
+        const lift = SPARK_START_Y + t * SPARK_RISE_H
+        const ang = (i / SPARK_N) * Math.PI * 2
         const st = Transform.getMutableOrNull(spark)
-        const size = rise ? 0.24 : 0.32
+        const size = 0.28 * (0.75 + 0.25 * fade)
         if (st) {
-          st.position = Vector3.create(Math.cos(ang) * radius, lift, Math.sin(ang) * radius)
+          st.position = Vector3.create(Math.cos(ang) * SPARK_SPREAD, lift, Math.sin(ang) * SPARK_SPREAD)
           st.scale = Vector3.create(size, size, size)
         }
-        Material.setPbrMaterial(spark, sparkMat(0.45 + 0.55 * Math.sin(sparkClock * 5 + i)))
+        Material.setPbrMaterial(spark, sparkMat(fade))
       })
     }
     // While an orb or a star is live, send feet so the server can test pickup and touches.

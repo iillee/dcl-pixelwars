@@ -57,7 +57,7 @@ export type Events = {
   'paint:score': { n: number }
   'star:spawn': { i: number; x: number; y: number; z: number }
   'star:despawn': { i: number }
-  'star:hold': { id: string; until: number }
+  'star:hold': { id: string; until: number; ms: number }
   'overdrive:impact': { attacker: string; target: string; dx: number; dz: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.

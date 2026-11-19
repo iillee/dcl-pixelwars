@@ -2,9 +2,11 @@
  * verify-star-pickup.ts — star orb spawn, pickup, ties, bots, effects, reset.
  * Run: npx tsx scripts/verify-star-pickup.ts
  */
+import { readFileSync } from 'node:fs'
 import { OverdriveBook } from '../src/server/overdriveBook'
 import {
   canSpawnStar, emptyStarHold, expireStarHold, grantStarHold, isStarActive,
+  localStarEndAt, starHoldRemainingMs,
   nextStarSpawnAt, overdriveCanTouch, overdrivePaintRadiusCells, overdriveTouchDir,
   paintBrushOffsets, pickStarSpawn, starPickupWinner, PAINT_BRUSH_RADIUS_CELLS,
 } from '../src/shared/overdrive'
@@ -26,7 +28,7 @@ function check(name: string, ok: boolean): void {
 const t0 = 1_000_000
 let painted = 0
 
-check('STAR_MS is 12 seconds', STAR_MS === 12000)
+check('STAR_MS is 20 seconds', STAR_MS === 20000)
 check('spawn window is 20-35s', STAR_SPAWN_MIN_MS === 20000 && STAR_SPAWN_MAX_MS === 35000)
 check('at most one orb', STAR_MAX_ACTIVE === 1)
 check('pickup radius is 1.2m', STAR_PICKUP_RADIUS === 1.2)
@@ -68,7 +70,7 @@ check('too high is ignored', starPickupWinner([{ id: 'p', isBot: false, distH: 0
 let hold = emptyStarHold()
 painted = 40
 hold = grantStarHold(t0, STAR_MS)
-check('grant starts a 12s star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
+check('grant starts a 20s star', isStarActive(hold, t0 + 1) && hold.activeUntil === t0 + STAR_MS)
 check('star expires after STAR_MS', !isStarActive(expireStarHold(hold, t0 + STAR_MS + 1), t0 + STAR_MS + 1))
 check('painted total is unchanged by grant or expire', painted === 40)
 
@@ -112,6 +114,8 @@ check('teammates are not launched', !overdriveCanTouch({ ...touchBase, victimTea
 check('self is not launched', !overdriveCanTouch({ ...touchBase, victim: 'a' }))
 check('inactive star does not launch', !overdriveCanTouch({ ...touchBase, attackerActive: false }))
 check('a starred bot can launch a human', overdriveCanTouch({ ...touchBase, attacker: 'bot:3' }))
+check('a starred human can launch a human', overdriveCanTouch(touchBase))
+check('a starred human can launch a bot', overdriveCanTouch({ ...touchBase, victim: 'bot:7', victimTeam: 2 }))
 check('immune victim is not launched', !overdriveCanTouch({ ...touchBase, victimImmune: true }))
 check('same victim is not relaunched inside the window', !overdriveCanTouch({ ...touchBase, lastHitAt: t0 - OVERDRIVE_HIT_WINDOW_MS + 1 }))
 check('same victim can be launched after the window', overdriveCanTouch({ ...touchBase, lastHitAt: t0 - OVERDRIVE_HIT_WINDOW_MS }))
@@ -123,6 +127,20 @@ check('default brush is 3x3', paintBrushOffsets(2, PAINT_BRUSH_RADIUS_CELLS).len
 check('star brush uses OVERDRIVE_PAINT_RADIUS_MULT', overdrivePaintRadiusCells(true) === PAINT_BRUSH_RADIUS_CELLS * OVERDRIVE_PAINT_RADIUS_MULT)
 const wide = paintBrushOffsets(2, overdrivePaintRadiusCells(true))
 check('active brush is wider than the default 3x3', wide.length === 25 && paintBrushOffsets(2, overdrivePaintRadiusCells(false)).length === 9)
+
+check('remaining ms is until minus now', starHoldRemainingMs(t0 + STAR_MS, t0) === STAR_MS && starHoldRemainingMs(0, t0) === 0)
+check('a client 36s behind the server would have shown ~48s on a 12s hold', starHoldRemainingMs(t0 + 12000, t0 - 36000) === 48000)
+check('local end is remaining ms on the client clock, not the server timestamp', localStarEndAt(t0, STAR_MS) === t0 + STAR_MS && localStarEndAt(t0, 0) === 0)
+
+const serverSrc = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+const odSrc = readFileSync(new URL('../src/client/overdrive.ts', import.meta.url), 'utf8')
+check('the server touch loop looks up bot teams, not only the human roster', serverSrc.includes('overdriveTeamOf') && serverSrc.includes('botTeams.get(id)'))
+check('the server touch loop tests human victims and bot victims', serverSrc.includes('for (const e of rosterEntries())') && serverSrc.includes('for (const b of getBotHitPoints())') && serverSrc.includes("room.send('overdriveImpact'"))
+check('the client applies overdrive knock to the local player and to bots', odSrc.includes('applyKnock(overdriveKnock(dx, dz)') && odSrc.includes("playBotKnock(bid, dx, dz, 'overdrive')"))
+check('the STAR seconds chip is gone', !uiSrc.includes('starHudSeconds') && !/STAR \$\{/.test(uiSrc) && !uiSrc.includes('starLabel'))
+check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIFE') && odSrc.includes('SPARK_GOLD') && !odSrc.includes('SPARK_ORBIT') && odSrc.includes('fade = 1 - t'))
+check('the client starts the hold from remaining ms on its own clock', odSrc.includes('localStarEndAt(now, ms)'))
 
 if (fails) { console.log(`✗ ${fails} star-pickup check(s) failed`); process.exit(1) }
 console.log('✓ all star-pickup checks passed')

@@ -25,6 +25,18 @@ export function grantStarHold(now: number, durationMs = STAR_MS): StarHold {
   return { activeUntil: now + durationMs }
 }
 
+/** Remaining hold time in ms. Used so the client can start its own clock. */
+export function starHoldRemainingMs(until: number, now: number): number {
+  if (!Number.isFinite(until) || until <= 0) return 0
+  return Math.max(0, until - now)
+}
+
+/** Local expiry time from a remaining-ms value (avoids server/client clock skew). */
+export function localStarEndAt(now: number, remainingMs: number): number {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 0
+  return now + remainingMs
+}
+
 export function expireStarHold(hold: StarHold, now: number): StarHold {
   if (hold.activeUntil !== 0 && hold.activeUntil <= now) return emptyStarHold()
   return hold

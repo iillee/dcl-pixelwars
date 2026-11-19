@@ -21,7 +21,7 @@ import { pickTeamRescueCell } from '../shared/teamRescue'
 import { refillWallet, resetWallets, setWallet, walletOf } from './paintWallet'
 import { balloonBotIds, benchBot, botCount, botDepotFeet, botRegenStances, freezeBots, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, setPopulation, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock, overdriveKnock } from '../shared/knocks'
-import { canSpawnStar, nextStarSpawnAt, overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir, pickStarSpawn, starPickupWinner, type StarCell } from '../shared/overdrive'
+import { canSpawnStar, nextStarSpawnAt, overdriveCanTouch, overdriveFeetFresh, overdriveTouchDir, pickStarSpawn, starHoldRemainingMs, starPickupWinner, type StarCell } from '../shared/overdrive'
 import { OverdriveBook } from './overdriveBook'
 import { RESCUE_TIMES } from '../shared/rescuePath'
 import {
@@ -150,14 +150,29 @@ export async function setupServer(): Promise<void> {
       starNextAt = nextStarSpawnAt(now, STAR_SPAWN_MIN_MS, STAR_SPAWN_MAX_MS, Math.random)
     } else starNextAt = 0
   }
+  const sendStarHold = (id: string, until: number, now: number, to?: string): void => {
+    const msg = { id, until, ms: starHoldRemainingMs(until, now) }
+    if (to) room.send('starHold', msg, { to: [to] })
+    else room.send('starHold', msg)
+  }
+  const overdriveTeamOf = (id: string): number | null => {
+    if (id.startsWith('bot:')) return botTeams.get(id) ?? null
+    const direct = getTeam(id)
+    if (direct !== null) return direct
+    const want = id.toLowerCase()
+    for (const e of rosterEntries()) {
+      if (e.userId.toLowerCase() === want) return e.team
+    }
+    return null
+  }
   const endStar = (id: string, now = Date.now()): void => {
-    room.send('starHold', { id, until: 0 })
+    sendStarHold(id, 0, now)
     scheduleNextStar(now)
   }
   const clearStars = (): void => {
     const { holders, orbs } = overdrive.clearRound()
     for (const o of orbs) room.send('starDespawn', { i: o.i })
-    for (const id of holders) room.send('starHold', { id, until: 0 })
+    for (const id of holders) sendStarHold(id, 0, Date.now())
     starRoundStart = 0
     starNextAt = 0
   }
@@ -172,7 +187,7 @@ export async function setupServer(): Promise<void> {
       room.send('starSpawn', { i: o.i, x: o.x, y: o.y, z: o.z }, { to: [id] })
     }
     for (const h of overdrive.actives(now)) {
-      room.send('starHold', { id: h.id, until: h.until }, { to: [id] })
+      sendStarHold(h.id, h.until, now, id)
     }
   }
   const tryPickupStars = (now: number): void => {
@@ -194,7 +209,7 @@ export async function setupServer(): Promise<void> {
       overdrive.removeOrb(orb.i)
       room.send('starDespawn', { i: orb.i })
       const until = overdrive.grant(winner, now)
-      room.send('starHold', { id: winner, until })
+      sendStarHold(winner, until, now)
       console.log('[Server] star pickup ' + winner.slice(0, 8) + ' orb=' + orb.i + ' until ' + until)
     }
   }
@@ -223,7 +238,7 @@ export async function setupServer(): Promise<void> {
     if (!matchLive()) return
     for (const { id, until } of overdrive.actives(now)) {
       void until
-      const team = getTeam(id)
+      const team = overdriveTeamOf(id)
       if (team === null) continue
       const atk = overdriveFeet(id, now)
       if (!atk) continue

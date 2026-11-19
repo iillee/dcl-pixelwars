@@ -667,7 +667,7 @@ export const STAR_SPAWN_CLEAR_M = 8
 export const STAR_HOVER_Y = 1.1
 export const STAR_ORB_DIAMETER = 0.6
 /** How long the star lasts once picked up (ms). */
-export const STAR_MS = 12000
+export const STAR_MS = 20000
 /** Jog/run multiplier via AvatarLocomotionSettings while the star is held. */
 export const STAR_SPEED_MULT = 1.4
 /** Client cooldown ticks and server min-gaps are multiplied by this while starred. */

@@ -72,7 +72,7 @@ export const Messages = {
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
   starDespawn: Schemas.Map({ i: Schemas.Int }),
   // Server → everyone: who is holding the star, and until when (0 = ended).
-  starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number }),
+  starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number, ms: Schemas.Number }),
   // Server → everyone: accepted star bump. The victim applies overdriveKnock.
   overdriveImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
