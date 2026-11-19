@@ -2,7 +2,7 @@
  * audio.ts — background music + UI click sound.
  *
  * Music is parented to the camera so it stays at ear-level anywhere in
- * the 160m scene. Starts muted so the scene loads quietly; the HUD mute
+ * the 160m scene. Starts unmuted so the BGM plays on load; the HUD mute
  * pill toggles it via toggleMusic().
  *
  * Playback position is tracked across pause/resume so the loop continues
@@ -34,7 +34,7 @@ let claimSfxEnt: Entity = 0 as Entity
 let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
 let balloonPopSfxEnt: Entity = 0 as Entity
-let musicMuted = true
+let musicMuted = false
 let musicDucked = false
 let playStartMs = 0
 let pausedPositionSec = 0
