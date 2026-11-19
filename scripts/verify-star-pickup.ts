@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs'
 import { OverdriveBook } from '../src/server/overdriveBook'
 import {
   canSpawnStar, emptyStarHold, expireStarHold, grantStarHold, isStarActive,
-  localStarEndAt, starHoldRemainingMs,
+  resolveStarHoldEnd, starHoldRemainingMs,
+  localStarEndAt,
   nextStarSpawnAt, overdriveCanTouch, overdrivePaintRadiusCells, overdriveTouchDir,
   paintBrushOffsets, pickStarSpawn, starPickupWinner, PAINT_BRUSH_RADIUS_CELLS,
 } from '../src/shared/overdrive'
@@ -140,7 +141,45 @@ check('the server touch loop tests human victims and bot victims', serverSrc.inc
 check('the client applies overdrive knock to the local player and to bots', odSrc.includes('applyKnock(overdriveKnock(dx, dz)') && odSrc.includes("playBotKnock(bid, dx, dz, 'overdrive')"))
 check('the STAR seconds chip is gone', !uiSrc.includes('starHudSeconds') && !/STAR \$\{/.test(uiSrc) && !uiSrc.includes('starLabel'))
 check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIFE') && odSrc.includes('SPARK_GOLD') && !odSrc.includes('SPARK_ORBIT') && odSrc.includes('fade = 1 - t'))
-check('the client starts the hold from remaining ms on its own clock', odSrc.includes('localStarEndAt(now, ms)'))
+check('the client starts the hold from remaining ms on its own clock', odSrc.includes('resolveStarHoldEnd(endAt, remainingMs, now)'))
+
+// End-to-end: expire the book, spawn a new orb, and claim it as the same player,
+// including the starHold payload the server would send and the client's resolver.
+const e2e = new OverdriveBook()
+const tGrant = 5_000_000
+const orb1 = e2e.addOrb({ x: 10, y: 2, z: 10, cell: 'c1' })
+const first = e2e.claimOrb('P1', orb1.i, tGrant)
+check('first claim removes the orb and grants STAR_MS', !!first && first.until === tGrant + STAR_MS && e2e.orbCount() === 0 && e2e.isActive('p1', tGrant + 1))
+check('first starHold payload has remaining STAR_MS', !!first && starHoldRemainingMs(first.until, tGrant) === STAR_MS)
+const localFirst = resolveStarHoldEnd(first!.until, STAR_MS, tGrant)
+check('client starts the first hold from remaining ms, not the server clock', localFirst === tGrant + STAR_MS)
+const expiredAt = tGrant + STAR_MS + 1
+const expiredIds = e2e.expire(expiredAt)
+check('after the timer the book has no leftover hold', expiredIds.includes('p1') && !e2e.isActive('p1', expiredAt) && !e2e.holderActive(expiredAt) && e2e.actives(expiredAt).length === 0)
+check('an expired hold is removed, not left as a sticky empty entry', !e2e.isActive('p1', expiredAt + 1))
+const endPayloadMs = starHoldRemainingMs(0, expiredAt)
+const localClear = resolveStarHoldEnd(0, endPayloadMs, expiredAt)
+check('end starHold (until=0, ms=0) clears the client hold', endPayloadMs === 0 && localClear === 0)
+const tSecond = expiredAt + 1
+check('a new orb can spawn once the hold is gone', canSpawnStar({ now: tSecond, roundStartAt: 0, nextAt: tSecond, activeOrbs: e2e.orbCount(), holderActive: e2e.holderActive(tSecond) }))
+const orb2 = e2e.addOrb({ x: 20, y: 2, z: 20, cell: 'c2' })
+check('second orb uses a new id', orb2.i !== orb1.i)
+const second = e2e.claimOrb('P1', orb2.i, tSecond)
+check('same player can claim the second orb after expiry', !!second && second.until === tSecond + STAR_MS && second.until !== first!.until && e2e.isActive('p1', tSecond + 1) && e2e.orbCount() === 0)
+check('second starHold payload is a full fresh grant', !!second && starHoldRemainingMs(second.until, tSecond) === STAR_MS)
+const localSecond = resolveStarHoldEnd(second!.until, STAR_MS, tSecond)
+check('client treats the second grant as a new hold', localSecond === tSecond + STAR_MS && localSecond !== localFirst)
+const staleEnd = resolveStarHoldEnd(0, 0, tSecond)
+check('a late until:0 does not look like a grant', staleEnd === 0)
+// If ms is missing on a live until, still start a full hold instead of no-op.
+check('a grant with until>0 still activates when ms is missing', resolveStarHoldEnd(tSecond + STAR_MS, undefined, tSecond) === tSecond + STAR_MS)
+check('claimOrb is always fresh even if a hold were still live', e2e.claimOrb('p1', e2e.addOrb({ x: 1, y: 2, z: 1, cell: 'c3' }).i, tSecond + 100)!.until === tSecond + 100 + STAR_MS)
+
+const bookSrc = readFileSync(new URL('../src/server/overdriveBook.ts', import.meta.url), 'utf8')
+check('server pickups go through claimOrb', serverSrc.includes('overdrive.claimOrb(') && !/overdrive\.removeOrb\(orb\.i\)/.test(serverSrc))
+check('claimOrb grants a fresh hold', bookSrc.includes('this.grant(winner, now, true)') && bookSrc.includes('this.holds.delete(id)'))
+check('client uses resolveStarHoldEnd for every starHold', odSrc.includes('resolveStarHoldEnd(') && odSrc.includes('if (who === myAddress()) setLocal(localEnd)'))
+check('feet are reported during a match so a second orb can be claimed', odSrc.includes('hasStarOrbs() || !inLobby()'))
 
 if (fails) { console.log(`✗ ${fails} star-pickup check(s) failed`); process.exit(1) }
-console.log('✓ all star-pickup checks passed')
+console.log('✓ star pickup, expiry, and a second claim end to end')

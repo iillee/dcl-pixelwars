@@ -37,6 +37,18 @@ export function localStarEndAt(now: number, remainingMs: number): number {
   return now + remainingMs
 }
 
+/**
+ * Client-local end time for a starHold message. An explicit end is `until <= 0`.
+ * A grant is `until > 0` and uses `ms` when it is a positive remaining time,
+ * otherwise STAR_MS, so a second grant cannot be treated as an expiry if `ms`
+ * is missing or 0 while `until` is still a live timestamp.
+ */
+export function resolveStarHoldEnd(until: number, ms: number | undefined, now: number, durationMs = STAR_MS): number {
+  if (!Number.isFinite(until) || until <= 0) return 0
+  if (typeof ms === 'number' && isFinite(ms) && ms > 0) return localStarEndAt(now, ms)
+  return localStarEndAt(now, durationMs)
+}
+
 export function expireStarHold(hold: StarHold, now: number): StarHold {
   if (hold.activeUntil !== 0 && hold.activeUntil <= now) return emptyStarHold()
   return hold

@@ -20,12 +20,19 @@ export class OverdriveBook {
     return this.holds.get(keyOf(id)) ?? emptyStarHold()
   }
 
-  grant(id: string, now: number): number {
+  grant(id: string, now: number, fresh = false): number {
     if (!id) return 0
-    if (isStarActive(this.get(id), now)) return this.get(id).activeUntil
+    if (!fresh && isStarActive(this.get(id), now)) return this.get(id).activeUntil
     const hold = grantStarHold(now, STAR_MS)
     this.holds.set(keyOf(id), hold)
     return hold.activeUntil
+  }
+
+  /** Remove a live orb and start a new hold. Always fresh, even if a stale hold is still on the book. */
+  claimOrb(winner: string, orbI: number, now: number): { until: number; i: number } | null {
+    if (!winner || !this.removeOrb(orbI)) return null
+    const until = this.grant(winner, now, true)
+    return { until, i: orbI }
   }
 
   onDeath(id: string, now = Date.now()): boolean {
@@ -42,10 +49,10 @@ export class OverdriveBook {
 
   expire(now: number): string[] {
     const ended: string[] = []
-    for (const [id, hold] of this.holds) {
+    for (const [id, hold] of [...this.holds]) {
       const next = expireStarHold(hold, now)
       if (next === hold) continue
-      this.holds.set(id, next)
+      this.holds.delete(id)
       ended.push(id)
     }
     return ended

@@ -13,7 +13,8 @@ import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } fro
 import { setBotStarFace, clearBotStarFaces } from './botFace'
 import { getBotVisualEntity, playBotKnock } from './botVisual'
 import { setStarSpeedMult } from './speed'
-import { localStarEndAt } from '../shared/overdrive'
+import { inLobby } from './phase'
+import { resolveStarHoldEnd } from '../shared/overdrive'
 import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
 
 const AAPT_POSITION = 0
@@ -181,10 +182,7 @@ function applyHold(id: string, endAt: number, remainingMs?: number): void {
   const who = (id || '').toLowerCase()
   if (!who) return
   const now = Date.now()
-  const ms = typeof remainingMs === 'number' && isFinite(remainingMs)
-    ? remainingMs
-    : (endAt > 0 ? STAR_MS : 0)
-  const localEnd = localStarEndAt(now, ms)
+  const localEnd = resolveStarHoldEnd(endAt, remainingMs, now)
   if (!localEnd) {
     const cur = auras.get(who)
     // A delayed until:0 from a previous hold must not clear a newer grant.
@@ -195,15 +193,11 @@ function applyHold(id: string, endAt: number, remainingMs?: number): void {
     if (who === myAddress()) setLocal(0)
     return
   }
-  const prev = auras.get(who)
   auras.set(who, localEnd)
-  const rec = glows.get(who)
-  if (!rec || rec.until !== localEnd) {
-    dropGlow(who)
-    ensureGlow(who, localEnd)
-  }
+  dropGlow(who)
+  ensureGlow(who, localEnd)
   setBotStarFromId(who, true)
-  if (who === myAddress() && (prev !== localEnd || !isLocalOverdriveActive())) setLocal(localEnd)
+  if (who === myAddress()) setLocal(localEnd)
 }
 
 export function initOverdrive() {
@@ -282,8 +276,11 @@ export function initOverdrive() {
         Material.setPbrMaterial(spark, sparkMat(fade))
       })
     }
-    // While an orb or a star is live, send feet so the server can test pickup and touches.
-    const needFeet = isLocalOverdriveActive() || auras.size > 0 || hasStarOrbs()
+    // Send feet whenever an orb is out or a hold is live, and also during
+    // a match so a second spawn is claimable even if the orb visual is a
+    // frame late. Without this, a solo player with no bots stopped reporting
+    // after the first star ended, and the next pickup never registered.
+    const needFeet = isLocalOverdriveActive() || auras.size > 0 || hasStarOrbs() || !inLobby()
     if (!needFeet) return
     feetClock += dt
     if (feetClock < 1 / Math.max(BOT_AIM_REPORT_HZ, 10)) return

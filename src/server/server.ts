@@ -206,11 +206,11 @@ export async function setupServer(): Promise<void> {
       }
       const winner = starPickupWinner(touches)
       if (!winner) continue
-      overdrive.removeOrb(orb.i)
-      room.send('starDespawn', { i: orb.i })
-      const until = overdrive.grant(winner, now)
-      sendStarHold(winner, until, now)
-      console.log('[Server] star pickup ' + winner.slice(0, 8) + ' orb=' + orb.i + ' until ' + until)
+      const claimed = overdrive.claimOrb(winner, orb.i, now)
+      if (!claimed) continue
+      room.send('starDespawn', { i: claimed.i })
+      sendStarHold(winner, claimed.until, now)
+      console.log('[Server] star pickup ' + winner.slice(0, 8) + ' orb=' + claimed.i + ' until ' + claimed.until)
     }
   }
   const trySpawnStar = (now: number): void => {
