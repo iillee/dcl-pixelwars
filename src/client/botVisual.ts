@@ -198,6 +198,7 @@ type VisualKind = 'ghost' | 'avatar'
 /** Client wall time minus server sim time (s): tracks the lowest-latency packet, drifts up slowly. */
 let clockOffset: number | null = null
 let roundFormat: RoundFormat = 'pvp'
+let hiddenPlates = false
 
 interface BotVisual {
   root: Entity
@@ -271,7 +272,11 @@ function rgb(team: number): Color3 {
 }
 
 function hideGhostPlates(): boolean {
-  return roundFormat === 'balloon' || teamPlatesHidden()
+  // Only Balloon Battle is team-neutral. isLobbyLayout() must not force
+  // the balloon (blue) swatch — a late joiner can still have the lobby
+  // floor while mid-match botPositions already arrived, which painted
+  // every bot blue and then never refreshed because the team id was already set.
+  return roundFormat === 'balloon'
 }
 
 function lightColor(team: number): Color3 {
@@ -632,6 +637,9 @@ export function initBotVisual(): void {
       else clockOffset += (sample - clockOffset) * 0.05
     }
     const kind = visualKind()
+    const hide = hideGhostPlates()
+    const platesChanged = hide !== hiddenPlates
+    hiddenPlates = hide
     for (const b of msg) {
       seen.add(b.id)
       // Server positions are feet. The avatar origin is the feet. The ghost floats at draw time.
@@ -658,7 +666,7 @@ export function initBotVisual(): void {
       rec.st = b.st
       if ((b.st ?? 0) === 1 && wasSt !== 1) beginKnockFace(rec, b.vx ?? 0, b.vz ?? 0)
       if ((b.st ?? 0) === 0 || (b.st ?? 0) === 2) rec.knockFaceUntil = -1
-      if (rec.team !== b.team) {
+      if (rec.team !== b.team || platesChanged) {
         if (rec.kind === 'ghost') {
           if (rec.light) paintLight(rec.light, b.team)
           applyCustomBotBody(rec.root, b.team)
