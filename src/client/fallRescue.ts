@@ -131,21 +131,17 @@ export const FALL_RESCUE = {
 
 /**
  * Rescue-cloud visuals. The root stays over the rider. A child `spin` yaws
- * so local +Z points away from the camera (same convention as BM_Y). The puff
- * is placed each frame along the camera's right vector, not a baked local X,
- * so a yaw-sign mismatch cannot flip it to the far side.
+ * so the face looks at the camera; the puff itself stays centered on that
+ * root (directly above the head) and does not slide when the camera turns.
  */
-/** Metres from the hook to the puff center, along the camera's right. */
-const CLOUD_SIDE = 1.45
 /** Puff bottom above the cloud root (the root is HANG_Y above the feet). */
 const CLOUD_OFFSET_Y = 0.75
 /** Uniform scale on the body (face and rod inherit it). */
 const CLOUD_SCALE = 1.25
 /**
  * Authored rod-mesh tip in glTF metres (min-X vertex on cloud-rod.glb).
- * The rod already extends toward local -X, so with the puff on the camera's
- * right the tip points at the hook. A tip helper is parented to the rod at
- * this point so world placement picks up yaw and CLOUD_SCALE.
+ * The rod is shifted so this tip sits at the puff's underside center, and
+ * the line drops straight down to the hook.
  */
 const ROD_TIP_LOCAL = { x: -1.1985, y: -0.0492, z: -0.4557 }
 /** Hook below the cloud root, just above a ~1.8 m rider's head (world Y ~ 2.35, clear of the nametag). */
@@ -153,8 +149,8 @@ const HOOK_Y = -0.30
 const HOOK_SCALE = Vector3.create(0.38, 0.38, 0.38)
 /** Coded fishing line, same construction as balloon strings, in world space. */
 const LINE_RADIUS = 0.018
-const LINE_SEGS = 4
-const LINE_SAG = 0.04
+const LINE_SEGS = 3
+const LINE_SAG = 0.02
 /** Hide the line only if an endpoint is clearly stale or unready. */
 const LINE_MAX_M = 12
 const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
@@ -460,15 +456,6 @@ function setFaceCamera(c: CloudVisual | null, on: boolean): void {
   if (!on) Transform.getMutable(c.spin).rotation = Quaternion.Identity()
 }
 
-/** Horizontal camera-right of a look from `cam` toward `at` (up x forward). */
-function cameraRightXZ(at: { x: number; z: number }, cam: { x: number; z: number }): { x: number; z: number } | null {
-  const fx = at.x - cam.x
-  const fz = at.z - cam.z
-  const len = Math.hypot(fx, fz)
-  if (len < 1e-4) return null
-  return { x: fz / len, z: -fx / len }
-}
-
 /** Yaw `spin` so local +Z points away from the camera (BM_Y / LookRotation convention). Yaw only. */
 function yawSpinToCamera(spin: Entity): void {
   const pos = getWorldPosition(engine, spin)
@@ -479,30 +466,11 @@ function yawSpinToCamera(spin: Entity): void {
   Transform.getMutable(spin).rotation = Quaternion.lookRotation(Vector3.create(fx, 0, fz), Vector3.Up())
 }
 
-/** Place the puff CLOUD_SIDE metres along the camera's right, in spin-local space. */
-function placePuffBesideCamera(c: CloudVisual, cam: { x: number; z: number }, at: { x: number; z: number }): { x: number; z: number } | null {
-  const bodyTf = Transform.getMutable(c.body)
-  // Ride camera looks along +Z with spin at identity, so camera-right is local +X.
-  if (!(c.face && !(c === floater && cameraRide))) {
-    bodyTf.position = Vector3.create(CLOUD_SIDE, CLOUD_OFFSET_Y, 0)
-    return { x: 1, z: 0 }
-  }
-  const right = cameraRightXZ(at, cam)
-  if (!right) return null
-  const q = Transform.get(c.spin).rotation
-  const inv = Quaternion.create(-q.x, -q.y, -q.z, q.w)
-  const local = Vector3.rotate(Vector3.create(right.x * CLOUD_SIDE, 0, right.z * CLOUD_SIDE), inv)
-  bodyTf.position = Vector3.create(local.x, CLOUD_OFFSET_Y, local.z)
-  return right
-}
-
 let rigLogAt = 0
 function logCloudRig(
   c: CloudVisual,
   hook: { x: number; y: number; z: number },
   tip: { x: number; y: number; z: number },
-  cam: { x: number; y: number; z: number },
-  right: { x: number; z: number } | null,
   len: number
 ): void {
   if (c !== floater) return
@@ -510,36 +478,31 @@ function logCloudRig(
   if (now - rigLogAt < 1000) return
   rigLogAt = now
   const body = getWorldPosition(engine, c.body)
-  const side = right ? right.x.toFixed(2) + ',' + right.z.toFixed(2) : 'n/a'
   console.log(
     '[FallRescue] rig hook=' + hook.x.toFixed(2) + ',' + hook.y.toFixed(2) + ',' + hook.z.toFixed(2) +
       ' tip=' + tip.x.toFixed(2) + ',' + tip.y.toFixed(2) + ',' + tip.z.toFixed(2) +
       ' puff=' + body.x.toFixed(2) + ',' + body.y.toFixed(2) + ',' + body.z.toFixed(2) +
-      ' cam=' + cam.x.toFixed(2) + ',' + cam.y.toFixed(2) + ',' + cam.z.toFixed(2) +
-      ' right=' + side + ' line=' + len.toFixed(2)
+      ' line=' + len.toFixed(2)
   )
 }
 
 function updateCloudVisual(c: CloudVisual): void {
-  const cam = getWorldPosition(engine, engine.CameraEntity)
-  const hook = getWorldPosition(engine, c.hook)
   if (c.face && !(c === floater && cameraRide)) yawSpinToCamera(c.spin)
-  const right = placePuffBesideCamera(c, cam, hook)
   const tip = getWorldPosition(engine, c.tip)
-  const hookNow = getWorldPosition(engine, c.hook)
+  const hook = getWorldPosition(engine, c.hook)
   const root = getWorldPosition(engine, c.root)
-  const len = Math.hypot(tip.x - hookNow.x, tip.y - hookNow.y, tip.z - hookNow.z)
+  const len = Math.hypot(tip.x - hook.x, tip.y - hook.y, tip.z - hook.z)
   const tipR = Math.hypot(tip.x - root.x, tip.y - root.y, tip.z - root.z)
-  const hookR = Math.hypot(hookNow.x - root.x, hookNow.y - root.y, hookNow.z - root.z)
-  const ready = [tip.x, tip.y, tip.z, hookNow.x, hookNow.y, hookNow.z, root.x, root.y, root.z].every(Number.isFinite)
-  logCloudRig(c, hookNow, tip, cam, right, len)
+  const hookR = Math.hypot(hook.x - root.x, hook.y - root.y, hook.z - root.z)
+  const ready = [tip.x, tip.y, tip.z, hook.x, hook.y, hook.z, root.x, root.y, root.z].every(Number.isFinite)
+  logCloudRig(c, hook, tip, len)
   if (!ready || len > LINE_MAX_M || tipR > 12 || hookR > 12) {
     hideStringLine(c.line)
     return
   }
   const scale = Transform.getOrNull(c.root)?.scale.y ?? 1
   c.line.radius = LINE_RADIUS * Math.max(0.02, scale)
-  placeStringLine(c.line, tip, hookNow, 0, { sag: LINE_SAG * Math.max(0.02, scale), lagTau: 0 })
+  placeStringLine(c.line, tip, hook, 0, { sag: LINE_SAG * Math.max(0.02, scale), lagTau: 0 })
 }
 
 let fallEmoteOn = false
@@ -574,10 +537,12 @@ function cloudParts(root: Entity): Omit<CloudVisual, 'face'> {
   Transform.create(spin, { parent: root })
   const body = gltfChild(spin, CLOUD_BODY_SRC)
   const bodyTf = Transform.getMutable(body)
-  bodyTf.position = Vector3.create(CLOUD_SIDE, CLOUD_OFFSET_Y, 0)
+  bodyTf.position = Vector3.create(0, CLOUD_OFFSET_Y, 0)
   bodyTf.scale = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
   const face = gltfChild(body, CLOUD_FACE_SRC)
   const rod = gltfChild(body, CLOUD_ROD_SRC)
+  // Shift the rod so its authored tip sits at the puff underside (body origin).
+  Transform.getMutable(rod).position = Vector3.create(-ROD_TIP_LOCAL.x, -ROD_TIP_LOCAL.y, -ROD_TIP_LOCAL.z)
   const hook = makeHook(spin)
   const tip = engine.addEntity()
   Transform.create(tip, {
