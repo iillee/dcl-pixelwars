@@ -1,13 +1,18 @@
 /**
- * starOrb.ts — the star pickup visual. Swap STAR_MODEL to a GLB later;
+ * starOrb.ts — the star pickup visual. STAR_MODEL points at the star mesh;
  * an empty path falls back to an emissive gold sphere (~0.6 m).
+ * The file pivot is at the base; the child is offset so bob/spin turn
+ * around the visual center.
  */
 import { engine, Entity, Transform, GltfContainer, LightSource, MeshRenderer, Material } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { STAR_ORB_DIAMETER } from '../shared/pvp'
 
-/** Set this to 'assets/models/star.glb' when the star mesh is ready. */
-export const STAR_MODEL = ''
+export const STAR_MODEL = 'assets/models/star.glb'
+/** Native size of star.glb (metres, glTF Y-up): 1.00 wide, 0.97 tall, 0.38 thick. */
+const STAR_MODEL_CENTER_Y = 0.483978
+/** Native height is already ~0.97 m, inside the 0.8-1 m target, so leave scale at 1. */
+const STAR_MODEL_SCALE = 1
 
 const SPIN_Y = 1.15
 const SPIN_X = 0.35
@@ -51,11 +56,17 @@ export function showStarOrb(i: number, x: number, y: number, z: number): void {
   })
   const parts: Entity[] = []
   const body = engine.addEntity()
-  const s = STAR_ORB_DIAMETER
-  Transform.create(body, { parent: root, scale: Vector3.create(s, s, s) })
   if (STAR_MODEL) {
+    const s = STAR_MODEL_SCALE
+    Transform.create(body, {
+      parent: root,
+      position: Vector3.create(0, -STAR_MODEL_CENTER_Y * s, 0),
+      scale: Vector3.create(s, s, s),
+    })
     GltfContainer.create(body, { src: STAR_MODEL })
   } else {
+    const s = STAR_ORB_DIAMETER
+    Transform.create(body, { parent: root, scale: Vector3.create(s, s, s) })
     MeshRenderer.setSphere(body)
     Material.setPbrMaterial(body, {
       albedoColor: GOLD4,
