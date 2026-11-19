@@ -21,7 +21,7 @@ import { AIR_SPIKE_DIVE_VOL, AIR_SPIKE_HIT_VOL, AIR_SPIKE_STAMP_VOL, AIR_SPIKE_B
 import { OCEAN_AMBIENCE_SRC, OCEAN_AMBIENCE_VOLUME } from '../shared/waterLook'
 
 const MUSIC_VOLUME = 0.4
-const MUSIC_SRC = 'assets/sounds/HomeAgain_Loop.mp3'
+const MUSIC_SRC = 'assets/sounds/bgm-main.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
 /** flagtag's swoosh.mp3 — dash wind whoosh. */
