@@ -16,6 +16,7 @@ import { setStarSpeedMult } from './speed'
 import { inLobby } from './phase'
 import { resolveStarHoldEnd } from '../shared/overdrive'
 import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
+import { spawnStarPickupPop } from './starPickupPop'
 
 const AAPT_POSITION = 0
 const GLOW_Y = 0.95
@@ -155,6 +156,7 @@ function ensureGlow(id: string, endAt: number): void {
   }
   rec = { attach, light, music, sparks, until: endAt }
   glows.set(id, rec)
+  spawnStarPickupPop(who.kind === 'bot' ? { kind: 'bot', entity: who.entity } : { kind: 'player', avatarId: who.avatarId || undefined })
 }
 
 function dropGlow(id: string): void {

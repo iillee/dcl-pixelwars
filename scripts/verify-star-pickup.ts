@@ -144,6 +144,9 @@ check('star particles rise and fade and do not orbit', odSrc.includes('SPARK_LIF
 check('the client starts the hold from remaining ms on its own clock', odSrc.includes('resolveStarHoldEnd(endAt, remainingMs, now)'))
 check('star theme track is kept but disabled, and BGM is not ducked', STAR_THEME_SRC === 'assets/sounds/star-theme.mp3' && STAR_THEME_ENABLED === false && odSrc.includes('STAR_THEME_ENABLED && live'))
 check('star sparkles are bigger, higher, and more plentiful', /const SPARK_N = 3[0-9]/.test(odSrc) && /const SPARK_RISE_H = 3\.[0-9]/.test(odSrc) && /const SPARK_SIZE = 0\.(7|8)/.test(odSrc))
+const popSrc = readFileSync(new URL('../src/client/starPickupPop.ts', import.meta.url), 'utf8')
+check('star pickup pop ports flagtag head-bounce timings and offsets', popSrc.includes('coinPickupSystem.ts') && popSrc.includes('spawnHeadBounce') && popSrc.includes('duration: 200') && popSrc.includes('duration: 350') && popSrc.includes('EF_EASEOUTQUAD') && popSrc.includes('EF_EASEINQUAD') && popSrc.includes('0, 0.5, 0') && popSrc.includes('0, 2.0, 0') && popSrc.includes('0, 0.8, 0') && popSrc.includes('POP_DURATION = 0.6'))
+check('star pickup plays flagtag flag pickup sound', popSrc.includes('assets/sounds/pickup2.wav') && popSrc.includes('volume: 2') && odSrc.includes('spawnStarPickupPop('))
 
 // End-to-end: expire the book, spawn a new orb, and claim it as the same player,
 // including the starHold payload the server would send and the client's resolver.
