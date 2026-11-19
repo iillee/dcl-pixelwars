@@ -14,7 +14,7 @@ import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_NAME, TEAM_RGB, PLAYING_TEAMS, isPlayingTeam, leadingTeams, rankedTeams, type TeamCoverage } from "./shared/team"
 import {
-  areaPct, rosterLayout, sortTeamRows, summaryPcts, summaryRank, tablesLayout, tablesW, textW, textWSafe, titleFontFor,
+  areaPct, cardBodyContentH, cardFrameH, rosterLayout, sortTeamRows, summaryPcts, summaryRank, standingsLayout, tablesLayout, tablesW, textW, textWSafe, titleFontFor,
   SUMMARY_BOLD_PX, SUMMARY_CARD_BODY_H, SUMMARY_CARD_GAP, SUMMARY_CARD_H, SUMMARY_CARD_HEAD_H, SUMMARY_CARD_W, SUMMARY_FIT, SUMMARY_FONT_MIN, SUMMARY_GAP, SUMMARY_HEAD_FONT, SUMMARY_HEAD_H, SUMMARY_PILL_FONT, SUMMARY_PILL_H, SUMMARY_PILL_W, SUMMARY_ROW_FONT, SUMMARY_ROW_H, SUMMARY_SUB_FONT, SUMMARY_TITLE_FONT, TITLE_WORD_GAP,
   type SummaryRow,
 } from "./shared/summaryLayout"
@@ -261,25 +261,31 @@ function TeamCardGrid(props: {
   stacked: boolean
   order: number[]
   leaders: number[]
+  fitContent?: boolean
+  bodyCap?: number
 }) {
-  const { rows, total, mvp, me, k, a, stacked, order, leaders } = props
+  const { rows, total, mvp, me, k, a, stacked, order, leaders, fitContent, bodyCap } = props
+  const cap = bodyCap ?? SUMMARY_CARD_BODY_H
   const card = (team: number, i: number) => (
-    <TeamCard team={team} rows={rows.filter(r => r.team === team)} total={total} mvp={mvp} me={me} k={k} a={a} leader={leaders.includes(team)} rank={i + 1} />
+    <TeamCard team={team} rows={rows.filter(r => r.team === team)} total={total} mvp={mvp} me={me} k={k} a={a} leader={leaders.includes(team)} rank={i + 1} fitContent={fitContent} bodyCap={cap} />
   )
   const gap = SUMMARY_CARD_GAP * k
   const vgap = SUMMARY_GAP * 0.6 * k
-  const ch = SUMMARY_CARD_H * k
+  const hOf = (team: number) => fitContent
+    ? cardFrameH(Math.max(1, rows.filter(r => r.team === team).length), cap) * k
+    : SUMMARY_CARD_H * k
   const gridW = tablesW(stacked) * k
   // Explicit widths and heights: DCL UI does not size auto flex rows reliably,
   // so a second 2×2 row was painting on top of the first.
   if (stacked) {
-    const stackH = ch * order.length + vgap * Math.max(0, order.length - 1)
+    const hs = order.map(team => hOf(team))
+    const stackH = hs.reduce((s, h) => s + h, 0) + vgap * Math.max(0, order.length - 1)
     return (
       <UiEntity uiTransform={{ width: gridW, height: stackH, flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
         {order.map((team, i) => (
-          <UiEntity uiTransform={{ width: gridW, height: ch + (i === 0 ? 0 : vgap), flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+          <UiEntity uiTransform={{ width: gridW, height: hs[i] + (i === 0 ? 0 : vgap), flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
             <UiEntity uiTransform={{ width: 1, height: i === 0 ? 0 : vgap, flexShrink: 0 }} />
-            <UiEntity uiTransform={{ width: gridW, height: ch, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+            <UiEntity uiTransform={{ width: gridW, height: hs[i], flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
               {card(team, i)}
             </UiEntity>
           </UiEntity>
@@ -287,15 +293,20 @@ function TeamCardGrid(props: {
       </UiEntity>
     )
   }
-  const row = (a: number, b: number, ia: number, ib: number) => (
-    <UiEntity uiTransform={{ width: gridW, height: ch, flexDirection: 'row', alignItems: 'flex-start', flexShrink: 0 }}>
+  const row = (a: number, b: number, ia: number, ib: number) => {
+    const rh = Math.max(hOf(a), hOf(b))
+    return (
+    <UiEntity uiTransform={{ width: gridW, height: rh, flexDirection: 'row', alignItems: 'flex-start', flexShrink: 0 }}>
       {card(a, ia)}
-      <UiEntity uiTransform={{ width: gap, height: ch, flexShrink: 0 }} />
+      <UiEntity uiTransform={{ width: gap, height: rh, flexShrink: 0 }} />
       {card(b, ib)}
     </UiEntity>
-  )
+    )
+  }
+  const rh0 = Math.max(hOf(order[0]), hOf(order[1]))
+  const rh1 = Math.max(hOf(order[2]), hOf(order[3]))
   return (
-    <UiEntity uiTransform={{ width: gridW, height: ch * 2 + vgap, flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+    <UiEntity uiTransform={{ width: gridW, height: rh0 + vgap + rh1, flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
       {row(order[0], order[1], 0, 1)}
       <UiEntity uiTransform={{ width: gridW, height: vgap, flexShrink: 0 }} />
       {row(order[2], order[3], 2, 3)}
@@ -338,14 +349,16 @@ function HeadlineRow(props: { text: string; font: number }) {
   )
 }
 /** Hotbar style: light-grey panel, thick dark outline, dark caps; colour only on the team name and dots. */
-function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; leader?: boolean; rank?: number }) {
-  const { team, rows, total, mvp, me, k, a, leader, rank } = props
+function TeamCard(props: { team: number; rows: SummaryRow[]; total: number; mvp: string; me: string; k: number; a: number; leader?: boolean; rank?: number; fitContent?: boolean; bodyCap?: number }) {
+  const { team, rows, total, mvp, me, k, a, leader, rank, fitContent, bodyCap } = props
   const col = barColor(team)
   const shown = sortTeamRows(rows)
-  const lay = rosterLayout(shown.length)
+  const cap = bodyCap ?? SUMMARY_CARD_BODY_H
+  const fitted = cardBodyContentH(shown.length, cap)
+  const lay = fitContent ? fitted.lay : rosterLayout(shown.length)
   const cw = SUMMARY_CARD_W * k
-  const ch = SUMMARY_CARD_H * k
-  const bodyH = SUMMARY_CARD_BODY_H * k
+  const ch = (fitContent ? cardFrameH(shown.length, cap) : SUMMARY_CARD_H) * k
+  const bodyH = (fitContent ? fitted.bodyH : SUMMARY_CARD_BODY_H) * k
   const rowH = lay.rowH * k
   const font = fnt(lay.font, k)
   const headF = fnt(SUMMARY_HEAD_FONT, k)
@@ -454,25 +467,29 @@ function StandingsPopup() {
   if (now - standingsReqAt > STANDINGS_REFRESH_MS) { standingsReqAt = now; room.send('requestStandings', {}) }
   const cv = canvasSize()
   const rows = standingsRows.slice().sort((x, y) => y.cells - x.cells)
-  const { k, stacked } = tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }, SUMMARY_PILL_H + SUMMARY_GAP)
   const cov = coverage()
   const share = { red: cov.red, blue: cov.blue, green: cov.green ?? 0, yellow: cov.yellow ?? 0, total: cov.total }
   const pcts = summaryPcts(share)
   const { order, leaders } = summaryRank(share)
-  const pw = tablesW(stacked) * k, ph = SUMMARY_PILL_H * k, border = SUMMARY_OUTLINE * k
+  const counts = order.map(team => rows.filter(r => r.team === team).length)
+  const hidePill = isBasesRound()
+  const lay = standingsLayout(counts, cv, STANDINGS_TOP_PX, { hidePill })
+  const { k, stacked, bodyCap, pillW, pillH, panelW, panelH } = lay
+  const border = SUMMARY_OUTLINE * k
   const mvp = rows.length > 0 && rows[0].cells > 0 ? rows[0].id : ''
   const me = (getPlayer()?.userId ?? '').toLowerCase()
   const total = cov.total
   return (
     <UiEntity uiTransform={{ width: '100%', positionType: 'absolute', position: { top: STANDINGS_TOP_PX, left: 0 }, flexDirection: 'row', justifyContent: 'center', pointerFilter: 'none' }}>
-      <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', pointerFilter: 'block' }} onMouseDown={toggleStandings}>
+      <UiEntity uiTransform={{ width: panelW, height: panelH, flexDirection: 'column', alignItems: 'center', flexShrink: 0, pointerFilter: 'block' }} onMouseDown={toggleStandings}>
       {/* Territory pill is hidden in BASES; the charge meters stay in the top HUD. */}
-      {!isBasesRound() && (
-      <UiEntity uiTransform={{ margin: { bottom: SUMMARY_GAP * k } }}>
-        <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pw} height={ph} border={border} track={SUMMARY_INK} innerBg={SUMMARY_UNPAINTED} showLabels={true} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={true} />
-      </UiEntity>
+      {!hidePill && (
+        <UiEntity uiTransform={{ width: pillW, height: pillH + SUMMARY_GAP * k, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+          <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pillW} height={pillH} border={border} track={SUMMARY_INK} innerBg={SUMMARY_UNPAINTED} showLabels={true} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={true} />
+          <UiEntity uiTransform={{ width: pillW, height: SUMMARY_GAP * k, flexShrink: 0 }} />
+        </UiEntity>
       )}
-      <TeamCardGrid rows={rows} total={total} mvp={mvp} me={me} k={k} a={1} stacked={stacked} order={order} leaders={leaders} />
+      <TeamCardGrid rows={rows} total={total} mvp={mvp} me={me} k={k} a={1} stacked={stacked} order={order} leaders={leaders} fitContent={true} bodyCap={bodyCap} />
       </UiEntity>
     </UiEntity>
   )

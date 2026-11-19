@@ -154,3 +154,104 @@ export function summaryRank(input: TeamShareInput): { order: PlayingTeam[]; lead
   const max = Math.max(input.red, input.blue, input.green, input.yellow)
   return { order: rankedTeams(cov), leaders: max > 0 ? leadingTeams(cov) : [] }
 }
+
+/** Mid-game standings: a compact centered panel that does not grow with ultrawide canvases. */
+export const STANDINGS_MAX_W = 1000
+export const STANDINGS_K_MAX = 1
+export const STANDINGS_SIDE = 24
+export const STANDINGS_BOTTOM = 20
+
+/** Unscaled body height that tightly wraps this many players (at least one row). */
+export function cardBodyContentH(count: number, bodyCap: number = SUMMARY_CARD_BODY_H): { lay: RosterLayout; bodyH: number } {
+  const n = Math.max(1, count)
+  const lay = rosterLayout(n, bodyCap)
+  const rows = lay.columns === 2 ? Math.ceil(n / 2) : n
+  const bodyH = Math.min(bodyCap, rows * lay.rowH)
+  return { lay, bodyH }
+}
+
+/** Unscaled frame height: padding + header + fitted body. */
+export function cardFrameH(count: number, bodyCap: number = SUMMARY_CARD_BODY_H): number {
+  return SUMMARY_CARD_PAD_Y + SUMMARY_CARD_HEAD_H + cardBodyContentH(count, bodyCap).bodyH
+}
+
+export type StandingsLayout = {
+  k: number
+  stacked: boolean
+  bodyCap: number
+  cardW: number
+  gridW: number
+  pillW: number
+  pillH: number
+  panelW: number
+  panelH: number
+  rowHs: number[]
+}
+
+/**
+ * Mid-game player panel. Width is capped (not 94% of the canvas), cards
+ * shrink to their rosters, and the whole block is guaranteed to sit below
+ * `topPx` and above a bottom margin on both 16:9 and 21:9.
+ */
+export function standingsLayout(
+  teamCounts: number[],
+  cv: { w: number; h: number },
+  topPx: number,
+  opts?: { hidePill?: boolean },
+): StandingsLayout {
+  const counts = [0, 1, 2, 3].map(i => Math.max(0, teamCounts[i] ?? 0))
+  const gridW1 = SUMMARY_CARD_W * 2 + SUMMARY_CARD_GAP
+  const availW = Math.max(160, cv.w - STANDINGS_SIDE * 2)
+  const availH = Math.max(160, cv.h - topPx - STANDINGS_BOTTOM)
+  const stacked = availW < gridW1 * SUMMARY_K_READ
+  const widthUnit = stacked ? SUMMARY_CARD_W : gridW1
+  let k = Math.min(STANDINGS_K_MAX, STANDINGS_MAX_W / gridW1, availW / widthUnit)
+
+  const vgapU = SUMMARY_GAP * 0.6
+  const chromeU = opts?.hidePill ? 0 : SUMMARY_PILL_H + SUMMARY_GAP
+
+  const measure = (bodyCap: number, scale: number) => {
+    const frames = counts.map(c => cardFrameH(Math.max(1, c), bodyCap) * scale)
+    if (stacked) {
+      const rowHs = frames
+      const panelH = (chromeU * scale) + rowHs.reduce((a, b) => a + b, 0) + vgapU * scale * Math.max(0, frames.length - 1)
+      const gridW = SUMMARY_CARD_W * scale
+      return { rowHs, panelH, gridW }
+    }
+    const rowHs = [Math.max(frames[0], frames[1]), Math.max(frames[2], frames[3])]
+    const panelH = (chromeU * scale) + rowHs[0] + vgapU * scale + rowHs[1]
+    const gridW = gridW1 * scale
+    return { rowHs, panelH, gridW }
+  }
+
+  let bodyCap = SUMMARY_CARD_BODY_H
+  let m = measure(bodyCap, k)
+  if (m.panelH > availH) {
+    k = Math.max(0.6, k * (availH / m.panelH))
+    m = measure(bodyCap, k)
+  }
+  if (m.panelH > availH + 0.5) {
+    const chrome = chromeU * k + (stacked ? vgapU * k * 3 : vgapU * k)
+    const rowsRoom = Math.max(SUMMARY_COMPACT_MIN_H * 2 * k, availH - chrome)
+    const unscaledRows = rowsRoom / k
+    const padHead = SUMMARY_CARD_PAD_Y + SUMMARY_CARD_HEAD_H
+    const rowBudget = stacked
+      ? (unscaledRows - vgapU * 3) / 4 - padHead
+      : (unscaledRows - vgapU) / 2 - padHead
+    bodyCap = Math.max(SUMMARY_COMPACT_MIN_H * 2, Math.min(bodyCap, rowBudget))
+    m = measure(bodyCap, k)
+  }
+
+  return {
+    k,
+    stacked,
+    bodyCap,
+    cardW: SUMMARY_CARD_W * k,
+    gridW: m.gridW,
+    pillW: m.gridW,
+    pillH: SUMMARY_PILL_H * k,
+    panelW: m.gridW,
+    panelH: m.panelH,
+    rowHs: m.rowHs,
+  }
+}

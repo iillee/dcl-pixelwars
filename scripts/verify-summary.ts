@@ -3,8 +3,9 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  areaPct, pickWalkableTotal, rosterLayout, sortTeamRows, summaryPcts, summaryRank,
-  tablesLayout, titleFontFor,
+  areaPct, cardFrameH, pickWalkableTotal, rosterLayout, sortTeamRows, summaryPcts, summaryRank,
+  standingsLayout, tablesLayout, titleFontFor,
+  STANDINGS_BOTTOM, STANDINGS_MAX_W,
   SUMMARY_CARD_BODY_H, SUMMARY_CARD_H, SUMMARY_CARD_W, SUMMARY_COMPACT_MIN_H,
   SUMMARY_FIT, SUMMARY_FONT_MIN, SUMMARY_GAP, SUMMARY_HEAD_H, SUMMARY_K_READ,
   SUMMARY_OWNERS_MAX, SUMMARY_PILL_H, SUMMARY_ROW_MIN_H, SUMMARY_TWO_COL_AFTER,
@@ -134,7 +135,7 @@ if (!uiSrc.includes('showUnpainted={b.kind !== \'bases\'}') && !uiSrc.includes('
     process.exit(1)
   }
 }
-if (!uiSrc.includes('height: ch * 2 + vgap') || !uiSrc.includes('height: ch, flexShrink: 0')) {
+if ((!uiSrc.includes('height: ch * 2 + vgap') && !uiSrc.includes('height: rh0 + vgap + rh1')) || !uiSrc.includes('flexShrink: 0')) {
   console.error('✗ team cards need explicit heights so the 2×2 rows do not overlap')
   process.exit(1)
 }
@@ -163,4 +164,73 @@ if (1280 * SUMMARY_FIT < (SUMMARY_CARD_W * 2 + 40) * SUMMARY_K_READ) {
   process.exit(1)
 }
 
-console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; 4-team shares, rank, and winner flags; max ${SUMMARY_OWNERS_MAX} rows (scroll only then)`)
+const STANDINGS_TOP = 84
+const midCounts = [4, 3, 2, 1]
+const s16 = standingsLayout(midCounts, { w: 1920, h: 1080 }, STANDINGS_TOP)
+const s21 = standingsLayout(midCounts, { w: 3440, h: 1440 }, STANDINGS_TOP)
+const s21b = standingsLayout(midCounts, { w: 2560, h: 1080 }, STANDINGS_TOP)
+const s720 = standingsLayout(midCounts, { w: 1280, h: 720 }, STANDINGS_TOP)
+const sPhone = standingsLayout(midCounts, { w: 390, h: 844 }, STANDINGS_TOP)
+for (const [name, cv, lay] of [
+  ['16:9 1920×1080', { w: 1920, h: 1080 }, s16],
+  ['21:9 3440×1440', { w: 3440, h: 1440 }, s21],
+  ['21:9 2560×1080', { w: 2560, h: 1080 }, s21b],
+  ['16:9 1280×720', { w: 1280, h: 720 }, s720],
+  ['phone 390×844', { w: 390, h: 844 }, sPhone],
+] as const) {
+  if (lay.panelW > STANDINGS_MAX_W + 0.5) {
+    console.error(`✗ ${name}: standings width ${lay.panelW} exceeds max ${STANDINGS_MAX_W}`)
+    process.exit(1)
+  }
+  if (lay.panelW > cv.w - 48 + 0.5) {
+    console.error(`✗ ${name}: standings width ${lay.panelW} overflows the canvas`)
+    process.exit(1)
+  }
+  if (STANDINGS_TOP + lay.panelH > cv.h - STANDINGS_BOTTOM + 0.5) {
+    console.error(`✗ ${name}: standings panel (top ${STANDINGS_TOP} + h ${lay.panelH}) leaves the screen`)
+    process.exit(1)
+  }
+  if (lay.pillW > lay.panelW + 0.5) {
+    console.error(`✗ ${name}: territory bar ${lay.pillW} is wider than the panel ${lay.panelW}`)
+    process.exit(1)
+  }
+}
+if (s16.stacked || s21.stacked || s21b.stacked || s720.stacked) {
+  console.error('✗ mid-game standings should stay 2×2 on desktop 16:9 and 21:9')
+  process.exit(1)
+}
+if (!sPhone.stacked) {
+  console.error('✗ mid-game standings should stack on a phone-width canvas')
+  process.exit(1)
+}
+if (Math.abs(s16.k - s21.k) > 0.01 || Math.abs(s16.panelW - s21.panelW) > 1) {
+  console.error(`✗ ultrawide should not scale the mid-game panel up, 16:9 k=${s16.k} w=${s16.panelW} vs 21:9 k=${s21.k} w=${s21.panelW}`)
+  process.exit(1)
+}
+if (s21.panelW > 3440 * 0.45) {
+  console.error(`✗ the mid-game panel should stay compact on ultrawide, width=${s21.panelW}`)
+  process.exit(1)
+}
+if (cardFrameH(1) >= cardFrameH(4) - 1) {
+  console.error(`✗ a 1-player card should be shorter than a 4-player card, 1=${cardFrameH(1)} 4=${cardFrameH(4)}`)
+  process.exit(1)
+}
+if (s16.rowHs[0] <= s16.rowHs[1]) {
+  console.error(`✗ the row with more players should be taller, rowHs=${s16.rowHs.join(',')}`)
+  process.exit(1)
+}
+const packed = standingsLayout([60, 60, 60, 60], { w: 1920, h: 1080 }, STANDINGS_TOP)
+if (STANDINGS_TOP + packed.panelH > 1080 - STANDINGS_BOTTOM + 0.5) {
+  console.error(`✗ a full 60-player board must still fit under the HUD, h=${packed.panelH}`)
+  process.exit(1)
+}
+if (!uiSrc.includes('standingsLayout(') || !uiSrc.includes('fitContent={true}') && !uiSrc.includes('fitContent={true}')) {
+  console.error('✗ StandingsPopup should use the compact standingsLayout and content-sized cards')
+  process.exit(1)
+}
+if (uiSrc.includes('tablesLayout(rows, { w: cv.w, h: cv.h - STANDINGS_TOP_PX }')) {
+  console.error('✗ mid-game standings must not reuse the end-screen tablesLayout scale')
+  process.exit(1)
+}
+
+console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; 4-team shares, rank, and winner flags; max ${SUMMARY_OWNERS_MAX} rows (scroll only then); mid-game panel capped at ${STANDINGS_MAX_W}px (16:9 and 21:9)`)
