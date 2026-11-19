@@ -873,13 +873,9 @@ if (!nametags.includes('isPlayingTeam(team)') || nametags.includes('team !== Tea
   console.error('✗ player nametags should use every playing team, not only red and blue')
   process.exit(1)
 }
-const bots = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
-if (!bots.includes('TEAM_NAME[team]') || !bots.includes('paintGhostPlate') || !bots.includes('isPlayingTeam(rec.team)')) {
-  console.error('✗ bot team plates should label every playing team, including ghosts')
-  process.exit(1)
-}
-if (bots.includes("label: red ? 'RED' : 'BLUE'") || bots.includes("label: team === Team.Red ? 'RED' : 'BLUE'")) {
-  console.error('✗ bot plates must not hard-code a red/blue label')
+const botVisualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
+if (botVisualSrc.includes('paintGhostPlate') || botVisualSrc.includes('paintPlate') || botVisualSrc.includes('AvatarNametag') || botVisualSrc.includes('clearGhostPlate') || /\bplate:/.test(botVisualSrc)) {
+  console.error('✗ bots should not spawn nametag or team-plate entities')
   process.exit(1)
 }
 

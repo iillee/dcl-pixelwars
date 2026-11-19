@@ -208,8 +208,11 @@ const bots = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url)
 if (!nametags.includes("format === 'balloon'") || !nametags.includes('balloonMode') || !nametags.includes("events.on('round:reset'") || !nametags.includes("events.on('round:clock'")) {
   fail('Balloon Battle should clear team nametags at round start, including a late join')
 }
-if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('AvatarNametag.deleteFrom') || !bots.includes('hideGhostPlates') || !bots.includes("roundFormat === 'balloon'")) {
-  fail('Balloon Battle should not put RED/BLUE nametag plates on players or bots')
+if (!nametags.includes('teamPlatesHidden') || !bots.includes('teamPlatesHidden') || !bots.includes('hideGhostPlates') || !bots.includes("roundFormat === 'balloon'")) {
+  fail('Balloon Battle should hide team nametags and bot team tints, including a late join')
+}
+if (bots.includes('AvatarNametag') || bots.includes('paintGhostPlate') || bots.includes('paintPlate') || bots.includes('clearGhostPlate')) {
+  fail('bots should not spawn nametag or team-plate entities')
 }
 if (!client.includes('BOT_BACK_Y') || !client.includes('BOT_BACK_Z') || !client.includes('BOT_KNOT_LOCAL_Y') || !client.includes('BOT_KNOT_LOCAL_Z') || !client.includes('parent: host')) {
   fail('bot balloons should parent to the bot visual and sit on its upper back')
