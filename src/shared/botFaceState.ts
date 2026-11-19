@@ -13,9 +13,10 @@
  */
 import { BOT_ANIM_FALL, BOT_ANIM_GLIDE, type GhostClip } from './botAnim'
 
-export type BotFaceExpr = 'idle' | 'dash' | 'burst' | 'hit' | 'fall' | 'glide'
+export type BotFaceExpr = 'idle' | 'dash' | 'burst' | 'hit' | 'fall' | 'glide' | 'star'
 
 export const FACE_PRIORITY: Record<BotFaceExpr, number> = {
+  star: 6,
   hit: 5,
   glide: 4,
   fall: 3,
@@ -26,6 +27,7 @@ export const FACE_PRIORITY: Record<BotFaceExpr, number> = {
 
 /** Minimum display time (s). Event-driven faces are longer than a 2 Hz gap. */
 export const FACE_MIN_S: Record<BotFaceExpr, number> = {
+  star: 0,
   hit: 0.6,
   glide: 0.3,
   fall: 0.3,
@@ -71,6 +73,7 @@ export function resolveBotFace(args: {
   st: number
   clip: GhostClip | null
   latches: FaceLatches
+  starred?: boolean
 }): { expr: BotFaceExpr; latches: FaceLatches } {
   let latches = pruneLatches(args.latches, args.nowMs)
   const motion = faceFromMotion(args.pose, args.st, args.clip)
@@ -86,6 +89,7 @@ export function resolveBotFace(args: {
   }
   for (const key of Object.keys(latches) as BotFaceExpr[]) consider(key)
   if (motion) consider(motion)
+  if (args.starred) consider('star')
   return { expr, latches }
 }
 

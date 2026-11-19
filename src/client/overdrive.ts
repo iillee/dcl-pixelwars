@@ -10,6 +10,7 @@ import { BOT_AIM_REPORT_HZ, STAR_SPEED_MULT, STAR_THEME_SRC } from '../shared/pv
 import { overdriveKnock } from '../shared/knocks'
 import { playClaimSfx, playDashSfx, playDashHitSfx } from './audio'
 import { applyKnock, isKnockbackImmune, myAddress, setOverdriveImmuneCheck } from './knockback'
+import { setBotStarFace, clearBotStarFaces } from './botFace'
 import { getBotVisualEntity, playBotKnock } from './botVisual'
 import { setStarSpeedMult } from './speed'
 import { clearStarOrbs, hasStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
@@ -18,7 +19,9 @@ const AAPT_POSITION = 0
 const GLOW_Y = 0.95
 const GLOW_SCALE = 1.85
 const SPARK_SRC = 'assets/images/star_white.png'
-const SPARK_N = 5
+const SPARK_ORBIT = 8
+const SPARK_RISE = 4
+const SPARK_N = SPARK_ORBIT + SPARK_RISE
 const THEME_VOL = 0.5
 
 let active = 0
@@ -147,8 +150,8 @@ function ensureGlow(id: string, endAt: number): void {
     const ang = (i / SPARK_N) * Math.PI * 2
     Transform.create(spark, {
       parent: attach,
-      position: Vector3.create(Math.cos(ang) * 0.35, 0.7, Math.sin(ang) * 0.35),
-      scale: Vector3.create(0.22, 0.22, 0.22),
+      position: Vector3.create(Math.cos(ang) * 0.45, 0.7, Math.sin(ang) * 0.45),
+      scale: Vector3.create(0.3, 0.3, 0.3),
     })
     MeshRenderer.setPlane(spark)
     Billboard.create(spark, { billboardMode: BillboardMode.BM_ALL })
@@ -176,6 +179,12 @@ function dropGlow(id: string): void {
 function clearGlows() {
   for (const id of [...glows.keys()]) dropGlow(id)
   auras.clear()
+  clearBotStarFaces()
+}
+
+function setBotStarFromId(id: string, on: boolean): void {
+  const bid = botIdOf(id)
+  if (bid !== null) setBotStarFace(bid, on)
 }
 
 function applyHold(id: string, endAt: number): void {
@@ -185,11 +194,13 @@ function applyHold(id: string, endAt: number): void {
   if (!endAt || endAt <= now) {
     auras.delete(who)
     dropGlow(who)
+    setBotStarFromId(who, false)
     if (who === myAddress()) setLocal(0)
     return
   }
   auras.set(who, endAt)
   ensureGlow(who, endAt)
+  setBotStarFromId(who, true)
   if (who === myAddress()) setLocal(endAt)
 }
 
@@ -241,23 +252,34 @@ export function initOverdrive() {
       if (endAt <= now) {
         auras.delete(id)
         dropGlow(id)
+        setBotStarFromId(id, false)
         if (id === myAddress()) setLocal(0)
         continue
       }
       if (!glows.has(id)) ensureGlow(id, endAt)
+      setBotStarFromId(id, true)
     }
     for (const [id, rec] of glows) {
-      if (rec.until <= now) { dropGlow(id); auras.delete(id); continue }
+      if (rec.until <= now) { dropGlow(id); auras.delete(id); setBotStarFromId(id, false); continue }
       const s = GLOW_SCALE * (0.92 + 0.12 * pulse)
       const t = Transform.getMutableOrNull(rec.ball)
       if (t) t.scale = Vector3.create(s, s, s)
       Material.setPbrMaterial(rec.ball, glowMat(pulse))
       rec.sparks.forEach((spark, i) => {
-        const ang = (i / SPARK_N) * Math.PI * 2 + sparkClock * 1.6
-        const lift = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(sparkClock * 3 + i))
+        const rise = i >= SPARK_ORBIT
+        const k = rise ? (i - SPARK_ORBIT) / SPARK_RISE : i / SPARK_ORBIT
+        const ang = k * Math.PI * 2 + sparkClock * (rise ? 2.3 : 1.55)
+        const radius = rise ? 0.22 : 0.55
+        const lift = rise
+          ? 0.35 + ((sparkClock * 0.9 + k) % 1.5)
+          : 0.65 + 0.4 * Math.sin(sparkClock * 2.5 + i)
         const st = Transform.getMutableOrNull(spark)
-        if (st) st.position = Vector3.create(Math.cos(ang) * 0.4, lift, Math.sin(ang) * 0.4)
-        Material.setPbrMaterial(spark, sparkMat(0.5 + 0.5 * Math.sin(sparkClock * 5 + i)))
+        const size = rise ? 0.24 : 0.32
+        if (st) {
+          st.position = Vector3.create(Math.cos(ang) * radius, lift, Math.sin(ang) * radius)
+          st.scale = Vector3.create(size, size, size)
+        }
+        Material.setPbrMaterial(spark, sparkMat(0.45 + 0.55 * Math.sin(sparkClock * 5 + i)))
       })
     }
     // While an orb or a star is live, send feet so the server can test pickup and touches.

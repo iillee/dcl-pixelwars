@@ -43,6 +43,7 @@ const FACE_SRC: Record<BotFaceExpr, string> = {
   hit: 'assets/images/bots/faces/hit.png',
   fall: 'assets/images/bots/faces/fall.png',
   glide: 'assets/images/bots/faces/glide.png',
+  star: 'assets/images/bots/faces/star.png',
 }
 
 const FACE_CLIP_LOOP: Record<GhostClip, boolean> = {
@@ -56,6 +57,7 @@ type FaceRec = {
   clip: GhostClip | null
   pose: number
   st: number
+  starred: boolean
 }
 
 const faces = new Map<number, FaceRec>()
@@ -100,6 +102,7 @@ function resolve(rec: FaceRec, nowMs = Date.now()): void {
     st: rec.st,
     clip: rec.clip,
     latches: rec.latches,
+    starred: rec.starred,
   })
   rec.latches = next.latches
   if (rec.expr !== next.expr) {
@@ -139,7 +142,7 @@ export function attachBotFace(parent: Entity, id: number): void {
     })),
   })
   applyExpr(ent, 'idle')
-  faces.set(id, { ent, expr: 'idle', latches: {}, clip: 'idle', pose: 0, st: 0 })
+  faces.set(id, { ent, expr: 'idle', latches: {}, clip: 'idle', pose: 0, st: 0, starred: false })
 }
 
 export function destroyBotFace(id: number): void {
@@ -161,6 +164,22 @@ export function playBotFaceClip(id: number, clip: GhostClip): void {
 
 export function setBotFace(id: number, expr: BotFaceExpr, minS = FACE_MIN_S[expr]): void {
   latch(id, expr, minS)
+}
+
+/** Swap to the star-eyes face while this bot holds the star; revert when it ends. */
+export function setBotStarFace(id: number, on: boolean): void {
+  const rec = faces.get(id)
+  if (!rec || rec.starred === on) return
+  rec.starred = on
+  resolve(rec)
+}
+
+export function clearBotStarFaces(): void {
+  for (const rec of faces.values()) {
+    if (!rec.starred) continue
+    rec.starred = false
+    resolve(rec)
+  }
 }
 
 /** Latch the hit face when a lunge, burst, spike, or dash knocks this bot. */

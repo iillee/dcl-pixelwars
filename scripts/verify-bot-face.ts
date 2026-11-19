@@ -76,10 +76,14 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
   expect(r.expr, 'glide', 'st 4 (recovery glide) even if pose is late')
   seen.add(r.expr)
 
-  const all: BotFaceExpr[] = ['idle', 'dash', 'burst', 'hit', 'fall', 'glide']
+  const rStar = resolveBotFace({ nowMs: 0, pose: 0, st: 0, clip: 'idle', latches: {}, starred: true })
+  expect(rStar.expr, 'star', 'starred bot uses the star-eyes face')
+  seen.add(rStar.expr)
+
+  const all: BotFaceExpr[] = ['idle', 'dash', 'burst', 'hit', 'fall', 'glide', 'star']
   const missing = all.filter(e => !seen.has(e))
   if (missing.length) fail(`unreachable faces: ${missing.join(', ')}`)
-  else ok('each face state is reachable (idle, dash, burst, hit, fall, glide)')
+  else ok('each face state is reachable (idle, dash, burst, hit, fall, glide, star)')
 }
 
 // ── Priority: hit > glide > fall > burst > dash > idle ──────────────
@@ -107,6 +111,12 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
     }
   }
   ok('priority is hit > glide > fall > burst > dash > idle')
+
+  r = resolveBotFace({ nowMs: now, pose: 0, st: 0, clip: 'idle', latches: latchFace({}, 'hit', now), starred: true })
+  expect(r.expr, 'star', 'star-eyes stay on while the bot holds the star, even over hit')
+  r = resolveBotFace({ nowMs: now, pose: 0, st: 0, clip: 'idle', latches: latchFace({}, 'hit', now), starred: false })
+  expect(r.expr, 'hit', 'clearing starred restores the normal priority, including hit')
+  ok('star-eyes win while held and revert when the star ends')
 }
 
 // ── 2 Hz latch: dash / hit / burst stay up across a quiet packet ────
@@ -186,6 +196,8 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
     [server.includes("room.send('burstFired'") && server.includes('attacker: by'), 'server sends burstFired for bot attackers (by = bot:N)'],
     [server.includes("target: `bot:${"), 'server sends lunge/burst impact targets as bot:N'],
     [face.includes('tickBotFace') && visual.includes('tickBotFace(rec.id, rec.pose, rec.st)'), 'the draw loop ticks the face with pose and wire state'],
+    [face.includes('export function setBotStarFace') && face.includes("star: 'assets/images/bots/faces/star.png'"), 'botFace can swap the star-eyes texture'],
+    [readFileSync(new URL('../src/client/overdrive.ts', import.meta.url), 'utf8').includes('setBotStarFace('), 'overdrive turns star-eyes on and off with the hold'],
   ]
   for (const [pass, msg] of checks) {
     if (!pass) fail(msg)
