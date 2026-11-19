@@ -1,5 +1,5 @@
 /**
- * Water-fall splash (ripple + droplets + sound slot). Run: npx tsx scripts/verify-splash.ts
+ * Water-fall splash (droplets + sound slot). Run: npx tsx scripts/verify-splash.ts
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -22,16 +22,20 @@ if (!ownFn.includes('isOwnRescue') || ownFn.indexOf('isOwnRescue') > ownFn.index
   console.error('✗ the faller must not play a second splash from the rescue:start echo')
   process.exit(1)
 }
-if (!splashSrc.includes('swellSurfaceY') || !splashSrc.includes('waterVisualSeconds()') || !splashSrc.includes('RING_COUNT = 2') || !splashSrc.includes('BillboardMode.BM_ALL')) {
-  console.error('✗ the splash should be two rings on the live swell plus billboard droplets')
+if (/\bRING_POOL\b/.test(splashSrc) || /\bRING_COUNT\b/.test(splashSrc) || /\bstartRings\b/.test(splashSrc) || /\bringMat\b/.test(splashSrc) || /\btakeRing\b/.test(splashSrc)) {
+  console.error('✗ the fall-in splash should not spawn ripple rings')
   process.exit(1)
 }
-if (!splashSrc.includes('const seconds = waterVisualSeconds()') || !splashSrc.includes('swellSurfaceY(r.x, r.z, seconds)') || !splashSrc.includes('swellSurfaceY(sx, sz, seconds)') || !splashSrc.includes('tr.position.y = y')) {
-  console.error('✗ splash rings and droplets should re-sample the live swell Y every frame')
+if (!splashSrc.includes('swellSurfaceY') || !splashSrc.includes('waterVisualSeconds()') || !splashSrc.includes('DROP_COUNT') || !splashSrc.includes('BillboardMode.BM_ALL')) {
+  console.error('✗ the splash should keep billboard droplets on the live swell')
   process.exit(1)
 }
-if (!splashSrc.includes('RING_LIFE_S = 0.85') || !splashSrc.includes('DROP_LIFE_S = 0.9') || !splashSrc.includes('RING_POOL') || !splashSrc.includes('DROP_POOL')) {
-  console.error('✗ rings and droplets should be pooled and last about 0.6–1 s')
+if (!splashSrc.includes('const seconds = waterVisualSeconds()') || !splashSrc.includes('swellSurfaceY(sx, sz, seconds)') || !splashSrc.includes('tr.position.y = y')) {
+  console.error('✗ splash droplets should re-sample the live swell Y every frame')
+  process.exit(1)
+}
+if (!splashSrc.includes('DROP_LIFE_S = 0.9') || !splashSrc.includes('DROP_POOL') || !splashSrc.includes('startDrops') || !splashSrc.includes('playSplashSfx')) {
+  console.error('✗ droplets should be pooled and the splash sound slot should stay')
   process.exit(1)
 }
 if (!audioSrc.includes("assets/sounds/splash.mp3") || !audioSrc.includes('pitch') || !audioSrc.includes('0.9') || !audioSrc.includes('1.1') || !audioSrc.includes('splashReady') || !audioSrc.includes('LoadingState.FINISHED')) {
@@ -43,7 +47,7 @@ if (!audioSrc.includes('global: false') || !audioSrc.includes('forFaller') || !a
   process.exit(1)
 }
 if (existsSync(fileURLToPath(new URL('../assets/sounds/splash.mp3', import.meta.url)))) {
-  console.log('✓ water splash (ripple, droplets, sound slot; splash.mp3 is present)')
+  console.log('✓ water splash (droplets, sound slot; splash.mp3 is present)')
 } else {
-  console.log('✓ water splash (ripple, droplets, sound slot; splash.mp3 not in yet, stays silent)')
+  console.log('✓ water splash (droplets, sound slot; splash.mp3 not in yet, stays silent)')
 }
