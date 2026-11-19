@@ -8,7 +8,7 @@ import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, signTitlePlane, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
+  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -514,8 +514,22 @@ if (Math.abs(SIGN_W_M - yellowW) > 1e-6 || yellowW >= 26 || SIGN_W_M < SIGN_H_M 
 }
 const yellowPlane = signTitlePlane('YELLOW')
 const redPlane = signTitlePlane('RED')
+const bluePlane = signTitlePlane('BLUE')
+const greenPlane = signTitlePlane('GREEN')
 if (yellowPlane.src !== 'assets/textures/sign-title-yellow.png' || redPlane.src !== 'assets/textures/sign-title-red.png' || Math.abs(yellowPlane.h - redPlane.h) > 0.1 || yellowPlane.w <= redPlane.w) {
   console.error('✗ unlit title plates should keep a shared letter height and a tight width per word')
+  process.exit(1)
+}
+if (yellowPlane.w >= SIGN_W_M - 0.5 || yellowPlane.h >= SIGN_H_M - 0.2) {
+  console.error(`✗ YELLOW must fit inside the pill with padding, plane ${yellowPlane.w.toFixed(3)}×${yellowPlane.h.toFixed(3)} pill ${SIGN_W_M.toFixed(3)}×${SIGN_H_M.toFixed(3)}`)
+  process.exit(1)
+}
+if (Math.abs(bluePlane.h - greenPlane.h) > 0.12 || signTitleScale() <= 0) {
+  console.error('✗ all four titles should share one typographic scale')
+  process.exit(1)
+}
+if (!lobbySrc.includes('alphaTexture: titleTex') || !lobbySrc.includes('SIGN_TITLE_UVS') || !lobbySrc.includes('setPlane(title, SIGN_TITLE_UVS)')) {
+  console.error('✗ title plates should flip UVs to un-mirror the word and use the PNG alpha so the black backing does not show')
   process.exit(1)
 }
 if (SIGN_COUNT_FONT / 10 < SIGN_BADGE_H_M * 0.7 || SIGN_BADGE_H_M < 2 || SIGN_BADGE_H_M > 3.2) {

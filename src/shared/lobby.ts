@@ -139,7 +139,7 @@ export const SIGN_TITLE_FONT = 38
 /** Lilita One caps are fairly wide; this is the estimated width of one letter as a fraction of cap height. */
 const SIGN_TITLE_CHAR = 0.72
 /** Modest side padding around the word, in metres. */
-const SIGN_TITLE_PAD_M = 0.42 * SIGN_H_M
+export const SIGN_TITLE_PAD_M = 0.42 * SIGN_H_M
 /** Plate width for one team word, tight around the letters plus side padding. */
 export function signPlateWidth(label: string): number {
   const fontM = SIGN_TITLE_FONT / 10
@@ -150,14 +150,21 @@ export function signPlateWidth(label: string): number {
 export const SIGN_W_M = signPlateWidth('YELLOW')
 /** Unlit title plates, baked in Lilita One so the letters stay crisp white with no outline. */
 export type SignTitlePlane = { src: string; w: number; h: number }
-const SIGN_TITLE_PLANES: Record<string, SignTitlePlane> = {
-  RED: { src: 'assets/textures/sign-title-red.png', w: 9.8154, h: 4.4383 },
-  BLUE: { src: 'assets/textures/sign-title-blue.png', w: 12.2572, h: 4.4717 },
-  GREEN: { src: 'assets/textures/sign-title-green.png', w: 16.0238, h: 4.5051 },
-  YELLOW: { src: 'assets/textures/sign-title-yellow.png', w: 20.3396, h: 4.5051 },
+/** Pixel size of each baked title and of the opaque glyph box inside it. */
+const SIGN_TITLE_TEX: Record<string, { src: string; pxW: number; pxH: number; glyphW: number; glyphH: number }> = {
+  RED: { src: 'assets/textures/sign-title-red.png', pxW: 2645, pxH: 1196, glyphW: 2364, glyphH: 1032 },
+  BLUE: { src: 'assets/textures/sign-title-blue.png', pxW: 3303, pxH: 1205, glyphW: 2996, glyphH: 1041 },
+  GREEN: { src: 'assets/textures/sign-title-green.png', pxW: 4318, pxH: 1214, glyphW: 4037, glyphH: 1050 },
+  YELLOW: { src: 'assets/textures/sign-title-yellow.png', pxW: 5481, pxH: 1214, glyphW: 5282, glyphH: 1050 },
+}
+/** Metres per texture pixel, sized so YELLOW's glyphs fit inside the pill with SIGN_TITLE_PAD_M on each side. All four titles share this scale. */
+export function signTitleScale(): number {
+  return (SIGN_W_M - SIGN_TITLE_PAD_M * 2) / SIGN_TITLE_TEX.YELLOW.glyphW
 }
 export function signTitlePlane(label: string): SignTitlePlane {
-  return SIGN_TITLE_PLANES[label] ?? SIGN_TITLE_PLANES.YELLOW
+  const t = SIGN_TITLE_TEX[label] ?? SIGN_TITLE_TEX.YELLOW
+  const s = signTitleScale()
+  return { src: t.src, w: t.pxW * s, h: t.pxH * s }
 }
 /** Overview `viewScale` at the desktop default framing (a 60° camera at this many metres). */
 export const SIGN_ZOOM_REF = 29
