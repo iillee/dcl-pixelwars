@@ -342,6 +342,26 @@ function playerLocalXZ(): { x: number; z: number } | null {
   return { x: p.x - s.x, z: p.z - s.z }
 }
 
+/**
+ * Live pad top from the renderer Transform, not the authored-leg lerp
+ * `surfaceNow` may use for slip. The cloud is parented to that Transform,
+ * so the offset has to be in the same space or the puff drifts.
+ */
+function livePadSurface(): Vec | null {
+  if (!pad) return null
+  const live = Transform.getOrNull(pad)
+  if (!live) return null
+  return { x: live.position.x, y: live.position.y + FALL_RESCUE.PAD_THICK / 2, z: live.position.z }
+}
+
+/** Keep the puff HANG_Y above the local rider's live feet, in anchor metres. */
+function placeFloaterOverRider(): void {
+  const p = playerPos()
+  const s = livePadSurface()
+  if (!p || !s) return
+  placeFloater(p.y + FALL_RESCUE.HANG_Y - s.y, 1, null, { x: p.x - s.x, z: p.z - s.z })
+}
+
 /** Local offset while parented to the anchor; world position once the pad is gone (peel / base). */
 function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: { x: number; z: number } | null): void {
   if (!floater) return
@@ -940,12 +960,11 @@ function tickPhase(dt: number): void {
     phaseLeft = Math.max(0, FALL_RESCUE.GRAB_S - (Date.now() - trippedAt) / 1000)
     if (phaseLeft <= 0) {
       // Do not move the pad and do not movePlayerTo. Both knocked them off the rise.
-      // Lock the cloud over where they stand, then rise. Chasing XZ during the
-      // carry copied pad-vs-avatar noise onto the cloud every frame.
+      // Hang mode follows the live rider every frame (see tickFloater).
       phase = 'carry'
       if (floater) {
         floater.mode = 'hang'
-        placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
+        placeFloaterOverRider()
       }
       // After they are on the pad. Starting the emote at the catch hitch-decoded
       // the GLB and let the first fall tunnel through the panel.
@@ -982,7 +1001,11 @@ function tickFloater(dt: number, line: number): void {
     const u = 1 - Math.max(0, phaseLeft) / FALL_RESCUE.GRAB_S
     placeFloater(FALL_RESCUE.HANG_Y + (1 - u) * FALL_RESCUE.APPROACH_EXTRA_Y, 0.2 + 0.8 * u, world, playerLocalXZ())
   } else if (floater.mode === 'hang') {
-    // Carry: the offset locked at grab end rides the parent. Do not write the root Transform.
+    // Desktop: follow the live player so a lagging avatar does not slide
+    // out from under a pad-locked cloud once the cruise starts. Mobile
+    // already detached the puff and tweens it with the stand-in; writing
+    // the root here would fight that ride and jump when they teleport home.
+    if (!cameraRide) placeFloaterOverRider()
   } else if (floater.mode === 'wait') {
     placeFloater(FALL_RESCUE.HANG_Y, 1, world)
     floater.waitLeft -= dt
