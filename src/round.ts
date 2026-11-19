@@ -72,6 +72,11 @@ export function getSummaryProgress(nowMs: number = Date.now()): number {
 
 interface BannerState {
   visible: boolean
+  /** Owned cells at round end, used to rank cards and compute shares. */
+  red: number
+  blue: number
+  green: number
+  yellow: number
   redPct: number
   bluePct: number
   greenPct: number
@@ -94,6 +99,10 @@ interface BannerState {
 
 const banner: BannerState = {
   visible: false,
+  red: 0,
+  blue: 0,
+  green: 0,
+  yellow: 0,
   redPct: 0,
   bluePct: 0,
   greenPct: 0,
@@ -129,11 +138,16 @@ export function setRoundResult(cells: number, teamCells: number, team: number): 
 
 export function showRoundEndBanner(red: number, blue: number, total: number, green = 0, yellow = 0): void {
   const cov: TeamCoverage = { red, blue, green, yellow, total }
+  const pcts = summaryPcts(cov)
   banner.visible = true
-  banner.redPct = coveragePct(cov, 1)
-  banner.bluePct = coveragePct(cov, 2)
-  banner.greenPct = coveragePct(cov, 3)
-  banner.yellowPct = coveragePct(cov, 4)
+  banner.red = red
+  banner.blue = blue
+  banner.green = green
+  banner.yellow = yellow
+  banner.redPct = Number(pcts.red.toFixed(1))
+  banner.bluePct = Number(pcts.blue.toFixed(1))
+  banner.greenPct = Number(pcts.green.toFixed(1))
+  banner.yellowPct = Number(pcts.yellow.toFixed(1))
   const headline = winnerHeadline(cov)
   banner.headline = headline
   banner.winner = headline.endsWith(' WINS!') ? headline.slice(0, -6) : 'TIE'
@@ -159,8 +173,9 @@ export function getBanner(): BannerState {
 
 // ─── Server event subscriber ────────────────────────────────────
 import { events } from './shared/events'
-import { coverage } from './paint'
+import { coverage, lastMatchCoverage } from './paint'
 import { TEAM_NAME, coveragePct, isPlayingTeam, teamName, winnerHeadline, type TeamCoverage } from './shared/team'
+import { pickWalkableTotal, summaryPcts } from './shared/summaryLayout'
 
 /**
  * initRoundNet — shows the end-of-round banner when the server declares
@@ -177,14 +192,20 @@ export function initRoundNet(): void {
   // Scores arrive on round:ended. The banner keeps its own timer. The lobby
   // roundReset that follows swaps the floor and does not dismiss this screen.
   events.on('round:ended', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victorName }) => {
-    const localTotal = coverage().total
+    const snap = lastMatchCoverage()
+    const red = finalRed
+    const blue = finalBlue
+    const green = finalGreen ?? 0
+    const yellow = finalYellow ?? 0
+    const painted = red + blue + green + yellow
+    const walkable = pickWalkableTotal(snap?.total ?? 0, coverage().total, finalTotal ?? 0, painted)
     console.log(
-      `[Client] roundEnded final red=${finalRed} blue=${finalBlue} green=${finalGreen ?? 0} yellow=${finalYellow ?? 0} ` +
-      `serverTotal=${finalTotal} localTotal=${localTotal}`
+      `[Client] roundEnded final red=${red} blue=${blue} green=${green} yellow=${yellow} ` +
+      `serverTotal=${finalTotal} localTotal=${coverage().total} matchTotal=${snap?.total ?? 0} walkable=${walkable}`
     )
     if (kind === 'balloon') showBalloonBanner(victorName || 'SOMEONE')
     else if (kind === 'bases') showBasesBanner(finalRed, finalBlue, finalTotal)
-    else showRoundEndBanner(finalRed, finalBlue, localTotal, finalGreen ?? 0, finalYellow ?? 0)
+    else showRoundEndBanner(red, blue, walkable, green, yellow)
   })
   events.on('round:clock', ({ idx, active, format }) => {
     // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
@@ -224,6 +245,10 @@ export function nextRoundBlurb(): string {
 
 export function showBalloonBanner(name: string): void {
   banner.visible = true
+  banner.red = 0
+  banner.blue = 0
+  banner.green = 0
+  banner.yellow = 0
   banner.redPct = 0
   banner.bluePct = 0
   banner.greenPct = 0
@@ -250,6 +275,10 @@ export function isBasesRound(): boolean {
 export function showBasesBanner(red: number, blue: number, threshold: number): void {
   const t = threshold > 0 ? threshold : 1
   banner.visible = true
+  banner.red = red
+  banner.blue = blue
+  banner.green = 0
+  banner.yellow = 0
   banner.redPct = (red / t) * 100
   banner.bluePct = (blue / t) * 100
   banner.greenPct = 0
@@ -265,19 +294,7 @@ export function showBasesBanner(red: number, blue: number, threshold: number): v
   banner.owners = []
 }
 
+/** The PIXELWARS / Classic pop-up at round start is retired. currentFormat is still set by armFormatSplash. */
 export function getFormatSplash(): { format: RoundFormat; title: string; sub: string } | null {
-  if (!armedFormat) return null
-  if (formatStartedAt === 0) {
-    if (loadSplashCovering()) return null
-    formatStartedAt = Date.now()
-  }
-  if (Date.now() - formatStartedAt > FORMAT_SPLASH_MS) {
-    armedFormat = null
-    return null
-  }
-  if (armedFormat === 'pvb') return { format: 'pvb', title: modeTitle('pvb'), sub: modeSubtitle('pvb') }
-  if (armedFormat === 'prototype') return { format: 'prototype', title: modeTitle('prototype'), sub: modeSubtitle('prototype') }
-  if (armedFormat === 'balloon') return { format: 'balloon', title: modeTitle('balloon'), sub: modeSubtitle('balloon') }
-  if (armedFormat === 'bases') return { format: 'bases', title: modeTitle('bases'), sub: modeSubtitle('bases') }
-  return { format: 'pvp', title: modeTitle('pvp'), sub: modeSubtitle('pvp') }
+  return null
 }

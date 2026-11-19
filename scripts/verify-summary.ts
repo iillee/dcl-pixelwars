@@ -3,12 +3,14 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  rosterLayout, sortTeamRows, tablesLayout, titleFontFor,
+  areaPct, pickWalkableTotal, rosterLayout, sortTeamRows, summaryPcts, summaryRank,
+  tablesLayout, titleFontFor,
   SUMMARY_CARD_BODY_H, SUMMARY_CARD_H, SUMMARY_CARD_W, SUMMARY_COMPACT_MIN_H,
   SUMMARY_FIT, SUMMARY_FONT_MIN, SUMMARY_GAP, SUMMARY_HEAD_H, SUMMARY_K_READ,
   SUMMARY_OWNERS_MAX, SUMMARY_PILL_H, SUMMARY_ROW_MIN_H, SUMMARY_TWO_COL_AFTER,
   TITLE_WORD_GAP,
 } from '../src/shared/summaryLayout'
+import { Team } from '../src/shared/team'
 
 const top = SUMMARY_HEAD_H + SUMMARY_PILL_H + SUMMARY_GAP
 const desk = tablesLayout([], { w: 1280, h: 720 }, top)
@@ -69,15 +71,75 @@ if (sorted.length !== 12 || sorted[11].id !== 'me' || sorted[0].id !== 'p0') {
   process.exit(1)
 }
 
-const titleF = titleFontFor(['BLUE', 'WINS!'], 1, 1200)
-if (titleF <= SUMMARY_FONT_MIN || TITLE_WORD_GAP >= 0.5) {
+const titleF = titleFontFor(['YELLOW', 'WINS!'], 1, 1200)
+if (titleF <= SUMMARY_FONT_MIN || TITLE_WORD_GAP >= 0.16) {
   console.error('✗ the title should stay one tight, large line')
   process.exit(1)
 }
 
+const yellowWins = { red: 2200, blue: 1800, green: 1400, yellow: 2955, total: 12000 }
+const pcts = summaryPcts(yellowWins)
+const painted = yellowWins.red + yellowWins.blue + yellowWins.green + yellowWins.yellow
+if (Math.abs(pcts.red + pcts.blue + pcts.green + pcts.yellow + pcts.white - 100) > 1e-6) {
+  console.error(`✗ 4-team shares plus unpainted must add to 100, got ${JSON.stringify(pcts)}`)
+  process.exit(1)
+}
+if (pcts.white <= 0 || Math.abs(pcts.white - ((12000 - painted) / 12000) * 100) > 1e-6) {
+  console.error(`✗ the bar must keep the unpainted remainder, white=${pcts.white}`)
+  process.exit(1)
+}
+if (areaPct(2955, 12000) !== Math.round(2955 / 12000 * 100) || areaPct(2130, 0) !== 0) {
+  console.error('✗ area % should be owned cells over the walkable total')
+  process.exit(1)
+}
+const ranked = summaryRank(yellowWins)
+if (ranked.order[0] !== Team.Yellow || ranked.order[1] !== Team.Red || ranked.order[2] !== Team.Blue || ranked.order[3] !== Team.Green) {
+  console.error(`✗ cards should sort by owned cells, YELLOW first, got ${ranked.order.join(',')}`)
+  process.exit(1)
+}
+if (ranked.leaders.length !== 1 || ranked.leaders[0] !== Team.Yellow) {
+  console.error(`✗ only the winner should be flagged, got ${ranked.leaders.join(',')}`)
+  process.exit(1)
+}
+if (summaryRank({ red: 0, blue: 0, green: 0, yellow: 0, total: 12000 }).leaders.length !== 0) {
+  console.error('✗ a zero-score board should not mark every card as the winner')
+  process.exit(1)
+}
+if (pickWalkableTotal(12000, 0, painted, painted) !== 12000) {
+  console.error('✗ the walkable total should come from the in-match snapshot after the lobby swap')
+  process.exit(1)
+}
+if (pickWalkableTotal(0, 0, painted, painted) !== 0) {
+  console.error("✗ a painted-only server total must not be used as the walkable denominator")
+  process.exit(1)
+}
+if (summaryPcts({ ...yellowWins, total: 0 }).yellow !== 0) {
+  console.error('✗ a missing walkable total should not invent 0% from a bad divide, but also must not renormalize to 100')
+  process.exit(1)
+}
+
 const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
-if (!uiSrc.includes('SUMMARY_TITLE_BG') || !uiSrc.includes('uiBackground={{ color: SUMMARY_TITLE_BG }}') || !uiSrc.includes('color={SUMMARY_TITLE_FG}')) {
-  console.error('✗ the title, subtitle, and next-round line should sit on an opaque dark strip')
+if (uiSrc.includes('uiBackground={{ color: SUMMARY_TITLE_BG }}') || uiSrc.includes('FINAL TERRITORY') || uiSrc.includes('nextRoundBlurb()')) {
+  console.error('✗ the title should be just TEAM WINS!, with no black strip or subtext')
+  process.exit(1)
+}
+if (!uiSrc.includes('wordRow(3, true)') || !uiSrc.includes('wordRow(0, false)')) {
+  console.error('✗ the title should use a subtle drop shadow, not a solid panel')
+  process.exit(1)
+}
+if (!uiSrc.includes('showUnpainted={b.kind !== \'bases\'}') && !uiSrc.includes('showUnpainted={b.kind !== "bases"}')) {
+  // allow either quote style
+  if (!uiSrc.includes('showUnpainted={b.kind !==')) {
+    console.error('✗ the end-screen bar should use real shares plus the unpainted remainder')
+    process.exit(1)
+  }
+}
+if (!uiSrc.includes('height: ch * 2 + vgap') || !uiSrc.includes('height: ch, flexShrink: 0')) {
+  console.error('✗ team cards need explicit heights so the 2×2 rows do not overlap')
+  process.exit(1)
+}
+if (uiSrc.includes('<FormatSplash') || uiSrc.includes('function FormatSplash')) {
+  console.error('✗ the PIXELWARS CLASSIC round-start pop-up should be gone')
   process.exit(1)
 }
 if (uiSrc.includes('+N MORE') || uiSrc.includes('+N more') || uiSrc.includes('SUMMARY_CARD_ROWS') || uiSrc.includes('rows.slice(0, cap)')) {
@@ -101,4 +163,4 @@ if (1280 * SUMMARY_FIT < (SUMMARY_CARD_W * 2 + 40) * SUMMARY_K_READ) {
   process.exit(1)
 }
 
-console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; max ${SUMMARY_OWNERS_MAX} rows (scroll only then)`)
+console.log(`✓ summary shows everyone, compact rows, 2×2 on desktop, stacked on phones; 4-team shares, rank, and winner flags; max ${SUMMARY_OWNERS_MAX} rows (scroll only then)`)

@@ -2,13 +2,13 @@
  * Round-end summary layout. Pure numbers so we can verify overflow and
  * render previews without the explorer.
  */
-import { PLAYING_TEAMS } from './team'
+import { PLAYING_TEAMS, leadingTeams, rankedTeams, type PlayingTeam, type TeamCoverage } from './team'
 
 export const SUMMARY_K_MAX = 1.6
 export const SUMMARY_PILL_W = 720
 export const SUMMARY_PILL_H = 48
 export const SUMMARY_TITLE_FONT = 72
-export const SUMMARY_HEAD_H = 184
+export const SUMMARY_HEAD_H = 110
 export const SUMMARY_GAP = 32
 export const SUMMARY_SUB_FONT = 18
 export const SUMMARY_PILL_FONT = 30
@@ -21,7 +21,7 @@ export const SUMMARY_FONT_MIN = 12
 export const SUMMARY_FIT = 0.94
 export const SUMMARY_K_READ = 0.75
 /** Tight gap between title words (em), so "BLUE WINS!" stays together. */
-export const TITLE_WORD_GAP = 0.22
+export const TITLE_WORD_GAP = 0.08
 export const SUMMARY_BOLD_PX = 0.035
 /** Server buildStandings keeps the payload under 12 KB with this many rows total. */
 export const SUMMARY_OWNERS_MAX = 60
@@ -102,4 +102,55 @@ export function sortTeamRows<T extends { cells: number; painted?: number }>(rows
     if (b.cells !== a.cells) return b.cells - a.cells
     return (b.painted ?? 0) - (a.painted ?? 0)
   })
+}
+
+/** Cell counts plus the walkable denominator used for area % and the overall bar. */
+export type TeamShareInput = Pick<TeamCoverage, 'red' | 'blue' | 'green' | 'yellow' | 'total'>
+
+/**
+ * Prefer the in-match walkable snapshot. The live total is next, but only
+ * while it still looks like the arena (not 0 after the lobby swap). The
+ * server's finalTotal is painted-only today, so it is used only when it is
+ * clearly larger than the painted sum (a true walkable count).
+ */
+export function pickWalkableTotal(matchTotal: number, localTotal: number, serverTotal: number, painted: number): number {
+  if (matchTotal > 0) return matchTotal
+  if (localTotal > 0) return localTotal
+  if (serverTotal > painted) return serverTotal
+  return 0
+}
+
+/** Team shares and the unpainted remainder, as percents of the walkable total. */
+export function summaryPcts(input: TeamShareInput): { red: number; blue: number; green: number; yellow: number; white: number } {
+  const red = Math.max(0, input.red)
+  const blue = Math.max(0, input.blue)
+  const green = Math.max(0, input.green)
+  const yellow = Math.max(0, input.yellow)
+  const t = Math.max(0, input.total)
+  if (t <= 0) return { red: 0, blue: 0, green: 0, yellow: 0, white: 0 }
+  const white = Math.max(0, t - red - blue - green - yellow)
+  return {
+    red: (red / t) * 100,
+    blue: (blue / t) * 100,
+    green: (green / t) * 100,
+    yellow: (yellow / t) * 100,
+    white: (white / t) * 100,
+  }
+}
+
+export function areaPct(cells: number, total: number): number {
+  return total > 0 ? Math.round((Math.max(0, cells) / total) * 100) : 0
+}
+
+/** Rank teams by owned cells. No leaders when every team is at 0, so a missing total cannot paint every card as the winner. */
+export function summaryRank(input: TeamShareInput): { order: PlayingTeam[]; leaders: PlayingTeam[] } {
+  const cov: TeamCoverage = {
+    red: input.red,
+    blue: input.blue,
+    green: input.green,
+    yellow: input.yellow,
+    total: input.total,
+  }
+  const max = Math.max(input.red, input.blue, input.green, input.yellow)
+  return { order: rankedTeams(cov), leaders: max > 0 ? leadingTeams(cov) : [] }
 }

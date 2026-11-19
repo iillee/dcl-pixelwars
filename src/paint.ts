@@ -354,8 +354,19 @@ export function clearAllPaintState() {
 // first delta arrives, coverage() falls back to a local scan (returns
 // zeros on fresh join, which is fine — Step 5's snapshot fills the gap).
 let serverCoverage: TeamCoverage | null = null
+/** Walkable total + team counts from the match, kept through the lobby swap so the end screen can still score. */
+let matchCoverage: TeamCoverage | null = null
+export function lastMatchCoverage(): TeamCoverage | null {
+  return matchCoverage
+}
+function noteMatchCoverage(c: TeamCoverage, walkable: number): void {
+  if (walkable > 0 && c.red + c.blue + (c.green ?? 0) + (c.yellow ?? 0) > 0) {
+    matchCoverage = { red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: walkable }
+  }
+}
 export function setServerCoverage(c: TeamCoverage): void {
   serverCoverage = c
+  noteMatchCoverage(c, cellEntity.size)
 }
 
 export function removePaintForTile(tileEntity: Entity) {
@@ -763,10 +774,11 @@ function spawnCellsForTileImmediate(
 // as new tiles spawn; % briefly overshoots then settles, which is fine.
 export function coverage(): TeamCoverage {
   const total = cellEntity.size
-  if (serverCoverage !== null) {
-    return { red: serverCoverage.red, blue: serverCoverage.blue, green: serverCoverage.green ?? 0, yellow: serverCoverage.yellow ?? 0, total }
-  }
-  return coverageFromTeams(cellTeam.values(), total)
+  const c = serverCoverage !== null
+    ? { red: serverCoverage.red, blue: serverCoverage.blue, green: serverCoverage.green ?? 0, yellow: serverCoverage.yellow ?? 0, total }
+    : coverageFromTeams(cellTeam.values(), total)
+  noteMatchCoverage(c, total)
+  return c
 }
 
 // ─── Coord math: world pos → cell ID ─────────────────────────────────
