@@ -1011,12 +1011,11 @@ export async function setupServer(): Promise<void> {
     // Count only cells that actually changed team — a player standing
     // still on their own paint re-sends the same 9 cellIds every 100ms;
     // crediting all of them would inflate the leaderboard by ~90/sec.
-    let gained = 0
-    if (economyOn()) {
-      gained = paintCells(from, team, ids, at || null, true)
-    } else {
-      for (const id of ids) if (applyPaint(id, team, from)) gained++
-    }
+    // Always go through paintCells so walking also grants upgrade charge.
+    // PIXELWARS has the paint-economy tank off; the old applyPaint-only
+    // branch tallied flips for the pill but never called upgrades.gain,
+    // so the first upgrade lagged far behind the number on screen.
+    const gained = paintCells(from, team, ids, at || null, true)
     // Even if nothing changed team (walking on own paint), the paintTick
     // itself is proof the player is real — mark them active so scraper
     // bots that never send paintTick are filtered out.

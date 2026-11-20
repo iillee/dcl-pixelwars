@@ -20,8 +20,8 @@ import {
 } from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
-import { paintedHud } from "./client/paintScore"
 import { DesktopUpgradeExtras, MobileUpgradeRow, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
+import { getUpgradeHud } from "./client/upgrades"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -636,14 +636,15 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
   )
 }
 
-/** Personal tiles-painted total. Parked to the right of mute as an overlay
- *  so the centered eye / timer / mute cluster never shifts. The pill's left
- *  edge stays put and the width grows right with the digit count. Hidden in
- *  the lobby, summary, and standings. When an upgrade is ready the pill
- *  turns gold and pulses in place (click / tap opens the cards). */
+/** Personal upgrade charge this round (the same number that unlocks
+ *  upgrades). Parked to the right of mute as an overlay so the centered
+ *  eye / timer / mute cluster never shifts. The pill's left edge stays put
+ *  and the width grows right with the digit count. Hidden in the lobby,
+ *  summary, and standings. When an upgrade is ready the pill turns gold
+ *  and pulses in place (click / tap opens the cards). */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
-  const { n } = paintedHud()
+  const n = getUpgradeHud().charge
   const countText = String(n)
   const mob = isMobile()
   const font = mob ? 22 : 26

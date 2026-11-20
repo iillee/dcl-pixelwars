@@ -241,6 +241,8 @@ export type UpgradeHud = {
   pending: boolean
   maxed: boolean
   progress: UpgradeProgress
+  /** Server upgrade charge. This is the number the PAINTED pill shows. */
+  charge: number
   /** Kinds still below level III, in SPEED / PAINT / HASTE order. */
   offer: UpgradeKind[]
   speed: number
@@ -272,6 +274,7 @@ export function getUpgradeHud(): UpgradeHud {
     pending: state.pending,
     maxed: progress.mode === 'max',
     progress,
+    charge: state.charge,
     offer: offeredUpgradeKinds(state),
     speed: state.speed,
     paint: state.paint,

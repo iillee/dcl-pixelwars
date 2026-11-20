@@ -4,6 +4,7 @@
  * exclusion (Overdrive V2 §9).
  * Run: npx tsx scripts/verify-upgrades.ts
  */
+import { readFileSync } from 'node:fs'
 import { UpgradeBook } from '../src/server/upgradeBook'
 import {
   accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade,
@@ -238,6 +239,22 @@ check('the pop-out ends undersized', cardPopScale(CARD_POP_MS, true) < 0.9 && Ma
 check('the cluster slides up on open and down on close', cardSlidePx(0, false) > 0 && cardSlidePx(CARD_POP_MS, false) === 0 && cardSlidePx(0, true) === 0 && cardSlidePx(CARD_POP_MS, true) > 0)
 
 
+
+// The HUD pill must show the same number that unlocks upgrades (charge),
+// and walking paint in economy-off modes (PIXELWARS) must grant that charge.
+check('500 charge is the first unlock the pill should match', unlockedUpgradeCount(500) === 1 && UPGRADE_THRESHOLDS[0] === 500)
+check('neutral flips add 1 charge, so 500 neutrals unlock at a pill of 500', upgradeChargeFor(0, 1) === 1)
+check('enemy flips add 2 charge, so the pill reaches 500 faster than the flip count', upgradeChargeFor(2, 1) === 2 && paintedScoreFor(2, 1) === 1)
+
+const serverSrc = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+const tickStart = serverSrc.indexOf("room.onMessage('paintTick'")
+const tickEnd = serverSrc.indexOf("room.onMessage('upgradeSelect'", tickStart)
+const tickSrc = tickStart >= 0 && tickEnd > tickStart ? serverSrc.slice(tickStart, tickEnd) : ''
+check('paintTick always credits upgrade charge through paintCells', tickSrc.includes('paintCells(') && tickSrc.includes('const gained = paintCells('))
+check('paintTick no longer skips upgrades.gain when the paint tank is off', tickSrc.includes('paintCells(') && !tickSrc.includes('economyOn()') && !tickSrc.includes('applyPaint('))
+
+const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+check('the HUD pill displays upgrade charge, not the flip-count paint score', uiSrc.includes('getUpgradeHud().charge') && !uiSrc.includes('paintedHud()'))
 
 if (fails) { console.log(`\u2717 ${fails} upgrade check(s) failed`); process.exit(1) }
 console.log('\u2713 all upgrade checks passed')
