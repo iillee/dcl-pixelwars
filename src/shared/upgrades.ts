@@ -208,14 +208,7 @@ export function upgradeOfferLine(kind: UpgradeKind, currentLevel: number): strin
   return `${sign}${pct}% ${UPGRADE_BONUS_UNIT[kind]}`
 }
 
-/** Coloured HUD buff icons (kept for the top-bar badges). */
-export const UPGRADE_ICON_SRC: Record<UpgradeKind, string> = {
-  speed: 'assets/images/ui/upgrade-speed.png',
-  paint: 'assets/images/ui/upgrade-paint.png',
-  haste: 'assets/images/ui/upgrade-haste.png',
-}
-
-/** Flat black-and-white silhouettes used on the coloured upgrade cards. */
+/** Flat black-and-white silhouettes used on the coloured upgrade cards and HUD buff tiles. */
 export const UPGRADE_CARD_ICON_SRC: Record<UpgradeKind, string> = {
   speed: 'assets/images/ui/upgrade-card-speed.png',
   paint: 'assets/images/ui/upgrade-card-paint.png',

@@ -16,7 +16,7 @@ import {
   closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, type UpgradeHud,
 } from './upgrades'
 import {
-  UPGRADE_CARD_ICON_SRC, UPGRADE_ICON_SRC, UPGRADE_KINDS, UPGRADE_LABEL,
+  UPGRADE_CARD_ICON_SRC, UPGRADE_KINDS, UPGRADE_LABEL,
   UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
 } from '../shared/upgrades'
 
@@ -131,18 +131,29 @@ function IconBadge(props: { kind: UpgradeKind; level: number; size: number; font
   if (level <= 0) return null
   const roman = UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)
   const badge = Math.max(22, Math.round(size * 0.4))
-  const icon = Math.max(20, size - 16)
+  const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
+  const innerR = HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING
+  const icon = Math.max(20, size - frame - 4)
   return (
-    <UiEntity uiTransform={{ width: size, height: size, margin: { left: 6 }, flexShrink: 0, borderRadius: 14, borderWidth: 3, borderColor: HOTBAR_RIM, pointerFilter: 'none' }}
-      uiBackground={{ color: HOTBAR_TILE_BG }}>
-      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: 11, justifyContent: 'center', alignItems: 'center' }}
-        uiBackground={{ color: PANEL_LIGHT }}>
+    <UiEntity uiTransform={{
+      width: size, height: size, margin: { left: 6 }, flexShrink: 0,
+      borderRadius: HOTBAR_RADIUS, borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+      padding: TILE_RING, pointerFilter: 'none',
+    }} uiBackground={{ color: HOTBAR_TILE_BG }}>
+      <UiEntity uiTransform={{
+        width: '100%', height: '100%', borderRadius: innerR,
+        justifyContent: 'center', alignItems: 'center',
+      }} uiBackground={{ color: UPGRADE_CARD_FILL[kind] }}>
         <UiEntity uiTransform={{ width: icon, height: icon, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_ICON_SRC[kind] } }} />
-        <UiEntity uiTransform={{ positionType: 'absolute', position: { right: -3, bottom: -3 }, width: badge, height: badge, borderRadius: badge / 2, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: INK }}
-          uiBackground={{ color: GOLD }}>
-          <Label value={bold(roman)} fontSize={font} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-        </UiEntity>
+          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
+      </UiEntity>
+      <UiEntity uiTransform={{
+        positionType: 'absolute', position: { right: -3, bottom: -3 },
+        width: badge, height: badge, borderRadius: badge / 2,
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 2, borderColor: INK, pointerFilter: 'none',
+      }} uiBackground={{ color: WHITE }}>
+        <Label value={bold(roman)} fontSize={font} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
       </UiEntity>
     </UiEntity>
   )
