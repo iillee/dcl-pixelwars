@@ -8,7 +8,7 @@ import { engine, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs
 import { events } from '../shared/events'
 import { room } from '../shared/messages'
 import {
-  emptyUpgrade, hasteCooldownMult, paintAreaMult, speedMoveMult, burstPaintRadiusCellsFor,
+  emptyUpgrade, hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, speedMoveMult, burstPaintRadiusCellsFor,
   trySelectUpgrade, upgradeKindFromId, upgradeProgress, UPGRADE_KIND_ID, UPGRADE_LABEL,
   type UpgradeKind, type UpgradeState, type UpgradeProgress,
 } from '../shared/upgrades'
@@ -87,14 +87,34 @@ function resetLocal(): void {
   applyModifiers()
 }
 
+function closeClusterNow(): void {
+  cardsOpen = false
+  autoOpen = false
+  closing = false
+  openAt = 0
+  closeAt = 0
+  autoUntil = 0
+  reopenAt = 0
+  highlightKind = null
+}
+
 function setState(next: UpgradeState): void {
   const wasPending = state.pending
   const wasEarned = state.earned
+  const hadBuffs = state.speed > 0 || state.paint > 0 || state.haste > 0
   const justPicked = next.earned > wasEarned
   // A select that immediately unlocks the next threshold also counts as READY.
   const becameReady = next.pending && (!wasPending || justPicked)
+  const stripped = (hadBuffs || wasPending) && next.speed === 0 && next.paint === 0 && next.haste === 0 && !next.pending
   state = next
   applyModifiers()
+  if (stripped) {
+    closeClusterNow()
+    notice = ''
+    noticeUntil = 0
+    flashUntil = 0
+    return
+  }
   if (becameReady) {
     const now = Date.now()
     flashUntil = now + FLASH_MS
@@ -149,9 +169,10 @@ export function initUpgrades(): void {
     }
     if (cardsOpen && !closing && autoOpen && now >= autoUntil) beginClose(now, false)
     if (inLobby() || !clusterVisible(now)) return
-    if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN)) requestUpgradeSelect('speed')
-    else if (inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) requestUpgradeSelect('paint')
-    else if (inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) requestUpgradeSelect('haste')
+    const offer = offeredUpgradeKinds(state)
+    if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && offer[0]) requestUpgradeSelect(offer[0])
+    else if (inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && offer[1]) requestUpgradeSelect(offer[1])
+    else if (inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN) && offer[2]) requestUpgradeSelect(offer[2])
   })
 }
 
@@ -220,6 +241,8 @@ export type UpgradeHud = {
   pending: boolean
   maxed: boolean
   progress: UpgradeProgress
+  /** Kinds still below level III, in SPEED / PAINT / HASTE order. */
+  offer: UpgradeKind[]
   speed: number
   paint: number
   haste: number
@@ -249,6 +272,7 @@ export function getUpgradeHud(): UpgradeHud {
     pending: state.pending,
     maxed: progress.mode === 'max',
     progress,
+    offer: offeredUpgradeKinds(state),
     speed: state.speed,
     paint: state.paint,
     haste: state.haste,

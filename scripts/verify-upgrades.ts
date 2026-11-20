@@ -1,15 +1,16 @@
 /**
  * verify-upgrades.ts — paint-earned upgrade charge, thresholds, selection,
- * stacking, modifiers, deferral, and bot exclusion (Overdrive V2 §9).
+ * stacking, modifiers, deferral, fall buff-loss, offered kinds, and bot
+ * exclusion (Overdrive V2 §9).
  * Run: npx tsx scripts/verify-upgrades.ts
  */
 import { UpgradeBook } from '../src/server/upgradeBook'
 import {
   accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade,
-  hasteCooldownMult, paintAreaMult, paintedScoreFor, speedMoveMult,
-  trySelectUpgrade, unlockedUpgradeCount, upgradeChargeFor, upgradeOfferLine,
-  upgradePaintBrushOffsets, upgradePaintTileCount, upgradeProgress,
-  type UpgradeState,
+  hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, paintedScoreFor,
+  speedMoveMult, stripUpgradesOnFall, trySelectUpgrade, unlockedUpgradeCount,
+  upgradeChargeFor, upgradeOfferLine, upgradePaintBrushOffsets, upgradePaintTileCount,
+  upgradeProgress, type UpgradeState,
 } from '../src/shared/upgrades'
 import {
   CARD_AUTO_MS, CARD_COMPACT_SCALE, CARD_POP_MS, CARD_REOPEN_MS,
@@ -17,8 +18,9 @@ import {
 } from '../src/shared/upgradeCards'
 import {
   BURST_PAINT_RADIUS_CELLS, STAR_PICKUPS_ENABLED,
-  UPGRADE_CHARGE_ENEMY, UPGRADE_CHARGE_NEUTRAL, UPGRADE_HASTE_REDUCTION,
-  UPGRADE_MAX, UPGRADE_PAINT_AREA_BONUS, UPGRADE_SPEED_BONUS, UPGRADE_THRESHOLDS,
+  UPGRADE_CHARGE_ENEMY, UPGRADE_CHARGE_NEUTRAL, UPGRADE_CHARGE_STEP,
+  UPGRADE_HASTE_REDUCTION, UPGRADE_LEVEL_MAX, UPGRADE_MAX,
+  UPGRADE_PAINT_AREA_BONUS, UPGRADE_SPEED_BONUS, UPGRADE_THRESHOLDS,
 } from '../src/shared/pvp'
 import { PAINT_BRUSH_RADIUS_CELLS, paintBrushOffsets } from '../src/shared/overdrive'
 
@@ -29,7 +31,13 @@ function check(name: string, ok: boolean): void {
 }
 
 check('star pickups are disabled by config', STAR_PICKUPS_ENABLED === false)
-check('thresholds are 75 / 175 / 300', UPGRADE_THRESHOLDS[0] === 75 && UPGRADE_THRESHOLDS[1] === 175 && UPGRADE_THRESHOLDS[2] === 300)
+check('thresholds step every 500 up to 4500',
+  UPGRADE_CHARGE_STEP === 500
+  && UPGRADE_MAX === 9
+  && UPGRADE_THRESHOLDS.length === UPGRADE_MAX
+  && UPGRADE_THRESHOLDS.every((t, i) => t === (i + 1) * UPGRADE_CHARGE_STEP)
+  && UPGRADE_THRESHOLDS[0] === 500
+  && UPGRADE_THRESHOLDS[UPGRADE_THRESHOLDS.length - 1] === 4500)
 
 // Scoring: personal paint vs upgrade charge stay separate.
 let painted = 0
@@ -59,13 +67,13 @@ check('a second pass over already-friendly cells adds nothing', paintedScoreFor(
 
 // Thresholds and pending.
 s = emptyUpgrade()
-s = accrueUpgradeCharge(s, 74)
-check('74 charge is still charging toward the first upgrade', upgradeProgress(s).mode === 'charging' && !s.pending && unlockedUpgradeCount(s.charge) === 0)
+s = accrueUpgradeCharge(s, 499)
+check('499 charge is still charging toward the first upgrade', upgradeProgress(s).mode === 'charging' && !s.pending && unlockedUpgradeCount(s.charge) === 0)
 s = accrueUpgradeCharge(s, 1)
-check('75 charge unlocks a pending selection', s.pending && s.charge === 75 && unlockedUpgradeCount(s.charge) === 1 && upgradeProgress(s).mode === 'ready')
+check('500 charge unlocks a pending selection', s.pending && s.charge === 500 && unlockedUpgradeCount(s.charge) === 1 && upgradeProgress(s).mode === 'ready')
 
-const overflow = accrueUpgradeCharge(s, 200)
-check('charge keeps growing while a selection is pending', overflow.charge === 275 && overflow.pending && overflow.earned === 0)
+const overflow = accrueUpgradeCharge(s, 500)
+check('charge keeps growing while a selection is pending', overflow.charge === 1000 && overflow.pending && overflow.earned === 0)
 check('no second unlock is offered while the first is still pending', unlockedUpgradeCount(overflow.charge) === 2 && overflow.earned === 0 && overflow.pending)
 
 const denied = trySelectUpgrade(emptyUpgrade(), 'speed')
@@ -74,38 +82,53 @@ check('selection fails when nothing is pending', !denied.ok)
 let picked = trySelectUpgrade(overflow, 'speed')
 check('SPEED at level 0 becomes level 1', picked.ok && picked.state.speed === 1 && picked.state.earned === 1)
 s = picked.state
-check('charge is preserved after a selection', s.charge === 275)
+check('charge is preserved after a selection', s.charge === 1000)
 check('after selecting, a stored second threshold becomes pending immediately', s.pending && unlockedUpgradeCount(s.charge) === 2)
 
 picked = trySelectUpgrade(s, 'speed')
 s = picked.state
 check('the same upgrade can be stacked (SPEED 1 → 2)', picked.ok && s.speed === 2 && s.earned === 2)
-check('275 charge has not reached the third threshold yet', !s.pending && unlockedUpgradeCount(s.charge) === 2)
+check('1000 charge has not reached the third threshold yet', !s.pending && unlockedUpgradeCount(s.charge) === 2)
 
-s = accrueUpgradeCharge(s, 25) // 300
-check('300 charge unlocks the third upgrade', s.pending && s.charge === 300 && unlockedUpgradeCount(s.charge) === 3)
+s = accrueUpgradeCharge(s, 500) // 1500
+check('1500 charge unlocks the third upgrade', s.pending && s.charge === 1500 && unlockedUpgradeCount(s.charge) === 3)
 
 picked = trySelectUpgrade(s, 'paint')
 s = picked.state
-check('third selection is accepted and maxes out', picked.ok && s.earned === 3 && s.paint === 1 && !s.pending)
-check('further charge does not unlock a fourth upgrade', accrueUpgradeCharge(s, 500).charge === 300 && !accrueUpgradeCharge(s, 500).pending && accrueUpgradeCharge(s, 500).earned === 3)
-
-const dup = trySelectUpgrade(s, 'haste')
-check('a fourth selection is rejected', !dup.ok && dup.state.earned === 3)
+check('third selection is accepted and a later threshold can still unlock', picked.ok && s.earned === 3 && s.paint === 1 && !s.pending)
+s = accrueUpgradeCharge(s, 500) // 2000
+check('2000 charge unlocks a fourth upgrade', s.pending && s.charge === 2000 && unlockedUpgradeCount(s.charge) === 4 && s.earned === 3)
 
 // Level cap: three of the same, then that card cannot be taken again.
 let stack = emptyUpgrade()
-stack = accrueUpgradeCharge(stack, 300)
+stack = accrueUpgradeCharge(stack, 1500)
 for (let i = 0; i < 3; i++) {
   const r = trySelectUpgrade(stack, 'haste')
   check(`HASTE stack step ${i + 1} succeeds`, r.ok && r.state.haste === i + 1)
   stack = r.state
 }
 check('a fourth HASTE is rejected and the pending choice is kept if any', stack.haste === 3 && !trySelectUpgrade({ ...emptyUpgrade(), pending: true, haste: 3, earned: 0 }, 'haste').ok)
+check('a maxed type is not offered', offeredUpgradeKinds(stack).join(',') === 'speed,paint')
+
+// Nine-upgrade cap: max every kind, then no tenth offer.
+let cap = emptyUpgrade()
+cap = accrueUpgradeCharge(cap, 4500)
+const cycle: Array<'speed' | 'paint' | 'haste'> = ['speed', 'paint', 'haste']
+for (let i = 0; i < 9; i++) {
+  const kind = cycle[i % 3]
+  const r = trySelectUpgrade(cap, kind)
+  check(`cap pick ${i + 1} (${kind}) succeeds`, r.ok && r.state.earned === i + 1)
+  cap = r.state
+}
+check('nine picks maxes all three types', cap.earned === 9 && cap.speed === 3 && cap.paint === 3 && cap.haste === 3 && !cap.pending)
+check('a maxed loadout offers no cards', offeredUpgradeKinds(cap).length === 0)
+const pastCap = accrueUpgradeCharge(cap, 500)
+check('further charge after nine upgrades does not offer a tenth', pastCap.charge === 5000 && !pastCap.pending && pastCap.earned === 9)
+check('a tenth selection is rejected', !trySelectUpgrade(cap, 'speed').ok && cap.earned === 9)
 
 // Deferral: closing the UI does not consume the pending upgrade or charge.
-const deferred = accrueUpgradeCharge(emptyUpgrade(), 80)
-check('deferral leaves the pending selection and charge intact', deferred.pending && deferred.charge === 80 && deferred.earned === 0)
+const deferred = accrueUpgradeCharge(emptyUpgrade(), 500)
+check('deferral leaves the pending selection and charge intact', deferred.pending && deferred.charge === 500 && deferred.earned === 0)
 const afterDefer = trySelectUpgrade(deferred, 'paint')
 check('a deferred player can still select later', afterDefer.ok && afterDefer.state.paint === 1)
 
@@ -135,27 +158,52 @@ check('Paint L1 brush is 11 tiles (~+22%, target +20%)', upgradePaintTileCount(p
 check('Paint L2 brush is 13 tiles (closest symmetric shape to +35%)', upgradePaintTileCount(paintAreaMult(2)) === 13 && upgradePaintBrushOffsets(2, paintAreaMult(2)).length === 13)
 check('Paint L3 brush is 13 tiles (exact +44% vs +45%)', upgradePaintTileCount(paintAreaMult(3)) === 13 && upgradePaintBrushOffsets(2, paintAreaMult(3)).length === 13)
 
-// Progress bar states.
-const charging = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 30))
-check('charging fill is 30/75', Math.abs(charging.fill - 30 / 75) < 1e-12 && charging.mode === 'charging')
-const ready = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 75))
+// Progress states (the HUD no longer draws the charging fill, but the
+// helper still reports it for max / ready).
+const charging = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 200))
+check('charging fill is 200/500', Math.abs(charging.fill - 200 / 500) < 1e-12 && charging.mode === 'charging')
+const ready = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 500))
 check('ready fill is full', ready.mode === 'ready' && ready.fill === 1)
-const maxed: UpgradeState = { charge: 300, earned: 3, pending: false, speed: 1, paint: 1, haste: 1 }
+const maxed: UpgradeState = { charge: 4500, earned: 9, pending: false, speed: 3, paint: 3, haste: 3 }
 check('max upgrades reports a completed bar', upgradeProgress(maxed).mode === 'max' && upgradeProgress(maxed).fill === 1)
 
-// Death / rescue does not touch this state (no reset helper is called).
-const lived = { ...maxed }
-check('buffs are unchanged across a death/rescue (state is not reset)', lived.speed === 1 && lived.paint === 1 && lived.haste === 1 && lived.charge === 300)
+// Falling off the level clears buffs and any pending pick, but keeps charge.
+// Already-crossed thresholds stay spent, so the next offer is the next 500.
+let fall = emptyUpgrade()
+fall = accrueUpgradeCharge(fall, 1600)
+for (const kind of cycle) {
+  const r = trySelectUpgrade(fall, kind)
+  if (!r.ok) throw new Error('expected fall setup pick to succeed')
+  fall = r.state
+}
+check('fall setup has three buffs and leftover charge', fall.speed === 1 && fall.paint === 1 && fall.haste === 1 && fall.earned === 3 && fall.charge === 1600 && !fall.pending)
+const wiped = stripUpgradesOnFall(fall)
+check('a fall clears buffs and pending but keeps charge', wiped.speed === 0 && wiped.paint === 0 && wiped.haste === 0 && !wiped.pending && wiped.charge === 1600)
+check('already-crossed thresholds stay spent after a fall', wiped.earned === 3 && unlockedUpgradeCount(wiped.charge) === 3)
+check('200 more charge after a fall is still short of the next threshold', !accrueUpgradeCharge(wiped, 399).pending)
+check('the next 500 above current charge unlocks again', accrueUpgradeCharge(wiped, 400).pending && accrueUpgradeCharge(wiped, 400).charge === 2000)
+
+const unspent = stripUpgradesOnFall(accrueUpgradeCharge(emptyUpgrade(), 500))
+check('an unpicked pending upgrade is discarded on a fall', !unspent.pending && unspent.earned === 1 && unspent.charge === 500 && unspent.speed === 0)
+check('the player must reach the next threshold to earn again', accrueUpgradeCharge(unspent, 499).pending === false && accrueUpgradeCharge(unspent, 500).pending === true)
+
+const emptyFall = stripUpgradesOnFall(emptyUpgrade())
+check('a fall with no charge or buffs is a no-op', emptyFall.charge === 0 && emptyFall.earned === 0 && !emptyFall.pending)
 
 // Round reset.
 const book = new UpgradeBook()
-book.gain('p1', 200)
-check('book grants charge to a human and unlocks a pending upgrade', book.ownerState('p1').charge === 200 && book.ownerState('p1').pending === 1)
+book.gain('p1', 500)
+check('book grants charge to a human and unlocks a pending upgrade', book.ownerState('p1').charge === 500 && book.ownerState('p1').pending === 1)
 check('book accepts a valid selection', book.trySelect('p1', 'speed') && book.ownerState('p1').speed === 1)
 book.gain('bot:3', 500)
 check('bots do not receive upgrade charge or selections', book.ownerState('bot:3').charge === 0 && !book.trySelect('bot:3', 'speed') && book.level('bot:3', 'speed') === 0)
 book.gain('p1', 0)
-check('zero gain is ignored', book.ownerState('p1').charge === 200)
+check('zero gain is ignored', book.ownerState('p1').charge === 500)
+check('the book strips buffs on a fall and keeps charge spent', book.loseBuffsOnFall('p1') && book.ownerState('p1').speed === 0 && book.ownerState('p1').charge === 500 && book.ownerState('p1').earned === 1 && book.ownerState('p1').pending === 0)
+check('a second fall with nothing left is a no-op', !book.loseBuffsOnFall('p1'))
+check('bots do not lose buffs because they never had them', !book.loseBuffsOnFall('bot:3'))
+book.gain('p1', 500)
+check('the next threshold after a fall can still unlock', book.ownerState('p1').charge === 1000 && book.ownerState('p1').pending === 1)
 book.clearRound()
 check('a new round resets charge, pending, and levels', book.ownerState('p1').charge === 0 && book.ownerState('p1').pending === 0 && book.ownerState('p1').speed === 0 && book.ownerState('p1').earned === 0)
 
@@ -176,6 +224,8 @@ check('bonus labels and roman levels cover I/II/III', bonusPct('speed', 1) === 1
 check('card offer at level 0 is the first-stack line', upgradeOfferLine('speed', 0) === '+15% movement speed' && upgradeOfferLine('paint', 0) === '+20% paint area' && upgradeOfferLine('haste', 0) === '−15% cooldowns')
 check('card offer after one stack shows the next total', upgradeOfferLine('speed', 1) === '+25% movement speed')
 check('card offer at max shows the current total', upgradeOfferLine('speed', 3) === '+30% movement speed')
+check('all three kinds are offered at level 0', offeredUpgradeKinds(emptyUpgrade()).join(',') === 'speed,paint,haste')
+check('a type at III is hidden from the offer', offeredUpgradeKinds({ ...emptyUpgrade(), speed: UPGRADE_LEVEL_MAX, paint: 1 }).join(',') === 'paint,haste')
 
 check('compact cards are 65% of the tall size', CARD_COMPACT_SCALE === 0.65)
 check('auto-open lasts 5 seconds and the pop lasts 0.25 seconds', CARD_AUTO_MS === 5000 && CARD_POP_MS === 250)

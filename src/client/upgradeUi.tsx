@@ -16,7 +16,7 @@ import {
   closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, type UpgradeHud,
 } from './upgrades'
 import {
-  UPGRADE_CARD_ICON_SRC, UPGRADE_KINDS, UPGRADE_LABEL,
+  UPGRADE_CARD_ICON_SRC, UPGRADE_LABEL,
   UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
 } from '../shared/upgrades'
 
@@ -67,10 +67,9 @@ function readyFill(now: number, flashUntil: number, base: Color4): Color4 {
 }
 
 /**
- * The painted-tile count pill. Turns gold and pulses when an upgrade is ready;
- * a thin gold fill along the bottom shows charge while charging. Click / tap
- * opens the card overlay. The wrapper stays at the rest size so a pulse
- * cannot shove the mute button or the buff icons.
+ * The painted-tile count pill. Turns gold and pulses when an upgrade is ready.
+ * Click / tap opens the card overlay. The wrapper stays at the rest size so a
+ * pulse cannot shove the mute button or the buff icons.
  */
 export function PaintedCountPill(props: { width: number; height: number; font: number; countText: string; ink: Color4 }) {
   const { width, height, font, countText, ink } = props
@@ -91,10 +90,6 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
   } else if (hud.maxed) {
     rim = GOLD_EDGE
   }
-  const showBar = !ready && !hud.maxed
-  const barH = 5
-  const innerW = Math.max(1, width - (HOTBAR_BORDER_W + TILE_RING) * 2)
-  const fillW = Math.round(innerW * Math.max(0, Math.min(1, hud.progress.fill)))
   return (
     <UiEntity uiTransform={{
       width, height, flexShrink: 0, justifyContent: 'center', alignItems: 'center',
@@ -112,14 +107,9 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
       >
         <UiEntity uiTransform={{
           width: '100%', height: '100%', borderRadius: innerR, justifyContent: 'center', alignItems: 'center',
-          overflow: 'hidden', flexDirection: 'column', pointerFilter: 'none',
+          pointerFilter: 'none',
         }} uiBackground={{ color: fill }}>
-          <Label value={bold(countText)} fontSize={font} color={text} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', flexGrow: 1 }} />
-          {showBar ? (
-            <UiEntity uiTransform={{ width: '100%', height: barH, flexShrink: 0, justifyContent: 'flex-start', alignItems: 'stretch' }}>
-              <UiEntity uiTransform={{ width: Math.max(0, fillW), height: barH, borderRadius: 2 }} uiBackground={{ color: GOLD }} />
-            </UiEntity>
-          ) : null}
+          <Label value={bold(countText)} fontSize={font} color={text} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
     </UiEntity>
@@ -319,7 +309,8 @@ export function UpgradeOverlay() {
   const cardW = Math.max(1, Math.round((mobile ? 136 : 228) * COMPACT * pop))
   const cardH = Math.max(1, Math.round((mobile ? 280 : 348) * COMPACT * pop))
   const gap = mobile ? 6 : 10
-  const rowW = cardW * 3 + gap * 2
+  const n = Math.max(1, hud.offer.length)
+  const rowW = cardW * n + gap * Math.max(0, n - 1)
   const closeW = mobile ? 110 : 128
   const closeH = mobile ? 36 : 40
   const barH = 6
@@ -346,7 +337,7 @@ export function UpgradeOverlay() {
           </UiEntity>
         ) : null}
         <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
-          {UPGRADE_KINDS.map((kind, i) => (
+          {hud.offer.map((kind, i) => (
             <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} compact={true} />
           ))}
         </UiEntity>

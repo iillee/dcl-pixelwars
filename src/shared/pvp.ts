@@ -680,12 +680,18 @@ export const STAR_THEME_ENABLED = false
 export const STAR_PICKUPS_ENABLED = false
 
 // ═══ Round upgrades (paint-earned, last until the round ends) ════════
-// Players spend upgrade charge (from tiles they convert) on up to three
-// round-long buffs. All of these are playtest values and easy to retune.
-/** Cumulative upgrade-charge thresholds for the 1st, 2nd, and 3rd upgrade. */
-export const UPGRADE_THRESHOLDS = [75, 175, 300] as const
-/** Max upgrades a player can select in one round. */
-export const UPGRADE_MAX = 3
+// Players spend upgrade charge (from tiles they convert) on up to nine
+// round-long buffs, enough to max Speed, Paint, and Haste. Falling off
+// the level clears the buffs but keeps charge. Playtest values, easy to retune.
+/** Charge between consecutive upgrade unlocks. */
+export const UPGRADE_CHARGE_STEP = 500
+/** Max upgrades a player can select in one round (3 kinds × 3 levels). */
+export const UPGRADE_MAX = 9
+/** Cumulative unlocks: 500, 1000, … 4500. */
+export const UPGRADE_THRESHOLDS: readonly number[] = Array.from(
+  { length: UPGRADE_MAX },
+  (_, i) => (i + 1) * UPGRADE_CHARGE_STEP,
+)
 /** Max level of any single upgrade. */
 export const UPGRADE_LEVEL_MAX = 3
 /** Charge for converting a neutral (unpainted) tile. */

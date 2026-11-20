@@ -3,7 +3,7 @@
  * Bots never receive charge, pending selections, or modifiers.
  */
 import {
-  emptyUpgrade, accrueUpgradeCharge, trySelectUpgrade, type UpgradeKind, type UpgradeState,
+  emptyUpgrade, accrueUpgradeCharge, stripUpgradesOnFall, trySelectUpgrade, type UpgradeKind, type UpgradeState,
 } from '../shared/upgrades'
 
 const keyOf = (id: string) => id.toLowerCase()
@@ -62,6 +62,29 @@ export class UpgradeBook {
     const ids = [...this.dirty]
     this.dirty.clear()
     return ids
+  }
+
+  /**
+   * Falling off the level clears buffs and any pending pick. Charge is kept;
+   * already-crossed thresholds stay spent. Returns true if the client should
+   * be notified.
+   */
+  loseBuffsOnFall(id: string): boolean {
+    if (!id || id.startsWith('bot:')) return false
+    const cur = this.get(id)
+    const next = stripUpgradesOnFall(cur)
+    if (
+      next.speed === cur.speed
+      && next.paint === cur.paint
+      && next.haste === cur.haste
+      && next.pending === cur.pending
+      && next.earned === cur.earned
+      && next.charge === cur.charge
+    ) {
+      return false
+    }
+    this.set(id, next)
+    return true
   }
 
   clearRound(): string[] {

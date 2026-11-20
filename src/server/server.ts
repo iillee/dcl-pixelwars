@@ -1505,6 +1505,7 @@ export async function setupServer(): Promise<void> {
     const by = noteFell(from)
     onBalloonFall(from)
     if (overdrive.onDeath(from)) endStar(from.toLowerCase())
+    if (upgrades.loseBuffsOnFall(from)) sendUpgradeTo(from)
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
   // Relay the rider's cloud so every other client can show it. who is the

@@ -70,6 +70,21 @@ export function unlockedUpgradeCount(charge: number): number {
   return Math.min(n, UPGRADE_MAX)
 }
 
+/** Cards still below level III, in SPEED / PAINT / HASTE order. */
+export function offeredUpgradeKinds(state: UpgradeState): UpgradeKind[] {
+  return UPGRADE_KINDS.filter((kind) => state[kind] < UPGRADE_LEVEL_MAX)
+}
+
+/**
+ * Falling off the level clears buffs and any pending pick, but keeps charge.
+ * `earned` is raised to the number of thresholds already crossed so those
+ * unlocks stay spent. The next offer is the next 500 above current charge.
+ */
+export function stripUpgradesOnFall(state: UpgradeState): UpgradeState {
+  const earned = Math.max(state.earned, unlockedUpgradeCount(state.charge))
+  return { charge: state.charge, earned, pending: false, speed: 0, paint: 0, haste: 0 }
+}
+
 function clampLevel(n: number): number {
   if (!Number.isFinite(n) || n <= 0) return 0
   return Math.min(UPGRADE_LEVEL_MAX, Math.floor(n))
@@ -77,8 +92,10 @@ function clampLevel(n: number): number {
 
 export function accrueUpgradeCharge(state: UpgradeState, gained: number): UpgradeState {
   if (gained <= 0) return state
-  if (state.earned >= UPGRADE_MAX) return state
   const charge = state.charge + gained
+  if (state.earned >= UPGRADE_MAX || offeredUpgradeKinds(state).length === 0) {
+    return { ...state, charge, pending: false }
+  }
   const pending = state.pending || (unlockedUpgradeCount(charge) > state.earned)
   return { ...state, charge, pending }
 }
@@ -94,7 +111,11 @@ export function trySelectUpgrade(state: UpgradeState, kind: UpgradeKind): { ok: 
     earned: state.earned + 1,
     pending: false,
   }
-  if (next.earned < UPGRADE_MAX && unlockedUpgradeCount(next.charge) > next.earned) {
+  if (
+    next.earned < UPGRADE_MAX
+    && offeredUpgradeKinds(next).length > 0
+    && unlockedUpgradeCount(next.charge) > next.earned
+  ) {
     next.pending = true
   }
   return { ok: true, state: next }
