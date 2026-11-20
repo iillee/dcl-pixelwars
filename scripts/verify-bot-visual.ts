@@ -15,6 +15,8 @@ import { buildWalkableGraph, WalkableGraph } from '../src/shared/mazeGraph'
 import { Bot, mustLeap } from '../src/server/bots/bot'
 import { BotBody } from '../src/shared/botBody'
 import { lungeKnock } from '../src/shared/knocks'
+import { doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, JUMP_POP_S, JUMP_SQUASH_S, knockFaceYaw, KNOCK_FACE_HOLD_S, turnYawDeg, shortestYawDelta } from '../src/shared/botAnim'
+import { RESCUE_PATH } from '../src/shared/rescuePath'
 import { initBots, rebuildBotGraph, tickBots, getBotBroadcast, botSimTime } from '../src/server/bots/manager'
 
 const PREDICT_AHEAD_SEC = 0.1
@@ -312,3 +314,99 @@ if (!finite(live) || !finite(rampPackets) || !finite(knockPackets)) {
   process.exit(1)
 }
 console.log('✓ walking draw stays within 3 m; a knock falls (no glider) and the draw stays inside 15 m')
+
+{
+  const dur = DOUBLE_JUMP_SPIN_DUR_S
+  if (dur < 0.35 || dur > 0.4) {
+    console.error(`✗ double-jump spin duration ${dur} s should be 0.35–0.4 s`)
+    process.exit(1)
+  }
+  const at = (elapsed: number, want: number, slop = 1e-9) => {
+    const got = doubleJumpSpinDeg(elapsed, dur)
+    if (Math.abs(got - want) > slop) {
+      console.error(`✗ double-jump spin at ${elapsed.toFixed(3)} s: ${got} deg, expected ${want}`)
+      process.exit(1)
+    }
+  }
+  at(-0.1, 0)
+  at(0, 0)
+  const mid = doubleJumpSpinDeg(dur * 0.5, dur)
+  if (mid <= 180 || mid >= 360) {
+    console.error(`✗ ease-out spin should be past 180° by halfway, got ${mid}`)
+    process.exit(1)
+  }
+  at(dur, 0)
+  at(dur + 0.1, 0)
+  if (doubleJumpSpinDeg(0.2, 0) !== 0) { console.error('✗ double-jump spin with no duration'); process.exit(1) }
+  const squash = jumpPop(JUMP_SQUASH_S / 2)
+  if (squash.sy >= 1 || squash.sx <= 1) {
+    console.error(`✗ jump squash should flatten Y and widen XZ, got sx=${squash.sx} sy=${squash.sy}`)
+    process.exit(1)
+  }
+  const stretch = jumpPop(JUMP_SQUASH_S + 0.05)
+  if (stretch.sy <= 1 || stretch.y <= 0) {
+    console.error(`✗ jump stretch should lengthen Y and pop up, got sy=${stretch.sy} y=${stretch.y}`)
+    process.exit(1)
+  }
+  const rest = jumpPop(JUMP_POP_S)
+  if (rest.y !== 0 || rest.sx !== 1 || rest.sy !== 1) {
+    console.error('✗ jump pop should settle to identity')
+    process.exit(1)
+  }
+  console.log(`✓ double-jump spin is a full 360° in ${dur} s with ease-out, then facing is unchanged`)
+  console.log('✓ jump and double jump use a squash-and-stretch pop that settles')
+}
+
+{
+  // Custom ghost: GHOST_FLOAT 1.0 + GHOST_SCALE 1.2 * outline crown 1.94 m.
+  const crown = 1.0 + 1.2 * 1.94
+  const hookBelow = 0.95
+  const hook = RESCUE_PATH.BOT_HANG_Y - hookBelow
+  if (RESCUE_PATH.HANG_Y !== 2.65) {
+    console.error(`✗ player cloud hang should stay 2.65 m, got ${RESCUE_PATH.HANG_Y}`)
+    process.exit(1)
+  }
+  if (hook < crown) {
+    console.error(`✗ bot cloud hook at ${hook.toFixed(2)} m overlaps the crown at ${crown.toFixed(2)} m (hang ${RESCUE_PATH.BOT_HANG_Y})`)
+    process.exit(1)
+  }
+  if (RESCUE_PATH.BOT_HANG_Y <= RESCUE_PATH.HANG_Y) {
+    console.error('✗ bot cloud hang should be above the player hang')
+    process.exit(1)
+  }
+  console.log(`✓ bot rescue cloud hang ${RESCUE_PATH.BOT_HANG_Y.toFixed(2)} m (was ${RESCUE_PATH.HANG_Y.toFixed(2)} m); hook at ${hook.toFixed(2)} m sits above the ${crown.toFixed(2)} m crown`)
+}
+
+{
+  if (Math.abs(shortestYawDelta(10, 20) - 10) > 1e-9 || Math.abs(shortestYawDelta(350, 10) - 20) > 1e-9) {
+    console.error('✗ shortestYawDelta is wrong around 0')
+    process.exit(1)
+  }
+  if (Math.abs(turnYawDeg(0, 90, 30) - 30) > 1e-9 || Math.abs(turnYawDeg(10, 0, 30) - 0) > 1e-9) {
+    console.error('✗ turnYawDeg should step or arrive')
+    process.exit(1)
+  }
+  const held = 90
+  const knockMove = 180
+  const recoverMove = 0
+  const during = knockFaceYaw({ now: 0.5, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: knockMove, recovering: false, speed: 20, alongKnock: true, dt: 0.05 })
+  if (during !== held) {
+    console.error(`✗ knock facing turned during the hold: ${during}, expected ${held}`)
+    process.exit(1)
+  }
+  const stillKnock = knockFaceYaw({ now: KNOCK_FACE_HOLD_S + 0.1, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: knockMove, recovering: false, speed: 20, alongKnock: true, dt: 0.05 })
+  if (stillKnock !== held) {
+    console.error(`✗ knock facing followed the knock velocity after the hold: ${stillKnock}`)
+    process.exit(1)
+  }
+  const recovering = knockFaceYaw({ now: KNOCK_FACE_HOLD_S + 0.1, holdUntil: KNOCK_FACE_HOLD_S, heldYaw: held, currentYaw: held, moveYawDeg: recoverMove, recovering: true, speed: 6, alongKnock: false, dt: 0.05 })
+  if (recovering === held || Math.abs(shortestYawDelta(held, recovering)) < 1 || Math.abs(shortestYawDelta(recovering, recoverMove)) >= Math.abs(shortestYawDelta(held, recoverMove))) {
+    console.error(`✗ after the hold, facing should ease toward recovery, got ${recovering}`)
+    process.exit(1)
+  }
+  if (KNOCK_FACE_HOLD_S < 1 || KNOCK_FACE_HOLD_S > 1.5) {
+    console.error(`✗ knock face hold ${KNOCK_FACE_HOLD_S} s should be 1–1.5 s`)
+    process.exit(1)
+  }
+  console.log(`✓ knock facing holds ${KNOCK_FACE_HOLD_S} s, never follows the push, then eases toward recovery`)
+}

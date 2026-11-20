@@ -7,19 +7,19 @@
  *           a held force, gravity and floor friction, exactly like the anvils. No floor
  *           under it = it falls. Back on a floor and slow = walk again.
  *           Edge recovery (jump, double jump, glide, steer-home, glide dash) is
- *           gated by BOT_RECOVERY_ENABLED. Off, the knock just falls into rescue.
+ *           gated by this.recoveryEnabled, set from botRecoveryEnabled(format).
+ *           Off, the knock just falls into rescue.
  *   rescue  crossed the fall line: rides the Lakitu cloud home along the shared path
  *           (shared/rescuePath.ts) that every client draws for it.
  *   drop    the cloud let go above the base: falls onto it, then a land hold and
  *           respawn immunity, like a human arriving home.
  */
 import { WalkableGraph, leapPlan } from './mazeGraph'
-import { graphFloorAt } from './anvilSim'
+import { graphFloorAt, resolveSupport } from './anvilSim'
 import { Placed } from '../maze/generator'
 import { fallTriggerY } from './swell'
 import {
   RESPAWN_IMMUNITY_S, BOT_KNOCK_UNIT, BOT_GRAVITY, BOT_FRICTION, BOT_RECOVER_SPEED, AIR_SPIKE_GLIDE_LOCK_S,
-  BOT_RECOVERY_ENABLED,
   BOT_RECOVER_CHANCE, BOT_RECOVER_REACT_MIN_S, BOT_RECOVER_REACT_MAX_S, BOT_RECOVER_SKIP_DOUBLE_CHANCE,
   BOT_RECOVER_MISJUDGE_CHANCE, BOT_RECOVER_MISJUDGE_M, BOT_RECOVER_STEER_ACCEL,
   BOT_RECOVER_EDGE_SPEED, BOT_RECOVER_RUN_JUMP_AT, BOT_RECOVER_GIVE_UP_M, BOT_GLIDE_TURN,
@@ -30,7 +30,7 @@ import {
 } from './pvp'
 import { BOT_ANIM_DOUBLE, BOT_ANIM_FALL, BOT_ANIM_GLIDE, BOT_ANIM_JUMP, BOT_ANIM_LOCO, BOT_ANIM_SLIDE } from './botAnim'
 import { KnockSpec, KnockTrace, KNOCK_TRACE } from './knocks'
-import { RESCUE_PATH, rescueCloudPose, RescueVec } from './rescuePath'
+import { RESCUE_PATH, RESCUE_TIMES, rescueCloudPose, rescueRiderFromCloud, RescueVec } from './rescuePath'
 
 type V3 = RescueVec
 export type BotBodyMode = 'walk' | 'knock' | 'rescue' | 'drop'
@@ -40,10 +40,10 @@ export type BotBodyEvent =
   | { type: 'landed' }               // home on the base after the cloud
   | { type: 'trace'; line: string }  // KNOCK_TRACE result
   | { type: 'recover'; how: 'jump' | 'double' | 'glide' }
-export type BotWorld = { graph: WalkableGraph; rampTiles: Placed[]; base: V3 }
+  | { type: 'dash'; dx: number; dz: number; at: V3 } // recovery air / glide lunge, same numbers as a player
+export type BotWorld = { graph: WalkableGraph; rampTiles: Placed[]; tiles?: Placed[]; base: V3 }
 
 const SUBSTEP_S = 0.05
-const SNAP_DOWN = 0.6
 
 export class BotBody {
   mode: BotBodyMode = 'walk'
@@ -75,12 +75,16 @@ export class BotBody {
   private jumpTime = 0
   private glideTime = 0
   private recoverTo: V3 | null = null
-  /** Player lunge while the glider is open: same length and cooldown, aimed at the floor. */
+  /** Player lunge in the air or with the glider open: same length and cooldown, aimed at the floor. */
   private glideDashLeft = 0
   private glideDashCd = 0
   private glideDashDir: V3 = { x: 0, y: 0, z: 0 }
   /** Random source for the recover roll (scripts pass a fixed one). */
   rng: () => number = Math.random
+  /** Set by the manager from botRecoveryEnabled(format). Default off. */
+  recoveryEnabled = false
+  /** Set by the manager from lungeEnabledForRound. Default on so recovery tests can dash. */
+  lungeEnabled = true
 
   constructor(pos: V3, rng?: () => number) {
     this.pos = { ...pos }
@@ -89,6 +93,37 @@ export class BotBody {
 
   /** Gliding back toward a floor right now. */
   isGliding(): boolean { return this.mode === 'knock' && this.phase === 'glide' && !this.grounded }
+  /** Mid recovery jump, double jump, or glide. */
+  isRecovering(): boolean {
+    return this.willRecover && this.mode === 'knock' && !this.grounded && (this.phase === 'jump' || this.phase === 'glide')
+  }
+  horizontalSpeed(): number { return Math.hypot(this.vel.x, this.vel.z) }
+
+  /**
+   * Test hook: start mid-glide at `pos` with velocity `vel`, steering to `to`.
+   * Used by verify-recovery to reproduce a lip snag and the air dash.
+   */
+  startGlideApproach(pos: V3, vel: V3, to: V3, glideT = 0.2): void {
+    this.mode = 'knock'
+    this.grounded = false
+    this.willRecover = true
+    this.recoveryEnabled = true
+    this.phase = 'glide'
+    this.jumped = true
+    this.didDouble = true
+    this.glideTime = glideT
+    this.jumpTime = 0
+    this.reactLeft = 0
+    this.noJumpLeft = 0
+    this.forceLeft = 0
+    this.lockLeft = 0
+    this.dashLeft = 0
+    this.glideDashLeft = 0
+    this.glideDashCd = 0
+    this.pos = { ...pos }
+    this.vel = { ...vel }
+    this.recoverTo = { ...to }
+  }
 
   /**
    * Pose for the client. Does not affect the integrator.
@@ -102,7 +137,8 @@ export class BotBody {
     if (this.isDashing()) return BOT_ANIM_LOCO
     if (this.phase === 'glide' && !this.grounded) return BOT_ANIM_GLIDE
     if (this.phase === 'jump' && !this.grounded) return this.didDouble ? BOT_ANIM_DOUBLE : BOT_ANIM_JUMP
-    if (!this.grounded) return this.vel.y > 0.4 ? BOT_ANIM_JUMP : BOT_ANIM_FALL
+    // A raw knock lift is not a recovery jump, so the glider stays down.
+    if (!this.grounded) return BOT_ANIM_FALL
     if (this.forceLeft > 0 || this.lockLeft > 0 || Math.hypot(this.vel.x, this.vel.z) >= BOT_RECOVER_SPEED) return BOT_ANIM_SLIDE
     return BOT_ANIM_LOCO
   }
@@ -128,6 +164,7 @@ export class BotBody {
     this.vel = { x: 0, y: 0, z: 0 }
     this.forceLeft = 0; this.lockLeft = 0; this.holdLeft = 0; this.immuneLeft = 0
     this.grounded = true
+    this.dashPaint = false
     this.trace = null
     this.clearRecovery()
   }
@@ -145,15 +182,21 @@ export class BotBody {
     this.vel = { x: dx * speed, y: 0, z: dz * speed }
     this.forceLeft = 0
     this.lockLeft = 0
+    this.glideDashCd = LUNGE_COOLDOWN_S
     this.armRecovery(0)
+    this.dashPaint = true
     return true
   }
   private dashDir: V3 = { x: 0, y: 0, z: 0 }
   private dashSpeed = 0
   private dashLeft = 0
   private dashKeep = 0
+  /** Own ground dash, including the short brake, until we settle, get hit, or leave the floor. */
+  private dashPaint = false
   /** Mid-dash (its own lunge). */
   isDashing(): boolean { return this.mode === 'knock' && this.dashLeft > 0 }
+  /** Grounded on its own lunge: the manager should paint along the path. */
+  ownDashPaint(): boolean { return this.grounded && this.dashPaint && this.mode === 'knock' }
   /** In the air and not inside its own dash. A spike can fire here. */
   isAirborne(): boolean { return this.mode === 'knock' && !this.grounded && this.dashLeft <= 0 }
   verticalSpeed(): number { return this.vel.y }
@@ -197,6 +240,7 @@ export class BotBody {
     this.forceLeft = 0
     this.lockLeft = 0
     this.dashLeft = 0
+    this.dashPaint = false
     this.clearRecovery()
   }
 
@@ -212,6 +256,7 @@ export class BotBody {
     }
     this.lockLeft = Math.max(this.lockLeft, spec.lockS)
     this.dashLeft = 0
+    this.dashPaint = false
     // Each hit starts a new attempt. The reaction delay stays the one this bot rolled.
     this.armRecovery(Math.max(spec.lockS, spec.kind === 'spike' ? AIR_SPIKE_GLIDE_LOCK_S : 0))
     if (this.mode === 'walk') this.grounded = true
@@ -256,6 +301,7 @@ export class BotBody {
         else if (this.reactLeft > 0) this.reactLeft -= dt
         this.steerRecovery(dt, world, out)
         this.physics(dt, world)
+        if (!this.grounded) this.dashPaint = false
         if (this.lockLeft > 0) this.lockLeft -= dt
         if (this.pos.y < fallTriggerY(this.pos.x, this.pos.z)) {
           this.mode = 'rescue'
@@ -270,13 +316,14 @@ export class BotBody {
         if (this.grounded && this.forceLeft <= 0 && this.lockLeft <= 0 && Math.hypot(this.vel.x, this.vel.z) < BOT_RECOVER_SPEED) {
           this.mode = 'walk'
           this.vel = { x: 0, y: 0, z: 0 }
+          this.dashPaint = false
           out.push({ type: 'settled' })
         }
         return
       case 'rescue': {
         this.rescueAge += dt
-        const pose = rescueCloudPose(this.catchP, this.base, this.rescueAge)
-        if (this.rescueAge >= RESCUE_PATH.GRAB_S) this.pos = { x: pose.pos.x, y: pose.pos.y - RESCUE_PATH.HANG_Y, z: pose.pos.z }
+        const pose = rescueCloudPose(this.catchP, this.base, this.rescueAge, RESCUE_TIMES, RESCUE_PATH.BOT_HANG_Y)
+        if (this.rescueAge >= RESCUE_PATH.GRAB_S) this.pos = rescueRiderFromCloud(pose.pos, RESCUE_PATH.BOT_HANG_Y)
         if (pose.done) {
           this.mode = 'drop'
           this.vel = { x: 0, y: 0, z: 0 }
@@ -306,7 +353,7 @@ export class BotBody {
     this.jumpTime = 0
     this.glideTime = 0
     this.noJumpLeft = blockS
-    this.willRecover = BOT_RECOVERY_ENABLED && this.rng() < BOT_RECOVER_CHANCE
+    this.willRecover = this.recoveryEnabled && this.rng() < BOT_RECOVER_CHANCE
     if (!this.willRecover) { this.reactLeft = 0; return }
     if (this.reactS === null) {
       const span = BOT_RECOVER_REACT_MAX_S - BOT_RECOVER_REACT_MIN_S
@@ -367,7 +414,7 @@ export class BotBody {
     if (this.phase === 'idle') {
       // Touching the lip clears the phase. Slipping off again keeps the glide; it does not grant a second jump.
       if (this.jumped) {
-        if (!this.grounded && this.recoverTo && this.glideTime > 0 && this.glideTime < BOT_RECOVER_MAX_S) this.phase = 'glide'
+        if (!this.grounded && this.recoverTo && this.glideTime > 0 && this.willRecover) this.phase = 'glide'
         else return
       } else {
         if (!this.threatened(world)) return
@@ -386,9 +433,13 @@ export class BotBody {
     }
     const t = this.recoverTo
     if (!t) { this.clearRecovery(); return }
-    if (this.pos.y < t.y - BOT_RECOVER_GIVE_UP_M) { this.abortGlide(); return }
-    if (this.phase === 'glide') this.steerGlide(t, dt)
-    else this.steerToward(t, dt)
+    const approach = this.phase === 'glide' ? this.finalApproach(world) : null
+    // Don't fold the glider just short of a lip they can still reach.
+    if (this.pos.y < t.y - BOT_RECOVER_GIVE_UP_M && !approach) { this.abortGlide(); return }
+    if (this.phase === 'glide') this.steerGlide(t, dt, out, world)
+    else this.steerToward(t, dt, out)
+    this.holdLipClearance(t)
+    if (approach) this.stretchFinalApproach(approach.floor)
     if (this.phase === 'jump') {
       this.jumpTime += dt
       const apex = this.vel.y <= 0.4 || this.jumpTime > 0.55
@@ -406,7 +457,12 @@ export class BotBody {
       return
     }
     this.glideTime += dt
-    if (this.glideTime > BOT_RECOVER_MAX_S) this.abortGlide()
+    // A close inbound glide may run a little long to finish the last metres.
+    // Past that, let it fall — otherwise a graze can float forever.
+    if (this.glideTime > BOT_RECOVER_MAX_S) {
+      const late = this.finalApproach(world)
+      if (!late || this.glideTime > BOT_RECOVER_MAX_S + BotBody.FINAL_EXTRA_S) this.abortGlide()
+    }
   }
 
   /** First jump's arc, then a 1 m/s glide, does not cover the floor before the give-up line. */
@@ -426,6 +482,110 @@ export class BotBody {
     return budget <= 0 || time > budget / Math.max(0.25, HUMAN_GLIDE_FALL)
   }
 
+  /** Inbound glide within this many metres of a walkable cell: keep going (m). */
+  static readonly FINAL_APPROACH_M = 4.5
+  /** How far below that floor a last stretch may still climb into the mantle (m). */
+  static readonly FINAL_STRETCH_M = 1.85
+  /** Extra glide time allowed once already in the final approach (s). */
+  static readonly FINAL_EXTRA_S = 1.5
+
+  /** Nearest walkable cell within `range` of the feet, on a nearby deck. */
+  private nearbyFloor(world: BotWorld, range: number): V3 | null {
+    const yRef = this.recoverTo?.y ?? this.pos.y
+    let best: V3 | null = null
+    let bestD = range
+    for (const p of world.graph.worldPos.values()) {
+      if (Math.abs(p[1] - yRef) > 2 && Math.abs(p[1] - this.pos.y) > 2) continue
+      const d = Math.hypot(p[0] - this.pos.x, p[2] - this.pos.z)
+      if (d <= bestD) { bestD = d; best = { x: p[0], y: p[1], z: p[2] } }
+    }
+    return best
+  }
+
+  /**
+   * Gliding back and close enough to a walkable lip that giving up would
+   * drop them just short of the edge. Also used to aim the last stretch at
+   * that lip instead of a deep or misjudged recoverTo.
+   */
+  private finalApproach(world: BotWorld): { floor: V3 } | null {
+    if (!this.willRecover || this.phase !== 'glide' || this.grounded) return null
+    const floor = this.nearbyFloor(world, BotBody.FINAL_APPROACH_M)
+    if (!floor) return null
+    if (this.pos.y < floor.y - BotBody.FINAL_STRETCH_M) return null
+    const dx = floor.x - this.pos.x, dz = floor.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    const speed = Math.hypot(this.vel.x, this.vel.z)
+    const inbound = speed < 0.4 || d < 1.5 || this.vel.x * dx + this.vel.z * dz > 0
+    return inbound ? { floor } : null
+  }
+
+  /**
+   * Close the last vertical gap so the feet arrive inside the mantle window.
+   * Does not climb from a hopeless short jump (outside FINAL_STRETCH_M).
+   */
+  private stretchFinalApproach(floor: V3): void {
+    const dy = floor.y - this.pos.y
+    if (dy <= 0) {
+      if (this.pos.y < floor.y + 0.55) this.vel.y = Math.max(this.vel.y, 0)
+      return
+    }
+    if (dy > BotBody.FINAL_STRETCH_M) return
+    const d = Math.hypot(floor.x - this.pos.x, floor.z - this.pos.z)
+    const sp = Math.max(1, Math.hypot(this.vel.x, this.vel.z))
+    const eta = Math.max(0.08, d / sp)
+    const need = Math.max(0, dy - 0.4)
+    this.vel.y = Math.max(this.vel.y, Math.min(2.4, need / eta))
+  }
+
+  /**
+   * Stay above the lip while still approaching the floor. The physics body is
+   * the feet; a glide aimed at floor Y can sink under the slab face and snag.
+   * Only holds height once already at or above the floor — it does not climb
+   * out of a short jump. Once over the target (inside `range`), normal descent
+   * is fine, and an inbound mantle still catches a slightly low arrival.
+   */
+  private holdLipClearance(t: V3, range = 1.2): void {
+    const d = Math.hypot(t.x - this.pos.x, t.z - this.pos.z)
+    if (d <= range) return
+    if (this.pos.y >= t.y + 0.55 || this.pos.y < t.y) return
+    this.vel.y = Math.max(this.vel.y, 0)
+  }
+
+  /**
+   * Player lunge toward the floor: same distance, active time, and cooldown,
+   * in the air or with the glider open. Keeps the current vertical velocity
+   * (an air lunge does not flatten). Fires when the floor is still out of a
+   * plain glide's reach, and not when it is already coming in or too far
+   * for the boost to matter.
+   */
+  private tryRecoverDash(t: V3, dt: number, out: BotBodyEvent[]): boolean {
+    const dx = t.x - this.pos.x, dz = t.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d <= 0.3) return false
+    const wantX = dx / d, wantZ = dz / d
+    if (this.glideDashLeft > 0) {
+      this.glideDashLeft -= dt
+      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
+      this.vel.x = this.glideDashDir.x * sp
+      this.vel.z = this.glideDashDir.z * sp
+      return true
+    }
+    const toward = this.vel.x * wantX + this.vel.z * wantZ
+    // Wait until the heading is already toward the floor. A dash the instant a
+    // lunge is still carrying them out would turn a planned fall into a save.
+    if (this.lungeEnabled && this.glideDashCd <= 0 && d > 6 && d < 20 && toward > 0.5 && toward < HUMAN_GLIDE_SPEED) {
+      this.glideDashLeft = LUNGE_ACTIVE_S
+      this.glideDashCd = LUNGE_COOLDOWN_S
+      this.glideDashDir = { x: wantX, y: 0, z: wantZ }
+      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
+      this.vel.x = wantX * sp
+      this.vel.z = wantZ * sp
+      out.push({ type: 'dash', dx: wantX, dz: wantZ, at: { ...this.pos } })
+      return true
+    }
+    return false
+  }
+
   /**
    * Glide like a player who is steering home. The open glider caps speed near
    * HUMAN_GLIDE_SPEED and the heading turns toward the floor, so a hard knock
@@ -433,30 +593,12 @@ export class BotBody {
    * dash) fires toward that floor on the same cooldown and active time, and
    * only when the floor is still out of a plain glide's reach.
    */
-  private steerGlide(t: V3, dt: number): void {
+  private steerGlide(t: V3, dt: number, out: BotBodyEvent[], world?: BotWorld): void {
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z
     const d = Math.hypot(dx, dz)
     if (d <= 0.3) return
+    if (this.tryRecoverDash(t, dt, out)) return
     const wantX = dx / d, wantZ = dz / d
-    if (this.glideDashLeft > 0) {
-      this.glideDashLeft -= dt
-      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
-      this.vel.x = this.glideDashDir.x * sp
-      this.vel.z = this.glideDashDir.z * sp
-      return
-    }
-    const toward = (this.vel.x * wantX + this.vel.z * wantZ)
-    // Same window a player has: one lunge, then LUNGE_COOLDOWN_S. Skip it when
-    // the floor is already coming in, or so far that the boost cannot matter.
-    if (this.glideDashCd <= 0 && d > 6 && d < 20 && toward < HUMAN_GLIDE_SPEED) {
-      this.glideDashLeft = LUNGE_ACTIVE_S
-      this.glideDashCd = LUNGE_COOLDOWN_S
-      this.glideDashDir = { x: wantX, y: 0, z: wantZ }
-      const sp = LUNGE_DISTANCE / LUNGE_ACTIVE_S
-      this.vel.x = wantX * sp
-      this.vel.z = wantZ * sp
-      return
-    }
     let vx = this.vel.x, vz = this.vel.z
     let sp = Math.hypot(vx, vz)
     const dirx = sp > 0.4 ? vx / sp : wantX
@@ -466,7 +608,10 @@ export class BotBody {
     const c = Math.cos(step), s = Math.sin(step)
     const ndx = dirx * c - dirz * s
     const ndz = dirx * s + dirz * c
-    const spWant = d < 2.5 ? Math.min(HUMAN_GLIDE_SPEED, d * 2) : HUMAN_GLIDE_SPEED
+    // Don't ease off in the last 2.5 m unless the feet are already over a floor.
+    // Slowing down still outside the lip is what left them short of the edge.
+    const over = !!world && graphFloorAt(world.graph, world.rampTiles, this.pos.x, this.pos.z, this.pos.y, 1.2, 1) !== null
+    const spWant = (!over) ? HUMAN_GLIDE_SPEED : (d < 2.5 ? Math.min(HUMAN_GLIDE_SPEED, d * 2) : HUMAN_GLIDE_SPEED)
     // Excess over the glide cap decays like the player's external-velocity drag.
     const excess = sp - spWant
     sp = excess > 0 ? spWant + excess * Math.exp(-1.5 * dt) : sp + (spWant - sp) * Math.min(1, 8 * dt)
@@ -474,10 +619,11 @@ export class BotBody {
     this.vel.z = ndz * sp
   }
 
-  private steerToward(t: V3, dt: number): void {
+  private steerToward(t: V3, dt: number, out: BotBodyEvent[]): void {
     const dx = t.x - this.pos.x, dz = t.z - this.pos.z
     const d = Math.hypot(dx, dz)
     if (d <= 0.2) return
+    if (this.tryRecoverDash(t, dt, out)) return
     const want = Math.min(HUMAN_GLIDE_SPEED, d * 2)
     const ex = (dx / d) * want - this.vel.x
     const ez = (dz / d) * want - this.vel.z
@@ -527,7 +673,24 @@ export class BotBody {
     return best
   }
 
-  /** Anvil-style integration: held force, gravity, floor snap, floor friction. */
+  /**
+   * Recovering and moving toward the floor (or already stopped against it).
+   * Outbound or raw knocks keep the strict 0.15 m snap and incoming-wall rule.
+   */
+  private inboundMantle(): boolean {
+    if (!this.willRecover || this.grounded) return false
+    if (this.phase !== 'glide' && this.phase !== 'jump') return false
+    const t = this.recoverTo
+    if (!t) return false
+    const dx = t.x - this.pos.x, dz = t.z - this.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d < 0.5) return true
+    const speed = Math.hypot(this.vel.x, this.vel.z)
+    if (speed < 0.4) return true
+    return this.vel.x * dx + this.vel.z * dz > 0
+  }
+
+  /** Anvil-style integration: held force, gravity, floor snap, wall stop, floor friction. */
   private physics(dt: number, world: BotWorld): void {
     if (this.forceLeft > 0) {
       this.vel.x += this.force.x * dt
@@ -540,15 +703,14 @@ export class BotBody {
     if (this.phase === 'glide' && this.vel.y < -HUMAN_GLIDE_FALL) this.vel.y = -HUMAN_GLIDE_FALL
     const nx = this.pos.x + this.vel.x * dt
     const nz = this.pos.z + this.vel.z * dt
-    let ny = this.pos.y + this.vel.y * dt
-    const floor = graphFloorAt(world.graph, world.rampTiles, nx, nz, this.pos.y)
-    this.grounded = false
-    if (floor !== null && (ny <= floor || (wasGrounded && ny - floor <= SNAP_DOWN))) {
-      ny = floor
-      if (this.vel.y < 0) this.vel.y = 0
-      this.grounded = true
-    }
-    this.pos = { x: nx, y: ny, z: nz }
+    const ny = this.pos.y + this.vel.y * dt
+    const hit = resolveSupport(world.graph, world.rampTiles, world.tiles ?? [], this.pos, nx, ny, nz, this.vel.y, wasGrounded,
+      this.inboundMantle() ? { mantle: true } : undefined)
+    if (Math.abs(hit.x - nx) > 1e-6) this.vel.x = 0
+    if (Math.abs(hit.z - nz) > 1e-6) this.vel.z = 0
+    this.pos = { x: hit.x, y: hit.y, z: hit.z }
+    this.vel.y = hit.velY
+    this.grounded = hit.grounded
     if (this.grounded) {
       const h = Math.hypot(this.vel.x, this.vel.z)
       const nh = Math.max(0, h - BOT_FRICTION * dt)

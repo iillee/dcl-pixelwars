@@ -15,6 +15,7 @@
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
+import { isBalloonRound } from '../round'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import { inLobby } from './phase'
@@ -26,10 +27,11 @@ import {
   DASH_TILE_AHEAD, DASH_TILE_AHEAD_DELAY_S, DASH_TILE_AHEAD_STEP_S,
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
+import { localBurstPaintRadiusCells } from './upgrades'
 import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
-import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
+import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
 
 const HIDDEN = Vector3.create(8, -60, 8)
 const CELL_M = 2
@@ -37,6 +39,8 @@ type Slab = { ent: Entity; busy: boolean; t: number; delay: number; x: number; y
 const pool: Slab[] = []
 let graph: WalkableGraph | null = null
 let graphSeed = -1
+let graphLayout = ''
+let graphTiles = 0
 const FLAT = Quaternion.Identity()
 
 /** Ramp cells: tilt the slab to the slope under it (pitch from rampSurfaceY along the ramp's
@@ -53,9 +57,13 @@ function cellPose(id: string, c: [number, number, number]): { y: number; rot: Qu
 
 function ensureGraph(): WalkableGraph | null {
   const seed = getCurrentSeed()
-  if (!isRebuilding() && seed !== graphSeed && getPlacedTilesInOrder().length > 0) {
-    graph = buildWalkableGraph(getPlacedTilesInOrder())
+  const layout = isLobbyLayout() ? 'lobby' : 'arena'
+  const tiles = getPlacedTilesInOrder()
+  if (!isRebuilding() && tiles.length > 0 && (seed !== graphSeed || layout !== graphLayout || tiles.length !== graphTiles)) {
+    graph = buildWalkableGraph(tiles)
     graphSeed = seed
+    graphLayout = layout
+    graphTiles = tiles.length
   }
   return graph
 }
@@ -87,17 +95,19 @@ export function footprintAt(p: V3, cell: string): number {
   if (!g) return -1
   const centre = burstCentre(g, cell, p)
   if (!centre) return 0
-  return burstFootprint(g, centre).length
+  return burstFootprint(g, centre, undefined, localBurstPaintRadiusCells()).length
 }
 
 /** Start the ripple for a grounded burst fired at feet position `p` by `team`. */
 export function startRipple(p: V3, team: Team, cell = ''): void {
   if (!BURST_TILE_RIPPLE || pool.length === 0) return
+  // Team.None (lobby, Balloon Battle, or an empty tank) raises temporary white
+  // slabs. They are pooled visuals only and never write the paint grid.
   const g = ensureGraph()
   if (!g) return
   const centre = burstCentre(g, cell, p)
   if (!centre) return
-  const cells = burstFootprint(g, centre)
+  const cells = burstFootprint(g, centre, undefined, localBurstPaintRadiusCells())
   const c0 = g.worldPos.get(centre)!
   let maxD = CELL_M
   for (const id of cells) { const c = g.worldPos.get(id)!; maxD = Math.max(maxD, Math.hypot(c[0] - c0[0], c[2] - c0[2])) }
@@ -134,8 +144,9 @@ function cellNear(g: WalkableGraph, x: number, y: number, z: number, r: number):
  *  centre column DASH_TILE_INNER_LAG_S later; the forward row uses DASH_TILE_AHEAD_DELAY_S so it
  *  leads. Visual only; capped at DASH_TILE_MAX live slabs. */
 export function dashPop(who: string, p: V3, team: Team): void {
-  // Team.None is the lobby (white slabs). Outside the lobby it still means "no trail".
-  if (!DASH_TILE_POP || pool.length === 0 || (team === Team.None && !inLobby())) return
+  // Team.None (lobby, Balloon Battle, or an empty tank) is a white trail.
+  // Pooled visuals only; this never writes the paint grid.
+  if (!DASH_TILE_POP || pool.length === 0) return
   const g = ensureGraph()
   if (!g) return
   const centre = cellNear(g, p.x, p.y, p.z, CELL_M)
@@ -224,7 +235,9 @@ export function initBurstRipple(): void {
       const u = s.t - s.delay
       let h = 0
       if (u < 0) continue // wave not here yet: stay hidden
-      if (Transform.get(s.ent).scale.x === 0) Transform.getMutable(s.ent).scale = Vector3.create(BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_SIZE)
+      const tr0 = Transform.getMutableOrNull(s.ent)
+      if (!tr0) { s.busy = false; continue }
+      if (tr0.scale.x === 0) tr0.scale = Vector3.create(BURST_TILE_SIZE, BURST_TILE_THICK, BURST_TILE_SIZE)
       if (u < s.up) { const k = u / s.up; h = 1 - (1 - k) * (1 - k) } // ease-out up
       else if (u < s.up + s.down) { const k = (u - s.up) / s.down; h = 1 - k * k } // ease-in settle
       else {

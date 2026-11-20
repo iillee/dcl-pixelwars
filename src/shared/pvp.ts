@@ -17,24 +17,26 @@
 // true → startNextRound flips pvp/pvb after each round that continues from
 // the summary. A cold start or an idle start is always PvP.
 // PvB: every human on one colour (Red, then Blue, … across PvB rounds);
-// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)),
-// taken at round start. Mid-round the count may grow as humans join; it does
-// not shrink until the next round, unless no humans are left.
+// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)).
+// Taken at round start and again whenever humans join or leave, so the pool
+// stays at 2× the humans. PVB_BOT_MAX is the hard cap.
 export const FORMAT_ALTERNATE = true
-/** Bots per active human in a PvB round. 1 = one bot each. */
-export const PVB_RATIO = 1.0
-/** Hard cap on PvB bots (playtest: up to 15). */
+/** Bots per active human in a Bot Invasion round. */
+export const PVB_RATIO = 2
+/** Hard cap on Bot Invasion bots. 8 humans would be 16; the pool stops at 15. */
 export const PVB_BOT_MAX = 15
 
-export type RoundFormat = 'pvp' | 'pvb'
+export type RoundFormat = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
 
 export function pvbBotCount(activeHumans: number): number {
   if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
   return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
 }
 
-/** Next round's format. `continuing` is false for a cold start and an idle start. */
+/** Next round's format. `continuing` is false for a cold start and an idle start.
+ *  Prototype and Balloon Battle are voted modes, not part of the pvp/pvb flip. */
 export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
+  if (current === 'prototype' || current === 'balloon') return current
   if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
   return current === 'pvb' ? 'pvp' : 'pvb'
 }
@@ -512,19 +514,28 @@ export function botJumpSpeed(heightM: number): number {
 }
 
 /**
- * Edge recovery after a knock. Off: the bot keeps the knock and just falls,
- * then fallTriggerY (the swell, or y 112.47) starts the same cloud rescue a
- * human gets. No jump, double jump, glide, steer-home, or glide dash.
- * The attempt code below stays for when this comes back on.
+ * Edge recovery after a knock. On in every live mode (Classic, Base Charge,
+ * Paint Limit, Balloon Battle, and Bot Invasion). A bot that makes it back
+ * never starts the cloud trip; one that still crosses fallTriggerY gets the
+ * same cloud rescue a human does. BotBody.recoveryEnabled is set from this
+ * each tick.
  */
+export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp', 'pvb', 'bases', 'prototype', 'balloon'])
+
+export function botRecoveryEnabled(format: RoundFormat): boolean {
+  return BOT_RECOVERY_MODES.has(format)
+}
+
+/** Default for a body with no mode set (unit tests that do not pass a format). */
 export const BOT_RECOVERY_ENABLED = false
 /**
- * Recovery after a knock, when BOT_RECOVERY_ENABLED. The bot always attempts
+ * Recovery after a knock, when botRecoveryEnabled(format). The bot always attempts
  * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
  * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
- * jump or aim wide. Steering accelerates toward the human glide speed instead
- * of clamping the knock velocity away, so a hard hit still carries them past
- * the floor. Tune only these.
+ * jump or aim wide — often enough that a weak shove is saved most of the time,
+ * with a human-like miss now and then. Steering accelerates toward the human
+ * glide speed instead of clamping the knock velocity away, so a hard hit still
+ * carries them past the floor. Tune only these.
  */
 /** 0 = never attempts, 1 = always attempts. Execution error is the other knobs. */
 export const BOT_RECOVER_CHANCE = 1
@@ -532,11 +543,11 @@ export const BOT_RECOVER_CHANCE = 1
 export const BOT_RECOVER_REACT_MIN_S = 0.15
 export const BOT_RECOVER_REACT_MAX_S = 0.45
 /** Chance this knock skips the double jump even when the first jump comes up short. */
-export const BOT_RECOVER_SKIP_DOUBLE_CHANCE = 0.34
+export const BOT_RECOVER_SKIP_DOUBLE_CHANCE = 0.22
 /** Chance this knock aims beside the floor it wanted. */
-export const BOT_RECOVER_MISJUDGE_CHANCE = 0.30
+export const BOT_RECOVER_MISJUDGE_CHANCE = 0.17
 /** Sideways miss when they misjudge (m). */
-export const BOT_RECOVER_MISJUDGE_M = 3.5
+export const BOT_RECOVER_MISJUDGE_M = 2.8
 /**
  * Air steering (m/s²) toward a glide of HUMAN_GLIDE_SPEED. The human glider also clamps
  * horizontal speed to that number, which would erase a knock; this accel does not.
@@ -549,9 +560,9 @@ export const BOT_RECOVER_EDGE_SPEED = 2.5
 /** At or above this horizontal speed the first jump is the run jump; below it, the standing jump. */
 export const BOT_RECOVER_RUN_JUMP_AT = 4
 /** Give up once this far below the floor they were aiming at (m). */
-export const BOT_RECOVER_GIVE_UP_M = 2.2
+export const BOT_RECOVER_GIVE_UP_M = 2.5
 /** Stop steering after this long in the glide and just fall (s). */
-export const BOT_RECOVER_MAX_S = 3.5
+export const BOT_RECOVER_MAX_S = 3.9
 /** Ignore floors farther than this when picking a landing (m). */
 export const BOT_RECOVER_MAX_SEEK_M = 36
 /** Ground hop: up a low ledge, or the jump that starts a spike (m/s). Apex ≈ 1.6 m at BOT_GRAVITY — a player hop, not a whole level. */
@@ -607,6 +618,13 @@ export const BOT_BURST_PAINT_MIN_CELLS = 20
 export const BOT_BURST_PAINT_CHANCE = 0.5
 /** Aim error on a lunge, ± degrees (uniform). */
 export const BOT_AIM_ERROR_DEG = 12
+/** Near a lip, chance a combat dash yaws toward the drop and goes off (human-like slip).
+ *  There is no clamp that keeps a dash on the arena; a landing past the floor is allowed. */
+export const BOT_DASH_SLIP_CHANCE = 0.12
+/** Look this far along the aim for a drop when deciding a slip (m). */
+export const BOT_DASH_SLIP_LOOK_M = 10
+/** Half-angle of the cone around the aim that can catch a nearby lip (deg). */
+export const BOT_DASH_SLIP_CONE_DEG = 50
 /** Bot dash speed and length for its lunge (m/s, s): LUNGE_DISTANCE over LUNGE_ACTIVE_S, then it brakes. */
 export const BOT_LUNGE_BRAKE = 0.15 // fraction of the dash speed kept after the active window
 
@@ -617,25 +635,103 @@ export const LUNGE_TEST_DUMMY = true
 export const LUNGE_DUMMY_COUNT = 2
 /** A dummy that falls off respawns at a random tile centre after this delay (s). */
 export const LUNGE_DUMMY_RESPAWN_S = 1
-/** Anvil launch: a SLIDING anvil dummy (horizontal speed ≥ MIN_SPEED m/s) that touches the local
- *  player launches them (impulse along the anvil's travel + big lift) — meant to throw you off the
- *  arena. Client-local like the dummies. Once per anvil per slide; COOLDOWN_S between launches. */
-export const ANVIL_LAUNCH_ENABLED = true
-export const ANVIL_LAUNCH_MIN_SPEED = 3
-export const ANVIL_LAUNCH_IMPULSE = 220 // horizontal (lunge knockback is 108)
-export const ANVIL_LAUNCH_LIFT = 45
-export const ANVIL_LAUNCH_COOLDOWN_S = 1
+/** Anvil weapon: a launched anvil (hit by a lunge/burst, still above MIN_SPEED, inside
+ *  WINDOW_MS) that touches a player or bot knocks them along its travel + LIFT. Server
+ *  authoritative. A resting or slow-pushed anvil does nothing. The hitter is immune to
+ *  their own anvil for HITTER_IMMUNE_MS. Each victim once per launch. */
+export const ANVIL_HIT_MIN_SPEED = 4
+/** Horizontal contact radius (m): anvil footprint (~0.85) + player radius + a little slack. */
+export const ANVIL_HIT_RADIUS = 1.5
+/** Vertical pad (m) around the anvil's feet. */
+export const ANVIL_HIT_MAX_DY = 1.5
+/** Horizontal impulse on the victim. Lunge knock is 108; this is meant to carry across the arena. */
+export const ANVIL_HIT_KNOCK = 260
+export const ANVIL_HIT_LIFT = 52
+/** A launch can deal damage for this long after the accepted lunge/burst hit. */
+export const ANVIL_HIT_WINDOW_MS = 2000
+/** The player who just knocked the anvil cannot be launched by it for this long. */
+export const ANVIL_HITTER_IMMUNE_MS = 400
+/** Extra metres allowed on a client-reported player contact (RTT / snapshot lag). */
+export const ANVIL_HIT_REPORT_SLACK = 0.8
+
+// ═══ Star pickup ════════════════════════════════════════════════════
+// One orb on the floor at a time, after a short grace at round start.
+// The first player or bot to touch it gets the star.
+export const STAR_SPAWN_GRACE_MS = 8000
+export const STAR_SPAWN_MIN_MS = 20000
+export const STAR_SPAWN_MAX_MS = 35000
+export const STAR_MAX_ACTIVE = 1
+export const STAR_PICKUP_RADIUS = 1.2
+export const STAR_PICKUP_MAX_DY = 2
+export const STAR_SPAWN_CLEAR_M = 8
+export const STAR_HOVER_Y = 1.1
+export const STAR_ORB_DIAMETER = 0.6
+/** How long the star lasts once picked up (ms). Matches the star theme (~23.01 s). */
+export const STAR_MS = 23000
+/** Jog/run multiplier via AvatarLocomotionSettings while the star is held. */
+export const STAR_SPEED_MULT = 1.4
+/** Client cooldown ticks and server min-gaps are multiplied by this while starred. */
+export const STAR_COOLDOWN_MULT = 0.5
+/** Spatial star theme on the carrier. Played once; duration matches STAR_MS. */
+export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
+/** Carrier theme + BGM duck. Off for now; flip to re-enable. The unpicked-star idle loop is separate. */
+export const STAR_THEME_ENABLED = false
+/** When false, no star orb, beacon, or idle sound is spawned. Pickup / hold code stays in place. */
+export const STAR_PICKUPS_ENABLED = false
+
+// ═══ Round upgrades (paint-earned, last until the round ends) ════════
+// Players spend upgrade charge (from tiles they convert) on up to nine
+// round-long buffs, enough to max Speed, Paint, and Haste. Falling off
+// the level clears the buffs but keeps charge. Playtest values, easy to retune.
+/** Charge between consecutive upgrade unlocks. */
+export const UPGRADE_CHARGE_STEP = 500
+/** Max upgrades a player can select in one round (3 kinds × 3 levels). */
+export const UPGRADE_MAX = 9
+/** Cumulative unlocks: 500, 1000, … 4500. */
+export const UPGRADE_THRESHOLDS: readonly number[] = Array.from(
+  { length: UPGRADE_MAX },
+  (_, i) => (i + 1) * UPGRADE_CHARGE_STEP,
+)
+/** Max level of any single upgrade. */
+export const UPGRADE_LEVEL_MAX = 3
+/** Charge for converting a neutral (unpainted) tile. */
+export const UPGRADE_CHARGE_NEUTRAL = 1
+/** Charge for converting an enemy tile. */
+export const UPGRADE_CHARGE_ENEMY = 2
+/** Charge for a friendly tile (no conversion, no credit). */
+export const UPGRADE_CHARGE_FRIENDLY = 0
+/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog/run only; Dash distance is unchanged. */
+export const UPGRADE_SPEED_BONUS = [0, 0.15, 0.25, 0.30] as const
+/** Paint *area* bonus by level: 0, +20%, +35% total, +45% total. Applied as a tile-count approximation, not a raw radius bump. */
+export const UPGRADE_PAINT_AREA_BONUS = [0, 0.20, 0.35, 0.45] as const
+/** Dash and Burst cooldown reduction by level: 0, −15%, −25% total, −30% total. Future activations only. */
+export const UPGRADE_HASTE_REDUCTION = [0, 0.15, 0.25, 0.30] as const
+/** Horizontal reach (m) for a bump that launches an enemy. */
+export const OVERDRIVE_TOUCH_RADIUS = 2
+/** Vertical pad (m) for that bump. */
+export const OVERDRIVE_TOUCH_MAX_DY = 1.5
+/** Same victim cannot be launched again until this many ms pass. */
+export const OVERDRIVE_HIT_WINDOW_MS = 800
+/** Movement-paint brush radius multiplier (1 = 3x3, 2 = 5x5). */
+export const OVERDRIVE_PAINT_RADIUS_MULT = 2
+/** Knock impulse. Defaults to the anvil hit so a bump carries across the floor. */
+export const OVERDRIVE_KNOCK = ANVIL_HIT_KNOCK
+export const OVERDRIVE_LIFT = ANVIL_HIT_LIFT
+/** Last-known feet older than this are ignored for touch tests (ms). */
+export const OVERDRIVE_FEET_STALE_MS = 1000
 /** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
  *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot
  *  for that hit arrives (or PREDICT_TIMEOUT_S passes: e.g. the hit was rejected); then the render
  *  blends to the server state: error ≤ PREDICT_CLOSE_M over BLEND_S, else over BLEND_FAR_S.
- *  Errors > SNAP_M snap (same as plain snapshot rendering), and respawns always snap. */
+ *  Errors > SNAP_M snap (same as plain snapshot rendering), and respawns always snap.
+ *  Timeouts and blend windows are long enough for a hosted ~530 ms tick; SNAP_M only
+ *  catches teleports, not ordinary inter-tick travel. */
 export const ANVIL_PREDICT_ENABLED = true
-export const ANVIL_PREDICT_TIMEOUT_S = 0.5
+export const ANVIL_PREDICT_TIMEOUT_S = 1.6
 export const ANVIL_PREDICT_CLOSE_M = 1.0
-export const ANVIL_BLEND_S = 0.2
-export const ANVIL_BLEND_FAR_S = 0.12
-export const ANVIL_SNAP_M = 3
+export const ANVIL_BLEND_S = 0.4
+export const ANVIL_BLEND_FAR_S = 0.35
+export const ANVIL_SNAP_M = 10
 /** After the server confirms our predicted slide, keep rendering the local sim (it runs ~RTT ahead of the
  *  snapshots on the same path) until the server anvil stops, diverges, or this many seconds pass. */
 export const ANVIL_PREDICT_CONFIRMED_MAX_S = 4

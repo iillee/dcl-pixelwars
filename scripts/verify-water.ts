@@ -1,7 +1,7 @@
 /**
- * The sea stays under the rescue line and inside the parcel box, the play
- * grid stays 5×5, and fog does not sit on the arena. Swells are geometric,
- * tall and slow, and the crest stays clear of the rescue line.
+ * The sea stays inside the parcel box, the play grid stays 5×5, and fog
+ * does not sit on the arena. Swells are geometric, tall and slow. Rescue
+ * triggers at the live sea surface, not the old fixed kill-Y.
  *
  * Run: npx tsx scripts/verify-water.ts
  */
@@ -9,7 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { CELL, GRID_W, MAZE_ORIGIN, MIN_Y, ROT_OFFSET, SCENE_SIZE, TILE_SCALE, baseSpawn, generateWithRetry, getPlacedTilesInOrder, placeLobbyLayout } from '../src/maze/generator'
 import { FALL_RESPAWN_DROP, LEVEL_Y_OFFSET, SKY_PARCELS, SKY_TOP_Y, WORLD_SIZE, sceneOriginParcel } from '../src/maze/level'
 import { fallTriggerY, liveSwell, shouldBeginRescue, swellSurfaceY } from '../src/shared/swell'
-import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
+import { FOAM, HAZE_COLOR, HAZE_RING_M, LOOK, RIM_COLOR, SURFACE, SWELL_48_PERIOD_S, SWELL_TRAINS, SWELL_TRAINS_48, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, fogAt, hazeBand, hazeOuterBand, horizonOuterRadiusM, horizonRadiusM, meanSwellWavelength, resolvedWaterSize, resolvedWaterY, swellMesh, swellPeakY, swellTroughY } from '../src/shared/waterLook'
 import { lobbyFeet } from '../src/shared/lobby'
 
 const rescue = MIN_Y - FALL_RESPAWN_DROP
@@ -133,6 +133,27 @@ if (HAZE_RING_M !== horizon || horizonRadiusM(SCENE_SIZE) !== horizon) {
   console.error(`✗ haze should sit just inside the parcel edge (${horizon} m), got ${HAZE_RING_M}`)
   process.exit(1)
 }
+const innerHaze = hazeBand()
+const outerHaze = hazeOuterBand()
+const outerHorizon = horizonOuterRadiusM(SCENE_SIZE)
+if (innerHaze.below !== WATER_FOG.hazeBelowM || innerHaze.above !== WATER_FOG.hazeAboveM) {
+  console.error('✗ the original haze band should stay 24 m below and 130 m above the water')
+  process.exit(1)
+}
+if (!(outerHorizon > horizon && outerHorizon < SCENE_SIZE / 2)) {
+  console.error(`✗ outer haze ${outerHorizon} m should sit past ${horizon} m and inside the parcel edge`)
+  process.exit(1)
+}
+if (outerHaze.height !== innerHaze.height * 2) {
+  console.error(`✗ outer haze should be twice as tall (${innerHaze.height} → ${outerHaze.height})`)
+  process.exit(1)
+}
+const innerMid = -innerHaze.below + innerHaze.height / 2
+const outerMid = -outerHaze.below + outerHaze.height / 2
+if (Math.abs(innerMid - outerMid) > 0.01) {
+  console.error('✗ the two haze rings should share a vertical centre so they do not cross')
+  process.exit(1)
+}
 const gap = Math.hypot(WATER_COLOR.r - RIM_COLOR.r, WATER_COLOR.g - RIM_COLOR.g, WATER_COLOR.b - RIM_COLOR.b)
 if (gap < 0.25) {
   console.error('✗ near water is so close to the horizon colour that the swells will not read')
@@ -162,6 +183,35 @@ if (scene.landscapeTerrain !== false) {
 if (!LOOK.sea || !LOOK.seaLast || !LOOK.gloss || !LOOK.softNormal) {
   console.error('✗ the sea, its gloss, and the soft normal should be on')
   process.exit(1)
+}
+{
+  const waterSrc = readFileSync(new URL('../src/client/water.ts', import.meta.url), 'utf8')
+  const indexSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+  if (!indexSrc.includes('armSea(')) {
+    console.error('✗ setupClient should still call armSea')
+    process.exit(1)
+  }
+  if (!waterSrc.includes("path: ''") && !waterSrc.includes('path: ""')) {
+    console.error('✗ water GltfNodeModifiers should use an empty path, the SDK global modifier')
+    process.exit(1)
+  }
+  if (waterSrc.includes("path: 'Haze'") || waterSrc.includes('path: "Haze"')) {
+    console.error('✗ a named Haze path drops the alpha gradient and leaves a solid wall')
+    process.exit(1)
+  }
+  if (!waterSrc.includes('MTM_ALPHA_BLEND') || !waterSrc.includes('hazeMask')) {
+    console.error('✗ the haze ring must keep its alpha-gradient mask and alpha-blend mode')
+    process.exit(1)
+  }
+  if (waterSrc.includes('deferred until teamAssigned') || waterSrc.includes('if (!team) return')) {
+    console.error('✗ the sea should not wait on team:assigned before spawning')
+    process.exit(1)
+  }
+  if (!waterSrc.includes('combat clips are in') && !waterSrc.includes('Team assignment is not a gate')) {
+    console.error('✗ armSea should still stagger after combat clips, without a team gate')
+    process.exit(1)
+  }
+  console.log('✓ sea still arms from setupClient, without a team gate, and the haze stays a blended gradient')
 }
 if (scene.scene.parcels.length !== SKY_PARCELS * SKY_PARCELS) {
   console.error(`✗ scene.json has ${scene.scene.parcels.length} parcels, want ${SKY_PARCELS * SKY_PARCELS}`)
@@ -240,8 +290,8 @@ if (src.includes('horizonSrcVeil') || src.includes('1.08')) {
   console.error('✗ the overlapping horizon curtain is still in the client')
   process.exit(1)
 }
-if (!src.includes('hazeSrc')) {
-  console.error('✗ the seamless haze ring is not spawned')
+if (!src.includes('hazeSrc') || !src.includes('horizonOuterRadiusM') || !src.includes('hazeOuterBand')) {
+  console.error('✗ both haze rings should spawn from the same mesh')
   process.exit(1)
 }
 const pillarDrop = 99.75 * TILE_SCALE
@@ -291,6 +341,10 @@ if (!src.includes('speed: 1')) {
   console.error('✗ the swell clip should play at a constant speed')
   process.exit(1)
 }
+if (!src.includes('GltfContainerLoadingState') || !src.includes('playSingleAnimation') || !src.includes('clipArmed')) {
+  console.error('✗ the CPU swell clock should start when the visible wave clip starts')
+  process.exit(1)
+}
 if (FOAM.rings || FOAM.whitecaps) {
   console.error('✗ sticker rings and whitecap blobs should stay off')
   process.exit(1)
@@ -326,9 +380,27 @@ if (high < y + (SWELL_VARIANT === '48m' ? 12 : 40)) {
   console.error(`✗ crest ${high.toFixed(1)} does not rise with the live swell`)
   process.exit(1)
 }
-if (fallTriggerY(SCENE_SIZE / 2, SCENE_SIZE / 2, 0) < rescue) {
-  console.error('✗ the fall trigger dropped below the fixed rescue line')
-  process.exit(1)
+const midX = SCENE_SIZE / 2
+const midZ = SCENE_SIZE / 2
+for (const s of [0, period / 4, period / 2]) {
+  const surface = swellSurfaceY(midX, midZ, s)
+  const trig = fallTriggerY(midX, midZ, s)
+  if (Math.abs(trig - surface) > 1e-9) {
+    console.error(`✗ fall trigger ${trig.toFixed(3)} must equal the live sea surface ${surface.toFixed(3)}`)
+    process.exit(1)
+  }
+  if (shouldBeginRescue(surface + 0.01, false, surface, MIN_Y)) {
+    console.error('✗ feet just above the water must not start a rescue')
+    process.exit(1)
+  }
+  if (!shouldBeginRescue(surface - 0.01, false, surface, MIN_Y)) {
+    console.error('✗ feet just under the water must rescue, even before the maze is ready')
+    process.exit(1)
+  }
+  if (MIN_Y - 4 > surface && shouldBeginRescue(MIN_Y - 4 + 0.01, false, surface, MIN_Y)) {
+    console.error('✗ a mid-air drop under the floor must not rescue above the sea')
+    process.exit(1)
+  }
 }
 if (SWELL_VARIANT === '48m') {
   let hi = -Infinity
@@ -393,8 +465,11 @@ const mid = SCENE_SIZE / 2
 inside('water inner', mid - seaHalf, mid - seaHalf)
 inside('water outer', mid + seaHalf, mid + seaHalf)
 const haze = horizonRadiusM(SCENE_SIZE)
+const hazeFar = horizonOuterRadiusM(SCENE_SIZE)
 inside('haze inner', mid - haze, mid - haze)
 inside('haze outer', mid + haze, mid + haze)
+inside('far haze inner', mid - hazeFar, mid - hazeFar)
+inside('far haze outer', mid + hazeFar, mid + hazeFar)
 inside('swell far', mid - WATER.swellFarM, mid - WATER.swellFarM)
 inside('swell far', mid + WATER.swellFarM, mid + WATER.swellFarM)
-console.log('✓ swells stay under the rescue line; lobby, maze, water, and spawns stay inside the scene')
+console.log('✓ rescue meets the live sea surface; lobby, maze, water, and spawns stay inside the scene')

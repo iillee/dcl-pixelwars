@@ -4,33 +4,37 @@ import { isOverviewActive } from './overviewCamera'
  * (server/anvils.ts + shared/anvilSim.ts: spawn spots, yaw, slide sim, falls, respawns) and
  * broadcasts anvilState (~10 Hz while moving, keep-alive every 2 s). This client:
  *  - renders each anvil smoothed toward the latest snapshot (extrapolated by its velocity for
- *    up to 150 ms), model + collider follow the rendered position;
+ *    up to ~850 ms, enough to cover a hosted ~530 ms tick), model + collider follow the rendered position;
  *  - reports lunge / burst hits on an anvil to the server (anvilHit; server dedupes) and, for
  *    our OWN hits, predicts the knock locally at once (ANVIL_PREDICT_*, shared/anvilSim.ts) until
  *    the server's snapshot for it arrives / times out, then blends to the server state;
  *  - key 2 asks the server to re-roll all anvils (anvilRespawn);
- *  - victim-side anvil launch: a moving anvil touching the LOCAL player launches them
- *    (ANVIL_LAUNCH_*), once per anvil slide, with cooldown and respawn protection.
+ *  - launched anvil contact: if a launched anvil touches the LOCAL player, report anvilStrike;
+ *    the server validates and broadcasts anvilImpact, and the victim applies the knock.
  */
 
-import { engine, Entity, GltfContainer, ColliderLayer, Transform, Physics, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { engine, Entity, GltfContainer, ColliderLayer, Transform, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs'
+import { isUpgradeCardsOpen } from './upgrades'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 import {
   LUNGE_TEST_DUMMY, LUNGE_DUMMY_COUNT,
-  ANVIL_LAUNCH_ENABLED, ANVIL_LAUNCH_MIN_SPEED, ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, ANVIL_LAUNCH_COOLDOWN_S,
+  ANVIL_HIT_MIN_SPEED, ANVIL_HIT_RADIUS, ANVIL_HIT_MAX_DY,
   ANVIL_PREDICT_ENABLED, ANVIL_PREDICT_TIMEOUT_S, ANVIL_PREDICT_CLOSE_M, ANVIL_BLEND_S, ANVIL_BLEND_FAR_S, ANVIL_SNAP_M, ANVIL_PREDICT_CONFIRMED_MAX_S,
   BURST_KNOCKBACK, LUNGE_KNOCKBACK,
   ANVIL_PUSH_REACH, ANVIL_PUSH_FACING, ANVIL_PUSH_SEND_HZ,
 } from '../shared/pvp'
+import { anvilKnock } from '../shared/knocks'
 import { AnvilWorld } from '../shared/anvilSim'
 import { buildWalkableGraph } from '../shared/mazeGraph'
-import { getPlacedTilesInOrder } from '../maze/generator'
-import { getCurrentSeed, isRebuilding } from '../maze/rebuild'
+import { getPlacedTilesInOrder, type Placed } from '../maze/generator'
+import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
+import { events } from '../shared/events'
 import { room } from '../shared/messages'
-import { isKnockbackImmune, safePhysics } from './knockback'
+import { applyKnock, isKnockbackImmune, myAddress } from './knockback'
 import { hitsOpen } from './phase'
 import { startKnockLock } from './lunge'
 import { playDashHitSfx } from './audio'
+import { playBotKnock } from './botVisual'
 
 /** Anvil model (Creator Hub asset pack). GLB bounds: x −0.50…0.63, y 0…0.77 (origin at its
  *  base), z ±0.35 m. Scaled ×ANVIL_SCALE → ≈1.7 × 1.15 × 1.06 m; ANVIL_OFFSET_X centres the
@@ -39,8 +43,8 @@ const ANVIL_SRC = 'assets/asset-packs/anvil/Anvil_01/Anvil_01.glb'
 const ANVIL_SCALE = 1.5
 const ANVIL_OFFSET_X = -0.07 * ANVIL_SCALE
 const HIDDEN = Vector3.create(8, -50, 8)
-const EXTRAPOLATE_MAX_S = 0.15
-const SMOOTH_RATE = 15 // 1/s, exponential approach to the extrapolated server position
+const EXTRAPOLATE_MAX_S = 0.85
+const SMOOTH_RATE = 5 // 1/s, gentle approach so 2 Hz snapshot corrections do not snap
 
 type V3 = { x: number; y: number; z: number }
 type Dummy = {
@@ -49,6 +53,7 @@ type Dummy = {
   srv: V3 // last server position
   vel: V3 // last server velocity
   age: number // s since that snapshot
+  gap: number // last observed snapshot interval (s)
   alive: boolean
   moving: boolean
   yaw: number
@@ -68,7 +73,17 @@ const dummies: Dummy[] = []
 // Local copy of the shared sim, used ONLY for predicted anvils (positions come from the server).
 const predictWorld = new AnvilWorld()
 let predictSeed = -1
+let predictSig = ''
 let predictReady = false
+
+/** Bind the local prediction sim to the floor the server is on, not just the seed.
+ *  Boot lays the lobby at seed 1, and the first match often reuses that same seed,
+ *  so a seed-only bind would keep the 3-tile lobby graph and let a knocked anvil
+ *  fall through the arena, then pop back when prediction times out. */
+function predictMazeSig(seed: number, tiles: Placed[]): string {
+  const layout = isLobbyLayout() ? 'lobby' : 'arena'
+  return `${layout}:${seed}:${tiles.map(t => `${t.type}:${t.r}:${t.x}:${t.z}:${t.y}`).join('|')}`
+}
 
 export function isDummyEnabled(): boolean { return LUNGE_TEST_DUMMY }
 
@@ -124,9 +139,10 @@ function startPredict(d: Dummy, i: number, dx: number, dz: number, kind: 0 | 1):
   d.blendLeft = 0
 }
 
-/** Server target position (latest snapshot, extrapolated by its velocity for ≤ 150 ms). */
+/** Server target: latest snapshot, extrapolated by velocity up to the observed interval (capped). */
 function serverTarget(d: Dummy): V3 {
-  const t = d.moving ? Math.min(d.age, EXTRAPOLATE_MAX_S) : 0
+  const cap = Math.min(EXTRAPOLATE_MAX_S, Math.max(0.2, d.gap * 1.15))
+  const t = d.moving ? Math.min(d.age, cap) : 0
   return { x: d.srv.x + d.vel.x * t, y: d.srv.y + d.vel.y * t, z: d.srv.z + d.vel.z * t }
 }
 
@@ -170,34 +186,45 @@ function reconcile(d: Dummy, i: number, slide: number): void {
   }
 }
 
-// Anvil launch contact volume: anvil ≈ 1.7 × 1.15 × 1.06 m around the feet point + player radius.
-const ANVIL_LAUNCH_REACH = 0.85 + 0.4 // horizontal, m
-const ANVIL_LAUNCH_BELOW = 0.5
-const ANVIL_LAUNCH_ABOVE = 1.2
+const STRIKE_SEND_HZ = 10
+const lastStrikeAt = new Map<number, number>()
 let launchCooldown = 0
+let knockForceEnt: Entity = 0 as Entity
 
-/** Moving shared anvil touching the local player → launch them (victim-side). */
+/** Launched anvil touching the local player → ask the server. Knock waits for anvilImpact. */
 function checkLaunch(d: Dummy, i: number, dt: number): void {
   if (d.launchGraceS > 0) { d.launchGraceS -= dt; return }
-  // Dedupe key: server slide id, or a marker for the slide we're predicting (carried over on reconcile).
   const key = d.predicted ? -2 - d.predictSlide : d.slide
-  if (!ANVIL_LAUNCH_ENABLED || !d.alive || !(d.moving || d.predicted) || d.launchedSlide === key || launchCooldown > 0 || isKnockbackImmune()) return
+  if (!d.alive || !(d.moving || d.predicted) || d.launchedSlide === key || launchCooldown > 0 || isKnockbackImmune()) return
   const v = d.predicted ? predictWorld.anvils[i].vel : d.vel
   const speed = Math.hypot(v.x, v.z)
-  if (speed < ANVIL_LAUNCH_MIN_SPEED) return
+  if (speed < ANVIL_HIT_MIN_SPEED) return
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   if (!p) return
   const dx = p.x - d.pos.x, dz = p.z - d.pos.z, dy = p.y - d.pos.y
-  if (Math.hypot(dx, dz) > ANVIL_LAUNCH_REACH || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
-  let ux = v.x / speed, uz = v.z / speed
-  if (!isFinite(ux) || !isFinite(uz)) { const l = Math.hypot(dx, dz) || 1; ux = dx / l; uz = dz / l }
-  d.launchedSlide = key
-  launchCooldown = ANVIL_LAUNCH_COOLDOWN_S
+  if (Math.hypot(dx, dz) > ANVIL_HIT_RADIUS || Math.abs(dy) > ANVIL_HIT_MAX_DY) return
+  const now = Date.now()
+  if (now - (lastStrikeAt.get(i) ?? 0) < 1000 / STRIKE_SEND_HZ) return
+  lastStrikeAt.set(i, now)
+  room.send('anvilStrike', { i, x: p.x, y: p.y, z: p.z })
+}
+
+function onAnvilImpact(i: number, attacker: string, target: string, dx: number, dz: number): void {
+  if (target.startsWith('bot:')) {
+    const id = parseInt(target.slice(4), 10)
+    if (Number.isFinite(id)) playBotKnock(id, dx, dz, 'anvil')
+    return
+  }
+  const me = myAddress()
+  if (!me || target !== me) return
+  if (isKnockbackImmune()) return
+  const d = dummies[i]
+  if (d) d.launchedSlide = d.predicted ? -2 - d.predictSlide : d.slide
+  launchCooldown = 1
   startKnockLock()
-  safePhysics('anvil launch', () => Physics.applyImpulseToPlayer(Vector3.create(ux * ANVIL_LAUNCH_IMPULSE, ANVIL_LAUNCH_LIFT, uz * ANVIL_LAUNCH_IMPULSE)))
+  applyKnock(anvilKnock(dx, dz), knockForceEnt, 'anvil launch')
   playDashHitSfx()
-  room.send('anvilLaunched', { i })
-  console.log(`[Dummy ${i}] launched the player at ${speed.toFixed(1)} m/s`)
+  console.log(`[Dummy ${i}] launched the local player by ${attacker.slice(0, 8) || '?'}`)
 }
 
 /** Slow push: holding a move key while facing into an anvil we touch → anvilPush intent (server moves it). */
@@ -218,7 +245,7 @@ function checkPush(dt: number): void {
     if (!d.alive || d.predicted) return
     const dx = d.pos.x - t.position.x, dz = d.pos.z - t.position.z, dy = t.position.y - d.pos.y
     const dist = Math.hypot(dx, dz)
-    if (dist > ANVIL_PUSH_REACH || dist < 1e-3 || dy < -ANVIL_LAUNCH_BELOW || dy > ANVIL_LAUNCH_ABOVE) return
+    if (dist > ANVIL_PUSH_REACH || dist < 1e-3 || Math.abs(dy) > ANVIL_HIT_MAX_DY) return
     if ((fx * dx + fz * dz) / dist < ANVIL_PUSH_FACING) return
     room.send('anvilPush', { i, dx: fx, dz: fz, x: t.position.x, z: t.position.z, run: inputSystem.isPressed(InputAction.IA_WALK) ? 0 : 1 })
   })
@@ -256,6 +283,8 @@ function render(d: Dummy, i: number, dt: number): void {
 
 export function initLungeDummy(): void {
   if (!LUNGE_TEST_DUMMY) return
+  knockForceEnt = engine.addEntity()
+  events.on('anvil:impact', ({ i, attacker, target, dx, dz }) => onAnvilImpact(i, attacker, target, dx, dz))
   for (let i = 0; i < LUNGE_DUMMY_COUNT; i++) {
     const ent = engine.addEntity()
     Transform.create(ent, { position: HIDDEN })
@@ -265,7 +294,7 @@ export function initLungeDummy(): void {
     // so it follows the rendered position.
     GltfContainer.create(model, { src: ANVIL_SRC, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS })
     const z = { x: 0, y: 0, z: 0 }
-    dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
+    dummies.push({ ent, pos: { ...z }, srv: { ...z }, vel: { ...z }, age: 0, gap: 0.2, alive: false, moving: false, yaw: 0, slide: -1, launchedSlide: -1, launchGraceS: 0,
       predicted: false, confirmed: false, predictDir: { ...z }, predictLeft: 0, predictSlide: -1, offset: { ...z }, blendLeft: 0, blendTotal: 1 })
   }
   room.onMessage('anvilState', ({ a, st }) => {
@@ -280,6 +309,7 @@ export function initLungeDummy(): void {
       const respawned = s.alive === 1 && (!d.alive || (s.slide !== d.slide && s.moving === 0))
       d.srv = { x: s.x, y: s.y, z: s.z }
       d.vel = { x: s.vx, y: s.vy, z: s.vz }
+      if (!respawned && d.age > 0.05) d.gap = d.age
       d.age = 0
       d.alive = s.alive === 1
       d.moving = s.moving === 1
@@ -291,13 +321,16 @@ export function initLungeDummy(): void {
   })
   engine.addSystem((dt: number) => {
     // Key 2 = respawn dummies only while the overview is closed (open: key 2 zooms out).
-    if (!isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
+    if (!isUpgradeCardsOpen() && !isOverviewActive() && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN)) respawnDummy()
     if (launchCooldown > 0) launchCooldown -= dt
     // Local sim copy for prediction: same walk graph / ramps as the server; never respawns here.
     const seed = getCurrentSeed()
-    if (ANVIL_PREDICT_ENABLED && !isRebuilding() && seed !== predictSeed && getPlacedTilesInOrder().length > 0) {
-      predictWorld.setMaze(buildWalkableGraph(getPlacedTilesInOrder()), getPlacedTilesInOrder(), [], false)
+    const tiles = getPlacedTilesInOrder()
+    const sig = predictMazeSig(seed, tiles)
+    if (ANVIL_PREDICT_ENABLED && !isRebuilding() && tiles.length > 0 && sig !== predictSig) {
+      predictWorld.setMaze(buildWalkableGraph(tiles), tiles, [], false)
       predictSeed = seed
+      predictSig = sig
       predictReady = true
     }
     if (predictReady) {

@@ -8,9 +8,9 @@
  *      1 blue → 2 blue bots; even or zero humans → no bots. No cap.
  *      Wrong-side and excess bots retire immediately.
  *      PvB (setPopulation): every bot on the colour opposite the human
- *      team. Count = pvbBotCount(active humans). At a round boundary the
- *      pool is trimmed to that count. Mid-round it may grow when humans
- *      join, and it retires only when no humans are left.
+ *      team. Count = pvbBotCount(active humans), which is 2× the humans
+ *      and never above PVB_BOT_MAX. The pool adds and removes bots whenever
+ *      the human count changes, including mid-match.
  *   2. Tick every bot; apply resulting paint via the injected callback.
  *
  * Spawning: each bot starts on its own team's base, spread across the
@@ -31,16 +31,26 @@ import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
 import { graphFloorAt } from '../../shared/anvilSim'
-import { KnockSpec } from '../../shared/knocks'
-import { inBurst, inAirSpike, burstFootprint } from '../../shared/burst'
+import { planBotLungeAim } from '../../shared/botDash'
+import { pickCombatTarget, type CombatCandidate } from '../../shared/botCombat'
+import { cellsAlongPath, stampAround } from '../../shared/botPaint'
+import { overdrivePaintRadiusCells } from '../../shared/overdrive'
+import { KnockSpec, lungeKnock, burstKnock, spikeKnock } from '../../shared/knocks'
+import { inBurst, inAirSpike, burstFootprint, burstDir } from '../../shared/burst'
 import {
   BOT_THINK_S, BOT_ENGAGE_RANGE, BOT_SAME_LEVEL_DY, BOT_LUNGE_RANGE, BOT_LUNGE_CHANCE, BOT_BURST_RANGE_FRAC,
-  BOT_BURST_CHANCE, BOT_AIM_ERROR_DEG, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
-  BURST_COOLDOWN_S, BURST_RADIUS, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
+  BOT_BURST_CHANCE, BOT_LUNGE_BRAKE, LUNGE_DISTANCE, LUNGE_ACTIVE_S, LUNGE_COOLDOWN_S,
+  BURST_COOLDOWN_S, BURST_RADIUS, BURST_HIT_MAX_DY, BOT_BURST_PAINT_FRAC, BOT_BURST_PAINT_MIN_CELLS, BOT_BURST_PAINT_CHANCE,
   BOT_LUNGE_WINDUP_S, BOT_SPIKE_CHANCE, BOT_SPIKE_HOP_RANGE, pvbBotCount, BOT_LEAP_ROUTES,
+  AIR_SPIKE_RADIUS, AIR_SPIKE_DEPTH, SERVER_LUNGE_BOT_SLACK,
+  botRecoveryEnabled, RoundFormat,
   BOT_SEPARATE_M, BOT_SEPARATE_MAX_M,
+  STAR_SPEED_MULT, STAR_COOLDOWN_MULT,
 } from '../../shared/pvp'
+import { PLAYING_TEAMS, addTeamCount, emptyTeamCounts, pvpBotFill, teamCountsTotal, teamName as sharedTeamName, type TeamCounts } from '../../shared/team'
 import { Bot, makeWeightedTarget, mulberry32, rollPersonality, PaintReader } from './bot'
+import { orderNearest } from '../../shared/territory'
+import { BOT_REFILL_FRAC, PAINT_CAPACITY } from '../../shared/territory'
 import { BOT_ANIM_LOCO } from '../../shared/botAnim'
 
 type V3 = { x: number; y: number; z: number }
@@ -54,15 +64,15 @@ type Combat = {
   sweep: { target: string; left: number } | null
   /** Crouch before the dash. lungeStarted waits until this hits zero. */
   windup: { left: number; dx: number; dz: number; target: string; at: V3 } | null
-  /** Human we jumped to spike. Cleared when the dive fires or we land. */
+  /** Foe we jumped to spike. Cleared when the dive fires or we land. */
   spikeFor: string | null
-  /** Human this bot is chasing or swinging at, so a teammate can pick someone else. */
+  /** Foe this bot is chasing or swinging at, so a teammate can pick someone else. */
   chaseHuman: string | null
   /** Air spike in the air. A miss paints when the body settles; a hit does not. */
   dive: { id: number; hit: boolean; fx: number; fz: number } | null
 }
 type Gait = { heading: number; walking: boolean; sepX: number; sepZ: number; aim: string | null }
-type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait }
+type LiveBot = Bot & { botId: number; body: BotBody; combat: Combat; gait: Gait; out: boolean }
 const newGait = (): Gait => ({ heading: 0, walking: false, sepX: 0, sepZ: 0, aim: null })
 const newCombat = (): Combat => ({
   think: BOT_THINK_S, lungeCd: 1, burstCd: 2, chaseLeft: 0, ids: 0, sweep: null, windup: null, spikeFor: null, dive: null, chaseHuman: null,
@@ -74,7 +84,7 @@ export interface ManagerDeps {
   /** Read paint state to power smart-target heuristics. */
   paint: PaintReader
   /** Active humans per team (roster idle rule). Humans only — never bots. */
-  activeHumans: () => { red: number; blue: number }
+  activeHumans: () => { red: number; blue: number; green?: number; yellow?: number }
   /** Bot crossed the fall line at `at`; the cloud carries it to `base` (broadcast rescueStart, count the death). */
   onFell?: (id: number, at: V3, base: V3) => void
   /** Bot's cloud trip is over (landed, retired, or a round reset cut it short). */
@@ -93,6 +103,20 @@ export interface ManagerDeps {
   onBotHit?: (id: number, human: string) => void
   /** A bot just entered the round (live scoreboard row). */
   onSpawn?: (id: number, team: number) => void
+  /** Prototype only. Absent in Team Fight and Bot Fight. */
+  economyOn?: () => boolean
+  economyTank?: (painter: string) => number
+  friendlyDepot?: (team: number, fromCell: string) => string | null
+  /** Paint-mode landing: nearest owned walkable cell, or null to use the team spawn. */
+  rescuePaintedHome?: (team: number, from: V3, occupied: Set<string>, painted?: Array<{ id: string; team: number }>) => V3 | null
+  /** One paint snapshot per tick, shared when several bots fall together. */
+  paintedCells?: () => Array<{ id: string; team: number }>
+  /** Live round format: recovery (jump / double / glide-home) is on in every mode. */
+  format?: () => RoundFormat
+  /** True while this bot is holding the star. */
+  starHold?: (id: number) => boolean
+  /** Live star orbs, so a nearby bot can steer toward one. */
+  starOrbs?: () => Array<{ x: number; y: number; z: number; cell: string }>
 }
 
 let deps: ManagerDeps | null = null
@@ -102,19 +126,16 @@ let placedTiles: Placed[] = []
 let bots: LiveBot[] = []
 let botIdCounter = 0
 
-/** PvP fills the short team. PvB locks bots to the other colour (humanTeam is 1 or 2). */
+/** PvP evens all four teams up to a capped target. PvB locks bots to the other colour (humanTeam is 1 or 2). */
 export type BotPopulation = { kind: 'pvp' } | { kind: 'pvb'; humanTeam: number }
 let population: BotPopulation = { kind: 'pvp' }
-let populationGen = 0
-let appliedGen = -1
 /** Base cells per team, deep cells first, refreshed with the graph. */
-const baseCellCache: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+const baseCellCache: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] }
 
 export function initBots(d: ManagerDeps): void {
   deps = d
   population = { kind: 'pvp' }
-  populationGen++
-  console.log('[Bots] initialised (PvP short-team fill; PvB via setPopulation)')
+  console.log('[Bots] initialised (PvP four-team fill; PvB via setPopulation)')
 }
 
 /** Called from startNextRound. The next tick fits the pool (PvP immediately, PvB at the boundary). */
@@ -122,7 +143,6 @@ export function setPopulation(mode: BotPopulation): void {
   population = mode.kind === 'pvb' && (mode.humanTeam === 1 || mode.humanTeam === 2)
     ? { kind: 'pvb', humanTeam: mode.humanTeam }
     : { kind: 'pvp' }
-  populationGen++
 }
 
 /**
@@ -139,6 +159,8 @@ export function rebuildBotGraph(seed: number): void {
     placedTiles = []
     baseCellCache[1] = []
     baseCellCache[2] = []
+    baseCellCache[3] = []
+    baseCellCache[4] = []
     return
   }
   const t0 = Date.now()
@@ -156,26 +178,36 @@ export function rebuildBotGraph(seed: number): void {
 }
 
 function cacheBaseCells(): void {
-  baseCellCache[1] = []
-  baseCellCache[2] = []
+  for (const team of PLAYING_TEAMS) baseCellCache[team] = []
   if (!graph) return
-  const buckets: { 1: string[]; 2: string[] } = { 1: [], 2: [] }
+  const buckets: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] }
   for (const id of graph.nodes) {
     const t = baseTeamOfCellId(id)
-    if (t === 1 || t === 2) buckets[t].push(id)
+    if (t === 1 || t === 2 || t === 3 || t === 4) buckets[t].push(id)
   }
-  for (const team of [1, 2] as const) {
-    buckets[team].sort((a, b) => {
-      const da = graph!.deepNodes.has(a) ? 0 : 1
-      const db = graph!.deepNodes.has(b) ? 0 : 1
-      if (da !== db) return da - db
-      const pa = graph!.worldPos.get(a)
-      const pb = graph!.worldPos.get(b)
-      if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
-      if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
-      return a < b ? -1 : a > b ? 1 : 0
-    })
-    baseCellCache[team] = buckets[team]
+  const sortDeep = (list: string[]) => list.sort((a, b) => {
+    const da = graph!.deepNodes.has(a) ? 0 : 1
+    const db = graph!.deepNodes.has(b) ? 0 : 1
+    if (da !== db) return da - db
+    const pa = graph!.worldPos.get(a)
+    const pb = graph!.worldPos.get(b)
+    if (pa && pb && pa[0] !== pb[0]) return pa[0] - pb[0]
+    if (pa && pb && pa[2] !== pb[2]) return pa[2] - pb[2]
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+  for (const team of PLAYING_TEAMS) {
+    if (buckets[team].length === 0) {
+      const target = baseSpawn(team).pos
+      const scored: Array<{ id: string; d: number }> = []
+      for (const id of graph.nodes) {
+        const p = graph.worldPos.get(id)
+        if (!p) continue
+        scored.push({ id, d: (p[0] - target.x) ** 2 + (p[2] - target.z) ** 2 })
+      }
+      scored.sort((a, b) => a.d - b.d)
+      buckets[team] = scored.slice(0, 8).map(x => x.id)
+    }
+    baseCellCache[team] = sortDeep(buckets[team])
   }
 }
 
@@ -194,7 +226,7 @@ function placeAtBase(b: LiveBot): void {
  * so a reseat can keep its own cell when nobody else is on it.
  */
 function pickSpawn(team: number, self?: LiveBot): { cell: string; pos: V3 } {
-  const cells = team === 1 || team === 2 ? baseCellCache[team] : []
+  const cells = baseCellCache[team] ?? []
   const taken = new Set<string>()
   for (const o of bots) if (o !== self && o.team === team) taken.add(o.currentCell)
   const primary = baseStartCell(team)
@@ -242,33 +274,34 @@ function cellNear(p: V3): string | null {
 function baseStartCell(team: number): string {
   const g = graph!
   const target = baseSpawn(team).pos
-  for (const pool of [g.deepNodes, g.nodes]) {
-    let best: string | null = null, bestD = Infinity
-    for (const id of pool) {
-      if (baseTeamOfCellId(id) !== team) continue
-      const p = g.worldPos.get(id)
-      if (!p) continue
-      const d = (p[0] - target.x) ** 2 + (p[1] - target.y) ** 2 + (p[2] - target.z) ** 2
-      if (d < bestD) { bestD = d; best = id }
+  const nearest = (requireHome: boolean): string | null => {
+    for (const pool of [g.deepNodes, g.nodes]) {
+      let best: string | null = null, bestD = Infinity
+      for (const id of pool) {
+        if (requireHome && baseTeamOfCellId(id) !== team) continue
+        const p = g.worldPos.get(id)
+        if (!p) continue
+        const d = (p[0] - target.x) ** 2 + (p[1] - target.y) ** 2 + (p[2] - target.z) ** 2
+        if (d < bestD) { bestD = d; best = id }
+      }
+      if (best) return best
     }
-    if (best) return best
+    return null
   }
-  return [...g.nodes][0]
+  return nearest(true) ?? nearest(false) ?? [...g.nodes][0]
 }
 
 function teamName(team: number): string {
-  return team === 1 ? 'RED' : team === 2 ? 'BLUE' : 'NONE'
+  return sharedTeamName(team)
 }
 
-function countLabel(c: { red: number; blue: number }): string {
-  return `red=${c.red} blue=${c.blue} bots=${bots.length}`
+function asCounts(c: { red: number; blue: number; green?: number; yellow?: number }): TeamCounts {
+  return { red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0 }
 }
 
-/** Short team and how many bots it needs. Even or empty lobbies need none. */
-function desiredFill(c: { red: number; blue: number }): { team: number; count: number } {
-  if (c.red + c.blue === 0 || c.red === c.blue) return { team: 0, count: 0 }
-  if (c.red < c.blue) return { team: 1, count: c.blue - c.red }
-  return { team: 2, count: c.red - c.blue }
+function countLabel(c: { red: number; blue: number; green?: number; yellow?: number }): string {
+  const t = asCounts(c)
+  return `red=${t.red} blue=${t.blue} green=${t.green} yellow=${t.yellow} bots=${bots.length}`
 }
 
 /** Bot whose nearest human is farthest. No reported positions → newest id. */
@@ -294,7 +327,7 @@ function pickFarthest(pool: LiveBot[]): LiveBot {
   return best
 }
 
-function spawnBot(team: number, reason: string, counts: { red: number; blue: number }): void {
+function spawnBot(team: number, reason: string, counts: { red: number; blue: number; green?: number; yellow?: number }): void {
   if (!graph || !deps) return
   // Own base, spread across the base cells. Each bot is its own instance:
   // path, combat cooldowns, and `bot:<id>` paint / hit credit.
@@ -315,6 +348,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   bot.body = new BotBody(spot.pos, mulberry32(botId * 0xc2b2ae35))
   bot.combat = newCombat()
   bot.gait = newGait()
+  bot.out = false
   bots.push(bot)
   deps.onSpawn?.(bot.botId, team)
   const w = personality.weights
@@ -322,7 +356,7 @@ function spawnBot(team: number, reason: string, counts: { red: number; blue: num
   console.log(`[Bots] spawn #${bot.botId} team ${teamName(team)} at ${spot.cell} (${reason}, ${countLabel(counts)}) pace ${personality.speedMul.toFixed(2)} engage ${personality.engageM.toFixed(1)}m retarget ${personality.retargetS.toFixed(1)}s ${focus}`)
 }
 
-function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number }): void {
+function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: number; green?: number; yellow?: number }): void {
   const i = bots.indexOf(b)
   if (i < 0) return
   bots.splice(i, 1)
@@ -333,40 +367,49 @@ function retireBot(b: LiveBot, reason: string, counts: { red: number; blue: numb
 /** Match the pool to the short team now. Excess and wrong-side bots leave immediately. */
 function balanceBots(): void {
   if (!graph || !deps) return
-  const fresh = appliedGen !== populationGen
-  appliedGen = populationGen
   if (population.kind === 'pvb') {
-    balancePvb(fresh)
+    balancePvb()
     return
   }
-  const counts = deps.activeHumans()
-  const want = desiredFill(counts)
-  if (want.count === 0) {
-    const why = counts.red + counts.blue === 0 ? 'zero humans' : 'teams even'
-    while (bots.length > 0) retireBot(pickFarthest(bots), why, counts)
+  const counts = asCounts(deps.activeHumans())
+  const want = pvpBotFill(counts)
+  if (teamCountsTotal(counts) === 0) {
+    while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  for (const b of bots.filter(x => x.team !== want.team)) {
-    retireBot(b, `wrong team, short side is ${teamName(want.team)}`, counts)
+  const have = emptyTeamCounts()
+  for (const b of bots) addTeamCount(have, b.team)
+  for (const t of PLAYING_TEAMS) {
+    const extra = (t === 1 ? have.red : t === 2 ? have.blue : t === 3 ? have.green : have.yellow)
+      - (t === 1 ? want.red : t === 2 ? want.blue : t === 3 ? want.green : want.yellow)
+    if (extra <= 0) continue
+    const side = bots.filter(x => x.team === t)
+    for (let i = 0; i < extra && side.length > 0; i++) {
+      const b = pickFarthest(side)
+      retireBot(b, 'excess, farthest from a human', counts)
+      const idx = side.indexOf(b)
+      if (idx >= 0) side.splice(idx, 1)
+    }
   }
-  while (bots.length > want.count) retireBot(pickFarthest(bots), 'excess, farthest from a human', counts)
-  while (bots.length < want.count) {
-    const before = bots.length
-    spawnBot(want.team, 'fill short team', counts)
-    if (bots.length === before) break
+  for (const t of PLAYING_TEAMS) {
+    const need = t === 1 ? want.red : t === 2 ? want.blue : t === 3 ? want.green : want.yellow
+    while (bots.filter(x => x.team === t).length < need) {
+      const before = bots.length
+      spawnBot(t, 'fill team', counts)
+      if (bots.length === before) break
+    }
   }
 }
 
 /**
- * PvB pool. Wrong-team leftovers (the previous format) retire. On the tick
- * that applies a new population, trim down to the round-start count. After
- * that, only add bots — a human leaving does not retire anyone, unless the
- * human count hits zero.
+ * PvB pool. Wrong-team leftovers retire. The count is 2× the humans, capped,
+ * and it is applied every tick: humans joining add bots, humans leaving
+ * remove the farthest ones.
  */
-function balancePvb(fresh: boolean): void {
+function balancePvb(): void {
   if (!deps) return
   const counts = deps.activeHumans()
-  const humans = counts.red + counts.blue
+  const humans = counts.red + counts.blue + (counts.green ?? 0) + (counts.yellow ?? 0)
   const wantN = pvbBotCount(humans)
   const team = population.kind === 'pvb' && population.humanTeam === 1 ? 2 : 1
   for (const b of bots.filter(x => x.team !== team)) {
@@ -376,9 +419,7 @@ function balancePvb(fresh: boolean): void {
     while (bots.length > 0) retireBot(pickFarthest(bots), 'zero humans', counts)
     return
   }
-  if (fresh) {
-    while (bots.length > wantN) retireBot(pickFarthest(bots), 'round start, fit PvB count', counts)
-  }
+  while (bots.length > wantN) retireBot(pickFarthest(bots), 'fit 2x human count', counts)
   while (bots.length < wantN) {
     const before = bots.length
     spawnBot(team, 'PvB fill', counts)
@@ -397,8 +438,16 @@ let simClock = 0
 export function botSimTime(): number { return simClock }
 
 /** Drop every bot. The lobby does not run the match, so ghosts must leave before the next broadcast. */
+let populationFrozen = false
+export function freezeBots(on: boolean): void { populationFrozen = on }
+export function benchBot(id: number): void {
+  const b = bots.find(x => x.botId === id)
+  if (b) b.out = true
+}
+export function balloonBotIds(): number[] { return bots.map(b => b.botId) }
+
 export function sleepBots(): void {
-  const counts = deps ? deps.activeHumans() : { red: 0, blue: 0 }
+  const counts = deps ? deps.activeHumans() : { red: 0, blue: 0, green: 0, yellow: 0 }
   while (bots.length > 0) retireBot(bots[0], 'lobby', counts)
 }
 
@@ -410,7 +459,7 @@ export function tickBots(dtSec: number): void {
   // Immediate: a human joining or waking drops the excess this tick, not at
   // the round boundary. Bot.team is fixed per instance (target is bound to it),
   // so a side flip retires the old bots and spawns on the new base.
-  balanceBots()
+  if (!populationFrozen) balanceBots()
 
   // Walking ghost whose cell no longer exists (e.g. the tile under it went
   // away): back to its own base.
@@ -425,13 +474,38 @@ export function tickBots(dtSec: number): void {
   // Body first (knock flight, cloud ride, landing), then the legs if the
   // body lets them walk. Each step paints the stepped cell AND its walkable
   // neighbors, matching the ~3x3 footprint human players apply via
-  // paintTick. Knocked, falling or riding bots don't paint.
+  // paintTick. A ground dash also paints that stamp along the swept path,
+  // so a 46 m/s lunge does not skip cells between ticks. Knocked, falling,
+  // riding, or mid-air recovery dashes over the void don't paint.
   const dtMs = dtSec * 1000
+  const recoverOn = botRecoveryEnabled(deps.format?.() ?? 'bases')
+  for (const b of bots) b.body.recoveryEnabled = recoverOn
+  // Only a knocked body can cross the fall line this tick (botBody.ts).
+  // Share one paint snapshot if several bots are in the air together.
+  let paintedSnap: Array<{ id: string; team: number }> | undefined
   for (const b of bots) {
-    const world = { graph, rampTiles, tiles: placedTiles, base: cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos }
+    const spawn = cellPos(baseStartCell(b.team)) ?? baseSpawn(b.team).pos
+    let home = spawn
+    if (b.body.mode === 'knock' && deps.rescuePaintedHome) {
+      if (paintedSnap === undefined) paintedSnap = deps.paintedCells ? deps.paintedCells() : []
+      const occupied = new Set<string>()
+      for (const o of bots) {
+        if (o === b || o.body.inRescue()) continue
+        occupied.add(o.currentCell)
+      }
+      home = deps.rescuePaintedHome(b.team, b.body.pos, occupied, paintedSnap) ?? spawn
+    }
+    const world = { graph, rampTiles, tiles: placedTiles, base: home }
+    b.body.lungeEnabled = (deps?.abilities?.() ?? { lunge: true, burst: true }).lunge
+    const prev = { ...b.body.pos }
     for (const ev of b.body.tick(dtSec, world)) {
       if (ev.type === 'trace') console.log(ev.line)
       else if (ev.type === 'recover') console.log(`[Bots] ghost ${b.botId} recovery ${ev.how}`)
+      else if (ev.type === 'dash') {
+        b.combat.lungeCd = LUNGE_COOLDOWN_S
+        deps?.onLunge?.(b.botId, ++b.combat.ids, ev.dx, ev.dz, ev.at)
+        console.log(`[Bots] ghost ${b.botId} recovery dashes`)
+      }
       else if (ev.type === 'settled') {
         const dive = b.combat.dive
         b.combat.dive = null
@@ -450,14 +524,20 @@ export function tickBots(dtSec: number): void {
         console.log(`[Bots] ghost ${b.botId} fell at ${ev.catch.x.toFixed(1)},${ev.catch.y.toFixed(1)},${ev.catch.z.toFixed(1)} - cloud home`)
         deps.onFell?.(b.botId, ev.catch, world.base)
       } else if (ev.type === 'landed') {
-        b.currentCell = baseStartCell(b.team)
+        b.currentCell = cellNear(b.body.pos) ?? baseStartCell(b.team)
         b.clearPath()
         deps.onRescueEnd?.(b.botId)
         console.log(`[Bots] ghost ${b.botId} home`)
       }
     }
+    if (b.out) { b.gait.walking = false; continue }
     fillSense(b)
     fight(b, dtSec)
+    if (b.body.ownDashPaint()) {
+      const cells = cellsAlongPath(graph, rampTiles, prev, b.body.pos, overdrivePaintRadiusCells(!!deps?.starHold?.(b.botId)))
+      const at = cellNear(b.body.pos) ?? cells[0] ?? b.currentCell
+      for (const nid of orderNearest(cells, at)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
+    }
     if (!b.body.canWalk()) { b.gait.walking = false; continue }
     const stepped = b.tick(dtMs, graph)
     const leap = b.takeLeap()
@@ -489,39 +569,90 @@ export function tickBots(dtSec: number): void {
       // Paint the full 3x3 stamp around the stepped cell (matches human
       // 9-cell footprint). Uses cellId arithmetic + graph.nodes lookup so
       // off-corridor positions are filtered.
-      const colonIdx = stepId.indexOf(':')
-      if (colonIdx < 0) continue
-      const prefix = stepId.slice(0, colonIdx + 1)
-      const [colStr, rowStr] = stepId.slice(colonIdx + 1).split(',')
-      const col = parseInt(colStr, 10)
-      const row = parseInt(rowStr, 10)
-      for (let dc = -1; dc <= 1; dc++) {
-        for (let dr = -1; dr <= 1; dr++) {
-          const nid = `${prefix}${col + dc},${row + dr}`
-          if (graph.nodes.has(nid)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
-        }
-      }
+      const stamp = stampAround(graph, stepId, overdrivePaintRadiusCells(!!deps?.starHold?.(b.botId)))
+      for (const nid of orderNearest(stamp, stepId)) deps.applyPaint(nid, b.team, `bot:${b.botId}`)
     }
   }
 }
 
 /**
- * Combat brain, every BOT_THINK_S while the bot is on its feet: nearest enemy
- * human on its level within BOT_ENGAGE_RANGE → lunge if close, burst if inside
- * the radius, otherwise chase. Players' cooldowns; one roll per ability per think.
+ * Combat brain, every BOT_THINK_S while the bot is on its feet: nearest foe
+ * (humans preferred, enemy-team bots allowed) on its level within engage
+ * range → lunge if close, burst if inside the radius, otherwise chase.
+ * Players' cooldowns; one roll per ability per think. Hits on bots use the
+ * same knockback as a player hit, so the struck bot runs recovery as usual.
  */
-/** Airborne, past the top of the hop: spike the human in the cylinder, or dive the miss. */
-function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: number; y: number; z: number }>): void {
+/** Airborne, past the top of the hop: spike the foe in the cylinder, or dive the miss. */
+/** Feet are over a walkable cell, not off the edge or on a perimeter lip. */
+function overArena(p: { x: number; y: number; z: number }): boolean {
+  if (!graph) return false
+  return graphFloorAt(graph, rampTiles, p.x, p.z, p.y, 1.05, 8) !== null
+}
+
+function foeCandidates(b: LiveBot): CombatCandidate[] {
+  const out: CombatCandidate[] = []
+  for (const h of (deps?.humans?.() ?? b.sense.humans ?? [])) {
+    out.push({ id: h.id, team: h.team, x: h.x, y: h.y, z: h.z, kind: 'human' })
+  }
+  for (const o of bots) {
+    if (o.botId === b.botId || o.out) continue
+    if (!o.body.canBeHit()) continue
+    const q = o.body.pos
+    out.push({ id: `bot:${o.botId}`, team: o.team, x: q.x, y: q.y, z: q.z, kind: 'bot' })
+  }
+  return out
+}
+
+function pickFoe(b: LiveBot, engageRange: number): CombatCandidate | null {
+  const p = b.body.pos
+  return pickCombatTarget(
+    { id: `bot:${b.botId}`, team: b.team, x: p.x, y: p.y, z: p.z },
+    foeCandidates(b),
+    { engageRange, avoid: b.sense.avoidHumans },
+  )
+}
+
+function shoveLungeBot(attacker: LiveBot, targetId: string): boolean {
+  if (!targetId.startsWith('bot:')) return false
+  const id = parseInt(targetId.slice(4), 10)
+  const o = bots.find(x => x.botId === id)
+  if (!o || o.team === attacker.team) return false
+  const p = attacker.body.pos
+  const q = o.body.pos
+  if (Math.hypot(q.x - p.x, q.z - p.z) >= 2 || Math.abs(q.y - p.y) >= BOT_SAME_LEVEL_DY) return false
+  const dx = q.x - p.x, dz = q.z - p.z
+  const len = Math.hypot(dx, dz) || 1
+  if (!hitBot(id, p.x, p.y, p.z, 2, BOT_SAME_LEVEL_DY, () => lungeKnock(dx / len, dz / len))) return false
+  deps?.onBotHit?.(attacker.botId, targetId)
+  return true
+}
+
+function shoveBurstBots(attacker: LiveBot, origin: V3, fx: number, fz: number): void {
+  for (const o of bots) {
+    if (o.botId === attacker.botId || o.team === attacker.team || o.out) continue
+    if (!inBurst(origin, o.body.pos)) continue
+    const d = burstDir(origin, o.body.pos, fx, fz)
+    if (hitBot(o.botId, origin.x, origin.y, origin.z, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 3, () => burstKnock(d.x, d.z))) {
+      deps?.onBotHit?.(attacker.botId, `bot:${o.botId}`)
+    }
+  }
+}
+
+function trySpike(b: LiveBot): void {
   const c = b.combat
   if (!b.body.isAirborne() || b.body.verticalSpeed() > 1) return
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
   if (!can.burst || c.burstCd > 0 || c.dive) return
   const p = b.body.pos
-  let aim: (typeof humans)[number] | null = null
-  for (const h of humans) {
-    if (h.team !== b.team && inAirSpike(p, h)) { aim = h; break }
+  // Same cylinder as a player's aerial Burst, and only over the arena — never
+  // off the edge, even if a target is in range below.
+  if (!overArena(p)) return
+  const foes = foeCandidates(b)
+  let aim = foes.find(h => h.id === c.spikeFor && inAirSpike(p, h)) ?? null
+  if (!aim) {
+    const inCyl = foes.filter(h => h.team !== b.team && inAirSpike(p, h))
+    aim = pickCombatTarget({ id: `bot:${b.botId}`, team: b.team, x: p.x, y: p.y, z: p.z }, inCyl, { engageRange: 1e9 })
   }
-  if (!aim && c.spikeFor) aim = humans.find(h => h.id === c.spikeFor) ?? null
   if (!aim && !c.spikeFor) return
   const dx = (aim?.x ?? p.x) - p.x, dz = (aim?.z ?? p.z) - p.z
   const fl = Math.hypot(dx, dz) || 1
@@ -532,6 +663,12 @@ function trySpike(b: LiveBot, humans: Array<{ id: string; team: number; x: numbe
   c.dive = { id, hit, fx: dx / fl, fz: dz / fl }
   c.spikeFor = null
   deps?.onBurst?.(b.botId, id, b.team, { ...p }, 1, c.dive.fx, c.dive.fz)
+  if (hit && aim && aim.kind === 'bot') {
+    const bid = parseInt(aim.id.slice(4), 10)
+    if (hitBot(bid, p.x, p.y, p.z, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, grounded => spikeKnock(c.dive!.fx, c.dive!.fz, grounded))) {
+      deps?.onBotHit?.(b.botId, aim.id)
+    }
+  }
   console.log(`[Bots] ghost ${b.botId} spikes${hit ? ` ${aim!.id.slice(0, 8)}` : ' (miss)'}`)
 }
 
@@ -575,18 +712,46 @@ function separate(b: LiveBot, pos: V3): V3 {
   return { x: nx, y: pos.y, z: nz }
 }
 
+const STAR_SEEK_M = 24
+function botStarred(id: number): boolean { return !!deps?.starHold?.(id) }
+function seekStar(b: LiveBot): boolean {
+  if (b.body.inRescue() || b.combat.windup || b.combat.dive || b.combat.sweep) return false
+  const orbs = deps?.starOrbs?.() ?? []
+  if (!orbs.length) return false
+  const p = b.body.pos
+  let best: { cell: string } | null = null
+  let bestD = STAR_SEEK_M
+  for (const o of orbs) {
+    if (Math.abs(o.y - p.y) > 4) continue
+    const d = Math.hypot(o.x - p.x, o.z - p.z)
+    if (d < bestD) { bestD = d; best = o }
+  }
+  if (!best || best.cell === b.currentCell) return false
+  if (b.goalOf() === best.cell) return true
+  b.chase(best.cell)
+  return true
+}
 function fight(b: LiveBot, dt: number): void {
   const c = b.combat
-  c.lungeCd -= dt; c.burstCd -= dt; c.chaseLeft -= dt; c.think -= dt
+  const starred = botStarred(b.botId)
+  b.setStarSpeedMul(starred ? STAR_SPEED_MULT : 1)
+  const cdRate = starred && STAR_COOLDOWN_MULT > 0 ? 1 / STAR_COOLDOWN_MULT : 1
+  c.lungeCd -= dt * cdRate; c.burstCd -= dt * cdRate; c.chaseLeft -= dt; c.think -= dt
   const humans = deps?.humans?.() ?? []
   if (c.sweep) {
     c.sweep.left -= dt
-    const h = humans.find(x => x.id === c.sweep!.target)
+    const targetId = c.sweep.target
     const p = b.body.pos
-    if (h && Math.hypot(h.x - p.x, h.z - p.z) < 2 && Math.abs(h.y - p.y) < BOT_SAME_LEVEL_DY) {
-      deps?.onBotHit?.(b.botId, h.id)
-      c.sweep = null
-    } else if (c.sweep.left <= 0) c.sweep = null
+    if (targetId.startsWith('bot:')) {
+      if (shoveLungeBot(b, targetId)) c.sweep = null
+      else if (c.sweep.left <= 0) c.sweep = null
+    } else {
+      const h = humans.find(x => x.id === targetId)
+      if (h && Math.hypot(h.x - p.x, h.z - p.z) < 2 && Math.abs(h.y - p.y) < BOT_SAME_LEVEL_DY) {
+        deps?.onBotHit?.(b.botId, h.id)
+        c.sweep = null
+      } else if (c.sweep.left <= 0) c.sweep = null
+    }
   }
   if (c.windup) {
     c.windup.left -= dt
@@ -602,25 +767,24 @@ function fight(b: LiveBot, dt: number): void {
     }
     return
   }
-  if (!b.body.canWalk()) { trySpike(b, humans); return }
+  if (!b.body.canWalk()) { trySpike(b); return }
+  if (deps?.economyOn?.() && deps.economyTank && deps.friendlyDepot) {
+    const tank = deps.economyTank(`bot:${b.botId}`)
+    if (tank < PAINT_CAPACITY * BOT_REFILL_FRAC) {
+      const cell = deps.friendlyDepot(b.team, b.currentCell)
+      if (cell) { b.stay(cell); return }
+    }
+  }
   if (c.think > 0 || !graph) return
   c.think = BOT_THINK_S
   const p = b.body.pos
   const engage = b.personality?.engageM ?? BOT_ENGAGE_RANGE
-  const nearestHuman = (skipTaken: boolean) => {
-    let tgt: (typeof humans)[number] | null = null, best = engage
-    for (const h of humans) {
-      if (h.team === b.team || Math.abs(h.y - p.y) > BOT_SAME_LEVEL_DY) continue
-      if (skipTaken && b.sense.avoidHumans.has(h.id)) continue
-      const d = Math.hypot(h.x - p.x, h.z - p.z)
-      if (d < best) { best = d; tgt = h }
-    }
-    return { tgt, best }
-  }
-  let { tgt, best } = nearestHuman(true)
-  if (!tgt) ({ tgt, best } = nearestHuman(false))
+  const tgt = pickFoe(b, engage)
+  const best = tgt ? Math.hypot(tgt.x - p.x, tgt.z - p.z) : engage
   c.chaseHuman = tgt ? tgt.id : null
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
+  const melee = !!tgt && (best <= BOT_LUNGE_RANGE || inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC))
+  if (!melee && seekStar(b)) return
   if (!tgt) {
     // Nobody to fight: Burst for paint, like a player does, where most of the footprint isn't ours yet.
     if (!can.burst || c.burstCd > 0 || !deps) return
@@ -630,6 +794,7 @@ function fight(b: LiveBot, dt: number): void {
     if (gain / fp.length < BOT_BURST_PAINT_FRAC || Math.random() >= BOT_BURST_PAINT_CHANCE) return
     c.burstCd = BURST_COOLDOWN_S
     deps.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    shoveBurstBots(b, p, 0, 1)
     console.log(`[Bots] ghost ${b.botId} bursts for paint (${gain}/${fp.length} cells)`)
     return
   }
@@ -643,19 +808,20 @@ function fight(b: LiveBot, dt: number): void {
     }
   }
   if (can.lunge && c.lungeCd <= 0 && best <= BOT_LUNGE_RANGE && Math.random() < BOT_LUNGE_CHANCE) {
-    const err = (Math.random() * 2 - 1) * BOT_AIM_ERROR_DEG * Math.PI / 180
-    const ax = (tgt.x - p.x) / Math.max(best, 1e-3), az = (tgt.z - p.z) / Math.max(best, 1e-3)
-    const dx = ax * Math.cos(err) - az * Math.sin(err), dz = ax * Math.sin(err) + az * Math.cos(err)
+    const aim = planBotLungeAim(p, tgt, graph, rampTiles, Math.random)
     c.lungeCd = LUNGE_COOLDOWN_S
-    c.windup = { left: BOT_LUNGE_WINDUP_S, dx, dz, target: tgt.id, at: { ...p } }
+    c.windup = { left: BOT_LUNGE_WINDUP_S, dx: aim.dx, dz: aim.dz, target: tgt.id, at: { ...p } }
     b.stun(BOT_LUNGE_WINDUP_S * 1000)
     b.clearPath()
-    console.log(`[Bots] ghost ${b.botId} winds up a lunge at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
+    console.log(`[Bots] ghost ${b.botId} winds up a lunge at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m${aim.slipped ? ', edge slip' : ''})`)
     return
   }
   if (can.burst && c.burstCd <= 0 && inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC) && Math.random() < BOT_BURST_CHANCE) {
     c.burstCd = BURST_COOLDOWN_S
+    const fx = tgt.x - p.x, fz = tgt.z - p.z
+    const fl = Math.hypot(fx, fz) || 1
     deps?.onBurst?.(b.botId, ++c.ids, b.team, { ...p })
+    shoveBurstBots(b, p, fx / fl, fz / fl)
     console.log(`[Bots] ghost ${b.botId} bursts at ${tgt.id.slice(0, 8)} (${best.toFixed(1)} m)`)
     return
   }
@@ -716,6 +882,30 @@ export function getBotProfiles(): Array<{
     goal: b.goalOf(),
     chaseHuman: b.combat.chaseHuman,
   }))
+}
+
+export function botDepotFeet(): Array<{ id: string; team: number; cell: string }> {
+  const out: Array<{ id: string; team: number; cell: string }> = []
+  for (const b of bots) {
+    if (!b.body.canWalk()) continue
+    out.push({ id: `bot:${b.botId}`, team: b.team, cell: b.currentCell })
+  }
+  return out
+}
+
+/** Grounded bot stance for Prototype territory regen. */
+export function botRegenStances(): Array<{ id: string; team: number; cell: string; y: number; grounded: boolean }> {
+  const out: Array<{ id: string; team: number; cell: string; y: number; grounded: boolean }> = []
+  for (const b of bots) {
+    out.push({
+      id: `bot:${b.botId}`,
+      team: b.team,
+      cell: b.currentCell,
+      y: b.body.pos.y,
+      grounded: b.body.isGrounded() && !b.body.inRescue(),
+    })
+  }
+  return out
 }
 
 export function getBotPositions(): Array<{ id: number; team: number; x: number; y: number; z: number; st: BotWireState }> {

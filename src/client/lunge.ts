@@ -36,14 +36,15 @@ import {
   PlayerIdentityData, PointerEventType, Transform, AudioSource, inputSystem, Physics, Tween, EasingFunction, AvatarMask,
 } from '@dcl/sdk/ecs'
 import { triggerEmote } from '~system/RestrictedActions'
-import { isPlayerGrounded } from '../paint'
+import { isPlayerGrounded, paintEconomyOn, paintTank } from '../paint'
+import { isBalloonRound } from '../round'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE, LUNGE_STICK_FORCE,
-  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
+  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, STAR_COOLDOWN_MULT, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
@@ -54,11 +55,13 @@ import { initLungeHitbox, startHitbox, placeHitbox, flashHitbox } from './lungeH
 import { playLungeSfx, pickLungeSrc, DASH_HIT_SRC } from './audio'
 import { sendLungeStart, sendLungeHit } from './clientHandler'
 import { hitsOpen } from './phase'
-import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { isLocalOverdriveActive } from './overdrive'
+import { localHasteCooldownMult } from './upgrades'
 import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
 import { getMoveLock, isMoveLocked, setMoveLock, type MoveLock } from './moveLock'
@@ -71,6 +74,7 @@ type State = 'ready' | 'active' | 'recovery' | 'cooldown'
 let state: State = 'ready'
 let stateLeft = 0
 let cooldownLeft = 0
+let cooldownTotal = LUNGE_COOLDOWN_S
 let lungeId = 0
 let dir = { x: 0, z: 1 }
 let startPos: V3 = { x: 0, y: 0, z: 0 }
@@ -110,8 +114,9 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
   fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const WHITE = { r: 1, g: 1, b: 1 }
-const fxTeam = (t: Team) => inLobby() ? Team.None : t
-const teamRgb = (t: Team) => inLobby() ? WHITE : (TEAM_RGB[t] ?? WHITE)
+const shownTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
+const teamRgb = (t: Team) => TEAM_RGB[t] ?? WHITE
+const localDry = () => paintEconomyOn() && paintTank() <= 0
 const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const RECOVERY_CLICK = 'assets/sounds/click.wav'
 let recoveryClickEnt: Entity = 0 as Entity
@@ -155,7 +160,7 @@ const streakPool: Entity[] = []
 let streakIdx = 0
 const streakLive: Array<{ e: Entity; until: number }> = []
 /** Avatars currently lunging (us = '' key uses PlayerEntity). */
-const lungers = new Map<string, { left: number; accum: number }>()
+const lungers = new Map<string, { left: number; accum: number; dry: boolean }>()
 
 function spawnStreak(p: V3, team: Team): void {
   if (streakPool.length === 0) {
@@ -206,8 +211,9 @@ function tickStreaks(dt: number): void {
     if (l.left <= 0) { lungers.delete(who); dashPopEnd(who); continue }
     const p = avatarPos(who)
     if (!p) continue
-    const team = who === '' ? localTeam() : teamOfUser(who)
-    dashPop(who, p, fxTeam(team))
+    const dry = l.dry
+    const team = shownTeam(who === '' ? localTeam() : teamOfUser(who), dry)
+    dashPop(who, p, team)
     l.accum += dt
     while (l.accum >= STREAK_INTERVAL) { l.accum -= STREAK_INTERVAL; spawnStreak(p, team) }
   }
@@ -331,7 +337,7 @@ export function getLungeHud(): { show: boolean; enabled: boolean; ready: boolean
   const cd = Math.max(0, cooldownLeft)
   return {
     show: LUNGE_MODE !== 'off', enabled, ready: enabled && localTeam() !== Team.None && cd <= 0 && !isMoveLocked(),
-    cooldown: cd, cooldownFrac: cd / LUNGE_COOLDOWN_S, recovering: state === 'recovery' || isMoveLocked(),
+    cooldown: cd, cooldownFrac: cd / (cooldownTotal || LUNGE_COOLDOWN_S), recovering: state === 'recovery' || isMoveLocked(),
   }
 }
 
@@ -354,7 +360,8 @@ export function triggerLunge(): void {
   startPos = { x: t.position.x, y: t.position.y, z: t.position.z }
   prevPos = startPos
   state = 'active'; stateLeft = LUNGE_ACTIVE_S
-  cooldownLeft = LUNGE_COOLDOWN_S
+  cooldownTotal = LUNGE_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownLeft = cooldownTotal
   hitWindowLeft = LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S
   hitAny = false
   baseSpeed = Math.max(0, lastVel.x * dir.x + lastVel.z * dir.z)
@@ -368,12 +375,12 @@ export function triggerLunge(): void {
     if (isPlayerGrounded()) Physics.applyForceToPlayerForDuration(stickForceEnt, LUNGE_ACTIVE_S, Vector3.create(0, -1, 0), LUNGE_STICK_FORCE)
   })
   sendLungeStart(lungeId, dir.x, dir.z, startPos.x, startPos.y, startPos.z)
-  // Anticipation without input delay: team glow at the chest + lunge take.
-  spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(fxTeam(localTeam())),
+  const look = shownTeam(localTeam(), localDry())
+  spawnFx({ x: startPos.x + dir.x * 0.6, y: startPos.y + 1.1, z: startPos.z + dir.z * 0.6 }, teamRgb(look),
     0.08, 0.08, 0.5, 1.1, 0.5, undefined, { who: '', off: { x: dir.x * 0.6, y: 1.1, z: dir.z * 0.6 } })
-  lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0 })
-  startSlash('', dir.x, dir.z, fxTeam(localTeam()))
-  startHitbox('', dir.x, dir.z, fxTeam(localTeam()))
+  lungers.set('', { left: LUNGE_ACTIVE_S, accum: 0, dry: look === Team.None && !inLobby() })
+  startSlash('', dir.x, dir.z, look)
+  startHitbox('', dir.x, dir.z, look)
   dbgLog(`#${lungeId} start dir=(${dir.x.toFixed(2)},${dir.z.toFixed(2)})`)
   for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: startPos.x + dir.x * s, y: startPos.y + 0.2, z: startPos.z + dir.z * s }, { r: 1, g: 1, b: 0 }, 0.15)
   checkHits(startPos, startPos)
@@ -405,7 +412,7 @@ function checkHits(a0: V3, a1: V3): void {
     const k = knockDir(a1, t, dir.x, dir.z)
     if (id.startsWith('dummy:')) hitDummy(parseInt(id.slice(6), 10), k.x, k.z, 0, lungeId) // shared anvil: server applies it
     else sendLungeHit(lungeId, id, k.x, k.z, a1.x, a1.y, a1.z)
-    impactFx(t, myTeam, true) // optimistic: the attacker feels it now
+    impactFx(t, shownTeam(myTeam, lungers.get('')?.dry ?? false), true)
     flashSlash('')
     flashHitbox('')
     dbgMark({ x: t.x, y: t.y + 2.2, z: t.z }, { r: 1, g: 0, b: 0 }, 0.5)
@@ -438,17 +445,16 @@ function checkHits(a0: V3, a1: V3): void {
 }
 
 // ─── Network events ─────────────────────────────────────────────────
-function onStarted(attacker: string, id: number, dx: number, dz: number, x: number, y: number, z: number): void {
+function onStarted(attacker: string, id: number, dx: number, dz: number, x: number, y: number, z: number, dry: boolean): void {
   const att = attacker.toLowerCase()
   gate.sawStart(att, id, Date.now())
   if (att === myAddress()) return
-  lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0 })
-  startSlash(att, dx, dz, fxTeam(teamOfUser(att)))
-  startHitbox(att, dx, dz, fxTeam(teamOfUser(att)))
+  const look = shownTeam(teamOfUser(att), dry)
+  lungers.set(att, { left: LUNGE_ACTIVE_S, accum: 0, dry })
+  startSlash(att, dx, dz, look)
+  startHitbox(att, dx, dz, look)
   const p = avatarPos(att)
-  // Remote lunge: glow + the same lunge take set, positional at that avatar.
-  // life 0.7 s so the take (~0.6 s) isn't cut when the fx entity is removed.
-  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(fxTeam(teamOfUser(att))), 0.08, 0.7, 0.5, 1.1, 0.5,
+  if (p) spawnFx({ x: p.x, y: p.y + 1.1, z: p.z }, teamRgb(look), 0.08, 0.7, 0.5, 1.1, 0.5,
     { src: pickLungeSrc(), vol: 0.9 }, { who: att, off: { x: 0, y: 1.1, z: 0 } })
   // Victim anticipation: if we may be (or enter) the hit volume, knock ourselves
   // as soon as contact is visible here — don't wait for server Impact (~1 RTT).
@@ -477,7 +483,7 @@ function applyVictimKnock(att: string, id: number, dx: number, dz: number, why: 
   startKnockLock()
   const p = Transform.getOrNull(engine.PlayerEntity)?.position
   if (p) {
-    impactFx(p, teamOfUser(att), true)
+    impactFx(p, shownTeam(teamOfUser(att), lungers.get(att)?.dry ?? false), true)
     for (let s = 0.5; s <= 3; s += 0.5) dbgMark({ x: p.x + dx * s, y: p.y + 0.3, z: p.z + dz * s }, { r: 1, g: 0.3, b: 0 }, 0.18)
   }
   lastHitBy = att; lastHitAge = 0
@@ -513,12 +519,16 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
   const att = attacker.toLowerCase()
   const tgt = target.toLowerCase()
   const attTeam = teamOfUser(att)
+  if (tgt.startsWith('bot:')) {
+    const bid = parseInt(tgt.slice(4), 10)
+    if (Number.isFinite(bid)) playBotKnock(bid, dx, dz, 'lunge')
+  }
   if (me && att === me) return // attacker already showed its FX
   flashSlash(att)
   flashHitbox(att)
   if (tgt.startsWith('bot:')) {
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
-    if (b) impactFx({ x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }, attTeam, true)
+    if (b) impactFx({ x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }, shownTeam(attTeam, lungers.get(att)?.dry ?? false), true)
     return
   }
   if (me && tgt === me) {
@@ -527,7 +537,7 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     return
   }
   const p = avatarPos(tgt)
-  if (p) impactFx(p, attTeam, true)
+  if (p) impactFx(p, shownTeam(attTeam, lungers.get(att)?.dry ?? false), true)
 }
 
 function cancelLunge(why: string): void {
@@ -556,7 +566,7 @@ export function initLunge(): void {
   Transform.create(recoveryClickEnt, { parent: engine.CameraEntity })
   initLungeSlash(who => { const p = avatarPos(who); return p ? Vector3.create(p.x, p.y, p.z) : null })
   initLungeHitbox(avatarPos)
-  events.on('lunge:started', ({ attacker, id, dx, dz, x, y, z }) => onStarted(attacker, id, dx, dz, x, y, z))
+  events.on('lunge:started', ({ attacker, id, dx, dz, x, y, z, dry }) => onStarted(attacker, id, dx, dz, x, y, z, dry === 1))
   events.on('round:reset', () => { cancelLunge('round reset'); clearKnockLock(); pendingVictim.clear() })
   events.on('lunge:impact', ({ attacker, id, target, dx, dz }) => onImpact(attacker, id, target, dx, dz))
   events.on('player:respawned', ({ why }) => {

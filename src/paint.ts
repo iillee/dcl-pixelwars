@@ -10,7 +10,12 @@ import { engine, Transform, MeshRenderer, Material, Entity } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { playClaimSfx } from './client/audio'
 import { isMoveLocked } from './client/moveLock'
+import { isLocalOverdriveActive } from './client/overdrive'
+import { overdrivePaintRadiusCells, paintBrushOffsets } from './shared/overdrive'
+import { upgradePaintBrushOffsets } from './shared/upgrades'
+import { localPaintAreaMult } from './client/upgrades'
 import { BURST_STANCE_SLACK } from './shared/pvp'
+import { paintAllowed } from './shared/balloon'
 import { MAZE_ORIGIN, baseTeamOfCellId } from './maze/generator'
 import { BASE_PAINT_LOCK } from './maze/level'
 
@@ -24,8 +29,9 @@ function lockedTeam(id: string): Team {
 // Re-exported here so existing `import { Team } from './paint'` call sites
 // keep working during the refactor.
 export { Team } from './shared/team'
-import { Team } from './shared/team'
+import { Team, coverageFromTeams, type TeamCoverage } from './shared/team'
 import { events } from './shared/events'
+import { isRegenEligible, PAINT_CAPACITY, PAINT_REFILL_PER_SEC, refillOnTerritory } from './shared/territory'
 
 /**
  * initPaintNet — wire this module's server-event subscribers.
@@ -35,40 +41,56 @@ import { events } from './shared/events'
  * from setupClient() after paint state is initialized.
  */
 export function initPaintNet(): void {
-  // Server broadcasts every 200ms with all changes since the last tick
-  // + current coverage. This is the ONLY path that colors cells now —
-  // both our own paint (echoed back) and other players' paint arrive
-  // through here uniformly.
-  events.on('paint:delta', ({ changes, red, blue, total }) => {
+  events.on('paint:delta', ({ changes, red, blue, green, yellow, total }) => {
     for (const { id, team } of changes) applyRemotePaint(id, team)
-    setServerCoverage({ red, blue, total })
+    setServerCoverage({ red, blue, green: green ?? 0, yellow: yellow ?? 0, total })
   })
 
-  // Snapshot arrives once per teamAssigned (or on manual requestSnapshot).
-  // Same processing path as paint:delta — material updates and cellTeam
-  // bookkeeping stay consistent whether the client's tile entities have
-  // finished spawning yet or not (spawnOne adopts pre-existing paint).
-  events.on('paint:snapshot', ({ entries, red, blue, total }) => {
-    for (const { id, team } of entries) applyRemotePaint(id, team)
-    setServerCoverage({ red, blue, total })
+  events.on('paint:snapshot', ({ entries, red, blue, green, yellow, total }) => {
+    for (const { id, team } of entries) {
+      applyRemotePaint(id, team)
+      cellSince.set(id, 0)
+    }
+    setServerCoverage({ red, blue, green: green ?? 0, yellow: yellow ?? 0, total })
   })
 
-  // Round boundary: clear the paint map BEFORE the seed watcher sees
-  // the new seed and rebuilds. Two reasons:
-  // 1) rebuildMaze does NOT clear (so mid-round snapshots survive reload).
-  //    Real round transitions still need a clean slate here to avoid
-  //    ghost paint from cellId collisions between old/new mazes.
-  // 2) Zero the coverage HUD immediately — next paintDelta will refill it.
-  events.on('round:reset', () => {
+  events.on('paint:wallet', ({ tank, denied, regen }) => {
+    if (!paintEconomy) return
+    adoptWallet(tank)
+    serverRegen = regen === 1
+    // Only revert cells this client actually predicted. A Burst denial has
+    // no undo record; defaulting those to empty would bleach enemy paint.
+    for (const id of denied) {
+      const prev = paintUndo.get(id)
+      if (prev !== undefined) forceCell(id, prev)
+    }
+    paintUndo.clear()
+  })
+
+  events.on('round:reset', ({ format, layout }) => {
     clearAllPaintState()
-    setServerCoverage({ red: 0, blue: 0, total: 0 })
+    setServerCoverage({ red: 0, blue: 0, green: 0, yellow: 0, total: 0 })
+    setPaintEconomy(layout !== 'lobby' && format === 'prototype')
+    setPaintWorld(layout !== 'lobby' && paintAllowed(format))
+    adoptWallet(PAINT_CAPACITY)
+    paintUndo.clear()
+    cellSince.clear()
+    serverRegen = false
   })
+
+  events.on('round:clock', ({ format, active }) => {
+    setPaintEconomy(active && format === 'prototype')
+    setPaintWorld(active && paintAllowed(format))
+  })
+  engine.addSystem((dt: number) => tickLocalPaintRegen(dt))
 }
 
 const TEAM_COLORS: Record<Team, Color4> = {
-  [Team.None]: Color4.create(1, 1, 1, 1),
-  [Team.Red]:  Color4.create(255/255, 117/255, 119/255, 1), // pallet.jpeg #FF7577
-  [Team.Blue]: Color4.create(106/255, 153/255, 252/255, 1), // pallet.jpeg #6A99FC (queued for Phase 3)
+  [Team.None]:   Color4.create(1, 1, 1, 1),
+  [Team.Red]:    Color4.create(255/255, 117/255, 119/255, 1), // #FF7577
+  [Team.Blue]:   Color4.create(106/255, 153/255, 252/255, 1), // #6A99FC
+  [Team.Green]:  Color4.create( 79/255, 214/255, 140/255, 1), // #4FD68C
+  [Team.Yellow]: Color4.create(255/255, 224/255,  74/255, 1), // #FFE04A
 }
 
 // ─── Mask format ─────────────────────────────────────────────────────
@@ -255,12 +277,51 @@ export function cellId(tx: number, tz: number, ty: number, col: number, row: num
 // ─── Public: paint a cell (idempotent for same team) ─────────────────
 // Matte PBR material spec for a team. Roughness=1 + metallic=0 + no specular
 // kills the shine so paint reads as flat pigment, not plastic.
-export function cellMaterial(team: Team) {
+export function paintTeamOf(id: string): Team {
+  return cellTeam.get(id) ?? Team.None
+}
+export function cellMaterial(team: Team, dim = false) {
+  const c = TEAM_COLORS[team]
+  const albedo = (!dim || team === Team.None)
+    ? c
+    : Color4.create(
+      c.r + (1 - c.r) * MUTE_WASH,
+      c.g + (1 - c.g) * MUTE_WASH,
+      c.b + (1 - c.b) * MUTE_WASH,
+      c.a,
+    )
   return {
-    albedoColor: TEAM_COLORS[team],
+    albedoColor: albedo,
     roughness: 1.0,
     metallic: 0.0,
     specularIntensity: 0.0,
+  }
+}
+
+/** Mix disconnected paint toward white so it reads as a lighter pastel of the team color. */
+const MUTE_WASH = 0.48
+
+let muteFn: ((id: string, team: number) => boolean) | null = null
+export function setPaintMute(fn: ((id: string, team: number) => boolean) | null): void {
+  muteFn = fn
+}
+let paintConnect: ((id: string, team: number) => void) | null = null
+export function setPaintConnect(fn: ((id: string, team: number) => void) | null): void {
+  paintConnect = fn
+}
+function muted(id: string, team: Team): boolean {
+  return !!muteFn && muteFn(id, team)
+}
+export function retintCell(id: string, team?: Team, visualOnly = false): void {
+  const e = cellEntity.get(id)
+  if (e === undefined) return
+  const t = (team ?? cellTeam.get(id) ?? Team.None) as Team
+  Material.setPbrMaterial(e, cellMaterial(t, visualOnly ? false : muted(id, t)))
+}
+export function retintAllPaint(): void {
+  for (const [id, e] of cellEntity) {
+    const t = cellTeam.get(id) ?? Team.None
+    Material.setPbrMaterial(e, cellMaterial(t, muted(id, t)))
   }
 }
 
@@ -296,9 +357,20 @@ export function clearAllPaintState() {
 // players' paint — not just cells visible to the local client. Before the
 // first delta arrives, coverage() falls back to a local scan (returns
 // zeros on fresh join, which is fine — Step 5's snapshot fills the gap).
-let serverCoverage: { red: number; blue: number; total: number } | null = null
-export function setServerCoverage(c: { red: number; blue: number; total: number }): void {
+let serverCoverage: TeamCoverage | null = null
+/** Walkable total + team counts from the match, kept through the lobby swap so the end screen can still score. */
+let matchCoverage: TeamCoverage | null = null
+export function lastMatchCoverage(): TeamCoverage | null {
+  return matchCoverage
+}
+function noteMatchCoverage(c: TeamCoverage, walkable: number): void {
+  if (walkable > 0 && c.red + c.blue + (c.green ?? 0) + (c.yellow ?? 0) > 0) {
+    matchCoverage = { red: c.red, blue: c.blue, green: c.green ?? 0, yellow: c.yellow ?? 0, total: walkable }
+  }
+}
+export function setServerCoverage(c: TeamCoverage): void {
   serverCoverage = c
+  noteMatchCoverage(c, cellEntity.size)
 }
 
 export function removePaintForTile(tileEntity: Entity) {
@@ -331,7 +403,7 @@ export function resetPaintForTile(tileEntity: Entity) {
   if (!rec) return
   for (let i = 0; i < rec.entities.length; i++) {
     const t = lockedTeam(rec.ids[i])
-    Material.setPbrMaterial(rec.entities[i], cellMaterial(t))
+    Material.setPbrMaterial(rec.entities[i], cellMaterial(t, muted(rec.ids[i], t)))
     cellTeam.set(rec.ids[i], t)
   }
 }
@@ -343,6 +415,100 @@ export function resetPaintForTile(tileEntity: Entity) {
 // how OUR paint eventually becomes visible on our own screen too.
 // (We do NOT paint locally anymore — pure server-authoritative.)
 const paintOutbox = new Set<string>()
+let paintEconomy = false
+let paintLeft = PAINT_CAPACITY
+let serverTank = PAINT_CAPACITY
+let serverTankAt = 0
+/** Last ownership-change time (ms). 0 = pre-cured. Missing = not cured. */
+const cellSince = new Map<string, number>()
+let serverRegen = false
+let lastCenterGroundY = 0
+let paintFrac = 0
+let paintRefill = false
+const paintUndo = new Map<string, Team>()
+
+export function paintEconomyOn(): boolean { return paintEconomy }
+let paintWorld = true
+function setPaintWorld(on: boolean): void { paintWorld = on }
+export function paintWorldOn(): boolean { return paintWorld }
+export function paintTank(): number { return paintLeft }
+export function paintRefilling(): boolean { return paintRefill }
+
+function setPaintEconomy(on: boolean): void {
+  if (on === paintEconomy) return
+  paintEconomy = on
+  adoptWallet(PAINT_CAPACITY)
+  paintRefill = false
+  paintUndo.clear()
+}
+
+function adoptWallet(tank: number): void {
+  serverTank = Math.max(0, Math.min(PAINT_CAPACITY, tank))
+  serverTankAt = Date.now()
+  paintLeft = serverTank
+  paintFrac = 0
+}
+
+/** Cloud landed. The server refills too; this updates the bar before that echo. */
+export function refillPredictedTank(): void {
+  if (!paintEconomy) return
+  adoptWallet(PAINT_CAPACITY)
+  paintUndo.clear()
+}
+
+/** Local bar climbs while the server's refill echo is in flight. */
+export function predictDepotRefill(dt: number, friendly: boolean): void {
+  predictTerritoryRefill(dt, friendly)
+}
+
+/** Local bar climbs between throttled wallet echoes while on cured friendly ground. */
+export function predictTerritoryRefill(dt: number, eligible: boolean): void {
+  paintRefill = paintEconomy && eligible && paintLeft < PAINT_CAPACITY
+  if (!paintEconomy || !eligible) return
+  // Climb from the last server tank, not from a runaway local value, so a
+  // late wallet echo cannot snap the bar back down.
+  if (serverTankAt > 0) {
+    const expected = Math.min(PAINT_CAPACITY, serverTank + PAINT_REFILL_PER_SEC * ((Date.now() - serverTankAt) / 1000))
+    paintLeft = expected
+    paintFrac = 0
+    paintRefill = paintLeft < PAINT_CAPACITY
+    return
+  }
+  paintFrac += PAINT_REFILL_PER_SEC * dt
+  const whole = Math.floor(paintFrac)
+  if (whole <= 0) return
+  paintFrac -= whole
+  paintLeft = Math.min(PAINT_CAPACITY, paintLeft + whole)
+}
+
+function tickLocalPaintRegen(dt: number): void {
+  if (!refillOnTerritory()) return
+  if (!paintEconomy) { paintRefill = false; return }
+  const t = Transform.getOrNull(engine.PlayerEntity)
+  const cell = lastCenterId
+  const team = localTeam as number
+  const owned = cell ? (cellTeam.get(cell) ?? 0) : 0
+  const since = cell && cellSince.has(cell) ? (cellSince.get(cell) as number) : Number.POSITIVE_INFINITY
+  const eligible = !!cell && isRegenEligible({
+    team,
+    cellTeam: owned as number,
+    ownedSince: since,
+    now: Date.now(),
+    grounded: playerGrounded,
+    feetY: t?.position.y ?? 0,
+    cellY: lastCenterGroundY,
+  })
+  predictTerritoryRefill(dt, eligible || (serverRegen && playerGrounded && owned === team && team !== 0))
+}
+
+function forceCell(id: string, team: Team): void {
+  if (team === Team.None) cellTeam.delete(id)
+  else cellTeam.set(id, team)
+  paintConnect?.(id, team)
+  const e = cellEntity.get(id)
+  if (e !== undefined) Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
+}
+
 export function drainPaintOutbox(): string[] {
   if (paintOutbox.size === 0) return []
   const out: string[] = []
@@ -367,11 +533,20 @@ export function drainPaintOutbox(): string[] {
  * and just enqueue — server will drop it anyway (pre-roster), no harm.
  */
 export function noteLocalPaintCandidate(id: string): void {
-  if (lockedTeam(id) !== Team.None) return // locked base: never painted
+  if (!paintWorld) return
+  if (lockedTeam(id) !== Team.None) return
+  if (paintEconomy && localTeam !== Team.None) {
+    const prev = cellTeam.get(id) ?? Team.None
+    if (prev !== localTeam) {
+      if (paintLeft <= 0) return
+      paintLeft -= 1
+      serverTank = Math.max(0, serverTank - 1)
+      serverTankAt = Date.now()
+      paintUndo.set(id, prev)
+    }
+  }
   paintOutbox.add(id)
   if (localTeam !== Team.None) {
-    // Detect a real new claim (cell not already ours) BEFORE applying,
-    // so the SFX only fires when the tile actually flips to our team.
     const wasOurs = cellTeam.get(id) === localTeam
     applyRemotePaint(id, localTeam)
     if (!wasOurs) playClaimSfx()
@@ -402,6 +577,9 @@ let localTeam: Team = Team.None
 export function setLocalTeam(team: Team): void {
   localTeam = team
 }
+export function painterTeam(): Team {
+  return localTeam
+}
 
 /**
  * Apply a paint change received from the server (paintDelta). Updates
@@ -409,12 +587,15 @@ export function setLocalTeam(team: Team): void {
  * visible material. Does NOT add to the outbox — would infinite-loop.
  */
 export function applyRemotePaint(id: string, team: Team): void {
+  if (!paintWorld && team !== Team.None) return
   if (lockedTeam(id) !== Team.None) return
   if (cellTeam.get(id) === team) return
+  cellSince.set(id, Date.now())
   cellTeam.set(id, team)
+  paintConnect?.(id, team)
   const e = cellEntity.get(id)
   if (e !== undefined) {
-    Material.setPbrMaterial(e, cellMaterial(team))
+    Material.setPbrMaterial(e, cellMaterial(team, muted(id, team)))
   }
   // Note: if the cell entity hasn't spawned yet (grow-in delay window),
   // cellTeam still records the color — spawnOne() adopts it when the
@@ -514,7 +695,7 @@ function spawnCellsForTileImmediate(
       scale: Vector3.create(cellSize, scaleY, 1),
     })
     MeshRenderer.setPlane(e)
-    Material.setPbrMaterial(e, cellMaterial(preexisting))
+    Material.setPbrMaterial(e, cellMaterial(preexisting, muted(id, preexisting)))
     cellEntity.set(id, e)
     cellTeam.set(id, preexisting)
     tileRec!.entities.push(e)
@@ -586,7 +767,7 @@ function spawnCellsForTileImmediate(
 }
 
 // ─── Public: coverage counter ────────────────────────────────────────
-// red / blue = absolute painted-cell counts (server-authoritative when
+// red / blue / green / yellow = painted-cell counts (server-authoritative when
 // paintDelta has arrived, otherwise a local fallback).
 // total = WALKABLE CELLS IN THE MAZE, not "cells that have been touched."
 // Previously used cellTeam.size, which is only cells with a recorded team
@@ -595,17 +776,13 @@ function spawnCellsForTileImmediate(
 // because we spawn one entity per walkable mask cell. During round
 // teardown it briefly drops toward 0 as tiles are removed and climbs back
 // as new tiles spawn; % briefly overshoots then settles, which is fine.
-export function coverage(): { red: number; blue: number; total: number } {
+export function coverage(): TeamCoverage {
   const total = cellEntity.size
-  if (serverCoverage !== null) {
-    return { red: serverCoverage.red, blue: serverCoverage.blue, total }
-  }
-  let red = 0, blue = 0
-  for (const t of cellTeam.values()) {
-    if (t === Team.Red) red++
-    else if (t === Team.Blue) blue++
-  }
-  return { red, blue, total }
+  const c = serverCoverage !== null
+    ? { red: serverCoverage.red, blue: serverCoverage.blue, green: serverCoverage.green ?? 0, yellow: serverCoverage.yellow ?? 0, total }
+    : coverageFromTeams(cellTeam.values(), total)
+  noteMatchCoverage(c, total)
+  return c
 }
 
 // ─── Coord math: world pos → cell ID ─────────────────────────────────
@@ -706,14 +883,9 @@ export function initPaintingSystem(
   stanceStep = STEP
   stanceLookup = lookupTile
   const GROUND_TOLERANCE = 0.4
-  // Paint footprint: 3x3 square (9 cells, center + all 8 neighbors). Offsets
-  // in world meters; one cell is CELL / SIZE = 2m.
+  // Paint footprint: 3x3 square by default. Paint upgrades widen it by area;
+  // a live star still uses the 5x5 overdrive brush.
   const step = CELL / SIZE
-  const OFFSETS: Array<[number, number]> = [
-    [-step, -step], [0, -step], [step, -step],
-    [-step,     0], [0,     0], [step,     0],
-    [-step,  step], [0,  step], [step,  step],
-  ]
   // Phase 4 Step 4: this system no longer touches cellTeam or materials.
   // It just enqueues candidate cell ids into the outbox; the server owns
   // team attribution and echoes back paintDelta, which is what actually
@@ -731,9 +903,13 @@ export function initPaintingSystem(
       lastCenterId = center.id
       onOwnPaint = localTeam !== Team.None && cellTeam.get(center.id) === localTeam
     }
+    lastCenterGroundY = center.groundY
     playerGrounded = y - center.groundY <= GROUND_TOLERANCE
     // Fall rescue holds paint off through the pickup and the walk-only land brace.
     if (!playerGrounded || isMoveLocked()) return
+    const OFFSETS = isLocalOverdriveActive()
+      ? paintBrushOffsets(step, overdrivePaintRadiusCells(true))
+      : upgradePaintBrushOffsets(step, localPaintAreaMult())
     for (const [dx, dz] of OFFSETS) {
       const hit = worldToCellId(x + dx, y, z + dz, CELL, STEP, lookupTile)
       if (!hit) continue

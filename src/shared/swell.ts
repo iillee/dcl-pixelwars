@@ -121,26 +121,26 @@ export function swellSurfaceY(x: number, z: number, cycleSeconds: number = swell
 }
 
 /**
- * Falling through the fixed rescue line or through the crest, whichever
- * is higher. A crest above y 112 still counts as a fall.
+ * Falling through the visible sea (or the pre-water line when the sea is off).
+ * The live surface is the single source of truth — not the old fixed kill-Y,
+ * and not a mid-air margin under the floor.
  */
 const FLAT_FALL_Y = MIN_Y - FALL_RESPAWN_DROP
 
 export function fallTriggerY(x: number, z: number, cycleSeconds?: number): number {
   // Sea off: the pre-water rescue line. No sine, no clock read.
   if (!LOOK.sea) return FLAT_FALL_Y
-  return Math.max(FLAT_FALL_Y, swellSurfaceY(x, z, cycleSeconds ?? swellCycleSeconds()))
+  return swellSurfaceY(x, z, cycleSeconds ?? swellCycleSeconds())
 }
 
-/** Metres under the lowest tile that still counts as standing on that floor. */
+/** Metres under the lowest tile that still counts as standing on that floor. Kept for callers and tests. */
 export const FLOOR_RESCUE_MARGIN = 4
 
 /**
- * Rescue when they have fallen through the live line and the maze can catch
- * them, or when they are already on the base ground well under the floor.
- * The lobby never marks the maze ready, so the ground case must not wait.
+ * Rescue when the feet have crossed the live water surface (or the fixed
+ * line if the sea is off). Does not wait for the maze, and does not fire
+ * mid-air just below the floor — those used to catch you above the sea.
  */
-export function shouldBeginRescue(y: number, mazeReady: boolean, triggerY: number, floorY: number): boolean {
-  if (y < floorY - FLOOR_RESCUE_MARGIN) return true
-  return mazeReady && y < triggerY
+export function shouldBeginRescue(y: number, _mazeReady: boolean, triggerY: number, _floorY?: number): boolean {
+  return y < triggerY
 }

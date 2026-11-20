@@ -63,6 +63,7 @@
 import {
   engine, Entity, Material, MeshCollider, MeshRenderer, Transform, Tween, TweenSequence, ColliderLayer,
   MainCamera, VirtualCamera, AvatarShape, AvatarModifierArea, AvatarModifierType, PlayerIdentityData,
+  GltfContainer, Billboard, BillboardMode,
 } from '@dcl/sdk/ecs'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { movePlayerTo } from '~system/RestrictedActions'
@@ -76,14 +77,16 @@ import { isLobbyLayout } from '../maze/rebuild'
 import { lobbyFeet } from '../shared/lobby'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
 import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
-import { LOOK } from '../shared/waterLook'
-import { waterVisualSeconds } from './water'
-import { Team } from '../shared/team'
+import { LOOK, resolvedWaterY } from '../shared/waterLook'
+import { waterClipArmed, waterVisualSeconds } from './water'
+import { Team, isPlayingTeam } from '../shared/team'
 import { playFallRescueSfx } from './audio'
+import { playWaterSplash } from './waterSplash'
+import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
-import { RESCUE_PATH, rescueCloudPose } from '../shared/rescuePath'
+import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -124,22 +127,6 @@ export const FALL_RESCUE = {
   RIDE_HANDOFF_S: 0.75,
 }
 
-const CLOUD_MAT = {
-  albedoColor: Color4.create(0.75, 0.92, 1, 1),
-  emissiveColor: Color4.create(0.55, 0.85, 1, 1),
-  emissiveIntensity: 3,
-  roughness: 0.35,
-  metallic: 0,
-  castShadows: false,
-}
-const HOOK_MAT = {
-  albedoColor: Color4.create(1, 0.86, 0.25, 1),
-  emissiveColor: Color4.create(1, 0.75, 0.15, 1),
-  emissiveIntensity: 4,
-  roughness: 0.4,
-  metallic: 0,
-  castShadows: false,
-}
 type Phase = 'idle' | 'grab' | 'carry' | 'land'
 type FloaterMode = 'in' | 'hang' | 'wait' | 'peel'
 type Floater = { root: Entity; ents: Entity[]; mode: FloaterMode; peelLeft: number; waitLeft: number }
@@ -152,6 +139,10 @@ type MobileRide = { legs: Leg[]; index: number; legAt: number; beganAt: number; 
 export type FallRescueEnd = 'snap' | 'carry'
 
 /** True while a mobile ride owns the ending. Read from the arrival callback, before it is cleared. */
+export function isFallRescueActive(): boolean {
+  return phase !== 'idle'
+}
+
 export function fallRescueCameraRide(): boolean {
   return cameraRide
 }
@@ -185,8 +176,17 @@ let slipAccum = 0
 let sample: { p: Vec; at: number } | null = null
 /** Catch we just broadcast, so a self-echo with no address yet is not a second cloud. */
 let localCatch: Vec | null = null
+/** Server-chosen landing (nearest team paint, or the fallback spawn). Kept until the trip ends so a slip-off teleport uses it. */
+let assignedHome: Vec | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
+/** Visible sea at these feet, or the pre-water line when the sea is off. */
+function liveTrigger(p: { x: number; z: number } | null | undefined): number {
+  // Until the wave clip is running the visible mesh sits at rest (mean Y).
+  if (LOOK.sea && !waterClipArmed()) return resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
+  if (!p) return fallTriggerY(0, 0, waterVisualSeconds())
+  return fallTriggerY(p.x, p.z, waterVisualSeconds())
+}
 function ms(s: number): number { return Math.max(1, Math.round(s * 1000)) }
 function lerp(a: Vec, b: Vec, u: number): Vec {
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
@@ -211,6 +211,24 @@ function fallVelocity(p: Vec): Vec {
  * several meters ahead, or moving it later, is what emptied the rise.
  * No teleport: the rise leg is the lift, and the camera keeps its current aim.
  */
+/** Splash at the XZ where the feet crossed the live surface this frame. */
+function splashAtCrossing(prev: Vec | null, p: Vec): void {
+  let x = p.x
+  let z = p.z
+  if (prev) {
+    const line0 = liveTrigger(prev)
+    const line1 = liveTrigger(p)
+    const d0 = prev.y - line0
+    const d1 = p.y - line1
+    if (d0 >= 0 && d1 < 0 && d0 !== d1) {
+      const u = Math.max(0, Math.min(1, d0 / (d0 - d1)))
+      x = prev.x + (p.x - prev.x) * u
+      z = prev.z + (p.z - prev.z) * u
+    }
+  }
+  playWaterSplash(x, z, true)
+}
+
 function catchPoint(p: Vec, v: Vec): Vec {
   const fall = Math.max(0, -v.y)
   const drop = Math.min(
@@ -289,6 +307,7 @@ function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: 
 
 function despawnFloater(): void {
   if (!floater) return
+  stopCloudFace(floater.root)
   for (let i = floater.ents.length - 1; i >= 0; i--) engine.removeEntity(floater.ents[i])
   floater = null
 }
@@ -357,28 +376,181 @@ function detachFloater(): void {
   })
 }
 
-function makePart(parent: Entity, pos: Vector3, scale: Vector3, shape: 'sphere' | 'box', mat: typeof CLOUD_MAT): Entity {
+const CLOUD_BODY_SRC = 'assets/models/cloud-body.glb'
+const CLOUD_FACE_SRC = 'assets/models/cloud-face.glb'
+const CLOUD_FACE_BLINK_SRC = 'assets/models/cloud-face-blink.glb'
+const CLOUD_FACE_LAUGH_SRC = 'assets/models/cloud-face-laugh.glb'
+/** Closed-eye flash length (seconds). */
+const FACE_BLINK_MIN_S = 0.15
+const FACE_BLINK_MAX_S = 0.2
+/** Gap between later blinks. */
+const FACE_BLINK_EVERY_MIN_S = 1.0
+const FACE_BLINK_EVERY_MAX_S = 2.0
+/** First blink is sooner so a ~5s rescue is likely to show one. */
+const FACE_BLINK_FIRST_MIN_S = 0.3
+const FACE_BLINK_FIRST_MAX_S = 0.8
+/** Open-mouth laugh length (seconds). */
+const FACE_LAUGH_S = 1.0
+/** Gap between later laughs. */
+const FACE_LAUGH_EVERY_MIN_S = 2.5
+const FACE_LAUGH_EVERY_MAX_S = 4.0
+/** First laugh is earlier so it can land during a typical carry. */
+const FACE_LAUGH_FIRST_MIN_S = 1.2
+const FACE_LAUGH_FIRST_MAX_S = 2.0
+/** GLB width is ~1.77 m at scale 1, close to the old three-puff cluster. Underside sits at the root, like the placeholder. */
+const CLOUD_SCALE = 1
+/** Visual center of cloud-body.glb (Body mesh AABB Y), before CLOUD_SCALE. The billboard pivots here. */
+const BODY_CENTER_Y = 0.6083
+/** Static line from the puff underside to the hook point over the head. Tune these; nothing updates them per frame. */
+const LINE_TOP_Y = 0
+const LINE_BOTTOM_Y = -0.78
+const LINE_LENGTH = LINE_TOP_Y - LINE_BOTTOM_Y
+const LINE_RADIUS = 0.018
+const LINE_COLOR = Color4.create(0x20 / 255, 0x28 / 255, 0x3B / 255, 1)
+/** End bead at LINE_BOTTOM_Y, in the line color. 0 hides it. */
+const LINE_BEAD_R = 0.05
+
+function gltfChild(parent: Entity, src: string, pos: Vector3, scale: Vector3): Entity {
   const e = engine.addEntity()
   Transform.create(e, { parent, position: pos, scale })
-  if (shape === 'sphere') MeshRenderer.setSphere(e)
-  else MeshRenderer.setBox(e)
-  Material.setPbrMaterial(e, mat)
+  GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
   return e
 }
 
-/** Same white cloud the rider sees: body, two puffs, stem, hook. Root is ents[0]. */
-function cloudParts(root: Entity): Entity[] {
-  return [
-    root,
-    makePart(root, Vector3.create(0, 0.35, 0), Vector3.create(1.45, 0.72, 1.15), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(-0.55, 0.22, 0.05), Vector3.create(0.7, 0.5, 0.62), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(0.58, 0.18, -0.08), Vector3.create(0.62, 0.46, 0.55), 'sphere', CLOUD_MAT),
-    makePart(root, Vector3.create(0, -0.28, 0), Vector3.create(0.07, 0.85, 0.07), 'box', HOOK_MAT),
-    makePart(root, Vector3.create(0, -0.78, 0), Vector3.create(0.34, 0.34, 0.34), 'sphere', HOOK_MAT),
-  ]
+/** Fixed vertical cylinder from LINE_TOP_Y to LINE_BOTTOM_Y, parented to the motion root. */
+function makeLine(parent: Entity): Entity {
+  const len = Math.max(0.04, LINE_LENGTH)
+  const e = engine.addEntity()
+  Transform.create(e, {
+    parent,
+    position: Vector3.create(0, (LINE_TOP_Y + LINE_BOTTOM_Y) / 2, 0),
+    scale: Vector3.create(LINE_RADIUS, len, LINE_RADIUS),
+  })
+  MeshRenderer.setCylinder(e)
+  Material.setPbrMaterial(e, { albedoColor: LINE_COLOR, roughness: 1, metallic: 0, castShadows: false })
+  return e
 }
 
-/** Local placeholder parented to the pad: a bright cloud, a stem, and a hook. No character model. */
+function makeBead(parent: Entity): Entity {
+  const e = engine.addEntity()
+  Transform.create(e, {
+    parent,
+    position: Vector3.create(0, LINE_BOTTOM_Y, 0),
+    scale: Vector3.create(LINE_BEAD_R, LINE_BEAD_R, LINE_BEAD_R),
+  })
+  MeshRenderer.setSphere(e)
+  Material.setPbrMaterial(e, { albedoColor: LINE_COLOR, roughness: 1, metallic: 0, castShadows: false })
+  return e
+}
+
+/** Lavender body + three swappable faces, with a static line and a small end bead. Root is ents[0]. */
+function cloudParts(root: Entity): Entity[] {
+  const s = Vector3.create(CLOUD_SCALE, CLOUD_SCALE, CLOUD_SCALE)
+  // Billboard on a child at the puff's visual center so it yaws in place.
+  // Body is shifted down so the underside stays at the root (over the hook).
+  // Face is authored on the GLB's -Z; BM_Y points local -Z at the camera, so no Y flip.
+  const cy = BODY_CENTER_Y * CLOUD_SCALE
+  const spin = engine.addEntity()
+  Transform.create(spin, { parent: root, position: Vector3.create(0, cy, 0) })
+  Billboard.create(spin, { billboardMode: BillboardMode.BM_Y })
+  const body = gltfChild(spin, CLOUD_BODY_SRC, Vector3.create(0, -cy, 0), s)
+  const normal = gltfChild(body, CLOUD_FACE_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const blink = gltfChild(body, CLOUD_FACE_BLINK_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const laugh = gltfChild(body, CLOUD_FACE_LAUGH_SRC, Vector3.create(0, 0, 0), Vector3.create(1, 1, 1))
+  const line = makeLine(root)
+  const ents = [root, spin, body, normal, blink, laugh, line]
+  if (LINE_BEAD_R > 0) ents.push(makeBead(root))
+  startCloudFace(root, normal, blink, laugh)
+  return ents
+}
+
+type FaceKind = 'normal' | 'blink' | 'laugh'
+type CloudFace = {
+  normal: Entity
+  blink: Entity
+  laugh: Entity
+  kind: FaceKind
+  blinkIn: number
+  blinkLeft: number
+  laughIn: number
+  laughLeft: number
+}
+const cloudFaces = new Map<Entity, CloudFace>()
+
+function randRange(a: number, b: number): number {
+  return a + Math.random() * (b - a)
+}
+
+function showCloudFace(f: CloudFace, kind: FaceKind): void {
+  if (f.kind === kind) return
+  // Scale swap, not VisibilityComponent: some clients ignore visibility on
+  // a GltfContainer, which left every face stacked and nothing visibly changing.
+  setFaceShown(f.normal, kind === 'normal')
+  setFaceShown(f.blink, kind === 'blink')
+  setFaceShown(f.laugh, kind === 'laugh')
+  f.kind = kind
+}
+
+/** All three face GLBs are children of the body; only one is visible at a time. */
+function setFaceShown(e: Entity, on: boolean): void {
+  const t = Transform.getMutableOrNull(e)
+  if (!t) return
+  const k = on ? 1 : 0
+  t.scale = Vector3.create(k, k, k)
+}
+
+function startCloudFace(root: Entity, normal: Entity, blink: Entity, laugh: Entity): void {
+  setFaceShown(normal, true)
+  setFaceShown(blink, false)
+  setFaceShown(laugh, false)
+  cloudFaces.set(root, {
+    normal, blink, laugh, kind: 'normal',
+    blinkIn: randRange(FACE_BLINK_FIRST_MIN_S, FACE_BLINK_FIRST_MAX_S),
+    blinkLeft: 0,
+    laughIn: randRange(FACE_LAUGH_FIRST_MIN_S, FACE_LAUGH_FIRST_MAX_S),
+    laughLeft: 0,
+  })
+}
+
+function stopCloudFace(root: Entity): void {
+  cloudFaces.delete(root)
+}
+
+function tickCloudFaces(dt: number): void {
+  for (const f of cloudFaces.values()) {
+    // A laugh never starts during a blink: both only begin from the normal face.
+    if (f.kind === 'laugh') {
+      f.laughLeft -= dt
+      if (f.laughLeft <= 0) {
+        showCloudFace(f, 'normal')
+        f.laughIn = randRange(FACE_LAUGH_EVERY_MIN_S, FACE_LAUGH_EVERY_MAX_S)
+        if (f.blinkIn < 0.4) f.blinkIn = randRange(0.4, 1.2)
+      }
+      continue
+    }
+    if (f.kind === 'blink') {
+      f.blinkLeft -= dt
+      if (f.blinkLeft <= 0) {
+        showCloudFace(f, 'normal')
+        f.blinkIn = randRange(FACE_BLINK_EVERY_MIN_S, FACE_BLINK_EVERY_MAX_S)
+      }
+      continue
+    }
+    f.laughIn -= dt
+    f.blinkIn -= dt
+    if (f.laughIn <= 0) {
+      showCloudFace(f, 'laugh')
+      f.laughLeft = FACE_LAUGH_S
+      continue
+    }
+    if (f.blinkIn <= 0) {
+      showCloudFace(f, 'blink')
+      f.blinkLeft = randRange(FACE_BLINK_MIN_S, FACE_BLINK_MAX_S)
+    }
+  }
+}
+
+/** Local cloud parented to the pad: body, face, and a static line. No character model. */
 function spawnFloater(): void {
   if (!anchor) return
   despawnFloater()
@@ -413,9 +585,15 @@ function playLeg(index: number): void {
 }
 
 function rescueHome(): Vec {
+  if (assignedHome) return assignedHome
   // Center of the 3-tile lobby (straight between the PvP and PvB ends).
   if (isLobbyLayout()) return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
-  return baseSpawn(localTeam() === Team.Blue ? 2 : 1).pos
+  return baseSpawn(isPlayingTeam(localTeam()) ? localTeam() : 1).pos
+}
+
+/** Landing the last rescueStart assigned, if any. Used by the slip-off teleport. */
+export function assignedRescueHome(): Vec | null {
+  return assignedHome
 }
 
 function tripSeconds(): number {
@@ -685,6 +863,7 @@ function finish(how: FallRescueEnd, why: string): void {
   else if (rode) console.log(`[FallRescue] mobile camera ride arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   onEnd(how)
+  assignedHome = null
   // After onEnd's exitOverview, so a mobile overview does not steal the ride
   // and does not pop back on this same frame.
   pinOverviewClosed(false)
@@ -705,11 +884,12 @@ function sendRescueStart(hold: Vec, mobile: boolean): void {
 }
 
 function sendRescueEnd(): void {
+  refillPredictedTank()
   try { room.send('rescueEnd', { who: '' }) } catch (err) { console.log('[FallRescue] rescueEnd send failed', err) }
 }
 
 function begin(p: Vec): void {
-  const line = fallLine()
+  const line = liveTrigger(p)
   const v = fallVelocity(p)
   const hold = catchPoint(p, v)
   phase = 'grab'
@@ -718,6 +898,7 @@ function begin(p: Vec): void {
   interruptLocalLunge('fell')
   setFallMoveLock('frozen')
   playFallRescueSfx()
+  splashAtCrossing(sample ? sample.p : null, p)
   // The catch itself does not move the player. Overview off so the follow camera rides the tween.
   holdFallLine()
   exitOverview()
@@ -766,6 +947,7 @@ function tickPhase(dt: number): void {
   phase = 'idle'
   phaseLeft = 0
   localCatch = null
+  assignedHome = null
   setFallMoveLock('open')
   console.log('[FallRescue] land lock done')
     }
@@ -828,14 +1010,15 @@ type RemoteCloud = {
 const remotes = new Map<string, RemoteCloud>()
 
 /** Where `who`'s rider hangs (feet) on the cloud this client is drawing, once the grab is
- *  over and until the descend ends; null otherwise. client/botVisual pins a rescued ghost here. */
+ *  over and until the descend ends; null otherwise. After that, botVisual follows live
+ *  server feet instead of delayed ride snapshots, so the drop is not replayed. */
 export function remoteRiderFeet(who: string): Vec | null {
   const c = remotes.get(who.toLowerCase())
   if (!c || !c.mobile) return null
   const age = (Date.now() - c.started) / 1000
   if (age < c.grab || age > c.grab + c.rise + c.cruise + c.descend) return null
   const p = Transform.getOrNull(c.root)?.position
-  return p ? { x: p.x, y: p.y - FALL_RESCUE.HANG_Y, z: p.z } : null
+  return p ? { x: p.x, y: p.y - rescueHangY(c.who), z: p.z } : null
 }
 
 function remoteFeet(who: string): Vec | null {
@@ -847,13 +1030,13 @@ function remoteFeet(who: string): Vec | null {
   return null
 }
 
-function hangAt(p: Vec, extraY = 0): Vec {
-  return { x: p.x, y: p.y + FALL_RESCUE.HANG_Y + extraY, z: p.z }
+function hangAt(p: Vec, extraY = 0, hangY = FALL_RESCUE.HANG_Y): Vec {
+  return { x: p.x, y: p.y + hangY + extraY, z: p.z }
 }
 
 /** Mobile riders and bots: the cloud flies the three legs (the server moves a bot along the same path). */
 function mobileCloudPose(c: RemoteCloud, age: number): { pos: Vec; scale: number } {
-  return rescueCloudPose(c.catch, c.base, age, c)
+  return rescueCloudPose(c.catch, c.base, age, c, rescueHangY(c.who))
 }
 
 function placeRemote(c: RemoteCloud, pos: Vec, scale: number): void {
@@ -867,6 +1050,7 @@ function clearRemote(who: string, why = ''): void {
   const key = who.toLowerCase()
   const c = remotes.get(key)
   if (!c) return
+  stopCloudFace(c.root)
   for (let i = c.ents.length - 1; i >= 0; i--) engine.removeEntity(c.ents[i])
   remotes.delete(key)
   if (why) console.log(`[FallRescue] remote cloud done ${key.slice(0, 8)} (${why})`)
@@ -887,11 +1071,21 @@ function onRemoteStart(m: {
 }): void {
   const who = m.who.toLowerCase()
   const catchP = { x: m.x, y: m.y, z: m.z }
-  if (!who || isOwnRescue(who, catchP)) return
+  if (!who) return
+  // Local player's own start: they already began on the fall; do not reset
+  // the pose from a slightly later echo (that snap is what "pulled me back").
+  // Still take the server landing so startPath / a slip-off teleport use it.
+  if (isOwnRescue(who, catchP)) {
+    if (Number.isFinite(m.bx) && Number.isFinite(m.by) && Number.isFinite(m.bz)) {
+      assignedHome = { x: m.bx, y: m.by, z: m.bz }
+    }
+    return
+  }
   if (![m.x, m.y, m.z, m.bx, m.by, m.bz, m.grab, m.rise, m.cruise, m.descend].every(n => Number.isFinite(n))) return
+  playWaterSplash(catchP.x, catchP.z, false)
   clearRemote(who)
   const root = engine.addEntity()
-  const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y)
+  const pos = hangAt(catchP, FALL_RESCUE.APPROACH_EXTRA_Y, rescueHangY(who))
   Transform.create(root, { position: Vector3.create(pos.x, pos.y, pos.z), scale: Vector3.create(0.2, 0.2, 0.2) })
   remotes.set(who, {
     who, root, ents: cloudParts(root), mobile: m.mobile !== 0,
@@ -938,23 +1132,22 @@ function tickRemotes(dt: number): void {
 function tick(dt: number): void {
   // A background hitch shouldn't skip the whole pickup and drop on the same frame.
   const step = Math.min(dt, 0.1)
+  tickCloudFaces(step)
   tickRemotes(step)
-  const line = fallLine()
+  const p = playerPos()
+  const line = liveTrigger(p)
   if (!rearm) {
     if (rearmLeft > 0) rearmLeft -= step
-    const y = playerPos()?.y
+    const y = p?.y
     if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
   }
   if (phase !== 'idle') tickPhase(step)
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
-  const p = playerPos()
   if (p && phase === 'idle' && rearm) {
-    const trigger = LOOK.sea ? fallTriggerY(p.x, p.z, waterVisualSeconds()) : fallTriggerY(p.x, p.z)
-    // Below the floor by more than a few metres: the base ground at y 0, or a
-    // fall through tiles that are not colliders yet. Do not wait for the maze.
-    if (shouldBeginRescue(p.y, isMazeReady(), trigger, MIN_Y)) begin(p)
+    // Feet crossing the visible sea. Phase !== idle and rearm prevent a second trip.
+    if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) begin(p)
   }
   // Sample after the trip so the lead uses the fall, not the frame we just caught.
   if (p && phase === 'idle') remember(p)
@@ -972,6 +1165,7 @@ export function cancelFallRescue(why: string): void {
   console.log(`[FallRescue] cancel (${why})`)
   sendRescueEnd()
   localCatch = null
+  assignedHome = null
   releaseRideCamera()
   clearCarryDisguise()
   pinOverviewClosed(false)
@@ -987,6 +1181,17 @@ export function cancelFallRescue(why: string): void {
   setFallMoveLock('open')
 }
 
+/** Hidden instances so the first trip does not hitch while the cloud GLBs decode. */
+function preloadRescueCloud(): void {
+  const root = engine.addEntity()
+  Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
+  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC, CLOUD_FACE_BLINK_SRC, CLOUD_FACE_LAUGH_SRC]) {
+    const e = engine.addEntity()
+    Transform.create(e, { parent: root })
+    GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
+  }
+}
+
 /**
  * `endRescue('snap')` is the single base teleport (they slipped off).
  * `endRescue('carry')` means the panel already delivered them — emit player:respawned, do not movePlayerTo.
@@ -997,6 +1202,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   installed = true
   onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
+  preloadRescueCloud()
   events.on('rescue:start', onRemoteStart)
   events.on('rescue:end', ({ who }) => clearRemote(who, 'ended'))
   engine.addSystem(tick)

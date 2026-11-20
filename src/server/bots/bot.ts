@@ -431,6 +431,7 @@ export class Bot {
   sense: BotSense = { humans: [], avoidCells: new Set(), avoidHumans: new Set() }
   private goal: string | null = null
   private readonly speedMul: number
+  private starSpeedMul = 1
   /** 0 = keep a path until it ends (the verifies). */
   private readonly retargetEveryMs: number
   private retargetLeftMs: number
@@ -451,7 +452,7 @@ export class Bot {
     this.speedMul = this.personality?.speedMul ?? 1
     this.retargetEveryMs = this.personality && this.personality.retargetS > 0 ? this.personality.retargetS * 1000 : 0
     this.retargetLeftMs = this.retargetEveryMs
-    this.baseStepIntervalMs = 1000 / ((opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC) * this.speedMul)
+    this.baseStepIntervalMs = 1000 / ((opts.stepsPerSec ?? DEFAULT_STEPS_PER_SEC) * this.pace())
     this.stepIntervalMs = this.jitteredInterval()
     this.pick = opts.pickTarget ?? randomTarget
     this.paint = opts.paint
@@ -459,6 +460,16 @@ export class Bot {
   }
 
   nextRand(): number { return this.rng() }
+  private pace(): number { return this.speedMul * this.starSpeedMul }
+  /** 1 = normal pace. Composes with the rolled personality speed. */
+  setStarSpeedMul(m: number): void {
+    const next = Number.isFinite(m) && m > 0 ? m : 1
+    if (next === this.starSpeedMul) return
+    const old = this.pace()
+    this.starSpeedMul = next
+    if (old > 0) this.baseStepIntervalMs *= old / this.pace()
+    this.stepIntervalMs = this.jitteredInterval()
+  }
   /** Current step rate, after the route picked jog or run. */
   stepsPerSec(): number { return 1000 / this.baseStepIntervalMs }
   /** Cell this bot is walking toward, if it has one. */
@@ -556,7 +567,7 @@ export class Bot {
         this.path = p.slice(1) // drop index 0 (currentCell)
         if (!this.fixedPace) {
           const run = this.path.length >= RUN_ROUTE_CELLS || Math.random() < SHORT_ROUTE_RUN_CHANCE
-          this.baseStepIntervalMs = 1000 / ((run ? RUN_STEPS_PER_SEC : JOG_STEPS_PER_SEC) * this.speedMul)
+          this.baseStepIntervalMs = 1000 / ((run ? RUN_STEPS_PER_SEC : JOG_STEPS_PER_SEC) * this.pace())
         }
       }
 
@@ -602,6 +613,18 @@ export class Bot {
     this.goal = cell
     this.path = []
     this.pauseRemainingMs = 0
+  }
+
+  /** Keep walking to `cell`, and stay there once arrived. */
+  stay(cell: string): void {
+    if (this.currentCell === cell) {
+      this.path = []
+      this.chaseCell = cell
+      this.goal = cell
+      this.pauseRemainingMs = 0
+      return
+    }
+    if (this.goal !== cell) this.chase(cell)
   }
 
   /** Manager can call this to force target re-selection (e.g. round reset). */

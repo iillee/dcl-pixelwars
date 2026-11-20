@@ -1,6 +1,7 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
 import { paintOpen, setGamePhase, setMyVote, setServerLobbyCounts } from './phase'
-import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../maze/rebuild'
+import { applyServerWorld } from '../maze/rebuild'
+import { parseWorldLayout } from '../shared/worldState'
 /**
  * clientHandler.ts — the network boundary.
  *
@@ -20,12 +21,16 @@ import { ensureMazeSeed, isLobbyLayout, rebuildMaze, setHoldMazeSeed } from '../
  * Pattern borrowed from stom66/dcl-sky-chaser (clientHandler.ts + eventBus).
  */
 
-import { engine, PlayerIdentityData, AvatarBase } from '@dcl/sdk/ecs'
+import { engine, PlayerIdentityData, AvatarBase, Transform } from '@dcl/sdk/ecs'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
-import { Team } from '../shared/team'
-import { drainPaintOutbox, setLocalTeam } from '../paint'
-import { SeedHolder, seedHolder } from '../shared/components'
+import { initPaintScore } from './paintScore'
+import { initOverdrive } from './overdrive'
+import { initUpgrades } from './upgrades'
+import { Team, teamName } from '../shared/team'
+import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
+import { feetDue } from '../shared/territory'
+import { noteLagPong, noteServerRx } from './lagHud'
 
 // Locally-tracked team for this session. Written on team:assigned; used
 // only to log the human-readable team name. paint.ts owns the "does this
@@ -57,6 +62,9 @@ export function initClientHandler(): void {
     pingClock = 0
     room.send('presencePing', {})
   })
+  initPaintScore()
+  initOverdrive()
+  initUpgrades()
   wireInbound()
   wireTeamAssigned()
   wireOutbound()
@@ -66,27 +74,66 @@ export function initClientHandler(): void {
 // Handlers do the minimum needed to translate wire types to event payloads.
 // `team as Team` casts are safe: server enforces wire values 0/1/2 (see
 // shared/team.ts and server/roster.ts).
+function wireFormat(format: string): 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' {
+  if (format === 'pvb' || format === 'bases' || format === 'prototype' || format === 'balloon') return format
+  return 'pvp'
+}
+
 function wireInbound(): void {
+  room.onMessage('lagPong', ({ t }) => { noteLagPong(t) })
+
   room.onMessage('teamAssigned', ({ team }) => {
     events.emit('team:assigned', { team: team as Team })
   })
 
-  room.onMessage('paintDelta', ({ changes, red, blue, total }) => {
+  room.onMessage('paintDelta', ({ changes, red, blue, green, yellow, total }) => {
+    noteServerRx()
     events.emit('paint:delta', {
       changes: changes.map(c => ({ id: c.id, team: c.team as Team })),
-      red, blue, total,
+      red, blue, green: green ?? 0, yellow: yellow ?? 0, total,
     })
   })
 
-  room.onMessage('snapshot', ({ entries, red, blue, total, seed }) => {
+  room.onMessage('paintWallet', ({ tank, denied, regen }) => {
+    events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
+  })
+  room.onMessage('paintScore', ({ n }) => {
+    events.emit('paint:score', { n: n ?? 0 })
+  })
+  room.onMessage('upgradeState', ({ charge, pending, earned, speed, paint, haste }) => {
+    events.emit('upgrade:state', {
+      charge: charge ?? 0, pending: pending ?? 0, earned: earned ?? 0,
+      speed: speed ?? 0, paint: paint ?? 0, haste: haste ?? 0,
+    })
+  })
+  room.onMessage('starSpawn', ({ i, x, y, z }) => {
+    events.emit('star:spawn', { i: i ?? 0, x: x ?? 0, y: y ?? 0, z: z ?? 0 })
+  })
+  room.onMessage('starDespawn', ({ i }) => {
+    events.emit('star:despawn', { i: i ?? 0 })
+  })
+  room.onMessage('starHold', ({ id, until, ms }) => {
+    events.emit('star:hold', { id: id ?? '', until: until ?? 0, ms: typeof ms === 'number' && isFinite(ms) ? ms : 0 })
+  })
+  room.onMessage('overdriveImpact', ({ attacker, target, dx, dz }) => {
+    events.emit('overdrive:impact', { attacker: attacker ?? '', target: target ?? '', dx: dx ?? 0, dz: dz ?? 0 })
+  })
+
+  room.onMessage('snapshot', ({ entries, red, blue, green, yellow, total, seed, layout, seq, format, phase }) => {
+    noteServerRx()
     console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
     gotSnapshot = true
-    // Authoritative seed: build now (before the paint lands) if the SeedHolder CRDT hasn't given us it.
-    if (seed && SeedHolder.get(seedHolder).seed !== seed) SeedHolder.createOrReplace(seedHolder, { seed })
-    ensureMazeSeed(seed)
+    // Build the server's floor before the paint lands, even on a late join.
+    applyServerWorld({
+      seq: seq ?? 0,
+      seed,
+      layout: parseWorldLayout(layout),
+      format: format ?? '',
+      phase: phase ?? '',
+    }, 'snapshot')
     events.emit('paint:snapshot', {
       entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
-      red, blue, total,
+      red, blue, green: green ?? 0, yellow: yellow ?? 0, total,
     })
   })
 
@@ -103,10 +150,20 @@ function wireInbound(): void {
   })
 
   room.onMessage('botPositions', ({ bots, t }) => {
+    noteServerRx()
     events.emit('bots:positions', { bots, t })
   })
 
-  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine }) => {
+  room.onMessage('roundClock', ({ idx, remainingMs, active, format, phase, voteMs, winner, votes, present, feet, srvZone, why, mine, seed, layout, seq }) => {
+    noteServerRx()
+    // Ignore a stale clock so a late match packet cannot rebuild the arena over the lobby.
+    if (!applyServerWorld({
+      seq: seq ?? 0,
+      seed: seed ?? idx,
+      layout: parseWorldLayout(layout, active),
+      format: format ?? '',
+      phase: phase ?? '',
+    }, 'clock')) return
     // Server rebroadcasts every ROUND_CLOCK_RESYNC_S; a message applied late (load stall, slow frame on
     // mobile) leaves the end time late, so take the latest and correct when off by > 0.5 s.
     const end = Date.now() + remainingMs
@@ -115,25 +172,38 @@ function wireInbound(): void {
     setGamePhase(ph, voteMs ?? 0, votes ?? [], winner ?? '')
     setServerLobbyCounts(present ?? 0, feet ?? 0, srvZone || 'none', why || 'none')
     setMyVote(mine ?? '')
-    setHoldMazeSeed(ph === 'lobby' || ph === 'idle')
-    // A running match must replace the boot lobby. joinRoster does not send a
-    // second roundReset while the round is already active.
-    if (ph === 'match' && isLobbyLayout()) rebuildMaze(idx || 1, 'arena', 'match-clock')
     events.emit('round:clock', {
-      idx, active, format: format === 'pvb' ? 'pvb' : 'pvp',
+      idx, active, format: wireFormat(format),
       phase: ph, voteMs: voteMs ?? 0, winner: winner ?? '', votes: votes ?? [],
     })
   })
 
-  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalTotal }) => {
-    events.emit('round:ended', { finalRed, finalBlue, finalTotal })
+  room.onMessage('roundEnded', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victor, victorName }) => {
+    events.emit('round:ended', { finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal, kind: kind === 'balloon' ? 'balloon' : kind === 'bases' ? 'bases' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
   })
 
-  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalTotal, format, layout }) => {
+  room.onMessage('balloonState', ({ entries }) => {
+    events.emit('balloon:state', { entries: entries ?? [] })
+  })
+  room.onMessage('balloonPop', ({ id, n }) => {
+    events.emit('balloon:pop', { id, n })
+  })
+  room.onMessage('baseState', ({ redConnected, blueConnected, redProgress, blueProgress, threshold, redGrowing, blueGrowing }) => {
+    events.emit('base:state', {
+      redConnected, blueConnected, redProgress, blueProgress, threshold,
+      redGrowing: !!redGrowing, blueGrowing: !!blueGrowing,
+    })
+  })
+  room.onMessage('baseWin', ({ team }) => {
+    events.emit('base:win', { team })
+  })
+
+  room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalGreen, finalYellow, finalTotal, format, layout, seq }) => {
     events.emit('round:reset', {
-      seed, finalRed, finalBlue, finalTotal,
-      format: format === 'pvb' ? 'pvb' : 'pvp',
+      seed, finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal,
+      format: wireFormat(format),
       layout: layout === 'lobby' ? 'lobby' : 'arena',
+      seq: seq ?? 0,
     })
   })
 
@@ -143,14 +213,17 @@ function wireInbound(): void {
   })
 
   room.onMessage('lungeStarted', (m) => {
-    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z })
+    events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z, dry: m.dry ? 1 : 0 })
   })
   room.onMessage('lungeImpact', ({ attacker, id, target, dx, dz }) => {
     events.emit('lunge:impact', { attacker, id, target, dx, dz })
   })
+  room.onMessage('anvilImpact', ({ i, attacker, target, dx, dz }) => {
+    events.emit('anvil:impact', { i, attacker, target, dx, dz })
+  })
 
-  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz }) => {
-    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz })
+  room.onMessage('burstFired', ({ attacker, id, team, x, y, z, air, lx, ly, lz, dry }) => {
+    events.emit('burst:fired', { attacker, id, team: team as Team, x, y, z, air, lx, ly, lz, dry: dry ? 1 : 0 })
   })
   room.onMessage('burstImpact', ({ attacker, id, target, dx, dz, air }) => {
     events.emit('burst:impact', { attacker, id, target, dx, dz, air })
@@ -206,7 +279,7 @@ function wireTeamAssigned(): void {
   events.on('team:assigned', ({ team }) => {
     myTeam = team
     setLocalTeam(myTeam)
-    console.log(`[Client] teamAssigned → ${myTeam === Team.Red ? 'RED' : 'BLUE'}`)
+    console.log(`[Client] teamAssigned → ${teamName(myTeam)}`)
     // Ask for the current authoritative paint state. Fires exactly once
     // per teamAssigned; server has a 5s cooldown against abuse. Fixes:
     // reloading during a round used to wipe our view of already-painted
@@ -293,18 +366,28 @@ function wireOutbound(): void {
     room.send('joinRoster', { userId: uid })
   })
 
-  // Paint outbox flusher: 10 Hz. Drain locally-painted cell ids and send
-  // to the server; the server attributes to sender's team, applies to its
-  // authoritative map, and broadcasts back via paintDelta so all clients
-  // (including us) converge on the same picture.
+  // Paint outbox flusher: 10 Hz while cells are actually queued. An empty
+  // Prototype stand reports the cell underfoot on change, or at 2 Hz.
   let paintFlushClock = 0
+  let lastFeetCell = ''
+  let lastFeetAt = 0
+  let lastGrounded = true
   engine.addSystem((dt: number) => {
     paintFlushClock += dt
     if (paintFlushClock < 0.1) return
     paintFlushClock = 0
     const ids = drainPaintOutbox()
-    if (ids.length === 0 || !paintOpen()) return
-    room.send('paintTick', { ids })
+    const at = getCurrentCellId() ?? ''
+    if (!paintOpen()) return
+    const now = Date.now()
+    const grounded = isPlayerGrounded()
+    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || !paintEconomyOn() || grounded !== lastGrounded)) return
+    if (ids.length === 0 && !paintEconomyOn()) return
+    const y = Transform.getOrNull(engine.PlayerEntity)?.position.y ?? 0
+    room.send('paintTick', { ids, at, y, g: grounded ? 1 : 0 })
+    lastFeetCell = at
+    lastFeetAt = now
+    lastGrounded = grounded
   })
 }
 

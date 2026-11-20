@@ -16,9 +16,28 @@
 export const ROUND_LENGTH_MINUTES = 3
 export const ROUND_INTERVAL_MS = ROUND_LENGTH_MINUTES * 60 * 1000
 
-// Round-end summary animation (must match the client banner).
-// The server does not wait this long: the lobby floor is swapped on roundEnded.
-// Clients keep the win screen up for SUMMARY_MS on their own.
+// Round-end summary open/close motion. The server does not wait this long:
+// the lobby floor is swapped on roundEnded. Clients keep the win screen up
+// until the player dismisses it or the next match starts, not for SUMMARY_MS.
+
+const ease = (lin: number): number => {
+  const x = Math.max(0, Math.min(1, lin))
+  return x * x * (3 - 2 * x)
+}
+
+/** 0 = just opening, 1 = fully open; -1 = summary not showing. Ease-in-out. */
+export function summaryProgressAt(nowMs: number, shownAtMs: number, closedAtMs: number): number {
+  if (shownAtMs === 0) return -1
+  const grown = ease(Math.min(1, Math.max(0, (Math.max(closedAtMs || nowMs, shownAtMs) - shownAtMs) / 1000 / SUMMARY_GROW_S)))
+  if (closedAtMs > 0) {
+    const s = (nowMs - closedAtMs) / 1000 / SUMMARY_SHRINK_S
+    if (s >= 1) return -1
+    return grown * (1 - ease(s))
+  }
+  const elapsed = (nowMs - shownAtMs) / 1000
+  if (elapsed < 0) return -1
+  return elapsed < SUMMARY_GROW_S ? ease(elapsed / SUMMARY_GROW_S) : 1
+}
 export const SUMMARY_GROW_S = 0.4
 export const SUMMARY_HOLD_S = 10
 export const SUMMARY_SHRINK_S = 0.4

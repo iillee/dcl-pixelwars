@@ -34,7 +34,8 @@ export const LEVEL_Y_OFFSET = 100
 export const SKY_TOP_Y = 100 + LEVEL_Y_OFFSET
 /** L0 world Y = top minus one level rise (generator STEP = 5.3835 x TILE_SCALE 2
  *  = 10.767). With the offset: L-1 178.466 / L0 189.233 / L+1 200; spawns at
- *  L0 + 1.5 = 190.733; fall line MIN_Y - FALL_RESPAWN_DROP ≈ 112.47. */
+ *  L0 + 1.5 = 190.733; rescue triggers at the live sea surface (mean ~114).
+ *  FALL_RESPAWN_DROP is the pre-water fallback (~112.47) and the disable check. */
 export const SKY_ALTITUDE = SKY_TOP_Y - 5.3835 * 2
 /** Total levels including the base level (base level + ramps up). */
 export const SKY_LEVEL_COUNT = 3
@@ -104,7 +105,6 @@ export const BASE_PAINT_LOCK = false
 /** Spawn the teleport orb pair in-world? Off (Luke): playtesters found them unclear. The generator still
  *  places and fairness-checks the pair, so layouts are unchanged and turning this back on is one flag. */
 export const TELEPORT_ORBS = false
-/** The fall rescue (and anvil respawn) triggers this far below the lowest floor (MIN_Y ≈ 178.5 → line ≈ 112.5).
- *  Luke: was 12 (line ~66.5); lowered so a fall costs a couple more seconds of free fall. Keep the line
- *  above the ground (y 0) and MIN_Y > this value, or the rescue disables itself. */
+/** Pre-water fallback and the "rescue is enabled" check (MIN_Y must stay above this).
+ *  With the sea on, the live swell surface is the trigger, not this line. */
 export const FALL_RESPAWN_DROP = 66

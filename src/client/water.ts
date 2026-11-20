@@ -11,7 +11,8 @@
  * enough to hide the parcel edge would also sit on the arena.
  */
 import {
-  engine, Entity, Animator, GltfContainer, GltfNodeModifiers, Material, MaterialTransparencyMode, MeshRenderer,
+  engine, Entity, Animator, GltfContainer, GltfContainerLoadingState, GltfNodeModifiers, LoadingState,
+  Material, MaterialTransparencyMode, MeshRenderer,
   TextureFilterMode, TextureWrapMode, Transform, Tween, EasingFunction, TweenSequence, TweenLoop,
 } from '@dcl/sdk/ecs'
 import { EnvironmentFog } from '../shared/environmentFog'
@@ -19,9 +20,8 @@ import { Color3, Color4, Quaternion, Vector2, Vector3 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
 import { MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { FALL_RESPAWN_DROP } from '../maze/level'
-import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
+import { FOAM, HAZE_COLOR, LOOK, RIM_COLOR, SURFACE, SWELL_VARIANT, WATER, WATER_COLOR, WATER_FOG, hazeBand, hazeOuterBand, horizonOuterRadiusM, horizonRadiusM, resolvedWaterSize, resolvedWaterY, swellMesh } from '../shared/waterLook'
 import { liveSwell } from '../shared/swell'
-import { events } from '../shared/events'
 import { combatVfxReady } from './audio'
 import { initFoam, setFoamSeconds } from './foam'
 
@@ -30,15 +30,44 @@ const WATER_BOOT = Date.now()
 
 const swellClips: Entity[] = []
 let clipSeconds = 0
+/** False until the lead swell GLB is in and the wave clip has been restarted at t=0. */
+let clipArmed = false
 
 /** Clip time the swell meshes are actually showing. Fall checks use this so a crest you can see still counts. */
 export function waterVisualSeconds(): number {
   return clipSeconds
 }
 
-/** The clip starts at 0 and stays at speed 1. Chasing the wall clock made the swells lurch. */
+/** True once the lead swell GLB has loaded and the wave clip is running. */
+export function waterClipArmed(): boolean {
+  return clipArmed
+}
+
+function swellClipReady(ent: Entity): boolean {
+  const st = GltfContainerLoadingState.getOrNull(ent)
+  if (!st) return false
+  return st.currentState === LoadingState.FINISHED
+    || st.currentState === LoadingState.FINISHED_WITH_ERROR
+    || st.currentState === LoadingState.NOT_FOUND
+}
+
+/**
+ * The `wave` clip only starts once the GLB has loaded. Ticking clipSeconds from
+ * entity create put the CPU surface ahead of the visible morph, so a splash
+ * often sat under a crest. Wait for the lead mesh, restart every wave clip at
+ * t=0, then advance at speed 1. Do not chase the wall clock (that lurched).
+ */
 function trackSwell(dt: number): void {
   const period = liveSwell().periodS
+  if (!clipArmed) {
+    const lead = swellClips[0]
+    if (!lead || !swellClipReady(lead)) return
+    for (const ent of swellClips) Animator.playSingleAnimation(ent, 'wave', true)
+    clipSeconds = 0
+    clipArmed = true
+    if (FOAM.rings || FOAM.whitecaps) setFoamSeconds(clipSeconds)
+    return
+  }
   clipSeconds = (clipSeconds + dt) % period
   if (FOAM.rings || FOAM.whitecaps) setFoamSeconds(clipSeconds)
 }
@@ -159,10 +188,10 @@ export function initWater(): void {
 }
 
 /**
- * With `LOOK.seaLast`, the sea waits until the player has a team and the
- * burst/lunge clips have finished loading. Each mesh is then one frame apart
- * so a single frame does not decode every GLB. The ocean bed is `onAudio`,
- * after the haze.
+ * With `LOOK.seaLast`, the sea waits until the burst/lunge clips have
+ * finished loading (or 4s). Each mesh is then one frame apart so a single
+ * frame does not decode every GLB. The ocean bed is `onAudio`, after the
+ * haze. Team assignment is not a gate: the ocean belongs to the lobby too.
  */
 export function armSea(onAudio: () => void): void {
   if (!LOOK.sea) {
@@ -174,13 +203,10 @@ export function armSea(onAudio: () => void): void {
     onAudio()
     return
   }
-  console.log('[Water] deferred until teamAssigned; burst ripple pool is already built')
-  let team = false
+  console.log('[Water] deferred until combat clips are in (or 4s); meshes load one frame apart')
   let age = 0
   let stepping = false
-  events.on('team:assigned', () => { team = true })
   engine.addSystem(function seaLast(dt: number) {
-    if (!team) return
     age += dt
     if (!stepping) {
       if (!combatVfxReady() && age < 4) return
@@ -206,6 +232,26 @@ function repeatTex(src: string, tiling = 1) {
     wrapMode: TextureWrapMode.TWM_REPEAT,
     filterMode: TextureFilterMode.TFM_TRILINEAR,
     tiling: Vector2.create(tiling, tiling),
+  })
+}
+
+/**
+ * Empty path is the SDK's global modifier: it replaces the material on every
+ * node in the GLB. A named path (e.g. 'Haze') kept the tint but dropped the
+ * alpha-gradient mask, so the horizon haze rendered as a solid wall.
+ */
+function applySeaPbr(entity: Entity, pbr: Parameters<typeof Material.setPbrMaterial>[1]): void {
+  GltfNodeModifiers.create(entity, {
+    modifiers: [{
+      path: '',
+      castShadows: false,
+      material: {
+        material: {
+          $case: 'pbr',
+          pbr,
+        },
+      },
+    }],
   })
 }
 
@@ -270,19 +316,7 @@ function addSwell(root: Entity, src: string, wet: boolean): Entity {
     }],
   })
   swellClips.push(wave)
-  const c = WATER_COLOR
-  GltfNodeModifiers.create(wave, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: swellShade(c, wet),
-        },
-      },
-    }],
-  })
+  applySeaPbr(wave, swellShade(WATER_COLOR, wet))
   if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
   return wave
 }
@@ -332,18 +366,7 @@ function addFoam(root: Entity, src: string): Entity {
       weight: 1,
     }],
   })
-  GltfNodeModifiers.create(veil, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: foamShade(),
-        },
-      },
-    }],
-  })
+  applySeaPbr(veil, foamShade())
   scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
   return veil
 }
@@ -356,39 +379,33 @@ function addFlat(root: Entity, src: string): Entity {
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  GltfNodeModifiers.create(sea, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: {
-            texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-            albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
-            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
-            emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
-            emissiveIntensity: 1,
-            metallic: WATER.metallic,
-            roughness: WATER.roughness,
-            specularIntensity: WATER.specular,
-            reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
-            transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
-            castShadows: false,
-          },
-        },
-      },
-    }],
+  applySeaPbr(sea, {
+    texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
+    albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
+    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
+    emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
+    emissiveIntensity: 1,
+    metallic: WATER.metallic,
+    roughness: WATER.roughness,
+    specularIntensity: WATER.specular,
+    reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false,
   })
   return sea
 }
 
-/** One inward ring just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle. */
+/** Inward rings just inside the parcel edge. Scale carries the radius and the height; the mesh is the unit circle.
+ *  The farther ring is created first so it stays behind the original one. */
 function addHaze(waterY: number): void {
   const mid = SCENE_SIZE / 2
-  const radius = horizonRadiusM(SCENE_SIZE)
-  const bottom = waterY - WATER_FOG.hazeBelowM
-  const height = WATER_FOG.hazeBelowM + WATER_FOG.hazeAboveM
+  const inner = hazeBand()
+  const outer = hazeOuterBand()
+  placeHazeRing(mid, waterY - outer.below, horizonOuterRadiusM(SCENE_SIZE), outer.height)
+  placeHazeRing(mid, waterY - inner.below, horizonRadiusM(SCENE_SIZE), inner.height)
+}
+
+function placeHazeRing(mid: number, bottom: number, radius: number, height: number): void {
   const ring = engine.addEntity()
   Transform.create(ring, {
     position: Vector3.create(mid, bottom, mid),
@@ -400,28 +417,17 @@ function addHaze(waterY: number): void {
     invisibleMeshesCollisionMask: 0,
   })
   const c = HAZE_COLOR
-  GltfNodeModifiers.create(ring, {
-    modifiers: [{
-      path: '',
-      castShadows: false,
-      material: {
-        material: {
-          $case: 'pbr',
-          pbr: {
-            texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            albedoColor: Color4.create(c.r, c.g, c.b, c.a),
-            emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-            emissiveColor: Color3.create(c.r, c.g, c.b),
-            emissiveIntensity: 0.65,
-            roughness: 1,
-            metallic: 0,
-            specularIntensity: 0,
-            transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-            castShadows: false,
-          },
-        },
-      },
-    }],
+  applySeaPbr(ring, {
+    texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+    emissiveColor: Color3.create(c.r, c.g, c.b),
+    emissiveIntensity: 0.65,
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+    castShadows: false,
   })
 }
 
@@ -491,6 +497,7 @@ function watchMobile(root: Entity, desktop: Entity[]): void {
       for (const e of desktop) engine.removeEntity(e)
       swellClips.length = 0
       clipSeconds = 0
+      clipArmed = false
       addSwell(root, swellMesh('lite'), true)
       addFlat(root, WATER.flatLiteSrc)
     }

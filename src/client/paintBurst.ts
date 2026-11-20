@@ -33,7 +33,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, STAR_COOLDOWN_MULT, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
@@ -49,6 +49,8 @@ import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } fro
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
 import { isMoveLocked } from './moveLock'
+import { paintEconomyOn, paintTank } from '../paint'
+import { isBalloonRound } from '../round'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
@@ -62,21 +64,26 @@ import {
 } from './audio'
 import { sendBurstUse, sendBurstHit, sendBurstLand } from './clientHandler'
 import { hitsOpen, inLobby, paintOpen } from './phase'
-import { FLOAT_HEIGHT, getBotRenderPositions } from './botVisual'
+import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
+import { isLocalOverdriveActive } from './overdrive'
+import { localHasteCooldownMult } from './upgrades'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
 const BOT_FLOAT = FLOAT_HEIGHT
 
 let cooldownLeft = 0
+let cooldownTotal = BURST_COOLDOWN_S
 let burstId = 0
 let knockForceEnt: Entity = 0 as Entity
 let diveForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
 const WHITE = { r: 1, g: 1, b: 1 }
-const rgbOf = (t: Team) => inLobby() ? WHITE : (TEAM_RGB[t] ?? WHITE)
+const localDry = () => paintEconomyOn() && paintTank() <= 0
+const vfxTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
+const rgbOf = (t: Team) => TEAM_RGB[t] ?? WHITE
 function glow(ent: Entity, rgb: { r: number; g: number; b: number }, a: number, intensity: number): void {
   Material.setPbrMaterial(ent, {
     albedoColor: Color4.create(rgb.r, rgb.g, rgb.b, a), emissiveColor: Color4.create(rgb.r, rgb.g, rgb.b, 1),
@@ -97,7 +104,7 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
 function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
   const rgb = rgbOf(team)
-  startRipple(p, inLobby() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
+  startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4
@@ -447,7 +454,7 @@ export function getBurstHud(): { show: boolean; enabled: boolean; ready: boolean
   const enabled = isBurstEnabledNow() && localTeam() !== Team.None
   const cd = Math.max(0, cooldownLeft)
   const locked = isMoveLocked()
-  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / BURST_COOLDOWN_S, recovering: locked }
+  return { show: BURST_MODE !== 'off', enabled, ready: enabled && cd <= 0 && !locked, cooldown: cd, cooldownFrac: cd / (cooldownTotal || BURST_COOLDOWN_S), recovering: locked }
 }
 
 // ─── Use ────────────────────────────────────────────────────────────
@@ -539,7 +546,8 @@ export function triggerBurst(): void {
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
-  cooldownLeft = BURST_COOLDOWN_S
+  cooldownTotal = BURST_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownLeft = cooldownTotal
   // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.
   const air = burstPressIsAir(stance.lift, fallVy, isPlayerGrounded())
@@ -554,7 +562,7 @@ export function triggerBurst(): void {
   }
   const cell = stance.cell
   // Feedback on the input frame before any network work (same rule as Lunge).
-  showShockwave(p, team, true, cell)
+  showShockwave(p, vfxTeam(team, localDry()), true, cell)
   console.log(`[Burst] press -> local effect shown ${Date.now() - tPress}ms`)
   queuePaint('ground', id, cell, p, f.x, f.z)
   if (!safeSend('burstUse', () => sendBurstUse(id, cell, p.x, p.y, p.z, f.x, f.z, 0, tPress))) kickPaint(id)
@@ -589,7 +597,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct 
   // single sound as a ground Burst. Playing air_spike_dive here as well made
   // the local player hear the burst twice. A connect has no landing; its sound
   // is the hit clip only.
-  showAirTrail(p, team, fx, fz)
+  showAirTrail(p, vfxTeam(team, localDry()), fx, fz)
   queueUse(id, '', p, fx, fz)
   if (!safeSend('burstUse', () => sendBurstUse(id, '', p.x, p.y, p.z, fx, fz, 1, ct))) kickUse(id)
   const anvils = hitsOpen() ? knockAirAnvils(p, fx, fz, id) : 0
@@ -613,7 +621,7 @@ function fireAirSpike(id: number, team: Team, p: V3, fx: number, fz: number, ct 
   }
   // Full dive, including the sustained downward force. Nothing cancels this.
   commitAirDive(fx, fz)
-  armLandingStamp('', team, id, fx, fz)
+  armLandingStamp('', vfxTeam(team, localDry()), id, fx, fz)
   console.log(`[Burst] #${id} air spike miss pos=${p.y.toFixed(2)}`)
 }
 
@@ -665,6 +673,8 @@ function onImpact(attacker: string, id: number, target: string, dx: number, dz: 
     }
   }
   if (tgt.startsWith('bot:')) {
+    const bid = parseInt(tgt.slice(4), 10)
+    if (Number.isFinite(bid)) playBotKnock(bid, dx, dz, air ? 'spike' : 'burst')
     const b = getBotRenderPositions().find(x => `bot:${x.id}` === tgt)
     if (b) {
       const pos = { x: b.pos.x, y: b.pos.y - BOT_FLOAT, z: b.pos.z }
@@ -700,9 +710,10 @@ export function initPaintBurst(): void {
     emoteLeft = 0
     void stopEmote({}).catch(() => {})
   })
-  events.on('burst:fired', ({ attacker, id, team, x, y, z, air }) => {
+  events.on('burst:fired', ({ attacker, id, team, x, y, z, air, dry }) => {
     const att = attacker.toLowerCase()
     const selfAddr = myAddress()
+    const look = vfxTeam(team, dry === 1)
     if (selfAddr !== '' && att === selfAddr) clearUse(id)
     gate.sawStart(att, id, Date.now())
     let faceX = 0, faceZ = 1
@@ -716,13 +727,11 @@ export function initPaintBurst(): void {
     }
     if (att !== myAddress()) {
       if (air) {
-        showAirTrail({ x, y, z }, team, faceX, faceZ)
-        // Landing plays burst_impact once. The press dive clip is not played
-        // here either, or a remote would hear the burst twice.
-        armLandingStamp(att, team, id)
+        showAirTrail({ x, y, z }, look, faceX, faceZ)
+        armLandingStamp(att, look, id)
       } else if (!sawShock(`${att}#${id}`, Date.now())) {
         // Ground press, or the landing rebroadcast. The stamp may have played it already.
-        showShockwave({ x, y, z }, team, false)
+        showShockwave({ x, y, z }, look, false)
       }
     }
     // Victim anticipation: if we're already in the volume, knock now

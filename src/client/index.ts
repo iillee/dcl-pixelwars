@@ -32,6 +32,7 @@ import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
 import { initAudio, startOceanAmbience } from './audio'
+import { initWaterSplash } from './waterSplash'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
@@ -39,6 +40,7 @@ import { initSpeedBonus } from './speed'
 // Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
 import { initPaintBurst } from './paintBurst'
+import { initDepots } from './depots'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
@@ -46,6 +48,9 @@ import { ensureMazeSeed, initMazeNet, isLobbyLayout, rebuildMaze, setHoldMazeSee
 import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
+import { initBalloons } from './balloons'
+import { initBaseBeams } from './baseBeams'
+import { initLagHud } from './lagHud'
 
 // ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
 // Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
@@ -105,6 +110,7 @@ export async function setupClient(): Promise<void> {
   setupUi()
   if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
+  initWaterSplash()
   setupOverviewCamera()
 
   // Composite-lever scrubber. The scene's main.composite still contains a
@@ -140,10 +146,15 @@ export async function setupClient(): Promise<void> {
   initLunge()
   initLungeDummy()
   initPaintBurst()
+  initDepots()
   initLobby()
-  // Cross exists before the first frame the player can fall. The server
-  // also starts in the lobby and sends roundReset; this is the local floor
-  // so join does not wait on that message. A match clock replaces it.
+  initBalloons()
+  initBaseBeams()
+  // Lobby GLBs go up now. A primitive hold floor was already created in
+  // main() before this bundle loaded, so a mobile join has something to
+  // stand on if these colliders are still coming in. The server also
+  // starts in the lobby and sends roundReset; this is the local floor so
+  // join does not wait on that message. A match clock replaces it.
   rebuildMaze(1, 'lobby', 'boot')
   setHoldMazeSeed(true)
   setupTouchControls()
@@ -151,6 +162,7 @@ export async function setupClient(): Promise<void> {
   // Register the network boundary LAST so `room.onMessage` subscribers
   // above are all in place before the first message can arrive.
   initClientHandler()
+  initLagHud()
 
   // Register the SeedHolder for cross-client sync. Doing this inside
   // setupClient() (not at module top) ensures the networking layer is
@@ -162,8 +174,7 @@ export async function setupClient(): Promise<void> {
   syncEntity(leaderboardStateEntity, [LeaderboardState.componentId], 3001)
   // Maze construction is fully event-driven from here: the seed watcher
   // above builds the maze the moment a non-zero seed arrives.
-  // Sea meshes wait until the player has a team and the burst/lunge clips
-  // have loaded (LOOK.seaLast). Each mesh is one frame apart. The ocean
-  // bed starts after the haze.
+  // Sea meshes wait until the burst/lunge clips have loaded (LOOK.seaLast),
+  // then arrive one frame apart. The ocean bed starts after the haze.
   armSea(() => startOceanAmbience())
 }

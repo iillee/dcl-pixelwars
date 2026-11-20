@@ -222,11 +222,10 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     console.error('✗ PvB human colour should be Red, Blue, Red'); process.exit(1)
   }
   if (pvbBotCount(0) !== 0 || pvbBotCount(-3) !== 0) { console.error('✗ zero humans → 0 bots'); process.exit(1) }
-  if (pvbBotCount(1) < 1 || pvbBotCount(1000) !== PVB_BOT_MAX) { console.error('✗ PvB count out of range'); process.exit(1) }
-  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
-  if (PVB_RATIO === 1 && (pvbBotCount(10) !== 10 || pvbBotCount(15) !== 15 || pvbBotCount(16) !== 15)) {
-    console.error(`✗ ratio 1 counts: 10→${pvbBotCount(10)} 15→${pvbBotCount(15)} 16→${pvbBotCount(16)}`); process.exit(1)
+  if (pvbBotCount(1) !== 2 || pvbBotCount(2) !== 4 || pvbBotCount(8) !== PVB_BOT_MAX || pvbBotCount(1000) !== PVB_BOT_MAX) {
+    console.error(`✗ PvB 2× counts: 1→${pvbBotCount(1)} 2→${pvbBotCount(2)} 8→${pvbBotCount(8)}`); process.exit(1)
   }
+  if (pvbBotCount(4) < pvbBotCount(3)) { console.error('✗ PvB count shrank as humans grew'); process.exit(1) }
   console.log(`✓ format alternation (${seq.join(' → ')}) and PvB count cap ${PVB_BOT_MAX}`)
 }
 
@@ -259,24 +258,24 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     return minD
   }
 
-  counts = { red: 10, blue: 0 }
+  counts = { red: 1, blue: 0 }
   setPopulation({ kind: 'pvb', humanTeam: 1 })
   tickBots(0)
   const kept = new Set(getBotPositions().map(b => b.id))
-  const spread10 = assertSpread(10, 2, '10 humans → 10 blue bots')
+  const spread10 = assertSpread(2, 2, '1 human → 2 blue bots')
 
-  counts = { red: 12, blue: 0 }
+  counts = { red: 2, blue: 0 }
   tickBots(0) // mid-round: add, keep the ones already in
-  assertSpread(12, 2, 'humans 10→12 adds bots')
+  assertSpread(4, 2, 'humans 1→2 adds bots to 4')
   for (const id of kept) {
     if (!getBotPositions().some(b => b.id === id)) { console.error(`✗ added bots retired #${id}`); process.exit(1) }
   }
 
-  counts = { red: 3, blue: 0 }
-  tickBots(0) // mid-round: do not retire while humans remain
-  if (getBotPositions().length !== 12) { console.error(`✗ mid-round retire: ${getBotPositions().length} bots, want 12`); process.exit(1) }
+  counts = { red: 1, blue: 0 }
+  tickBots(0) // mid-round: drop back to 2×
+  if (getBotPositions().length !== 2) { console.error(`✗ mid-round trim: ${getBotPositions().length} bots, want 2`); process.exit(1) }
 
-  counts = { red: 20, blue: 0 }
+  counts = { red: 8, blue: 0 }
   tickBots(0)
   const spread15 = assertSpread(PVB_BOT_MAX, 2, 'cap')
 
@@ -284,13 +283,13 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   tickBots(0)
   if (getBotPositions().length !== 0) { console.error('✗ zero humans should retire PvB bots'); process.exit(1) }
 
-  counts = { red: 0, blue: 4 }
+  counts = { red: 0, blue: 2 }
   setPopulation({ kind: 'pvb', humanTeam: 2 }) // next PvB boundary: humans on blue
   tickBots(0)
   assertSpread(4, 1, 'human team flipped to blue')
 
-  counts = { red: 4, blue: 0 }
-  tickBots(0) // humans moved but population not reset: still the blue-human round, count may grow, no retire
+  counts = { red: 2, blue: 0 }
+  tickBots(0) // same headcount, still 2× on the bot team
   if (getBotPositions().length !== 4) { console.error(`✗ team counts changed under the same PvB round: ${getBotPositions().length}`); process.exit(1) }
 
   counts = { red: 3, blue: 1 }
@@ -330,7 +329,7 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
 
 // Interior wall (next cell is floor or a taller tile): a shove stays on the slab.
 // Perimeter lip (nothing at this height beyond): a knock flies off and falls.
-// A body left below a walkable cell is snapped back up, not left inside the mesh.
+// A body already at the top (within 0.15 m) snaps onto it; mid-fall from well below does not.
 {
   const tiles = getPlacedTilesInOrder()
   const world = {
@@ -384,15 +383,26 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
   }
   console.log(`✓ wall shove stayed on the slab (${along.toFixed(2)} m toward the wall)`)
 
-  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
+  const sunk = new BotBody({ x: wall.p[0], y: wall.p[1] - 0.10, z: wall.p[2] })
   sunk.rng = () => 1
   sunk.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
-  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.3; t += 0.05) sunk.tick(0.05, world)
-  if (sunk.pos.y < wall.p[1] - 0.25) {
-    console.error(`✗ body left inside the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
+  for (let t = 0; t < 0.5 && sunk.pos.y < wall.p[1] - 0.05; t += 0.05) sunk.tick(0.05, world)
+  if (sunk.pos.y < wall.p[1] - 0.12) {
+    console.error(`✗ body left just under the slab at y ${sunk.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
     process.exit(1)
   }
-  console.log(`✓ sunk body snapped up to ${sunk.pos.y.toFixed(2)}`)
+  console.log(`✓ body already at the top snapped up to ${sunk.pos.y.toFixed(2)}`)
+
+  const midFall = new BotBody({ x: wall.p[0], y: wall.p[1] - 1.2, z: wall.p[2] })
+  midFall.rng = () => 1
+  midFall.recoveryEnabled = false
+  midFall.knock({ kind: 'burst', impulse: { x: 0, y: 0, z: 0 }, forceDir: { x: 1, y: 0, z: 0 }, force: 0, forceS: 0, lockS: 0 })
+  for (let t = 0; t < 0.4; t += 0.05) midFall.tick(0.05, world)
+  if (midFall.pos.y >= wall.p[1] - 0.3) {
+    console.error(`✗ mid-fall body was pulled back onto the slab at y ${midFall.pos.y.toFixed(2)} (node ${wall.p[1].toFixed(2)})`)
+    process.exit(1)
+  }
+  console.log(`✓ mid-fall body 1.2 m below the top was not snapped back (y ${midFall.pos.y.toFixed(2)})`)
 
   const launch = (dx: number, dz: number) => {
     const bot = new BotBody({ x: lip.p[0], y: lip.p[1], z: lip.p[2] })
@@ -421,4 +431,57 @@ import { FORMAT_ALTERNATE, PVB_BOT_MAX, PVB_RATIO, nextRoundFormat, pvbBotCount,
     process.exit(1)
   }
   console.log(`✓ perimeter knock left the level (bot fell, anvil fell)`)
+
+  // Mid-air glide / jump / fast move into a tile's vertical face must stop at
+  // the slab, not tunnel through — including a step long enough to skip the edge.
+  const outside = (() => {
+    let x = lip.p[0], z = lip.p[2]
+    for (let i = 0; i < 40; i++) {
+      x += lip.dx
+      z += lip.dz
+      if (!cover(x, z).length) return { x: x + lip.dx * 1.5, z: z + lip.dz * 1.5 }
+    }
+    return null
+  })()
+  if (!outside) { console.error('✗ could not stand in the void outside a tile face'); process.exit(1) }
+  const faceX = outside.x - lip.dx * 1.5
+  const faceZ = outside.z - lip.dz * 1.5
+  // Stand a short step outside the vertical face, below a step-up so this is a
+  // side hit (not a landing). Stay close so a 6 m/s glide reaches the slab
+  // before falling out of it.
+  const startX = faceX + lip.dx * 0.8
+  const startZ = faceZ + lip.dz * 0.8
+  const intoX = -lip.dx, intoZ = -lip.dz
+  const faceDist = (sx: number, sz: number) => (faceX - sx) * intoX + (faceZ - sz) * intoZ
+  const alongIn = (sx: number, sz: number, px: number, pz: number) => (px - sx) * intoX + (pz - sz) * intoZ
+  const fire = (impulse: number, ticks: number) => {
+    const start = { x: startX, y: lip.p[1] - 0.9, z: startZ }
+    const bot = new BotBody(start)
+    bot.rng = () => 1
+    bot.recoveryEnabled = false
+    bot.knock({
+      kind: 'lunge',
+      impulse: { x: intoX * impulse, y: 0, z: intoZ * impulse },
+      forceDir: { x: intoX, y: 0, z: intoZ },
+      force: 0, forceS: 0, lockS: 0,
+    })
+    for (let t = 0; t < ticks * 0.05; t += 0.05) bot.tick(0.05, world)
+    const travel = alongIn(start.x, start.z, bot.pos.x, bot.pos.z)
+    const past = travel - faceDist(start.x, start.z)
+    return { past, y: bot.pos.y, start }
+  }
+  // Realistic mid-air glide (~HUMAN_GLIDE_SPEED 6 → impulse 24 at BOT_KNOCK_UNIT 0.25).
+  const glide = fire(24, 6)
+  if (glide.past > 1.5) {
+    console.error(`✗ mid-air glide tunneled through the tile side: ${glide.past.toFixed(2)} m past the face`)
+    process.exit(1)
+  }
+  console.log(`✓ mid-air glide stopped at the tile side (${glide.past.toFixed(2)} m past the face)`)
+  // One 0.05 s step at ~200 m/s would skip an 8 m lip without a swept check.
+  const fast = fire(800, 1)
+  if (fast.past > 1.5) {
+    console.error(`✗ fast jump/knock tunneled through the tile side: ${fast.past.toFixed(2)} m past the face`)
+    process.exit(1)
+  }
+  console.log(`✓ fast mid-air step swept and stopped at the tile side (${fast.past.toFixed(2)} m past the face)`)
 }

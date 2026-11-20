@@ -33,7 +33,9 @@ import { isMobile } from '@dcl/sdk/platform'
 import { SCENE_SIZE, BASE_Y } from '../maze/generator'
 import { signZoomScale } from '../shared/lobby'
 import { IS_SKY, LEVEL_Y_OFFSET } from '../maze/level'
+import { isLobbyLayout } from '../maze/rebuild'
 import { playUiClick } from './audio'
+import { isUpgradeCardsOpen } from './upgrades'
 
 // MARK: Tuning
 export const OV_PITCH_DEG = 35.26  // true isometric ≈ 35.26°
@@ -51,12 +53,13 @@ export const OV_FOV_DEG   = 24
  * lens while that camera stays active, so a step past the clamp switches to a
  * second camera (wideEntity) whose fov is written before it goes live.
  *
- * Mobile starts at the closest. Desktop starts at 29: one plus click reaches 7,
- * minus reaches 60, then 90. The table is latched when overview opens:
+ * Mobile starts at the closest. Desktop starts at 29 in a match: one plus click
+ * reaches 7, minus reaches 60, then 90. In the lobby, both start fully zoomed
+ * out (desktop 90, mobile 25 — the old farthest mobile step of 40 is gone). The table is latched when overview opens:
  * isMobile() resolves async, and a live re-read would compare a desktop scale
  * to the mobile max and disable minus.
  */
-const MOBILE_ZOOM_SCALES = [5, 15, 25, 40]
+const MOBILE_ZOOM_SCALES = [5, 15, 25]
 const DESKTOP_ZOOM_SCALES = [7, 29, 60, 90]
 const DESKTOP_DEFAULT_SCALE = 29
 /** Only steps above this use the wide camera, so 60 keeps its clamped look. */
@@ -99,6 +102,8 @@ let zoomIndex = DESKTOP_ZOOM_SCALES.indexOf(DESKTOP_DEFAULT_SCALE)
  *  judge a desktop scale against the mobile max of 25 once detection
  *  resolves, and minus would disable with no click. */
 let zoomMobile = false
+/** Previous open was in the lobby, so a later match open should snap back to the game default. */
+let lastLobbyOpen = false
 /** Eased scale. Distance and fov come from this. Pitch stays OV_PITCH_DEG. */
 let viewScale = DESKTOP_DEFAULT_SCALE
 /** Lens used when the wanted throw is longer than the fixed-pitch clamp. */
@@ -142,9 +147,9 @@ export function setupOverviewCamera(): void {
       playUiClick()
       toggleOverview()
     }
-    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && canOverviewZoomIn()) { playUiClick(); overviewZoomIn() }
-    if (wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && canOverviewZoomOut()) { playUiClick(); overviewZoomOut() }
-    if (active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
+    if (!isUpgradeCardsOpen() && wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && canOverviewZoomIn()) { playUiClick(); overviewZoomIn() }
+    if (!isUpgradeCardsOpen() && wasActive && active && inputSystem.isTriggered(InputAction.IA_ACTION_4, PointerEventType.PET_DOWN) && canOverviewZoomOut()) { playUiClick(); overviewZoomOut() }
+    if (!isUpgradeCardsOpen() && active && inputSystem.isTriggered(InputAction.IA_ACTION_5, PointerEventType.PET_DOWN)) {
       playUiClick()
       rotateOverview(1)
     }
@@ -237,13 +242,21 @@ function zoomTable(): readonly number[] {
   return zoomMobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
 }
 
-/** `snapDefault` on the first open, and on every mobile open (closest level). Desktop keeps its step, which starts at 29. */
-function useZoomTable(mobile: boolean, snapDefault: boolean): void {
+/** Opening in the lobby always uses the farthest step. A match uses the existing defaults. */
+function defaultZoomIndex(mobile: boolean, lobby: boolean): number {
+  const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
+  if (lobby) return table.length - 1
+  if (mobile) return 0
+  const i = table.indexOf(DESKTOP_DEFAULT_SCALE)
+  return i >= 0 ? i : 0
+}
+
+/** `snapDefault` on the first open, every lobby open, and every mobile open. Desktop keeps its in-match step. */
+function useZoomTable(mobile: boolean, snapDefault: boolean, lobby: boolean): void {
   zoomMobile = mobile
   const table = mobile ? MOBILE_ZOOM_SCALES : DESKTOP_ZOOM_SCALES
   if (snapDefault) {
-    const i = mobile ? 0 : table.indexOf(DESKTOP_DEFAULT_SCALE)
-    zoomIndex = i >= 0 ? i : 0
+    zoomIndex = defaultZoomIndex(mobile, lobby)
   } else if (zoomIndex < 0 || zoomIndex >= table.length) {
     zoomIndex = 0
   }
@@ -252,6 +265,12 @@ function useZoomTable(mobile: boolean, snapDefault: boolean): void {
 
 // MARK: API
 /** Flip between overview and the normal player camera. */
+export function enterOverview(): void {
+  if (camEntity === null || active) return
+  setActive(true)
+  mobileWant = true
+}
+
 export function toggleOverview(): void {
   if (camEntity === null) return
   setActive(!active)
@@ -268,9 +287,12 @@ function setActive(on: boolean): void {
   active = on
   if (active) {
     const mobile = isMobile()
-    // First open picks the platform default. Mobile re-opens at its closest
-    // level. Desktop stays on the step it already had, which begins at 29.
-    useZoomTable(mobile, !scaleInit || mobile)
+    const lobby = isLobbyLayout()
+    // Lobby always opens fully zoomed out. After a lobby open, the next match
+    // open snaps back to the game default. Mobile re-opens at its closest
+    // in-match level. Desktop keeps its in-match step otherwise.
+    useZoomTable(mobile, lobby || !scaleInit || mobile || lastLobbyOpen, lobby)
+    lastLobbyOpen = lobby
     scaleInit = true
     const p = Transform.getOrNull(engine.PlayerEntity)?.position
     if (p) { focus.x = p.x; focus.y = Math.max(p.y, BASE_Y - 15); focus.z = p.z }
@@ -301,6 +323,17 @@ export function exitOverview(): void {
 }
 
 export function isOverviewActive(): boolean { return active }
+
+/** Live overview pose. Signs use this to sit beside their tiles at the current zoom and yaw. */
+export function overviewFrame(): { yaw: number; pitch: number; fov: number; dist: number; focus: { x: number; y: number; z: number } } {
+  return {
+    yaw: yawDeg,
+    pitch: OV_PITCH_DEG,
+    fov,
+    dist: camDist,
+    focus: { x: focus.x, y: focus.y, z: focus.z },
+  }
+}
 
 /** Pitch and yaw of the overview view, including the in-progress 90° turn.
  *  Signs copy this so they stay parallel to the screen instead of aiming at the camera. */

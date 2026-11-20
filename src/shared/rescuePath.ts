@@ -21,8 +21,16 @@ export const RESCUE_PATH = {
   DESCEND_S: 0.8,
   /** Walk only / no abilities after arrival, before full control. Target 0.5–0.8s. */
   LAND_LOCK_S: 0.65,
-  /** Floater root height above the panel surface while carrying. */
+  /** Floater root height above the panel surface while carrying a player (~1.8 m avatar). The hook hangs 0.95 m below this, at the crown. */
   HANG_Y: 2.65,
+  /**
+   * Cloud root above a custom bot's feet. The custom ghost (GHOST_SCALE 1.2,
+   * GHOST_FLOAT 1.0) has its outline crown at ~3.33 m, and the hook hangs 0.95 m
+   * below the cloud root. 4.30 m puts the hook just above the crown and the puff
+   * clearly over the head, matching the player clearance. The previous bot attach
+   * reused HANG_Y 2.65 and sat inside the body.
+   */
+  BOT_HANG_Y: 4.30,
   /** Extra height at the start of the grab swoop. */
   APPROACH_EXTRA_Y: 4.5,
   /** Panel surface this many meters above SKY_TOP_Y while cruising, so the trip clears the roof. */
@@ -46,22 +54,43 @@ function lerp(a: RescueVec, b: RescueVec, u: number): RescueVec {
   return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: a.z + (b.z - a.z) * u }
 }
 
-function hangAt(p: RescueVec, extraY = 0): RescueVec {
-  return { x: p.x, y: p.y + RESCUE_PATH.HANG_Y + extraY, z: p.z }
+export function rescueHangY(who?: string): number {
+  return who && who.toLowerCase().startsWith('bot:') ? RESCUE_PATH.BOT_HANG_Y : RESCUE_PATH.HANG_Y
 }
 
-/** Cloud root pose `age` seconds after the catch. The rider's feet are HANG_Y below `pos`
- *  once the grab is over. `done` is true after the descend leg. */
-export function rescueCloudPose(catchP: RescueVec, base: RescueVec, age: number, t: RescueTimes = RESCUE_TIMES):
+export function rescueHangAt(p: RescueVec, extraY = 0, hangY = RESCUE_PATH.HANG_Y): RescueVec {
+  return {
+    x: p.x,
+    y: p.y + hangY + extraY,
+    z: p.z,
+  }
+}
+
+/** Rider feet under a cloud-root pose (the hook hangs on the root's Y axis). */
+export function rescueRiderFromCloud(cloud: RescueVec, hangY = RESCUE_PATH.HANG_Y): RescueVec {
+  return {
+    x: cloud.x,
+    y: cloud.y - hangY,
+    z: cloud.z,
+  }
+}
+
+function hangAt(p: RescueVec, extraY = 0, hangY = RESCUE_PATH.HANG_Y): RescueVec {
+  return rescueHangAt(p, extraY, hangY)
+}
+/** Cloud root pose `age` seconds after the catch. The rider's feet are `hangY` below `pos`
+ *  once the grab is over. `done` is true after the descend leg. Bots pass BOT_HANG_Y. */
+export function rescueCloudPose(catchP: RescueVec, base: RescueVec, age: number, t: RescueTimes = RESCUE_TIMES,
+  hangY = RESCUE_PATH.HANG_Y):
   { pos: RescueVec; scale: number; done: boolean } {
   if (age < t.grab) {
     const u = age / Math.max(0.05, t.grab)
-    return { pos: hangAt(catchP, (1 - u) * RESCUE_PATH.APPROACH_EXTRA_Y), scale: 0.2 + 0.8 * u, done: false }
+    return { pos: hangAt(catchP, (1 - u) * RESCUE_PATH.APPROACH_EXTRA_Y, hangY), scale: 0.2 + 0.8 * u, done: false }
   }
   let left = age - t.grab
-  const cruiseY = SKY_TOP_Y + RESCUE_PATH.CRUISE_CLEAR + RESCUE_PATH.HANG_Y
-  const arriveY = base.y + RESCUE_PATH.ARRIVE_ABOVE + RESCUE_PATH.HANG_Y
-  const start = hangAt(catchP)
+  const cruiseY = SKY_TOP_Y + RESCUE_PATH.CRUISE_CLEAR + hangY
+  const arriveY = base.y + RESCUE_PATH.ARRIVE_ABOVE + hangY
+  const start = hangAt(catchP, 0, hangY)
   const riseTo = { x: catchP.x, y: cruiseY, z: catchP.z }
   const cruiseTo = { x: base.x, y: cruiseY, z: base.z }
   const landTo = { x: base.x, y: arriveY, z: base.z }
@@ -78,4 +107,19 @@ export function rescueCloudPose(catchP: RescueVec, base: RescueVec, age: number,
     left -= leg.s
   }
   return { pos: landTo, scale: 1, done: true }
+}
+
+/**
+ * Delayed snapshot interpolation must not run while the bot is still riding
+ * or dropping from the cloud. Those snapshots lag the local cloud, and when
+ * the visual drop finishes they replay the descent — the bot pops back up
+ * and is lowered a second time.
+ */
+export function rescueAllowsSnapshotInterp(riding: boolean): boolean {
+  return !riding
+}
+
+/** Keep only the landing pose so a post-ride interpolator cannot climb the ride path. */
+export function snapsAfterRescueRelease<P>(landT: number, landPos: P): Array<{ t: number; pos: P }> {
+  return [{ t: landT, pos: landPos }]
 }

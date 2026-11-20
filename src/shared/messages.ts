@@ -38,9 +38,10 @@ export const Messages = {
   // client-only for now), so it can't resolve position -> cell. Client
   // authors ids via worldToCellId locally; server trusts them for Phase 4.
   // Anti-cheat (position validation) is deferred to Phase 5 per the plan.
-  // Rate limit: server caps at 100 ids per message (3x3 footprint @ 10Hz
-  // is 90 max; anything larger is dropped as suspicious).
-  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String) }),
+  // Rate limit: server caps at 260 ids per message (a 13-cell upgraded
+  // brush @ 10Hz is 130; a leftover 5x5 star brush is 250 worst-case, so
+  // 260 covers the upgrade brush and a leftover star 5x5. Larger batches are dropped).
+  paintTick: Schemas.Map({ ids: Schemas.Array(Schemas.String), at: Schemas.String, y: Schemas.Number, g: Schemas.Int }),
 
   // Server → Client: broadcast of paint state changes accumulated since
   // the last server tick (5Hz). Every delta carries the current coverage
@@ -51,8 +52,42 @@ export const Messages = {
     changes: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
     red: Schemas.Int,
     blue: Schemas.Int,
+    green: Schemas.Int,
+    yellow: Schemas.Int,
     total: Schemas.Int,
   }),
+
+  // Server → the painter only. Prototype tank after a spend or a respawn.
+  // denied cells were requested and not applied because the tank was empty.
+  paintWallet: Schemas.Map({
+    tank: Schemas.Int,
+    denied: Schemas.Array(Schemas.String),
+    regen: Schemas.Int,
+  }),
+
+  // Server → the painter only. Batched personal tiles-painted total for this round
+  // (not one message per tile). Sent with the 5 Hz paint flush, on snapshot, and as 0 on reset.
+  paintScore: Schemas.Map({ n: Schemas.Int }),
+
+  // Server → the player only. Authoritative upgrade charge, pending flag, and levels.
+  upgradeState: Schemas.Map({
+    charge: Schemas.Int,
+    pending: Schemas.Int,
+    earned: Schemas.Int,
+    speed: Schemas.Int,
+    paint: Schemas.Int,
+    haste: Schemas.Int,
+  }),
+  // Client → Server: pick one of the three cards (1 SPEED, 2 PAINT, 3 HASTE).
+  upgradeSelect: Schemas.Map({ kind: Schemas.Int }),
+
+  // Server → everyone: a star orb appeared or disappeared. i is the orb id.
+  starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  starDespawn: Schemas.Map({ i: Schemas.Int }),
+  // Server → everyone: who is holding the star, and until when (0 = ended).
+  starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number, ms: Schemas.Number }),
+  // Server → everyone: accepted star bump. The victim applies overdriveKnock.
+  overdriveImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
 
   // Client → Server: request the current authoritative paint state.
   // Sent once after teamAssigned so a reloaded/late-joining client sees
@@ -68,10 +103,17 @@ export const Messages = {
     entries: Schemas.Array(Schemas.Map({ id: Schemas.String, team: Schemas.Int })),
     red: Schemas.Int,
     blue: Schemas.Int,
+    green: Schemas.Int,
+    yellow: Schemas.Int,
     total: Schemas.Int,
     // Current round's maze seed (= server round index): late joiners build the maze from this
     // even if the SeedHolder CRDT never reaches them.
     seed: Schemas.Int,
+    // Authoritative floor + generation. A lower seq is stale and must be ignored.
+    layout: Schemas.String,
+    seq: Schemas.Int,
+    format: Schemas.String,
+    phase: Schemas.String,
   }),
 
   // Server → Client (broadcast): UTC round boundary crossed. Carries the
@@ -103,6 +145,10 @@ export const Messages = {
     why: Schemas.String,
     // Addressed clocks only: the mode this recipient is counted for, or ''.
     mine: Schemas.String,
+    // Same authoritative floor as roundReset / snapshot, so a late clock cannot diverge.
+    seed: Schemas.Int,
+    layout: Schemas.String,
+    seq: Schemas.Int,
   }),
 
   // Server → Clients: round just ended (scores for the win screen). The lobby
@@ -110,7 +156,12 @@ export const Messages = {
   roundEnded: Schemas.Map({
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
+    finalGreen: Schemas.Int,
+    finalYellow: Schemas.Int,
     finalTotal: Schemas.Int,
+    kind: Schemas.String,
+    victor: Schemas.String,
+    victorName: Schemas.String,
   }),
 
   // format: 'pvp' | 'pvb' for the round that is starting (the splash banner).
@@ -118,10 +169,13 @@ export const Messages = {
     seed: Schemas.Int,
     finalRed: Schemas.Int,
     finalBlue: Schemas.Int,
+    finalGreen: Schemas.Int,
+    finalYellow: Schemas.Int,
     finalTotal: Schemas.Int,
     format: Schemas.String,
     // 'arena' grows the match maze. 'lobby' grows the voting cross in its place.
     layout: Schemas.String,
+    seq: Schemas.Int,
   }),
   // Client → Server, ~2 Hz, only while the phase is lobby or idle. Feet, not a zone id.
   lobbyPos: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
@@ -154,7 +208,7 @@ export const Messages = {
   roundResult: Schemas.Map({ cells: Schemas.Int, teamCells: Schemas.Int, team: Schemas.Int }),
 
   // Server → Clients (broadcast): every active player's team. Sent on
-  // join, leave and round reset. Clients use it to paint red/blue
+  // join, leave and round reset. Clients use it to paint team
   // AvatarNametag plates on each avatar (client/nametags.ts).
   teamRoster: Schemas.Map({
     entries: Schemas.Array(Schemas.Map({ userId: Schemas.String, team: Schemas.Int })),
@@ -206,7 +260,7 @@ export const Messages = {
   // Server checks cooldown and rebroadcasts lungeStarted so every client
   // can show the lunge on that avatar.
   lungeStart: Schemas.Map({ id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  lungeStarted: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: lunge `id` touched `target` (player address, or
   // "bot:<id>"); (dx, dz) = knockback direction, (x, y, z) = attacker pos.
   lungeHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
@@ -231,7 +285,7 @@ export const Messages = {
   // lx/ly/lz stay on the wire and are always 0 (the air-miss cross paint was removed).
   // air 1 is the airborne press. A second burstFired with air 0, same id, is that
   // dive's landing shockwave (victim speculative knock). Clients play its VFX once.
-  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number }),
+  burstFired: Schemas.Map({ attacker: Schemas.String, id: Schemas.Int, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, air: Schemas.Int, lx: Schemas.Number, ly: Schemas.Number, lz: Schemas.Number, dry: Schemas.Int }),
   // Client → Server: burst `id` reached `target` (player address); (dx, dz) outward.
   burstHit: Schemas.Map({ id: Schemas.Int, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → Clients: accepted hit (player or "bot:<id>"). The player target knocks itself back.
@@ -243,9 +297,28 @@ export const Messages = {
   anvilHit: Schemas.Map({ kind: Schemas.Int, id: Schemas.Int, i: Schemas.Int, dx: Schemas.Number, dz: Schemas.Number, ct: Schemas.Number }),
   // Client → Server: key 2, re-roll all anvils.
   anvilRespawn: Schemas.Map({ n: Schemas.Int }),
-  // Client → Server (round stats): anvil i launched me / I fell off and respawned.
+  // Client → Server (round stats, legacy): anvil i launched me.
   anvilLaunched: Schemas.Map({ i: Schemas.Int }),
+  // Client → Server: a launched anvil i is touching me at (x,y,z). Server validates and may broadcast anvilImpact.
+  anvilStrike: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  // Server → Clients: accepted anvil strike. Player targets knock themselves; bot:<id> plays the bot knock.
+  anvilImpact: Schemas.Map({ i: Schemas.Int, attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   playerFell: Schemas.Map({}),
+  // Server -> Clients: Balloon Battle counts (full book) and one pop.
+  balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),
+  balloonPop: Schemas.Map({ id: Schemas.String, n: Schemas.Int }),
+  // Server → Clients: BASES connected counts and charge (5 Hz + late-join).
+  baseState: Schemas.Map({
+    redConnected: Schemas.Int,
+    blueConnected: Schemas.Int,
+    redProgress: Schemas.Int,
+    blueProgress: Schemas.Int,
+    threshold: Schemas.Int,
+    redGrowing: Schemas.Int,
+    blueGrowing: Schemas.Int,
+  }),
+  // Server → Clients: BASES winner (0 tie, 1 red, 2 blue). Visual shockwave only.
+  baseWin: Schemas.Map({ team: Schemas.Int }),
   // Fall rescue cloud for everyone else. The rider sends rescueStart at the
   // catch (who is ignored; the server stamps the authenticated id). mobile 1
   // means observers fly the cloud along catch → base; 0 means they follow the
@@ -284,6 +357,11 @@ export const Messages = {
   // opponents of `team` within BOMB_KNOCKBACK_RADIUS push themselves.
   // Painted cells arrive through the normal paintDelta tick.
   bombBlast: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, cells: Schemas.Int }),
+
+  // Cheap lag probe. Client sends its clock; the server echoes it to that
+  // sender only. Used by the optional lag HUD, about once every 2s.
+  lagPing: Schemas.Map({ t: Schemas.Number }),
+  lagPong: Schemas.Map({ t: Schemas.Number }),
 }
 
 export const room = registerMessages(Messages)

@@ -11,6 +11,7 @@
  * Knockback: v += impulse × LUNGE_DUMMY_UNIT, held force for LUNGE_KNOCK_FORCE_S, gravity, ground
  * friction; floor = highest walkable cell within ~1 cell under it (ramps: continuous slope height
  * via rampSurfaceY), grounded anvils snap down ≤ SNAP_DOWN (down-ramps), none → it falls.
+ * Anvils have no tile side walls and no snap-up; bot bodies use resolveSupport for those.
  */
 import {
   LUNGE_DUMMY_COUNT, LUNGE_DUMMY_UNIT, LUNGE_DUMMY_GRAVITY, LUNGE_DUMMY_FRICTION,
@@ -58,6 +59,263 @@ export function graphFloorAt(graph: WalkableGraph, rampTiles: Placed[], x: numbe
     if (best === null || fy > best) best = fy
   }
   return best
+}
+
+/** How far below a walkable surface still counts as "inside the slab", not the next level (~10.8 m). */
+const RECOVER_UP = 2.5
+/** Above a wall top by this much, a body may fly over the margin instead of being stopped. */
+const WALL_OVER = 0.4
+/** A walkable node covers its own 2 m cell (centre to edge is 1 m). Past that is the wall margin. */
+const WALL_REACH = 1.05
+/** How close to a node still counts as on the cell for a drop lip. The
+ *  walkable cell's edge is 1 m from its centre. 0.99 treated the seam
+ *  between two cells — including a ramp centreline — as a drop, so a
+ *  knock up a ramp fell through the mesh and popped at the top. 1.05 left
+ *  a 5 cm shelf past the edge where a slow slide looked stuck on the lip.
+ *  1.02 keeps the true edge (and a 2 cm epsilon for float error) without
+ *  that shelf. */
+const LIP_REACH = 1.02
+/** Subdivide a long XZ step so a fast glide, jump, or knock cannot skip a tile face. */
+const SWEEP_STEP = 0.45
+/** Snap up onto a slab only when already this close to the top. Mid-fall from well below must not be pulled back. */
+const SNAP_UP = 0.15
+/**
+ * Inbound recovery / glide only: how far below the top a returning body may
+ * mantle. Knocked or outbound bodies keep SNAP_UP, so edge falls stay the same.
+ * 0.7 m is inside the 0.5–0.8 m window — enough to catch a glide that arrived
+ * a little under the lip, not enough to pull mid-fall bodies back.
+ */
+export const MANTLE_UP = 0.7
+
+/** Optional support flags. `mantle` is for a recovering bot moving toward the arena. Anvils never set it. */
+export type SupportOpts = { mantle?: boolean }
+
+/** Walkable-surface Y of a tile at (x, z): flat slab top, or the ramp slope. Feet frame (FLOOR_FROM_NODE). */
+function tileSurfaceY(tile: Placed, x: number, z: number): number {
+  const nodeY = TILES[tile.type].isRamp ? rampSurfaceY(tile, x, z) : tile.y + 0.55
+  return nodeY + FLOOR_FROM_NODE
+}
+
+/** True when `fy` is this ramp's slope (or landing) at (x, z), not a flat neighbour. */
+function isRampSurface(rampTiles: Placed[], x: number, z: number, fy: number): boolean {
+  for (const t of rampTiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    if (Math.abs(rampSurfaceY(t, x, z) + FLOOR_FROM_NODE - fy) <= 0.2) return true
+  }
+  return false
+}
+
+/** Tile whose footprint contains (x, z) and whose slab could still contain a body at `y`.
+ *  Highest such tile. Null in the void and when `y` is clearly above that slab (flying over). */
+function tileContaining(tiles: Placed[], x: number, z: number, y: number): Placed | null {
+  let best: Placed | null = null
+  for (const t of tiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    const top = tileSurfaceY(t, x, z)
+    if (y > top + WALL_OVER) continue
+    if (y < t.y - 2) continue
+    if (!best || t.y > best.y) best = t
+  }
+  return best
+}
+
+/** Closest walkable node within `r` whose feet are near `y`. Null out in the void. */
+function nearestFloorNode(graph: WalkableGraph, x: number, z: number, y: number, r: number): { x: number; z: number; y: number } | null {
+  let best: { x: number; z: number; y: number } | null = null
+  let bestD = r * r
+  for (const p of graph.worldPos.values()) {
+    const d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z)
+    if (d > bestD) continue
+    const fy = p[1] + FLOOR_FROM_NODE
+    if (fy > y + RECOVER_UP || fy < y - 1.5) continue
+    bestD = d
+    best = { x: p[0], z: p[2], y: fy }
+  }
+  return best
+}
+
+/** Tile whose walkable surface is the floor under (x, z) at `y`. */
+function tileAtFeet(tiles: Placed[], x: number, z: number, y: number): Placed | null {
+  let best: Placed | null = null
+  for (const t of tiles) {
+    const x0 = t.x * CELL + MAZE_ORIGIN
+    const z0 = t.z * CELL + MAZE_ORIGIN
+    if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue
+    if (Math.abs(tileSurfaceY(t, x, z) - y) > 2.5) continue
+    if (!best || t.y > best.y) best = t
+  }
+  return best
+}
+
+/** Neighbour grid cell has a floor at or above `floorY` (same deck, or a taller tile's side). */
+function neighborSolid(tiles: Placed[], gx: number, gz: number, floorY: number): boolean {
+  const sx = gx * CELL + MAZE_ORIGIN + CELL / 2
+  const sz = gz * CELL + MAZE_ORIGIN + CELL / 2
+  for (const t of tiles) {
+    if (t.x !== gx || t.z !== gz) continue
+    if (tileSurfaceY(t, sx, sz) >= floorY - 1) return true
+  }
+  return false
+}
+
+/**
+ * Past the walkable cell, and the next tile in that direction is void or a
+ * lower level. That lip is a drop-off: don't stop on it and don't snap back
+ * onto it when leaving the floor. A solid neighbor along the other axis (the
+ * rest of a long rim) does not count as support — that was parking anvils
+ * hit off the side. An interior margin (floor or a taller tile in the next
+ * cell in the drop direction) is not a drop.
+ */
+function dropLip(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[], x: number, z: number, y: number): boolean {
+  if (!tiles.length) return false
+  if (graphFloorAt(graph, rampTiles, x, z, y, LIP_REACH, RECOVER_UP) !== null) return false
+  const node = nearestFloorNode(graph, x, z, y, 12)
+  if (!node) return true
+  const home = tileAtFeet(tiles, node.x, node.z, node.y)
+  if (!home) return true
+  const dx = x - node.x, dz = z - node.z
+  let drop = false
+  if (Math.abs(dx) > 0.4 && !neighborSolid(tiles, home.x + Math.sign(dx), home.z, node.y)) drop = true
+  if (Math.abs(dz) > 0.4 && !neighborSolid(tiles, home.x, home.z + Math.sign(dz), node.y)) drop = true
+  return drop
+}
+
+/**
+ * Wall at (x, z) for a body at height `y`. Only interior corridor margins and
+ * taller sides the body is moving into are walls. A perimeter lip or outer
+ * drop-off is never a wall when leaving the floor or falling past it, so a
+ * knock or slide can go off the edge. A mid-air glide into a tile's vertical
+ * face from outside (from is not in this slab, and the top is too high to
+ * step onto) is still a side hit. A floor a full level up is out of
+ * RECOVER_UP, so an open gap under a bridge is still a fall.
+ */
+function wallTopAt(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
+  x: number, z: number, y: number, from?: { x: number; z: number }, opts?: SupportOpts): number | null {
+  if (!tiles.length) return null
+  const entering = !!(from && !tileContaining(tiles, from.x, from.z, y))
+  const lip = dropLip(graph, rampTiles, tiles, x, z, y)
+  // Incoming mid-air hit on the vertical face, including a perimeter face
+  // approached from the void. Not when already leaving or falling along the lip.
+  // A returning glide may be a little under the top: the physics body is the
+  // feet, while the visible ghost sits about 1.9 m above them, so the lip
+  // face can stop the feet while the body already looks clear. Inbound
+  // recovery gets a taller mantle; knocked / outbound bodies do not.
+  if (entering) {
+    const tile = tileContaining(tiles, x, z, y)
+    if (tile) {
+      const up = opts?.mantle ? MANTLE_UP : STEP_UP
+      const step = graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, up)
+      if (step === null) {
+        const top = tileSurfaceY(tile, x, z)
+        // Lip XZ has no walkable node. If the slab top is within mantle
+        // range, let the body enter so it can reach the floor and snap up.
+        if (opts?.mantle && top - y <= MANTLE_UP && y <= top + WALL_OVER) return null
+        return top
+      }
+    }
+  }
+  if (lip) return null
+  // Walkable floor too high to step onto: a side only when moving into it.
+  // Falling down past a cell we already occupy is a drop, not a wall.
+  const slabFloor = graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP)
+  if (slabFloor !== null && slabFloor > y + STEP_UP) return entering ? slabFloor : null
+  const tile = tileContaining(tiles, x, z, y)
+  if (!tile) return null
+  if (graphFloorAt(graph, rampTiles, x, z, y, WALL_REACH, RECOVER_UP) !== null) return null
+  return tileSurfaceY(tile, x, z)
+}
+
+/** Stop a horizontal step at a wall. Axis slide, so a graze keeps the free component.
+ *  Long steps are swept so a fast glide, jump, or knock cannot skip a tile face
+ *  between ticks. Already inside the margin: hold the previous XZ and let gravity
+ *  carry the body out (rescue). */
+function clampWall(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
+  prev: { x: number; y: number; z: number }, nx: number, nz: number, opts?: SupportOpts): { x: number; z: number } {
+  const blocked = (x: number, z: number, from: { x: number; z: number }) =>
+    wallTopAt(graph, rampTiles, tiles, x, z, prev.y, from, opts) !== null
+  const dx = nx - prev.x, dz = nz - prev.z
+  const dist = Math.hypot(dx, dz)
+  if (dist < 1e-8) return { x: nx, z: nz }
+  const steps = Math.max(1, Math.ceil(dist / SWEEP_STEP))
+  let cx = prev.x, cz = prev.z
+  for (let i = 1; i <= steps; i++) {
+    const tx = prev.x + dx * (i / steps)
+    const tz = prev.z + dz * (i / steps)
+    if (!blocked(tx, tz, { x: cx, z: cz })) { cx = tx; cz = tz; continue }
+    if (!blocked(tx, cz, { x: cx, z: cz })) { cx = tx; continue }
+    if (!blocked(cx, tz, { x: cx, z: cz })) { cz = tz; continue }
+    break
+  }
+  return { x: cx, z: cz }
+}
+
+/**
+ * One integration step for a server body (bot or anvil), after velocity was updated.
+ * Lands on the walkable surface, refuses an interior wall (the next tile is floor or
+ * a taller side), and stops a mid-air glide into a tile's vertical face. Snap up only
+ * when already within SNAP_UP of the top (or SNAP_DOWN if still grounded), unless
+ * `opts.mantle` is set for an inbound recovery glide, which may snap from MANTLE_UP.
+ * A knock already on (or just entering) a ramp follows that slope even when the
+ * hit's lift left wasGrounded false, or the rise in one substep is more than
+ * SNAP_UP — otherwise the body flies through the mesh and pops at the top.
+ * Mid-fall from well below is not pulled back, and a perimeter lip is not a wall, so a knock
+ * or slide flies off and falls. A floor a full level up is out of RECOVER_UP, so an
+ * open gap under a bridge is still a fall.
+ */
+export function resolveSupport(graph: WalkableGraph, rampTiles: Placed[], tiles: Placed[],
+  prev: { x: number; y: number; z: number }, nx: number, ny: number, nz: number, velY: number, wasGrounded: boolean,
+  opts?: SupportOpts,
+): { x: number; y: number; z: number; velY: number; grounded: boolean } {
+  const stopped = clampWall(graph, rampTiles, tiles, prev, nx, nz, opts)
+  let y = ny
+  let vy = velY
+  let grounded = false
+  // A floor found just past a drop lip is the deck we are leaving, not support.
+  const lip = (at: number) => dropLip(graph, rampTiles, tiles, stopped.x, stopped.z, at)
+  const snapUp = opts?.mantle ? MANTLE_UP : SNAP_UP
+  let floor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y, CELL_SIZE * 0.6, Math.max(STEP_UP, snapUp))
+  if (floor !== null && lip(floor)) floor = null
+  if (floor !== null && (y <= floor || (wasGrounded && y - floor <= SNAP_DOWN))) {
+    y = floor
+    if (vy < 0) vy = 0
+    grounded = true
+  } else {
+    // Default: only if already at the top, within SNAP_UP. A 2.5 m grab was
+    // pulling mid-fall bodies and edge knocks back onto the slab.
+    // Inbound recovery may use MANTLE_UP. Not past a drop lip — that nearby
+    // floor is behind us.
+    let overhead = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, y, CELL_SIZE * 0.6, snapUp)
+    if (overhead !== null && lip(overhead)) overhead = null
+    if (overhead !== null && overhead > y && vy <= 0) {
+      y = overhead
+      vy = 0
+      grounded = true
+    }
+  }
+  // Ride a ramp we were already on. A lunge lift makes wasGrounded false, and
+  // the slope can rise more than STEP_UP in one substep, so the branches
+  // above would miss and the body would tunnel. Inbound mantle, mid-fall,
+  // and a sheer slab stay on the strict snap. Anvils do not use this path.
+  if (!grounded && !opts?.mantle) {
+    const travel = Math.hypot(stopped.x - prev.x, stopped.z - prev.z)
+    const rampUp = travel * (STEP / CELL) + 0.5
+    const prevFloor = graphFloorAt(graph, rampTiles, prev.x, prev.z, prev.y, CELL_SIZE * 0.6, 1)
+    const nearPrev = prevFloor !== null && Math.abs(prev.y - prevFloor) <= 1
+    if (nearPrev || wasGrounded) {
+      let rampFloor = graphFloorAt(graph, rampTiles, stopped.x, stopped.z, prev.y, CELL_SIZE * 0.6, Math.max(STEP_UP, rampUp))
+      if (rampFloor !== null && lip(rampFloor)) rampFloor = null
+      if (rampFloor !== null && isRampSurface(rampTiles, stopped.x, stopped.z, rampFloor) && y <= rampFloor + 0.35) {
+        y = rampFloor
+        vy = 0
+        grounded = true
+      }
+    }
+  }
+  return { x: stopped.x, y, z: stopped.z, velY: vy, grounded }
 }
 
 function shuffle<T>(a: T[]): T[] {
