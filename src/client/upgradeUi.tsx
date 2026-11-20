@@ -30,7 +30,6 @@ export const UPGRADE_CARD_FILL: Record<UpgradeKind, Color4> = {
   paint: Color4.create(0.949, 0.471, 0.706, 1),
   haste: Color4.create(1.000, 0.659, 0.220, 1),
 }
-const OVERLAY = Color4.create(0.05, 0.05, 0.07, 0.45)
 const WHITE = Color4.White()
 const bold = (t: string) => '<b>' + t + '</b>'
 
@@ -214,7 +213,7 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
   const offer = upgradeOfferLine(kind, level)
   const rim = selected ? GOLD : HOTBAR_RIM
   const fill = UPGRADE_CARD_FILL[kind]
-  const icon = mobile ? 52 : 72
+  const icon = mobile ? 72 : 96
   const titleF = mobile ? 16 : 22
   const bodyF = mobile ? 12 : 16
   const disabled = maxed || !hud.pending
@@ -233,12 +232,12 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
       <UiEntity uiTransform={{
         width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING,
         flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: { top: mobile ? 10 : 16, bottom: mobile ? 10 : 16, left: 8, right: 8 },
+        padding: { top: mobile ? 18 : 28, bottom: mobile ? 18 : 28, left: 10, right: 10 },
       }} uiBackground={{ color: fill }}>
         <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
-        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 8 : 12 } }} />
-        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: 2 } }} />
+        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 14 : 20 } }} />
+        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: 6 } }} />
         {roman ? (
           <UiEntity uiTransform={{
             positionType: 'absolute', position: { right: 4, top: 4 },
@@ -254,40 +253,66 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
   )
 }
 
-/** Compact centered overlay. Gameplay is not paused; only the cards and Close capture clicks. */
+/** White title with a dark outline so it stays readable over a bright sky. */
+function OutlinedTitle(props: { text: string; font: number; height: number }) {
+  const stroke = 3
+  const dirs: Array<[number, number]> = [
+    [-stroke, 0], [stroke, 0], [0, -stroke], [0, stroke],
+    [-stroke, -stroke], [-stroke, stroke], [stroke, -stroke], [stroke, stroke],
+  ]
+  const width = Math.ceil(props.text.length * props.font * 0.8 + 24)
+  return (
+    <UiEntity uiTransform={{
+      width, height: props.height + stroke * 2, margin: { bottom: 16 },
+      justifyContent: 'center', alignItems: 'center', flexShrink: 0, pointerFilter: 'none',
+    }}>
+      {dirs.map(([dx, dy]) => (
+        <Label
+          value={bold(props.text)}
+          fontSize={props.font}
+          color={INK}
+          font="sans-serif"
+          textAlign="middle-center"
+          textWrap="nowrap"
+          uiTransform={{ positionType: 'absolute', position: { top: dy, left: dx }, width: '100%', height: '100%' }}
+        />
+      ))}
+      <Label value={bold(props.text)} fontSize={props.font} color={WHITE} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+    </UiEntity>
+  )
+}
+
+/** Centered overlay with no backing panel. Gameplay is not paused; only the cards and Close capture clicks. */
 export function UpgradeOverlay() {
   const hud = getUpgradeHud()
   if (!hud.cardsOpen) return null
   const mobile = isMobile()
-  const cardW = mobile ? 124 : 228
-  const cardH = mobile ? 188 : 240
-  const closeW = mobile ? 120 : 140
-  const closeH = mobile ? 40 : 44
+  const cardW = mobile ? 136 : 228
+  const cardH = mobile ? 280 : 348
+  const closeW = mobile ? 128 : 148
+  const closeH = mobile ? 44 : 48
+  const hudClearance = mobile ? 128 : 116
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
-      justifyContent: 'center', alignItems: 'center', flexDirection: 'column', pointerFilter: 'none',
+      justifyContent: 'center', alignItems: 'center', flexDirection: 'column',
+      padding: { top: hudClearance, bottom: 16 }, pointerFilter: 'none',
     }}>
-      <UiEntity uiTransform={{
-        flexDirection: 'column', alignItems: 'center', padding: { top: 16, bottom: 16, left: 16, right: 16 },
-        borderRadius: 20, pointerFilter: 'none',
-      }} uiBackground={{ color: OVERLAY }}>
-        <Label value={bold('CHOOSE AN UPGRADE')} fontSize={mobile ? 18 : 24} color={WHITE} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ height: mobile ? 26 : 36, margin: { bottom: 10 } }} />
-        <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
-          {UPGRADE_KINDS.map((kind, i) => (
-            <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} />
-          ))}
-        </UiEntity>
-        <UiEntity
-          uiTransform={{
-            width: closeW, height: closeH, margin: { top: 12 }, borderRadius: 12,
-            borderWidth: 3, borderColor: HOTBAR_RIM, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
-          }}
-          uiBackground={{ color: PANEL_LIGHT }}
-          onMouseDown={closeUpgradeCards}
-        >
-          <Label value={bold('CLOSE')} fontSize={mobile ? 16 : 18} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
-        </UiEntity>
+      <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 20 : 28} height={mobile ? 28 : 36} />
+      <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
+        {UPGRADE_KINDS.map((kind, i) => (
+          <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} />
+        ))}
+      </UiEntity>
+      <UiEntity
+        uiTransform={{
+          width: closeW, height: closeH, margin: { top: 16 }, borderRadius: 12,
+          borderWidth: 4, borderColor: INK, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
+        }}
+        uiBackground={{ color: PANEL_LIGHT }}
+        onMouseDown={closeUpgradeCards}
+      >
+        <Label value={bold('CLOSE')} fontSize={mobile ? 16 : 18} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
       </UiEntity>
     </UiEntity>
   )
