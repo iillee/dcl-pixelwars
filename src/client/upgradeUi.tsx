@@ -216,39 +216,42 @@ export function MobileUpgradeRow() {
   )
 }
 
-function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number }) {
-  const { kind, hud, width, height, mobile, index } = props
+function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number; compact: boolean }) {
+  const { kind, hud, width, height, mobile, index, compact } = props
   const level = hud[kind]
   const maxed = level >= UPGRADE_LEVEL_MAX
   const selected = hud.highlight === kind
   const offer = upgradeOfferLine(kind, level)
   const rim = selected ? GOLD : HOTBAR_RIM
   const fill = UPGRADE_CARD_FILL[kind]
-  const icon = mobile ? 72 : 96
-  const titleF = mobile ? 16 : 22
-  const bodyF = mobile ? 12 : 16
+  const icon = compact ? (mobile ? 44 : 60) : (mobile ? 72 : 96)
+  const titleF = compact ? (mobile ? 12 : 15) : (mobile ? 16 : 22)
+  const bodyF = compact ? (mobile ? 10 : 13) : (mobile ? 12 : 16)
   const disabled = maxed || !hud.pending
-  const badge = Math.max(22, Math.round((mobile ? 52 : 68) * 0.38))
+  const badge = Math.max(compact ? 18 : 22, Math.round((mobile ? 52 : 68) * (compact ? 0.32 : 0.38)))
   const roman = level > 0 ? (UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)) : ''
+  const gap = index === 0 ? 0 : (mobile ? 6 : 10)
+  const padY = compact ? (mobile ? 10 : 14) : (mobile ? 18 : 28)
+  const padX = compact ? 8 : 10
   return (
     <UiEntity
       uiTransform={{
-        width, height, margin: { left: index === 0 ? 0 : (mobile ? 6 : 12) }, flexShrink: 0,
+        width, height, margin: { left: gap }, flexShrink: 0,
         borderRadius: HOTBAR_RADIUS, borderWidth: selected ? 4 : HOTBAR_BORDER_W, borderColor: rim,
-        padding: TILE_RING, pointerFilter: disabled ? 'none' : 'block',
+        padding: compact ? 4 : TILE_RING, pointerFilter: disabled ? 'none' : 'block',
       }}
       uiBackground={{ color: HOTBAR_TILE_BG }}
       onMouseDown={disabled ? undefined : () => requestUpgradeSelect(kind)}
     >
       <UiEntity uiTransform={{
-        width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING,
+        width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - (compact ? 4 : TILE_RING),
         flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: { top: mobile ? 18 : 28, bottom: mobile ? 18 : 28, left: 10, right: 10 },
+        padding: { top: padY, bottom: padY, left: padX, right: padX },
       }} uiBackground={{ color: fill }}>
         <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
           uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
-        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 14 : 20 } }} />
-        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: 6 } }} />
+        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 4, margin: { top: compact ? 8 : (mobile ? 14 : 20) } }} />
+        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: compact ? 4 : 6 } }} />
         {roman ? (
           <UiEntity uiTransform={{
             positionType: 'absolute', position: { right: 4, top: 4 },
@@ -293,37 +296,70 @@ function OutlinedTitle(props: { text: string; font: number; height: number }) {
   )
 }
 
-/** Centered overlay with no backing panel. Gameplay is not paused; only the cards and Close capture clicks. */
+/**
+ * Compact upgrade cluster, parked above the Dash / Burst hotbar (desktop)
+ * or in the lower centre on mobile, clear of the joystick (left) and the
+ * jump / ability column (right). Auto and manual opens share this layout.
+ * Gameplay is not paused; only the cards and Close capture clicks.
+ *
+ * Desktop clearance: 30 (hotbar bottom) + 72 (slot) + 18 gap = 120.
+ * Mobile clearance: 220, just above the jump button (top ≈ 175) and a
+ * typical native joystick, while the right-side ability column sits
+ * outside the centred row.
+ */
+const CLUSTER_BOTTOM_DESKTOP = 120
+const CLUSTER_BOTTOM_MOBILE = 220
+const COMPACT = 0.65
+
 export function UpgradeOverlay() {
   const hud = getUpgradeHud()
-  if (!hud.cardsOpen) return null
+  if (!hud.clusterVisible) return null
   const mobile = isMobile()
-  const cardW = mobile ? 136 : 228
-  const cardH = mobile ? 280 : 348
-  const closeW = mobile ? 128 : 148
-  const closeH = mobile ? 44 : 48
-  const hudClearance = mobile ? 128 : 116
+  const pop = hud.popScale
+  const cardW = Math.max(1, Math.round((mobile ? 136 : 228) * COMPACT * pop))
+  const cardH = Math.max(1, Math.round((mobile ? 280 : 348) * COMPACT * pop))
+  const gap = mobile ? 6 : 10
+  const rowW = cardW * 3 + gap * 2
+  const closeW = mobile ? 110 : 128
+  const closeH = mobile ? 36 : 40
+  const barH = 6
+  const bottom = Math.max(0, (mobile ? CLUSTER_BOTTOM_MOBILE : CLUSTER_BOTTOM_DESKTOP) - Math.round(hud.popSlide))
+  const showTimer = hud.autoOpen && hud.autoFrac > 0
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
-      justifyContent: 'center', alignItems: 'center', flexDirection: 'column',
-      padding: { top: hudClearance, bottom: 16 }, pointerFilter: 'none',
+      pointerFilter: 'none',
     }}>
-      <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 20 : 28} height={mobile ? 28 : 36} />
-      <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
-        {UPGRADE_KINDS.map((kind, i) => (
-          <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} />
-        ))}
-      </UiEntity>
-      <UiEntity
-        uiTransform={{
-          width: closeW, height: closeH, margin: { top: 16 }, borderRadius: 12,
-          borderWidth: 4, borderColor: INK, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
-        }}
-        uiBackground={{ color: PANEL_LIGHT }}
-        onMouseDown={closeUpgradeCards}
-      >
-        <Label value={bold('CLOSE')} fontSize={mobile ? 16 : 18} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
+      <UiEntity uiTransform={{
+        positionType: 'absolute', position: { bottom, left: 0 }, width: '100%',
+        flexDirection: 'column', alignItems: 'center', pointerFilter: 'none',
+      }}>
+        <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 16 : 20} height={mobile ? 22 : 28} />
+        {showTimer ? (
+          <UiEntity uiTransform={{
+            width: rowW, height: barH, margin: { bottom: 8 }, borderRadius: 3,
+            overflow: 'hidden', flexShrink: 0, pointerFilter: 'none',
+          }} uiBackground={{ color: INK }}>
+            <UiEntity uiTransform={{
+              width: Math.max(2, Math.round(rowW * hud.autoFrac)), height: barH, borderRadius: 3,
+            }} uiBackground={{ color: GOLD }} />
+          </UiEntity>
+        ) : null}
+        <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
+          {UPGRADE_KINDS.map((kind, i) => (
+            <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} compact={true} />
+          ))}
+        </UiEntity>
+        <UiEntity
+          uiTransform={{
+            width: closeW, height: closeH, margin: { top: 12 }, borderRadius: 12,
+            borderWidth: 4, borderColor: INK, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
+          }}
+          uiBackground={{ color: PANEL_LIGHT }}
+          onMouseDown={closeUpgradeCards}
+        >
+          <Label value={bold('CLOSE')} fontSize={mobile ? 14 : 16} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
+        </UiEntity>
       </UiEntity>
     </UiEntity>
   )

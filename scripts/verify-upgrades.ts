@@ -12,6 +12,10 @@ import {
   type UpgradeState,
 } from '../src/shared/upgrades'
 import {
+  CARD_AUTO_MS, CARD_COMPACT_SCALE, CARD_POP_MS, CARD_REOPEN_MS,
+  autoOpenDelayMs, autoTimerFrac, cardPopScale, cardSlidePx,
+} from '../src/shared/upgradeCards'
+import {
   BURST_PAINT_RADIUS_CELLS, STAR_PICKUPS_ENABLED,
   UPGRADE_CHARGE_ENEMY, UPGRADE_CHARGE_NEUTRAL, UPGRADE_HASTE_REDUCTION,
   UPGRADE_MAX, UPGRADE_PAINT_AREA_BONUS, UPGRADE_SPEED_BONUS, UPGRADE_THRESHOLDS,
@@ -172,6 +176,17 @@ check('bonus labels and roman levels cover I/II/III', bonusPct('speed', 1) === 1
 check('card offer at level 0 is the first-stack line', upgradeOfferLine('speed', 0) === '+15% movement speed' && upgradeOfferLine('paint', 0) === '+20% paint area' && upgradeOfferLine('haste', 0) === '−15% cooldowns')
 check('card offer after one stack shows the next total', upgradeOfferLine('speed', 1) === '+25% movement speed')
 check('card offer at max shows the current total', upgradeOfferLine('speed', 3) === '+30% movement speed')
+
+check('compact cards are 65% of the tall size', CARD_COMPACT_SCALE === 0.65)
+check('auto-open lasts 5 seconds and the pop lasts 0.25 seconds', CARD_AUTO_MS === 5000 && CARD_POP_MS === 250)
+check('a pick that unlocks another upgrade waits 0.5 s before reopening', autoOpenDelayMs(true) === CARD_REOPEN_MS && CARD_REOPEN_MS === 500)
+check('the first pending upgrade opens immediately', autoOpenDelayMs(false) === 0)
+check('the auto timer is full at the start and empty at the end', autoTimerFrac(0, 5000) === 1 && autoTimerFrac(5000, 5000) === 0)
+check('the auto timer is halfway at 2.5 s', Math.abs(autoTimerFrac(2500, 5000) - 0.5) < 1e-12)
+check('the pop-in starts undersized and finishes at 1', cardPopScale(0, false) < 0.9 && Math.abs(cardPopScale(CARD_POP_MS, false) - 1) < 1e-12)
+check('the pop-out ends undersized', cardPopScale(CARD_POP_MS, true) < 0.9 && Math.abs(cardPopScale(0, true) - 1) < 1e-12)
+check('the cluster slides up on open and down on close', cardSlidePx(0, false) > 0 && cardSlidePx(CARD_POP_MS, false) === 0 && cardSlidePx(0, true) === 0 && cardSlidePx(CARD_POP_MS, true) > 0)
+
 
 
 if (fails) { console.log(`\u2717 ${fails} upgrade check(s) failed`); process.exit(1) }
