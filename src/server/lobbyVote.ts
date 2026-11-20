@@ -6,7 +6,7 @@
 import { CELL, MAZE_ORIGIN, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import {
-  LOBBY_AFK_MS, LOBBY_MOVE_M, LOBBY_SAMPLE_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, cellAt,
+  LOBBY_AFK_MS, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_SAMPLE_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, cellAt,
   emptyCounts, emptyTeamCounts, everyPresentInZone, teamIdOf,
   toSceneFeet, type ModeId, type TeamChoice, type TeamCounts, type VoteCounts,
   voteModeAt, voteTeamAt,
@@ -206,6 +206,23 @@ export function anyoneStandingInTeamZone(present: string[], now: number): boolea
   return false
 }
 
+function isLobbyAfk(id: string, now: number): boolean {
+  const s = samples.get(keyOf(id))
+  return !!s && now - s.movedAt >= LOBBY_AFK_MS
+}
+
+/** Every non-AFK present player is currently standing in a team zone. */
+export function everyoneStandingReady(present: string[], now: number): boolean {
+  const ids = present.filter((id) => !isLobbyAfk(id, now))
+  if (ids.length === 0) return false
+  return ids.every((id) => standingTeam(id, now) !== 0)
+}
+
+function remainingCap(now: number, ends: number): number {
+  if (ends <= 0) return 0
+  return Math.max(0, ends - now)
+}
+
 export type LobbyClock = {
   wantFull: boolean
   countdownEnds: number
@@ -217,9 +234,10 @@ export type LobbyClock = {
 
 /** One scoring tick. The countdown is LOBBY_VOTE_MS, started only while someone
  *  is standing in a team zone. Sticky picks are kept for assignment, but walking
- *  off every zone stops and resets the timer. Everyone in a zone does not close it early. */
+ *  off every zone stops and resets the timer. If every non-AFK present player
+ *  is in a zone, remaining time drops to LOBBY_READY_MS and never extends. */
 
-export function stepLobby(s: LobbyClock, present: string[], now: number): { next: LobbyClock; log: '' | 'close' | 'start' | 'resolve' } {
+export function stepLobby(s: LobbyClock, present: string[], now: number): { next: LobbyClock; log: '' | 'close' | 'start' | 'resolve' | 'shorten' } {
   const next: LobbyClock = { ...s }
   const voters = voterIds(present)
   if (voters.length === 0) {
@@ -242,11 +260,17 @@ export function stepLobby(s: LobbyClock, present: string[], now: number): { next
       next.emptySince = 0
       return { next, log: 'close' }
     }
+    if (everyoneStandingReady(present, now) && remainingCap(now, next.countdownEnds) > LOBBY_READY_MS) {
+      next.countdownEnds = now + LOBBY_READY_MS
+      if (now >= next.countdownEnds) return { next, log: 'resolve' }
+      return { next, log: 'shorten' }
+    }
     if (now >= next.countdownEnds) return { next, log: 'resolve' }
     return { next, log: '' }
   }
   if (any) {
-    next.countdownEnds = now + LOBBY_VOTE_MS
+    const window = everyoneStandingReady(present, now) ? LOBBY_READY_MS : LOBBY_VOTE_MS
+    next.countdownEnds = now + window
     next.hadVotes = true
     next.emptySince = 0
     next.wantFull = false

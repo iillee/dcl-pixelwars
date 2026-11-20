@@ -13,6 +13,7 @@ import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
 import { isMobile } from '@dcl/sdk/platform'
 import { isOverviewActive, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
+import { playUiClick } from './audio'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -348,6 +349,29 @@ export function lobbyStand(): { x: number; y: number; z: number } {
   return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
 }
 
+/** Play click.wav once as each of the last 5 seconds of the lobby countdown begins. */
+let lastLobbyTickSec = -1
+function tickLobbyStartSfx(): void {
+  if (!inLobby() || isLobbyStarting()) {
+    lastLobbyTickSec = -1
+    return
+  }
+  const ms = voteRemainingMs()
+  if (ms <= 0) {
+    lastLobbyTickSec = -1
+    return
+  }
+  const sec = Math.ceil(ms / 1000)
+  if (sec > 5) {
+    lastLobbyTickSec = -1
+    return
+  }
+  if (sec >= 1 && sec !== lastLobbyTickSec) {
+    lastLobbyTickSec = sec
+    playUiClick()
+  }
+}
+
 export function initLobby(): void {
   events.on('lobby:floor', () => {
     laySigns()
@@ -373,6 +397,7 @@ export function initLobby(): void {
     // this, so a joiner whose HUD already said VOTE (phase idle) but whose
     // floor was still the arena never sent a sample. The server names the zone.
     if (!inLobby()) return
+    tickLobbyStartSfx()
     syncSignFacing()
     if (!readySent && isLobbyLayout()) {
       readySent = true

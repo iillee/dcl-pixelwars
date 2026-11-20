@@ -5,8 +5,9 @@ import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
 import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
 import { PAINT_CAPACITY, PAINT_REFILL_MODE } from "./shared/territory"
 import { hudClockText } from "./client/lobby"
+import { hudRoundStartsLine } from "./shared/lobby"
 import { lagHudLine, lagHudOn } from "./client/lagHud"
-import { inLobby } from "./client/phase"
+import { inLobby, isLobbyStarting, voteRemainingMs } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, isBalloonRound, isBasesRound } from "./round"
 import { baseCharge } from "./client/baseBeams"
 import { GROWTH_PER_CELL_PER_SEC } from "./shared/bases"
@@ -642,6 +643,50 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
  *  and the width grows right with the digit count. Hidden in the lobby,
  *  summary, and standings. When an upgrade is ready the pill turns gold
  *  and pulses in place (click / tap opens the cards). */
+
+/** Centered lobby countdown, shown to every player in the lobby (including
+ *  anyone not standing on a team tile). The top status pill is unchanged. */
+function LobbyStartCountdown() {
+  if (!inLobby() || isLobbyStarting()) return null
+  const ms = voteRemainingMs()
+  if (ms <= 0) return null
+  const n = Math.max(1, Math.ceil(ms / 1000))
+  const text = hudRoundStartsLine(n)
+  const mobile = isMobile()
+  const font = mobile ? 48 : 84
+  const stroke = mobile ? 4 : 6
+  const dirs: Array<[number, number]> = [
+    [-stroke, 0], [stroke, 0], [0, -stroke], [0, stroke],
+    [-stroke, -stroke], [-stroke, stroke], [stroke, -stroke], [stroke, stroke],
+  ]
+  const width = Math.ceil(text.length * font * 0.62 + 48)
+  const height = font + stroke * 2 + 8
+  return (
+    <UiEntity uiTransform={{
+      width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
+      justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
+    }}>
+      <UiEntity uiTransform={{
+        width, height, margin: { bottom: mobile ? 80 : 40 },
+        justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
+      }}>
+        {dirs.map(([dx, dy]) => (
+          <Label
+            value={hudBold(text)}
+            fontSize={font}
+            color={SUMMARY_INK}
+            font="sans-serif"
+            textAlign="middle-center"
+            textWrap="nowrap"
+            uiTransform={{ positionType: 'absolute', position: { top: dy, left: dx }, width: '100%', height: '100%' }}
+          />
+        ))}
+        <Label value={hudBold(text)} fontSize={font} color={Color4.White()} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const n = getUpgradeHud().charge
@@ -775,7 +820,7 @@ export const uiMenu = () => (
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
       const lobbyFont = isMobile() ? 16 : 22
       // One fixed width for both lobby states, snug around the longer line plus a little padding.
-      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 10', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 15', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
       return (
         <UiEntity
           uiTransform={{
@@ -1055,6 +1100,7 @@ export const uiMenu = () => (
         <Label value={lagHudLine()} fontSize={16} color={Color4.White()} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 22 }} />
       </UiEntity>
     ) : null}
+    <LobbyStartCountdown />
     <UpgradeOverlay />
     {/* Load splash: last child = top-most layer. */}
     <SplashScreen />

@@ -2,13 +2,13 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, countedTeam, lobbyVerdict, noteLobbyPos, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
+import { clearLobbyVotes, countedTeam, everyoneStandingReady, lobbyVerdict, noteLobbyPos, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
-  billboardAnchor, earlySpawnPads, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
+  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
+  billboardAnchor, earlySpawnPads, hudRoundStartsLine, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 
@@ -257,18 +257,18 @@ if (split.zone !== 'red' || split.why !== 'ok') {
 
 const clock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: lukeAt, emptySince: 0 }
 const step = stepLobby(clock, ['0xabc'], aged)
-if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_VOTE_MS) {
-  console.error(`✗ idle phase with this sample did not start the ${LOBBY_VOTE_MS}ms countdown (${step.log} ends ${step.next.countdownEnds})`)
+if (step.log !== 'start' || step.next.countdownEnds !== aged + LOBBY_READY_MS) {
+  console.error(`✗ a lone player in a zone should start the last ${LOBBY_READY_MS}ms (${step.log} ends ${step.next.countdownEnds})`)
   process.exit(1)
 }
-if (LOBBY_VOTE_MS !== 5_000) {
-  console.error(`✗ the vote window should be 5s, got ${LOBBY_VOTE_MS}ms`)
+if (LOBBY_VOTE_MS !== 15_000 || LOBBY_READY_MS !== 5_000) {
+  console.error(`✗ the vote window should be 15s, shrinking to 5s when everyone is ready (got ${LOBBY_VOTE_MS}ms / ${LOBBY_READY_MS}ms)`)
   process.exit(1)
 }
 
 const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
-if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 10', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING...', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
-  console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A TEAM and STARTING IN 10')
+if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 15', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING...', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
+  console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A TEAM and STARTING IN 15')
   process.exit(1)
 }
 if (hudVoteHeadline() !== 'CHOOSE A TEAM' || hudVoteHeadline(0, 'pvp') !== 'CHOOSE A TEAM') {
@@ -286,12 +286,12 @@ if (hudVoteHeadline(5, 'tie') !== 'STARTING IN 5' || hudVoteHeadline(8, '') !== 
 
 const early = stepLobby(step.next, ['0xabc'], aged + 2_000)
 if (early.log === 'resolve' || early.log === 'close') {
-  console.error(`✗ the vote closed before ${LOBBY_VOTE_MS}ms (${early.log})`)
+  console.error(`✗ the vote closed before ${LOBBY_READY_MS}ms (${early.log})`)
   process.exit(1)
 }
-const done = stepLobby(step.next, ['0xabc'], aged + LOBBY_VOTE_MS)
+const done = stepLobby(step.next, ['0xabc'], aged + LOBBY_READY_MS)
 if (done.log !== 'resolve') {
-  console.error(`✗ the vote did not resolve at ${LOBBY_VOTE_MS}ms (${done.log})`)
+  console.error(`✗ the lone-player vote did not resolve at ${LOBBY_READY_MS}ms (${done.log})`)
   process.exit(1)
 }
 const held = stepLobby({ wantFull: true, countdownEnds: 0, hadVotes: false, readyAt: aged - 3_000, emptySince: 0 }, ['0xabc'], aged)
@@ -352,8 +352,8 @@ if (!noteLobbyPos('proto', blueX, 190, blueZ, aged + 3_000)) {
   process.exit(1)
 }
 const onBlue = stepLobby(blueClock, ['proto'], aged + 3_000)
-if (onBlue.log !== 'start' || onBlue.next.countdownEnds !== aged + 3_000 + LOBBY_VOTE_MS) {
-  console.error(`✗ standing in blue should start the ${LOBBY_VOTE_MS}ms countdown (${onBlue.log})`)
+if (onBlue.log !== 'start' || onBlue.next.countdownEnds !== aged + 3_000 + LOBBY_READY_MS) {
+  console.error(`✗ a lone player standing in blue should start the last ${LOBBY_READY_MS}ms (${onBlue.log})`)
   process.exit(1)
 }
 if (!noteLobbyPos('proto', hubX, 190, hubZ, aged + 4_000)) {
@@ -367,6 +367,105 @@ if (offBlue.log !== 'close' || offBlue.next.countdownEnds !== 0) {
 }
 if (countedTeam('proto') !== 2) {
   console.error('✗ walking off blue should keep the sticky pick')
+  process.exit(1)
+}
+
+// 15s window when someone present is not in a zone; shrinks to 5s when they join.
+clearLobbyVotes()
+const waitAt = aged + 10_000
+if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, waitAt)) {
+  console.error('✗ server rejected the red sample for the two-player countdown')
+  process.exit(1)
+}
+if (!noteLobbyPos('wander', hubX, 190, hubZ, waitAt + 500)) {
+  console.error('✗ server rejected the hub wanderer sample')
+  process.exit(1)
+}
+const waitNow = waitAt + 500
+if (everyoneStandingReady(['0xabc', 'wander'], waitNow)) {
+  console.error('✗ a wanderer in the hub should block the everyone-ready shrink')
+  process.exit(1)
+}
+const waitClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: waitAt, emptySince: 0 }
+const waitStart = stepLobby(waitClock, ['0xabc', 'wander'], waitNow)
+if (waitStart.log !== 'start' || waitStart.next.countdownEnds !== waitNow + LOBBY_VOTE_MS) {
+  console.error(`✗ a partial lobby should start the full ${LOBBY_VOTE_MS}ms window (${waitStart.log} ends ${waitStart.next.countdownEnds})`)
+  process.exit(1)
+}
+if (!noteLobbyPos('wander', blueX, 190, blueZ, waitNow + 1_000)) {
+  console.error('✗ server rejected wander stepping onto blue')
+  process.exit(1)
+}
+if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, waitNow + 1_000)) {
+  console.error('✗ server rejected refreshing the red sample')
+  process.exit(1)
+}
+const readyNow = waitNow + 1_000
+if (!everyoneStandingReady(['0xabc', 'wander'], readyNow)) {
+  console.error('✗ both players standing in zones should be everyone-ready')
+  process.exit(1)
+}
+const shrunk = stepLobby(waitStart.next, ['0xabc', 'wander'], readyNow)
+if (shrunk.log !== 'shorten' || shrunk.next.countdownEnds !== readyNow + LOBBY_READY_MS) {
+  console.error(`✗ everyone ready should drop remaining time to ${LOBBY_READY_MS}ms (${shrunk.log} ends ${shrunk.next.countdownEnds})`)
+  process.exit(1)
+}
+const stillShort = stepLobby(shrunk.next, ['0xabc', 'wander'], readyNow + 1_000)
+if (stillShort.log !== '' || stillShort.next.countdownEnds !== readyNow + LOBBY_READY_MS) {
+  console.error(`✗ the ready shrink must not run again or extend (${stillShort.log} ends ${stillShort.next.countdownEnds})`)
+  process.exit(1)
+}
+if (!noteLobbyPos('wander', hubX, 190, hubZ, readyNow + 1_500)) {
+  console.error('✗ server rejected wander leaving blue after the shrink')
+  process.exit(1)
+}
+const noExtend = stepLobby(shrunk.next, ['0xabc', 'wander'], readyNow + 1_500)
+if (noExtend.log === 'close' || noExtend.next.countdownEnds !== readyNow + LOBBY_READY_MS) {
+  console.error(`✗ one player leaving a zone must not extend or cancel while another stays (${noExtend.log} ends ${noExtend.next.countdownEnds})`)
+  process.exit(1)
+}
+
+// An AFK wanderer does not block the ready shrink.
+clearLobbyVotes()
+const afkBase = aged + 30_000
+if (!noteLobbyPos('0xAbC', lukeX, 190, lukeZ, afkBase)) {
+  console.error('✗ server rejected the red sample for the AFK case')
+  process.exit(1)
+}
+if (!noteLobbyPos('idle', hubX, 190, hubZ, afkBase + 500)) {
+  console.error('✗ server rejected the AFK hub sample')
+  process.exit(1)
+}
+if (!noteLobbyPos('idle', hubX, 190, hubZ, afkBase + 500 + LOBBY_AFK_MS)) {
+  console.error('✗ server rejected refreshing the AFK hub sample in place')
+  process.exit(1)
+}
+if (!noteLobbyPos('0xAbC', lukeX - 1, 190, lukeZ, afkBase + 500 + LOBBY_AFK_MS)) {
+  console.error('✗ server rejected refreshing the red sample in the AFK case')
+  process.exit(1)
+}
+const afkNow = afkBase + 500 + LOBBY_AFK_MS
+if (!everyoneStandingReady(['0xabc', 'idle'], afkNow)) {
+  console.error('✗ an AFK player in the hub should not block everyone-ready')
+  process.exit(1)
+}
+const afkStart = stepLobby({ wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: afkNow, emptySince: 0 }, ['0xabc', 'idle'], afkNow)
+if (afkStart.log !== 'start' || afkStart.next.countdownEnds !== afkNow + LOBBY_READY_MS) {
+  console.error(`✗ a ready lobby with one AFK wanderer should start at ${LOBBY_READY_MS}ms (${afkStart.log} ends ${afkStart.next.countdownEnds})`)
+  process.exit(1)
+}
+
+if (hudRoundStartsLine(12) !== 'ROUND STARTS IN 12' || hudRoundStartsLine(1) !== 'ROUND STARTS IN 1' || hudRoundStartsLine(0) !== '') {
+  console.error(`✗ the center lobby line should read ROUND STARTS IN N (${hudRoundStartsLine(12)})`)
+  process.exit(1)
+}
+const lobbyClientSrc = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')
+if (!lobbyClientSrc.includes('tickLobbyStartSfx') || !lobbyClientSrc.includes('playUiClick()') || !lobbyClientSrc.includes('sec > 5')) {
+  console.error('✗ the lobby should tick click.wav once for each of the last 5 seconds')
+  process.exit(1)
+}
+if (!uiSrc.includes('<LobbyStartCountdown />') || !uiSrc.includes('hudRoundStartsLine(')) {
+  console.error('✗ the lobby should show a centered ROUND STARTS IN N countdown')
   process.exit(1)
 }
 if (hudVoteHeadline(0) !== 'CHOOSE A TEAM') {

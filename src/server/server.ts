@@ -1763,7 +1763,11 @@ export async function setupServer(): Promise<void> {
       readyAt = step.next.readyAt
       emptySince = step.next.emptySince
       if (step.log === 'start') {
-        console.log(`[Lobby] first vote → ${LOBBY_VOTE_MS / 1000}s`)
+        const left = Math.max(0, Math.round((countdownEnds - now) / 1000))
+        console.log(`[Lobby] first vote → ${left}s`)
+        sendRoundClock()
+      } else if (step.log === 'shorten') {
+        console.log('[Lobby] everyone ready → 5s')
         sendRoundClock()
       } else if (step.log === 'close') {
         console.log('[Lobby] votes left → idle')

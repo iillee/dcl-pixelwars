@@ -118,8 +118,12 @@ export function placedLobbyEnds(): TeamDef[] {
 
 
 /** Full start window, in one place. Starts when the first team is chosen.
- *  Standing in a zone does not end it early, and an empty lobby does not start it. */
-export const LOBBY_VOTE_MS = 5_000
+ *  An empty lobby does not start it. If every non-AFK present player is
+ *  standing in a team zone, the remaining time drops to LOBBY_READY_MS
+ *  (it never extends). Walking off every zone still cancels. */
+export const LOBBY_VOTE_MS = 15_000
+/** Remaining time when everyone present (and not AFK) is already in a zone. */
+export const LOBBY_READY_MS = 5_000
 /** End-tile walkable floor, matching the paint mask: a 20/32 corridor with a 6/32 closed cap.
  *  The vote tint and the trigger both use this rectangle, pulled in by VOTE_TINT_INSET_M. */
 export const VOTE_FLOOR_WIDTH = 20 / 32
@@ -375,6 +379,13 @@ export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
   const n = Math.max(0, Math.ceil(leftSecs))
   if (n <= 0) return LOBBY_STATUS_IDLE
   return `${LOBBY_STATUS_COUNTDOWN} ${n}`
+}
+
+/** Big center line shown to every lobby player during the countdown. */
+export function hudRoundStartsLine(leftSecs = 0): string {
+  const n = Math.max(0, Math.ceil(leftSecs))
+  if (n <= 0) return ''
+  return `ROUND STARTS IN ${n}`
 }
 
 
