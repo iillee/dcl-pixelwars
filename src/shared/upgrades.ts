@@ -195,14 +195,31 @@ export const UPGRADE_DESCRIPTION: Record<UpgradeKind, string> = {
 
 export const UPGRADE_BONUS_UNIT: Record<UpgradeKind, string> = {
   speed: 'movement speed',
-  paint: 'paint coverage',
-  haste: 'ability cooldowns',
+  paint: 'paint area',
+  haste: 'cooldowns',
 }
 
+/** One-line offer for the card picker, e.g. "+15% movement speed". */
+export function upgradeOfferLine(kind: UpgradeKind, currentLevel: number): string {
+  const maxed = currentLevel >= UPGRADE_LEVEL_MAX
+  const shown = maxed ? currentLevel : Math.min(UPGRADE_LEVEL_MAX, currentLevel + 1)
+  const pct = bonusPct(kind, shown)
+  const sign = kind === 'haste' ? '−' : '+'
+  return `${sign}${pct}% ${UPGRADE_BONUS_UNIT[kind]}`
+}
+
+/** Coloured HUD buff icons (kept for the top-bar badges). */
 export const UPGRADE_ICON_SRC: Record<UpgradeKind, string> = {
   speed: 'assets/images/ui/upgrade-speed.png',
   paint: 'assets/images/ui/upgrade-paint.png',
   haste: 'assets/images/ui/upgrade-haste.png',
+}
+
+/** Flat black-and-white silhouettes used on the coloured upgrade cards. */
+export const UPGRADE_CARD_ICON_SRC: Record<UpgradeKind, string> = {
+  speed: 'assets/images/ui/upgrade-card-speed.png',
+  paint: 'assets/images/ui/upgrade-card-paint.png',
+  haste: 'assets/images/ui/upgrade-card-haste.png',
 }
 
 export const UPGRADE_ROMAN = ['', 'I', 'II', 'III'] as const

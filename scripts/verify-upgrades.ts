@@ -7,7 +7,7 @@ import { UpgradeBook } from '../src/server/upgradeBook'
 import {
   accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade,
   hasteCooldownMult, paintAreaMult, paintedScoreFor, speedMoveMult,
-  trySelectUpgrade, unlockedUpgradeCount, upgradeChargeFor,
+  trySelectUpgrade, unlockedUpgradeCount, upgradeChargeFor, upgradeOfferLine,
   upgradePaintBrushOffsets, upgradePaintTileCount, upgradeProgress,
   type UpgradeState,
 } from '../src/shared/upgrades'
@@ -169,6 +169,10 @@ check('four-team convert credit is unchanged (neutral 1, enemy 2, friendly 0)', 
 
 // HUD roman / bonus labels for I/II/III.
 check('bonus labels and roman levels cover I/II/III', bonusPct('speed', 1) === 15 && bonusPct('speed', 2) === 25 && bonusPct('speed', 3) === 30)
+check('card offer at level 0 is the first-stack line', upgradeOfferLine('speed', 0) === '+15% movement speed' && upgradeOfferLine('paint', 0) === '+20% paint area' && upgradeOfferLine('haste', 0) === '−15% cooldowns')
+check('card offer after one stack shows the next total', upgradeOfferLine('speed', 1) === '+25% movement speed')
+check('card offer at max shows the current total', upgradeOfferLine('speed', 3) === '+30% movement speed')
+
 
 if (fails) { console.log(`\u2717 ${fails} upgrade check(s) failed`); process.exit(1) }
 console.log('\u2713 all upgrade checks passed')

@@ -16,16 +16,20 @@ import {
   closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, type UpgradeHud,
 } from './upgrades'
 import {
-  UPGRADE_BONUS_UNIT, UPGRADE_DESCRIPTION, UPGRADE_ICON_SRC, UPGRADE_KINDS, UPGRADE_LABEL,
-  UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, bonusPct, type UpgradeKind,
+  UPGRADE_CARD_ICON_SRC, UPGRADE_ICON_SRC, UPGRADE_KINDS, UPGRADE_LABEL,
+  UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
 } from '../shared/upgrades'
 
 const INK = Color4.create(0.13, 0.13, 0.15, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
-const GOLD_DEEP = Color4.create(0.95, 0.7, 0.15, 1)
 const GOLD_FLASH = Color4.create(1, 0.95, 0.55, 1)
 const GOLD_EDGE = Color4.create(0.95, 0.78, 0.28, 1)
-const DIM = Color4.create(0.45, 0.45, 0.5, 1)
+/** Card fills: Speed #6DB0F5, Paint #F278B4, Haste #FFA838. Dark text + black icons stay readable on all three. */
+export const UPGRADE_CARD_FILL: Record<UpgradeKind, Color4> = {
+  speed: Color4.create(0.427, 0.690, 0.961, 1),
+  paint: Color4.create(0.949, 0.471, 0.706, 1),
+  haste: Color4.create(1.000, 0.659, 0.220, 1),
+}
 const OVERLAY = Color4.create(0.05, 0.05, 0.07, 0.45)
 const WHITE = Color4.White()
 const bold = (t: string) => '<b>' + t + '</b>'
@@ -206,21 +210,16 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
   const { kind, hud, width, height, mobile, index } = props
   const level = hud[kind]
   const maxed = level >= UPGRADE_LEVEL_MAX
-  const next = Math.min(UPGRADE_LEVEL_MAX, level + 1)
-  const nowPct = bonusPct(kind, level)
-  const nextPct = bonusPct(kind, next)
   const selected = hud.highlight === kind
-  const sign = kind === 'haste' ? '−' : '+'
-  const levelLine = maxed ? `LEVEL ${level}  MAX` : `LEVEL ${level}  →  ${next}`
-  const bonusLine = maxed
-    ? `${sign}${nowPct}% ${UPGRADE_BONUS_UNIT[kind]}`
-    : `${sign}${nowPct}%  →  ${sign}${nextPct}% ${UPGRADE_BONUS_UNIT[kind]}`
+  const offer = upgradeOfferLine(kind, level)
   const rim = selected ? GOLD : HOTBAR_RIM
-  const icon = mobile ? 44 : 64
+  const fill = UPGRADE_CARD_FILL[kind]
+  const icon = mobile ? 52 : 72
   const titleF = mobile ? 16 : 22
-  const bodyF = mobile ? 11 : 14
-  const keyF = mobile ? 12 : 16
+  const bodyF = mobile ? 12 : 16
   const disabled = maxed || !hud.pending
+  const badge = Math.max(22, Math.round((mobile ? 52 : 68) * 0.38))
+  const roman = level > 0 ? (UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)) : ''
   return (
     <UiEntity
       uiTransform={{
@@ -231,20 +230,25 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
       uiBackground={{ color: HOTBAR_TILE_BG }}
       onMouseDown={disabled ? undefined : () => requestUpgradeSelect(kind)}
     >
-      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING, flexDirection: 'column', alignItems: 'center', padding: { top: mobile ? 8 : 12, bottom: 8, left: 6, right: 6 } }}
-        uiBackground={{ color: selected ? Color4.create(1, 0.95, 0.75, 1) : PANEL_LIGHT }}>
+      <UiEntity uiTransform={{
+        width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING,
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: { top: mobile ? 10 : 16, bottom: mobile ? 10 : 16, left: 8, right: 8 },
+      }} uiBackground={{ color: fill }}>
         <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_ICON_SRC[kind] } }} />
-        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: 4 } }} />
-        <Label value={bold(levelLine)} fontSize={bodyF} color={selected ? GOLD_DEEP : INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: bodyF + 4 }} />
-        <Label value={bold(bonusLine)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4 }} />
-        <Label value={UPGRADE_DESCRIPTION[kind]} fontSize={Math.max(10, bodyF - 1)} color={DIM} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 2 }} />
-        {mobile ? null : (
-          <UiEntity uiTransform={{ width: 28, height: 28, margin: { top: 6 }, borderRadius: 8, borderWidth: 2, borderColor: INK, justifyContent: 'center', alignItems: 'center' }}
-            uiBackground={{ color: GOLD }}>
-            <Label value={bold(String(index + 1))} fontSize={keyF} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
+          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
+        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 8 : 12 } }} />
+        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: 2 } }} />
+        {roman ? (
+          <UiEntity uiTransform={{
+            positionType: 'absolute', position: { right: 4, top: 4 },
+            width: badge, height: badge, borderRadius: badge / 2,
+            justifyContent: 'center', alignItems: 'center',
+            borderWidth: 2, borderColor: INK, pointerFilter: 'none',
+          }} uiBackground={{ color: GOLD }}>
+            <Label value={bold(roman)} fontSize={mobile ? 11 : 14} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
           </UiEntity>
-        )}
+        ) : null}
       </UiEntity>
     </UiEntity>
   )
@@ -255,8 +259,8 @@ export function UpgradeOverlay() {
   const hud = getUpgradeHud()
   if (!hud.cardsOpen) return null
   const mobile = isMobile()
-  const cardW = mobile ? 112 : 200
-  const cardH = mobile ? 210 : 280
+  const cardW = mobile ? 124 : 228
+  const cardH = mobile ? 188 : 240
   const closeW = mobile ? 120 : 140
   const closeH = mobile ? 40 : 44
   return (
