@@ -23,6 +23,7 @@ import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { DesktopUpgradeExtras, MobileUpgradeRow, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
 import { getUpgradeHud } from "./client/upgrades"
+import { OutlinedLabel } from "./client/outlinedLabel"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
@@ -637,13 +638,6 @@ function SideFillTrack(props: { trackW: number; trackH: number; pad: number; rad
   )
 }
 
-/** Personal upgrade charge this round (the same number that unlocks
- *  upgrades). Parked to the right of mute as an overlay so the centered
- *  eye / timer / mute cluster never shifts. The pill's left edge stays put
- *  and the width grows right with the digit count. Hidden in the lobby,
- *  summary, and standings. When an upgrade is ready the pill turns gold
- *  and pulses in place (click / tap opens the cards). */
-
 /** Centered lobby countdown, shown to every player in the lobby (including
  *  anyone not standing on a team tile). The top status pill is unchanged. */
 function LobbyStartCountdown() {
@@ -655,10 +649,6 @@ function LobbyStartCountdown() {
   const mobile = isMobile()
   const font = mobile ? 48 : 84
   const stroke = mobile ? 4 : 6
-  const dirs: Array<[number, number]> = [
-    [-stroke, 0], [stroke, 0], [0, -stroke], [0, stroke],
-    [-stroke, -stroke], [-stroke, stroke], [stroke, -stroke], [stroke, stroke],
-  ]
   const width = Math.ceil(text.length * font * 0.62 + 48)
   const height = font + stroke * 2 + 8
   return (
@@ -666,27 +656,26 @@ function LobbyStartCountdown() {
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
       justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
     }}>
-      <UiEntity uiTransform={{
-        width, height, margin: { bottom: mobile ? 80 : 40 },
-        justifyContent: 'center', alignItems: 'center', pointerFilter: 'none',
-      }}>
-        {dirs.map(([dx, dy]) => (
-          <Label
-            value={hudBold(text)}
-            fontSize={font}
-            color={SUMMARY_INK}
-            font="sans-serif"
-            textAlign="middle-center"
-            textWrap="nowrap"
-            uiTransform={{ positionType: 'absolute', position: { top: dy, left: dx }, width: '100%', height: '100%' }}
-          />
-        ))}
-        <Label value={hudBold(text)} fontSize={font} color={Color4.White()} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-      </UiEntity>
+      <OutlinedLabel
+        value={hudBold(text)}
+        fontSize={font}
+        color={Color4.White()}
+        outlineColor={SUMMARY_INK}
+        outline={stroke}
+        width={width}
+        height={height}
+        margin={{ bottom: mobile ? 80 : 40 }}
+      />
     </UiEntity>
   )
 }
 
+/** Personal upgrade charge this round (the same number that unlocks
+ *  upgrades). Parked to the right of mute as an overlay so the centered
+ *  eye / timer / mute cluster never shifts. The pill's left edge stays put
+ *  and the width grows right with the digit count. Hidden in the lobby,
+ *  summary, and standings. When an upgrade is ready the pill turns gold
+ *  and pulses in place (click / tap opens the cards). */
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const n = getUpgradeHud().charge

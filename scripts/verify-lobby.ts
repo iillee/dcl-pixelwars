@@ -11,6 +11,7 @@ import {
   billboardAnchor, earlySpawnPads, hudRoundStartsLine, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
+import { OUTLINE_COPIES, outlineOffsets } from '../src/shared/outlineOffsets'
 
 const tiles = placeLobbyLayout()
 if (tiles.length !== 5) {
@@ -457,6 +458,21 @@ if (afkStart.log !== 'start' || afkStart.next.countdownEnds !== afkNow + LOBBY_R
 
 if (hudRoundStartsLine(12) !== 'ROUND STARTS IN 12' || hudRoundStartsLine(1) !== 'ROUND STARTS IN 1' || hudRoundStartsLine(0) !== '') {
   console.error(`✗ the center lobby line should read ROUND STARTS IN N (${hudRoundStartsLine(12)})`)
+  process.exit(1)
+}
+const ring = outlineOffsets(6)
+if (OUTLINE_COPIES !== 16 || ring.length < 12) {
+  console.error(`✗ the text outline should use a 16-copy circle, got ${ring.length}`)
+  process.exit(1)
+}
+if (ring.some(([dx, dy]) => Math.hypot(dx, dy) > 6 + 0.51) || ring.some(([dx, dy]) => Math.abs(dx) === 6 && Math.abs(dy) === 6)) {
+  console.error('✗ the text outline must sit on a circle, not a square of diagonal copies')
+  process.exit(1)
+}
+const uiOutlined = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
+const upgradeUi = readFileSync(new URL('../src/client/upgradeUi.tsx', import.meta.url), 'utf8')
+if (!uiOutlined.includes('<OutlinedLabel') || !upgradeUi.includes('<OutlinedLabel')) {
+  console.error('✗ the lobby countdown and the upgrade title should share the circular outline')
   process.exit(1)
 }
 const lobbyClientSrc = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')

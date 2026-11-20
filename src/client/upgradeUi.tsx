@@ -15,6 +15,7 @@ import { RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT
 import {
   closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, type UpgradeHud,
 } from './upgrades'
+import { OutlinedLabel } from './outlinedLabel'
 import {
   UPGRADE_CARD_ICON_SRC, UPGRADE_LABEL,
   UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
@@ -260,29 +261,18 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
 /** White title with a dark outline so it stays readable over a bright sky. */
 function OutlinedTitle(props: { text: string; font: number; height: number }) {
   const stroke = 3
-  const dirs: Array<[number, number]> = [
-    [-stroke, 0], [stroke, 0], [0, -stroke], [0, stroke],
-    [-stroke, -stroke], [-stroke, stroke], [stroke, -stroke], [stroke, stroke],
-  ]
   const width = Math.ceil(props.text.length * props.font * 0.8 + 24)
   return (
-    <UiEntity uiTransform={{
-      width, height: props.height + stroke * 2, margin: { bottom: 16 },
-      justifyContent: 'center', alignItems: 'center', flexShrink: 0, pointerFilter: 'none',
-    }}>
-      {dirs.map(([dx, dy]) => (
-        <Label
-          value={bold(props.text)}
-          fontSize={props.font}
-          color={INK}
-          font="sans-serif"
-          textAlign="middle-center"
-          textWrap="nowrap"
-          uiTransform={{ positionType: 'absolute', position: { top: dy, left: dx }, width: '100%', height: '100%' }}
-        />
-      ))}
-      <Label value={bold(props.text)} fontSize={props.font} color={WHITE} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-    </UiEntity>
+    <OutlinedLabel
+      value={bold(props.text)}
+      fontSize={props.font}
+      color={WHITE}
+      outlineColor={INK}
+      outline={stroke}
+      width={width}
+      height={props.height + stroke * 2}
+      margin={{ bottom: 16 }}
+    />
   )
 }
 
