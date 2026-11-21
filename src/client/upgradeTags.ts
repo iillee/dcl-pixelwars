@@ -39,11 +39,11 @@ const ICON_SRC: Record<UpgradeKind, string> = {
 }
 const KIND_ORDER: UpgradeKind[] = ['speed', 'paint', 'haste']
 
-/** World metres per icon plane. Sized to stay readable at mid distance. */
-const ICON_M = 0.28
-const GAP_M = 0.05
+/** World metres per icon plane: about the cap height of an AvatarNametag letter. */
+const ICON_M = 0.13
+const GAP_M = 0.02
 /** Rise above the AAPT_NAME_TAG anchor so the row sits just over the plate. */
-const ROW_Y_M = 0.34
+const ROW_Y_M = 0.16
 const PASS_INTERVAL_S = 0.5
 
 type Buffs = { speed: number; paint: number; haste: number }
