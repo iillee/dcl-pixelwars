@@ -25,6 +25,10 @@ const MUSIC_SRC = 'assets/sounds/bgm-main.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
 const UPGRADE_READY_SRC = 'assets/sounds/pickup2.wav'
+/** Softer, distinct from the countdown tick (click.wav). */
+const UPGRADE_HOVER_SRC = 'assets/sounds/Clip_Click_1.wav'
+/** Short confirm, distinct from the hover click and the ready chime. */
+const UPGRADE_SELECT_SRC = 'assets/sounds/pop.mp3'
 /** flagtag's swoosh.mp3 — dash wind whoosh. */
 export const DASH_SRC = 'assets/sounds/swoosh.mp3'
 export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
@@ -33,6 +37,8 @@ let musicEnt: Entity = 0 as Entity
 let muteClickEnt: Entity = 0 as Entity
 let claimSfxEnt: Entity = 0 as Entity
 let upgradeReadySfxEnt: Entity = 0 as Entity
+let upgradeHoverSfxEnt: Entity = 0 as Entity
+let upgradeSelectSfxEnt: Entity = 0 as Entity
 let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
 let balloonPopSfxEnt: Entity = 0 as Entity
@@ -48,6 +54,12 @@ export function initAudio(): void {
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   upgradeReadySfxEnt = engine.addEntity()
   Transform.create(upgradeReadySfxEnt, { parent: engine.CameraEntity })
+  upgradeHoverSfxEnt = engine.addEntity()
+  Transform.create(upgradeHoverSfxEnt, { parent: engine.CameraEntity })
+  upgradeSelectSfxEnt = engine.addEntity()
+  Transform.create(upgradeSelectSfxEnt, { parent: engine.CameraEntity })
+  const upgradeUiPre = engine.addEntity()
+  AssetLoad.create(upgradeUiPre, { assets: [UPGRADE_HOVER_SRC, UPGRADE_SELECT_SRC] })
   initLungeSfx()
   initBurstSfx()
   initAirSpikeSfx()
@@ -120,6 +132,24 @@ export function playUiClick(): void {
   AudioSource.createOrReplace(muteClickEnt, {
     audioClipUrl: CLICK_SRC,
     playing: true, loop: false, volume: 0.5, global: true,
+  })
+}
+
+/** Local-only hover tick on an upgrade card. Quieter than the UI click. */
+export function playUpgradeHoverSfx(): void {
+  if (!upgradeHoverSfxEnt) return
+  AudioSource.createOrReplace(upgradeHoverSfxEnt, {
+    audioClipUrl: UPGRADE_HOVER_SRC,
+    playing: true, loop: false, volume: 0.32, global: true, currentTime: 0,
+  })
+}
+
+/** Local-only confirm when the player picks an upgrade card. */
+export function playUpgradeSelectSfx(): void {
+  if (!upgradeSelectSfxEnt) return
+  AudioSource.createOrReplace(upgradeSelectSfxEnt, {
+    audioClipUrl: UPGRADE_SELECT_SRC,
+    playing: true, loop: false, volume: 0.7, global: true, currentTime: 0,
   })
 }
 

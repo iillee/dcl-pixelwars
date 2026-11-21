@@ -70,6 +70,12 @@ export function unlockedUpgradeCount(charge: number): number {
   return Math.min(n, UPGRADE_MAX)
 }
 
+/** How many picks are waiting. 0 when nothing is pending. */
+export function pendingUpgradeCount(state: UpgradeState): number {
+  if (!state.pending) return 0
+  return Math.max(1, unlockedUpgradeCount(state.charge) - state.earned)
+}
+
 /** Cards still below level III, in SPEED / PAINT / HASTE order. */
 export function offeredUpgradeKinds(state: UpgradeState): UpgradeKind[] {
   return UPGRADE_KINDS.filter((kind) => state[kind] < UPGRADE_LEVEL_MAX)

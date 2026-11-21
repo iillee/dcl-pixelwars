@@ -8,14 +8,15 @@ import { readFileSync } from 'node:fs'
 import { UpgradeBook } from '../src/server/upgradeBook'
 import {
   accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade,
-  hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, paintedScoreFor,
+  hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, paintedScoreFor, pendingUpgradeCount,
   speedMoveMult, stripUpgradesOnFall, trySelectUpgrade, unlockedUpgradeCount,
   upgradeChargeFor, upgradeOfferLine, upgradePaintBrushOffsets, upgradePaintTileCount,
   upgradeProgress, type UpgradeState,
 } from '../src/shared/upgrades'
 import {
-  CARD_AUTO_MS, CARD_COMPACT_SCALE, CARD_POP_MS, CARD_REOPEN_MS,
-  autoOpenDelayMs, autoTimerFrac, cardPopScale, cardSlidePx,
+  BADGE_BOB_HZ, BADGE_BOB_PX, CARD_AUTO_MS, CARD_HOVER_SCALE, CARD_POP_MS,
+  CARD_REOPEN_MS, CARD_TARGET_W, autoOpenDelayMs, autoTimerFrac, badgeBobPx,
+  cardPopScale, cardSlidePx,
 } from '../src/shared/upgradeCards'
 import {
   BURST_PAINT_RADIUS_CELLS, STAR_PICKUPS_ENABLED,
@@ -228,7 +229,8 @@ check('card offer at max shows the current total', upgradeOfferLine('speed', 3) 
 check('all three kinds are offered at level 0', offeredUpgradeKinds(emptyUpgrade()).join(',') === 'speed,paint,haste')
 check('a type at III is hidden from the offer', offeredUpgradeKinds({ ...emptyUpgrade(), speed: UPGRADE_LEVEL_MAX, paint: 1 }).join(',') === 'paint,haste')
 
-check('compact cards are 65% of the tall size', CARD_COMPACT_SCALE === 0.65)
+check('hover grows a card by 8%', CARD_HOVER_SCALE === 1.08)
+check('desktop cards target about twice the old compact width', CARD_TARGET_W === 280)
 check('auto-open lasts 5 seconds and the pop lasts 0.25 seconds', CARD_AUTO_MS === 5000 && CARD_POP_MS === 250)
 check('a pick that unlocks another upgrade waits 0.5 s before reopening', autoOpenDelayMs(true) === CARD_REOPEN_MS && CARD_REOPEN_MS === 500)
 check('the first pending upgrade opens immediately', autoOpenDelayMs(false) === 0)
@@ -238,6 +240,19 @@ check('the pop-in starts undersized and finishes at 1', cardPopScale(0, false) <
 check('the pop-out ends undersized', cardPopScale(CARD_POP_MS, true) < 0.9 && Math.abs(cardPopScale(0, true) - 1) < 1e-12)
 check('the cluster slides up on open and down on close', cardSlidePx(0, false) > 0 && cardSlidePx(CARD_POP_MS, false) === 0 && cardSlidePx(0, true) === 0 && cardSlidePx(CARD_POP_MS, true) > 0)
 
+
+check('a pending pick reports a waiting count of at least 1', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 500, earned: 0 }) === 1)
+check('stored extra thresholds raise the waiting count', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 1500, earned: 0 }) === 3)
+check('no badge count when nothing is pending', pendingUpgradeCount(emptyUpgrade()) === 0)
+check('the pending badge bobs a few pixels at 1.5 Hz', BADGE_BOB_HZ === 1.5 && BADGE_BOB_PX === 5 && Math.abs(badgeBobPx(0)) < 1e-12 && Math.abs(badgeBobPx(1000 / 4 / BADGE_BOB_HZ) - BADGE_BOB_PX) < 1e-9)
+
+const overlaySrc = readFileSync(new URL('../src/client/upgradeUi.tsx', import.meta.url), 'utf8')
+check('the upgrade cards are centered and have no timer bar', overlaySrc.includes("justifyContent: 'center'") && overlaySrc.includes('fitCardSize(') && !overlaySrc.includes('showTimer') && !overlaySrc.includes('autoFrac'))
+check('cards highlight and grow on pointer hover', overlaySrc.includes('onMouseEnter') && overlaySrc.includes('CARD_HOVER_SCALE') && overlaySrc.includes('setUpgradeCardHover'))
+check('a tucked pending pick shows a red bouncing badge on the pill', overlaySrc.includes('BADGE_RED') && overlaySrc.includes('badgeBob') && overlaySrc.includes('showBadge'))
+
+const audioSrc = readFileSync(new URL('../src/client/audio.ts', import.meta.url), 'utf8')
+check('hover uses Clip_Click_1 and select uses pop.mp3', audioSrc.includes("assets/sounds/Clip_Click_1.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/pop.mp3"))
 
 
 // The HUD pill must show the same number that unlocks upgrades (charge),

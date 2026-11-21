@@ -1,14 +1,22 @@
 /**
- * upgradeCards.ts — timing and motion for the compact upgrade cluster.
- * Auto-open lasts CARD_AUTO_MS; the pop/slide uses CARD_POP_MS.
+ * upgradeCards.ts — timing and motion for the centered upgrade cards.
+ * Auto-open lasts CARD_AUTO_MS; the pop uses CARD_POP_MS.
  * After a pick that immediately unlocks another upgrade, wait
- * CARD_REOPEN_MS before opening again.
+ * CARD_REOPEN_MS before opening again. The cards auto-tuck when the
+ * timer expires; there is no visible countdown bar.
  */
 export const CARD_POP_MS = 250
 export const CARD_AUTO_MS = 5000
 export const CARD_REOPEN_MS = 500
-/** Resting compact size vs the tall card overlay they replaced. */
-export const CARD_COMPACT_SCALE = 0.65
+/** Hover grow on a card (desktop pointer only). */
+export const CARD_HOVER_SCALE = 1.08
+/** Target desktop card width, in UI pixels, before viewport fitting. */
+export const CARD_TARGET_W = 280
+/** Tall-card aspect (width / height) from the original overlay. */
+export const CARD_ASPECT = 228 / 348
+/** Red pending-pick badge bob: a few pixels at 1.5 Hz. */
+export const BADGE_BOB_HZ = 1.5
+export const BADGE_BOB_PX = 5
 const SCALE_FROM = 0.86
 const SLIDE_PX = 28
 
@@ -49,4 +57,9 @@ export function autoTimerFrac(now: number, autoUntil: number): number {
  */
 export function autoOpenDelayMs(justPicked: boolean): number {
   return justPicked ? CARD_REOPEN_MS : 0
+}
+
+/** Vertical offset for the pending-pick badge. Negative is up. */
+export function badgeBobPx(now: number, originMs = 0): number {
+  return Math.sin(((now - originMs) / 1000) * BADGE_BOB_HZ * Math.PI * 2) * BADGE_BOB_PX
 }

@@ -8,15 +8,15 @@ import { engine, inputSystem, InputAction, PointerEventType } from '@dcl/sdk/ecs
 import { events } from '../shared/events'
 import { room } from '../shared/messages'
 import {
-  emptyUpgrade, hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, speedMoveMult, burstPaintRadiusCellsFor,
+  emptyUpgrade, hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, pendingUpgradeCount, speedMoveMult, burstPaintRadiusCellsFor,
   trySelectUpgrade, upgradeKindFromId, upgradeProgress, UPGRADE_KIND_ID, UPGRADE_LABEL,
   type UpgradeKind, type UpgradeState, type UpgradeProgress,
 } from '../shared/upgrades'
-import { playUiClick, playUpgradeReadySfx } from './audio'
+import { playUiClick, playUpgradeHoverSfx, playUpgradeReadySfx, playUpgradeSelectSfx } from './audio'
 import { setUpgradeSpeedMult } from './speed'
 import { inLobby } from './phase'
 import {
-  CARD_AUTO_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, cardPopScale, cardSlidePx,
+  CARD_AUTO_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, badgeBobPx, cardPopScale, cardSlidePx,
 } from '../shared/upgradeCards'
 
 const READY_NOTICE_MS = 1800
@@ -33,6 +33,7 @@ let closeAt = 0
 let autoUntil = 0
 let reopenAt = 0
 let highlightKind: UpgradeKind | null = null
+let hoverKind: UpgradeKind | null = null
 let highlightUntil = 0
 let notice = ''
 let noticeUntil = 0
@@ -81,6 +82,7 @@ function resetLocal(): void {
   reopenAt = 0
   highlightKind = null
   highlightUntil = 0
+  hoverKind = null
   notice = ''
   noticeUntil = 0
   flashUntil = 0
@@ -96,6 +98,13 @@ function closeClusterNow(): void {
   autoUntil = 0
   reopenAt = 0
   highlightKind = null
+  hoverKind = null
+}
+
+export function setUpgradeCardHover(kind: UpgradeKind | null): void {
+  if (hoverKind === kind) return
+  hoverKind = kind
+  if (kind) playUpgradeHoverSfx()
 }
 
 function setState(next: UpgradeState): void {
@@ -154,6 +163,7 @@ export function initUpgrades(): void {
   engine.addSystem(() => {
     const now = Date.now()
     if (highlightKind && now >= highlightUntil) highlightKind = null
+    if (hoverKind && !clusterVisible(now)) hoverKind = null
     if (notice && now >= noticeUntil) notice = ''
     if (closing && now >= closeAt + CARD_POP_MS) {
       cardsOpen = false
@@ -228,7 +238,7 @@ export function requestUpgradeSelect(kind: UpgradeKind): void {
   highlightUntil = now + HIGHLIGHT_MS
   notice = UPGRADE_LABEL[kind]
   noticeUntil = now + SELECT_NOTICE_MS
-  playUiClick()
+  playUpgradeSelectSfx()
   beginClose(now, false)
   try { room.send('upgradeSelect', { kind: UPGRADE_KIND_ID[kind] }) } catch (err) {
     console.log('[Upgrade] select send failed', err)
@@ -257,6 +267,11 @@ export type UpgradeHud = {
   popScale: number
   popSlide: number
   highlight: UpgradeKind | null
+  hover: UpgradeKind | null
+  /** Waiting picks while a selection is pending (0 otherwise). */
+  pendingCount: number
+  /** Vertical badge offset in UI pixels (0 when the badge is hidden). */
+  badgeBob: number
   notice: string
   flash: boolean
   /** When the ready-flash ends and the scale pulse may start (ms). */
@@ -286,6 +301,9 @@ export function getUpgradeHud(): UpgradeHud {
     popScale: visible ? cardPopScale(elapsed, closing) : 1,
     popSlide: visible ? cardSlidePx(elapsed, closing) : 0,
     highlight: highlightKind && now < highlightUntil ? highlightKind : null,
+    hover: visible && !closing ? hoverKind : null,
+    pendingCount: pendingUpgradeCount(state),
+    badgeBob: state.pending && !visible ? badgeBobPx(now) : 0,
     notice: now < noticeUntil ? notice : '',
     flash: now < flashUntil,
     flashUntil,

@@ -11,18 +11,21 @@
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { isMobile } from '@dcl/sdk/platform'
+import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
 import { RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from './abilityHotbar'
 import {
-  closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, type UpgradeHud,
+  closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, setUpgradeCardHover, type UpgradeHud,
 } from './upgrades'
 import { OutlinedLabel } from './outlinedLabel'
 import {
   UPGRADE_CARD_ICON_SRC, UPGRADE_LABEL,
   UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
 } from '../shared/upgrades'
+import { CARD_ASPECT, CARD_HOVER_SCALE, CARD_TARGET_W } from '../shared/upgradeCards'
 
 const INK = Color4.create(0.13, 0.13, 0.15, 1)
 const GOLD = Color4.create(1.0, 0.8, 0.3, 1)
+const BADGE_RED = Color4.create(0.91, 0.259, 0.29, 1) // #E8424A
 const GOLD_FLASH = Color4.create(1, 0.95, 0.55, 1)
 const GOLD_EDGE = Color4.create(0.95, 0.78, 0.28, 1)
 /** Card fills: Speed #6DB0F5, Paint #F278B4, Haste #FFA838. Dark text + black icons stay readable on all three. */
@@ -33,6 +36,17 @@ export const UPGRADE_CARD_FILL: Record<UpgradeKind, Color4> = {
 }
 const WHITE = Color4.White()
 const bold = (t: string) => '<b>' + t + '</b>'
+
+function canvasSize(): { w: number; h: number } {
+  const c = UiCanvasInformation.getOrNull(engine.RootEntity)
+  if (!c || c.width <= 0) return { w: 1280, h: 720 }
+  const dpr = c.devicePixelRatio > 0 ? c.devicePixelRatio : 1
+  return { w: c.width / dpr, h: c.height / dpr }
+}
+
+function lighten(c: Color4, t: number): Color4 {
+  return Color4.create(c.r + (1 - c.r) * t, c.g + (1 - c.g) * t, c.b + (1 - c.b) * t, c.a)
+}
 
 /** Duck Pulse defaults, tuned to a gentle continuous 1 → 1.08 over 0.9 s. */
 export const PILL_PULSE_PERIOD = 0.9
@@ -70,7 +84,8 @@ function readyFill(now: number, flashUntil: number, base: Color4): Color4 {
 /**
  * The painted-tile count pill. Turns gold and pulses when an upgrade is ready.
  * Click / tap opens the card overlay. The wrapper stays at the rest size so a
- * pulse cannot shove the mute button or the buff icons.
+ * pulse cannot shove the mute button or the buff icons. If a pending pick is
+ * tucked away, a red bouncing count badge sits on the top-right corner.
  */
 export function PaintedCountPill(props: { width: number; height: number; font: number; countText: string; ink: Color4 }) {
   const { width, height, font, countText, ink } = props
@@ -91,6 +106,10 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
   } else if (hud.maxed) {
     rim = GOLD_EDGE
   }
+  const showBadge = ready && !hud.clusterVisible && hud.pendingCount > 0
+  const badge = Math.max(22, Math.round(height * 0.48))
+  const insetX = Math.max(0, Math.round((width - drawW) / 2))
+  const insetY = Math.max(0, Math.round((height - drawH) / 2))
   return (
     <UiEntity uiTransform={{
       width, height, flexShrink: 0, justifyContent: 'center', alignItems: 'center',
@@ -113,6 +132,29 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
           <Label value={bold(countText)} fontSize={font} color={text} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
+      {showBadge ? (
+        <UiEntity uiTransform={{
+          positionType: 'absolute',
+          position: {
+            top: insetY - Math.round(badge * 0.35) + hud.badgeBob,
+            right: insetX - Math.round(badge * 0.35),
+          },
+          width: badge, height: badge, borderRadius: badge / 2,
+          borderWidth: 3, borderColor: WHITE,
+          justifyContent: 'center', alignItems: 'center',
+          pointerFilter: 'none',
+        }} uiBackground={{ color: BADGE_RED }}>
+          <Label
+            value={bold(String(hud.pendingCount))}
+            fontSize={Math.max(12, Math.round(badge * 0.55))}
+            color={WHITE}
+            font="sans-serif"
+            textAlign="middle-center"
+            textWrap="nowrap"
+            uiTransform={{ width: '100%', height: '100%' }}
+          />
+        </UiEntity>
+      ) : null}
     </UiEntity>
   )
 }
@@ -207,55 +249,97 @@ export function MobileUpgradeRow() {
   )
 }
 
-function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number; compact: boolean }) {
-  const { kind, hud, width, height, mobile, index, compact } = props
+function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number; gap: number }) {
+  const { kind, hud, width, height, mobile, index, gap } = props
   const level = hud[kind]
   const maxed = level >= UPGRADE_LEVEL_MAX
   const selected = hud.highlight === kind
+  const hovered = !mobile && hud.hover === kind
   const offer = upgradeOfferLine(kind, level)
-  const rim = selected ? GOLD : HOTBAR_RIM
-  const fill = UPGRADE_CARD_FILL[kind]
-  const icon = compact ? (mobile ? 44 : 60) : (mobile ? 72 : 96)
-  const titleF = compact ? (mobile ? 12 : 15) : (mobile ? 16 : 22)
-  const bodyF = compact ? (mobile ? 10 : 13) : (mobile ? 12 : 16)
+  const rim = hovered ? WHITE : (selected ? GOLD : HOTBAR_RIM)
+  const fill = hovered ? lighten(UPGRADE_CARD_FILL[kind], 0.16) : UPGRADE_CARD_FILL[kind]
+  const icon = mobile ? 72 : 112
+  const titleF = mobile ? 18 : 26
+  const bodyF = mobile ? 14 : 18
   const disabled = maxed || !hud.pending
-  const badge = Math.max(compact ? 18 : 22, Math.round((mobile ? 52 : 68) * (compact ? 0.32 : 0.38)))
+  const badge = Math.max(22, Math.round((mobile ? 52 : 68) * 0.38))
   const roman = level > 0 ? (UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)) : ''
-  const gap = index === 0 ? 0 : (mobile ? 6 : 10)
-  const padY = compact ? (mobile ? 10 : 14) : (mobile ? 18 : 28)
-  const padX = compact ? 8 : 10
+  const left = index === 0 ? 0 : gap
+  const padY = mobile ? 18 : 28
+  const padX = mobile ? 10 : 14
+  const grow = hovered ? CARD_HOVER_SCALE : 1
+  const drawW = Math.max(1, Math.round(width * grow))
+  const drawH = Math.max(1, Math.round(height * grow))
   return (
     <UiEntity
       uiTransform={{
-        width, height, margin: { left: gap }, flexShrink: 0,
-        borderRadius: HOTBAR_RADIUS, borderWidth: selected ? 4 : HOTBAR_BORDER_W, borderColor: rim,
-        padding: compact ? 4 : TILE_RING, pointerFilter: disabled ? 'none' : 'block',
+        width, height, margin: { left }, flexShrink: 0,
+        justifyContent: 'center', alignItems: 'center',
+        overflow: 'visible',
+        pointerFilter: disabled ? 'none' : 'block',
       }}
-      uiBackground={{ color: HOTBAR_TILE_BG }}
       onMouseDown={disabled ? undefined : () => requestUpgradeSelect(kind)}
+      onMouseEnter={disabled || mobile ? undefined : () => setUpgradeCardHover(kind)}
+      onMouseLeave={disabled || mobile ? undefined : () => setUpgradeCardHover(null)}
     >
-      <UiEntity uiTransform={{
-        width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - (compact ? 4 : TILE_RING),
-        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: { top: padY, bottom: padY, left: padX, right: padX },
-      }} uiBackground={{ color: fill }}>
-        <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
-        <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 4, margin: { top: compact ? 8 : (mobile ? 14 : 20) } }} />
-        <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 4, margin: { top: compact ? 4 : 6 } }} />
-        {roman ? (
-          <UiEntity uiTransform={{
-            positionType: 'absolute', position: { right: 4, top: 4 },
-            width: badge, height: badge, borderRadius: badge / 2,
-            justifyContent: 'center', alignItems: 'center',
-            borderWidth: 2, borderColor: INK, pointerFilter: 'none',
-          }} uiBackground={{ color: GOLD }}>
-            <Label value={bold(roman)} fontSize={mobile ? 11 : 14} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-          </UiEntity>
-        ) : null}
+      <UiEntity
+        uiTransform={{
+          width: drawW, height: drawH, flexShrink: 0,
+          borderRadius: HOTBAR_RADIUS, borderWidth: hovered || selected ? 4 : HOTBAR_BORDER_W, borderColor: rim,
+          padding: TILE_RING, pointerFilter: 'none',
+        }}
+        uiBackground={{ color: HOTBAR_TILE_BG }}
+      >
+        <UiEntity uiTransform={{
+          width: '100%', height: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING,
+          flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          padding: { top: padY, bottom: padY, left: padX, right: padX },
+          pointerFilter: 'none',
+        }} uiBackground={{ color: fill }}>
+          <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
+            uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
+          <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 12 : 18 } }} />
+          <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 6, margin: { top: 6 } }} />
+          {roman ? (
+            <UiEntity uiTransform={{
+              positionType: 'absolute', position: { right: 6, top: 6 },
+              width: badge, height: badge, borderRadius: badge / 2,
+              justifyContent: 'center', alignItems: 'center',
+              borderWidth: 2, borderColor: INK, pointerFilter: 'none',
+            }} uiBackground={{ color: GOLD }}>
+              <Label value={bold(roman)} fontSize={mobile ? 12 : 16} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
+            </UiEntity>
+          ) : null}
+        </UiEntity>
       </UiEntity>
     </UiEntity>
   )
+}
+
+function fitCardSize(mobile: boolean, count: number, pop: number): { cardW: number; cardH: number; gap: number } {
+  const { w, h } = canvasSize()
+  const gap = mobile ? 10 : 16
+  const side = mobile ? 36 : 72
+  const chromeH = mobile ? 170 : 200
+  const n = Math.max(1, count)
+  const maxRow = Math.max(80, w - side)
+  const maxH = Math.max(180, h - chromeH)
+  let cardW = mobile ? Math.min(210, CARD_TARGET_W) : CARD_TARGET_W
+  let cardH = Math.round(cardW / CARD_ASPECT)
+  const rowW = cardW * n + gap * Math.max(0, n - 1)
+  if (rowW > maxRow) {
+    cardW = Math.floor((maxRow - gap * Math.max(0, n - 1)) / n)
+    cardH = Math.round(cardW / CARD_ASPECT)
+  }
+  if (cardH > maxH) {
+    cardH = maxH
+    cardW = Math.round(cardH * CARD_ASPECT)
+  }
+  return {
+    cardW: Math.max(1, Math.round(cardW * pop)),
+    cardH: Math.max(1, Math.round(cardH * pop)),
+    gap,
+  }
 }
 
 /** White title with a dark outline so it stays readable over a bright sky. */
@@ -277,69 +361,42 @@ function OutlinedTitle(props: { text: string; font: number; height: number }) {
 }
 
 /**
- * Compact upgrade cluster, parked above the Dash / Burst hotbar (desktop)
- * or in the lower centre on mobile, clear of the joystick (left) and the
- * jump / ability column (right). Auto and manual opens share this layout.
+ * Centered upgrade cards, shared by auto-open and a manual pill tap.
  * Gameplay is not paused; only the cards and Close capture clicks.
- *
- * Desktop clearance: 30 (hotbar bottom) + 72 (slot) + 18 gap = 120.
- * Mobile clearance: 220, just above the jump button (top ≈ 175) and a
- * typical native joystick, while the right-side ability column sits
- * outside the centred row.
+ * The 5-second auto-tuck still runs, but there is no visible timer bar.
  */
-const CLUSTER_BOTTOM_DESKTOP = 120
-const CLUSTER_BOTTOM_MOBILE = 220
-const COMPACT = 0.65
-
 export function UpgradeOverlay() {
   const hud = getUpgradeHud()
   if (!hud.clusterVisible) return null
   const mobile = isMobile()
-  const pop = hud.popScale
-  const cardW = Math.max(1, Math.round((mobile ? 136 : 228) * COMPACT * pop))
-  const cardH = Math.max(1, Math.round((mobile ? 280 : 348) * COMPACT * pop))
-  const gap = mobile ? 6 : 10
-  const n = Math.max(1, hud.offer.length)
-  const rowW = cardW * n + gap * Math.max(0, n - 1)
-  const closeW = mobile ? 110 : 128
-  const closeH = mobile ? 36 : 40
-  const barH = 6
-  const bottom = Math.max(0, (mobile ? CLUSTER_BOTTOM_MOBILE : CLUSTER_BOTTOM_DESKTOP) - Math.round(hud.popSlide))
-  const showTimer = hud.autoOpen && hud.autoFrac > 0
+  const { cardW, cardH, gap } = fitCardSize(mobile, hud.offer.length, hud.popScale)
+  const closeW = mobile ? 120 : 140
+  const closeH = mobile ? 40 : 46
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
+      justifyContent: 'center', alignItems: 'center', overflow: 'visible',
       pointerFilter: 'none',
     }}>
       <UiEntity uiTransform={{
-        positionType: 'absolute', position: { bottom, left: 0 }, width: '100%',
-        flexDirection: 'column', alignItems: 'center', pointerFilter: 'none',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        overflow: 'visible', pointerFilter: 'none',
       }}>
-        <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 16 : 20} height={mobile ? 22 : 28} />
-        {showTimer ? (
-          <UiEntity uiTransform={{
-            width: rowW, height: barH, margin: { bottom: 8 }, borderRadius: 3,
-            overflow: 'hidden', flexShrink: 0, pointerFilter: 'none',
-          }} uiBackground={{ color: INK }}>
-            <UiEntity uiTransform={{
-              width: Math.max(2, Math.round(rowW * hud.autoFrac)), height: barH, borderRadius: 3,
-            }} uiBackground={{ color: GOLD }} />
-          </UiEntity>
-        ) : null}
-        <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'stretch', pointerFilter: 'none' }}>
+        <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 20 : 28} height={mobile ? 28 : 36} />
+        <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', overflow: 'visible', pointerFilter: 'none' }}>
           {hud.offer.map((kind, i) => (
-            <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} compact={true} />
+            <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} gap={gap} />
           ))}
         </UiEntity>
         <UiEntity
           uiTransform={{
-            width: closeW, height: closeH, margin: { top: 12 }, borderRadius: 12,
+            width: closeW, height: closeH, margin: { top: 16 }, borderRadius: 12,
             borderWidth: 4, borderColor: INK, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
           }}
           uiBackground={{ color: PANEL_LIGHT }}
           onMouseDown={closeUpgradeCards}
         >
-          <Label value={bold('CLOSE')} fontSize={mobile ? 14 : 16} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
+          <Label value={bold('CLOSE')} fontSize={mobile ? 15 : 18} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
     </UiEntity>
