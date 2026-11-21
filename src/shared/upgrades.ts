@@ -84,7 +84,7 @@ export function offeredUpgradeKinds(state: UpgradeState): UpgradeKind[] {
 /**
  * Falling off the level clears buffs and any pending pick, but keeps charge.
  * `earned` is raised to the number of thresholds already crossed so those
- * unlocks stay spent. The next offer is the next 500 above current charge.
+ * unlocks stay spent. The next offer is the next 1000 above current charge.
  */
 export function stripUpgradesOnFall(state: UpgradeState): UpgradeState {
   const earned = Math.max(state.earned, unlockedUpgradeCount(state.charge))

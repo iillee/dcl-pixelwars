@@ -684,10 +684,10 @@ export const STAR_PICKUPS_ENABLED = false
 // round-long buffs, enough to max Speed, Paint, and Haste. Falling off
 // the level clears the buffs but keeps charge. Playtest values, easy to retune.
 /** Charge between consecutive upgrade unlocks. */
-export const UPGRADE_CHARGE_STEP = 500
+export const UPGRADE_CHARGE_STEP = 1000
 /** Max upgrades a player can select in one round (3 kinds × 3 levels). */
 export const UPGRADE_MAX = 9
-/** Cumulative unlocks: 500, 1000, … 4500. */
+/** Cumulative unlocks: 1000, 2000, … 9000. */
 export const UPGRADE_THRESHOLDS: readonly number[] = Array.from(
   { length: UPGRADE_MAX },
   (_, i) => (i + 1) * UPGRADE_CHARGE_STEP,

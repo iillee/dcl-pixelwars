@@ -33,13 +33,13 @@ function check(name: string, ok: boolean): void {
 }
 
 check('star pickups are disabled by config', STAR_PICKUPS_ENABLED === false)
-check('thresholds step every 500 up to 4500',
-  UPGRADE_CHARGE_STEP === 500
+check('thresholds step every 1000 up to 9000',
+  UPGRADE_CHARGE_STEP === 1000
   && UPGRADE_MAX === 9
   && UPGRADE_THRESHOLDS.length === UPGRADE_MAX
   && UPGRADE_THRESHOLDS.every((t, i) => t === (i + 1) * UPGRADE_CHARGE_STEP)
-  && UPGRADE_THRESHOLDS[0] === 500
-  && UPGRADE_THRESHOLDS[UPGRADE_THRESHOLDS.length - 1] === 4500)
+  && UPGRADE_THRESHOLDS[0] === 1000
+  && UPGRADE_THRESHOLDS[UPGRADE_THRESHOLDS.length - 1] === 9000)
 
 // Scoring: personal paint vs upgrade charge stay separate.
 let painted = 0
@@ -69,13 +69,13 @@ check('a second pass over already-friendly cells adds nothing', paintedScoreFor(
 
 // Thresholds and pending.
 s = emptyUpgrade()
-s = accrueUpgradeCharge(s, 499)
-check('499 charge is still charging toward the first upgrade', upgradeProgress(s).mode === 'charging' && !s.pending && unlockedUpgradeCount(s.charge) === 0)
+s = accrueUpgradeCharge(s, 999)
+check('999 charge is still charging toward the first upgrade', upgradeProgress(s).mode === 'charging' && !s.pending && unlockedUpgradeCount(s.charge) === 0)
 s = accrueUpgradeCharge(s, 1)
-check('500 charge unlocks a pending selection', s.pending && s.charge === 500 && unlockedUpgradeCount(s.charge) === 1 && upgradeProgress(s).mode === 'ready')
+check('1000 charge unlocks a pending selection', s.pending && s.charge === 1000 && unlockedUpgradeCount(s.charge) === 1 && upgradeProgress(s).mode === 'ready')
 
-const overflow = accrueUpgradeCharge(s, 500)
-check('charge keeps growing while a selection is pending', overflow.charge === 1000 && overflow.pending && overflow.earned === 0)
+const overflow = accrueUpgradeCharge(s, 1000)
+check('charge keeps growing while a selection is pending', overflow.charge === 2000 && overflow.pending && overflow.earned === 0)
 check('no second unlock is offered while the first is still pending', unlockedUpgradeCount(overflow.charge) === 2 && overflow.earned === 0 && overflow.pending)
 
 const denied = trySelectUpgrade(emptyUpgrade(), 'speed')
@@ -84,26 +84,26 @@ check('selection fails when nothing is pending', !denied.ok)
 let picked = trySelectUpgrade(overflow, 'speed')
 check('SPEED at level 0 becomes level 1', picked.ok && picked.state.speed === 1 && picked.state.earned === 1)
 s = picked.state
-check('charge is preserved after a selection', s.charge === 1000)
+check('charge is preserved after a selection', s.charge === 2000)
 check('after selecting, a stored second threshold becomes pending immediately', s.pending && unlockedUpgradeCount(s.charge) === 2)
 
 picked = trySelectUpgrade(s, 'speed')
 s = picked.state
 check('the same upgrade can be stacked (SPEED 1 → 2)', picked.ok && s.speed === 2 && s.earned === 2)
-check('1000 charge has not reached the third threshold yet', !s.pending && unlockedUpgradeCount(s.charge) === 2)
+check('2000 charge has not reached the third threshold yet', !s.pending && unlockedUpgradeCount(s.charge) === 2)
 
-s = accrueUpgradeCharge(s, 500) // 1500
-check('1500 charge unlocks the third upgrade', s.pending && s.charge === 1500 && unlockedUpgradeCount(s.charge) === 3)
+s = accrueUpgradeCharge(s, 1000) // 3000
+check('3000 charge unlocks the third upgrade', s.pending && s.charge === 3000 && unlockedUpgradeCount(s.charge) === 3)
 
 picked = trySelectUpgrade(s, 'paint')
 s = picked.state
 check('third selection is accepted and a later threshold can still unlock', picked.ok && s.earned === 3 && s.paint === 1 && !s.pending)
-s = accrueUpgradeCharge(s, 500) // 2000
-check('2000 charge unlocks a fourth upgrade', s.pending && s.charge === 2000 && unlockedUpgradeCount(s.charge) === 4 && s.earned === 3)
+s = accrueUpgradeCharge(s, 1000) // 4000
+check('4000 charge unlocks a fourth upgrade', s.pending && s.charge === 4000 && unlockedUpgradeCount(s.charge) === 4 && s.earned === 3)
 
 // Level cap: three of the same, then that card cannot be taken again.
 let stack = emptyUpgrade()
-stack = accrueUpgradeCharge(stack, 1500)
+stack = accrueUpgradeCharge(stack, 3000)
 for (let i = 0; i < 3; i++) {
   const r = trySelectUpgrade(stack, 'haste')
   check(`HASTE stack step ${i + 1} succeeds`, r.ok && r.state.haste === i + 1)
@@ -114,7 +114,7 @@ check('a maxed type is not offered', offeredUpgradeKinds(stack).join(',') === 's
 
 // Nine-upgrade cap: max every kind, then no tenth offer.
 let cap = emptyUpgrade()
-cap = accrueUpgradeCharge(cap, 4500)
+cap = accrueUpgradeCharge(cap, 9000)
 const cycle: Array<'speed' | 'paint' | 'haste'> = ['speed', 'paint', 'haste']
 for (let i = 0; i < 9; i++) {
   const kind = cycle[i % 3]
@@ -124,13 +124,13 @@ for (let i = 0; i < 9; i++) {
 }
 check('nine picks maxes all three types', cap.earned === 9 && cap.speed === 3 && cap.paint === 3 && cap.haste === 3 && !cap.pending)
 check('a maxed loadout offers no cards', offeredUpgradeKinds(cap).length === 0)
-const pastCap = accrueUpgradeCharge(cap, 500)
-check('further charge after nine upgrades does not offer a tenth', pastCap.charge === 5000 && !pastCap.pending && pastCap.earned === 9)
+const pastCap = accrueUpgradeCharge(cap, 1000)
+check('further charge after nine upgrades does not offer a tenth', pastCap.charge === 10000 && !pastCap.pending && pastCap.earned === 9)
 check('a tenth selection is rejected', !trySelectUpgrade(cap, 'speed').ok && cap.earned === 9)
 
 // Deferral: closing the UI does not consume the pending upgrade or charge.
-const deferred = accrueUpgradeCharge(emptyUpgrade(), 500)
-check('deferral leaves the pending selection and charge intact', deferred.pending && deferred.charge === 500 && deferred.earned === 0)
+const deferred = accrueUpgradeCharge(emptyUpgrade(), 1000)
+check('deferral leaves the pending selection and charge intact', deferred.pending && deferred.charge === 1000 && deferred.earned === 0)
 const afterDefer = trySelectUpgrade(deferred, 'paint')
 check('a deferred player can still select later', afterDefer.ok && afterDefer.state.paint === 1)
 
@@ -163,49 +163,49 @@ check('Paint L3 brush is 13 tiles (exact +44% vs +45%)', upgradePaintTileCount(p
 // Progress states (the HUD no longer draws the charging fill, but the
 // helper still reports it for max / ready).
 const charging = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 200))
-check('charging fill is 200/500', Math.abs(charging.fill - 200 / 500) < 1e-12 && charging.mode === 'charging')
-const ready = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 500))
+check('charging fill is 200/1000', Math.abs(charging.fill - 200 / 1000) < 1e-12 && charging.mode === 'charging')
+const ready = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 1000))
 check('ready fill is full', ready.mode === 'ready' && ready.fill === 1)
-const maxed: UpgradeState = { charge: 4500, earned: 9, pending: false, speed: 3, paint: 3, haste: 3 }
+const maxed: UpgradeState = { charge: 9000, earned: 9, pending: false, speed: 3, paint: 3, haste: 3 }
 check('max upgrades reports a completed bar', upgradeProgress(maxed).mode === 'max' && upgradeProgress(maxed).fill === 1)
 
 // Falling off the level clears buffs and any pending pick, but keeps charge.
-// Already-crossed thresholds stay spent, so the next offer is the next 500.
+// Already-crossed thresholds stay spent, so the next offer is the next 1000.
 let fall = emptyUpgrade()
-fall = accrueUpgradeCharge(fall, 1600)
+fall = accrueUpgradeCharge(fall, 3200)
 for (const kind of cycle) {
   const r = trySelectUpgrade(fall, kind)
   if (!r.ok) throw new Error('expected fall setup pick to succeed')
   fall = r.state
 }
-check('fall setup has three buffs and leftover charge', fall.speed === 1 && fall.paint === 1 && fall.haste === 1 && fall.earned === 3 && fall.charge === 1600 && !fall.pending)
+check('fall setup has three buffs and leftover charge', fall.speed === 1 && fall.paint === 1 && fall.haste === 1 && fall.earned === 3 && fall.charge === 3200 && !fall.pending)
 const wiped = stripUpgradesOnFall(fall)
-check('a fall clears buffs and pending but keeps charge', wiped.speed === 0 && wiped.paint === 0 && wiped.haste === 0 && !wiped.pending && wiped.charge === 1600)
+check('a fall clears buffs and pending but keeps charge', wiped.speed === 0 && wiped.paint === 0 && wiped.haste === 0 && !wiped.pending && wiped.charge === 3200)
 check('already-crossed thresholds stay spent after a fall', wiped.earned === 3 && unlockedUpgradeCount(wiped.charge) === 3)
-check('200 more charge after a fall is still short of the next threshold', !accrueUpgradeCharge(wiped, 399).pending)
-check('the next 500 above current charge unlocks again', accrueUpgradeCharge(wiped, 400).pending && accrueUpgradeCharge(wiped, 400).charge === 2000)
+check('200 more charge after a fall is still short of the next threshold', !accrueUpgradeCharge(wiped, 799).pending)
+check('the next 1000 above current charge unlocks again', accrueUpgradeCharge(wiped, 800).pending && accrueUpgradeCharge(wiped, 800).charge === 4000)
 
-const unspent = stripUpgradesOnFall(accrueUpgradeCharge(emptyUpgrade(), 500))
-check('an unpicked pending upgrade is discarded on a fall', !unspent.pending && unspent.earned === 1 && unspent.charge === 500 && unspent.speed === 0)
-check('the player must reach the next threshold to earn again', accrueUpgradeCharge(unspent, 499).pending === false && accrueUpgradeCharge(unspent, 500).pending === true)
+const unspent = stripUpgradesOnFall(accrueUpgradeCharge(emptyUpgrade(), 1000))
+check('an unpicked pending upgrade is discarded on a fall', !unspent.pending && unspent.earned === 1 && unspent.charge === 1000 && unspent.speed === 0)
+check('the player must reach the next threshold to earn again', accrueUpgradeCharge(unspent, 999).pending === false && accrueUpgradeCharge(unspent, 1000).pending === true)
 
 const emptyFall = stripUpgradesOnFall(emptyUpgrade())
 check('a fall with no charge or buffs is a no-op', emptyFall.charge === 0 && emptyFall.earned === 0 && !emptyFall.pending)
 
 // Round reset.
 const book = new UpgradeBook()
-book.gain('p1', 500)
-check('book grants charge to a human and unlocks a pending upgrade', book.ownerState('p1').charge === 500 && book.ownerState('p1').pending === 1)
+book.gain('p1', 1000)
+check('book grants charge to a human and unlocks a pending upgrade', book.ownerState('p1').charge === 1000 && book.ownerState('p1').pending === 1)
 check('book accepts a valid selection', book.trySelect('p1', 'speed') && book.ownerState('p1').speed === 1)
-book.gain('bot:3', 500)
+book.gain('bot:3', 1000)
 check('bots do not receive upgrade charge or selections', book.ownerState('bot:3').charge === 0 && !book.trySelect('bot:3', 'speed') && book.level('bot:3', 'speed') === 0)
 book.gain('p1', 0)
-check('zero gain is ignored', book.ownerState('p1').charge === 500)
-check('the book strips buffs on a fall and keeps charge spent', book.loseBuffsOnFall('p1') && book.ownerState('p1').speed === 0 && book.ownerState('p1').charge === 500 && book.ownerState('p1').earned === 1 && book.ownerState('p1').pending === 0)
+check('zero gain is ignored', book.ownerState('p1').charge === 1000)
+check('the book strips buffs on a fall and keeps charge spent', book.loseBuffsOnFall('p1') && book.ownerState('p1').speed === 0 && book.ownerState('p1').charge === 1000 && book.ownerState('p1').earned === 1 && book.ownerState('p1').pending === 0)
 check('a second fall with nothing left is a no-op', !book.loseBuffsOnFall('p1'))
 check('bots do not lose buffs because they never had them', !book.loseBuffsOnFall('bot:3'))
-book.gain('p1', 500)
-check('the next threshold after a fall can still unlock', book.ownerState('p1').charge === 1000 && book.ownerState('p1').pending === 1)
+book.gain('p1', 1000)
+check('the next threshold after a fall can still unlock', book.ownerState('p1').charge === 2000 && book.ownerState('p1').pending === 1)
 book.clearRound()
 check('a new round resets charge, pending, and levels', book.ownerState('p1').charge === 0 && book.ownerState('p1').pending === 0 && book.ownerState('p1').speed === 0 && book.ownerState('p1').earned === 0)
 
@@ -241,15 +241,15 @@ check('the pop-out ends undersized', cardPopScale(CARD_POP_MS, true) < 0.9 && Ma
 check('the cluster slides up on open and down on close', cardSlidePx(0, false) > 0 && cardSlidePx(CARD_POP_MS, false) === 0 && cardSlidePx(0, true) === 0 && cardSlidePx(CARD_POP_MS, true) > 0)
 
 
-check('a pending pick reports a waiting count of at least 1', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 500, earned: 0 }) === 1)
-check('stored extra thresholds raise the waiting count', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 1500, earned: 0 }) === 3)
+check('a pending pick reports a waiting count of at least 1', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 1000, earned: 0 }) === 1)
+check('stored extra thresholds raise the waiting count', pendingUpgradeCount({ ...emptyUpgrade(), pending: true, charge: 3000, earned: 0 }) === 3)
 check('no badge count when nothing is pending', pendingUpgradeCount(emptyUpgrade()) === 0)
 check('the pending badge bobs a few pixels at 1.5 Hz', BADGE_BOB_HZ === 1.5 && BADGE_BOB_PX === 5 && Math.abs(badgeBobPx(0)) < 1e-12 && Math.abs(badgeBobPx(1000 / 4 / BADGE_BOB_HZ) - BADGE_BOB_PX) < 1e-9)
 
 const overlaySrc = readFileSync(new URL('../src/client/upgradeUi.tsx', import.meta.url), 'utf8')
 check('the upgrade cards are centered and have no timer bar or close button', overlaySrc.includes("justifyContent: 'center'") && overlaySrc.includes('fitCardSize(') && !overlaySrc.includes('showTimer') && !overlaySrc.includes('autoFrac') && !overlaySrc.includes("bold('CLOSE')") && !overlaySrc.includes('closeUpgradeCards'))
 check('cards highlight and grow on pointer hover', overlaySrc.includes('onMouseEnter') && overlaySrc.includes('CARD_HOVER_SCALE') && overlaySrc.includes('setUpgradeCardHover'))
-check('a tucked pending pick shows a red bouncing badge on the pill', overlaySrc.includes('BADGE_RED') && overlaySrc.includes('badgeBob') && overlaySrc.includes('showBadge'))
+check('a pending pick shows a red bouncing badge as soon as it unlocks', overlaySrc.includes('BADGE_RED') && overlaySrc.includes('badgeBob') && overlaySrc.includes('showBadge') && overlaySrc.includes('ready && hud.pendingCount > 0') && !overlaySrc.includes('!hud.clusterVisible && hud.pendingCount'))
 check('the ready pill stays gold but no longer pulses', !overlaySrc.includes('pillPulseScale') && !overlaySrc.includes('PILL_PULSE') && overlaySrc.includes('readyFill') && overlaySrc.includes('openUpgradeCards'))
 
 const audioSrc = readFileSync(new URL('../src/client/audio.ts', import.meta.url), 'utf8')
@@ -258,9 +258,9 @@ check('hover uses Clip_Click_1 and select uses pop.mp3', audioSrc.includes("asse
 
 // The HUD pill must show the same number that unlocks upgrades (charge),
 // and walking paint in economy-off modes (PIXELWARS) must grant that charge.
-check('500 charge is the first unlock the pill should match', unlockedUpgradeCount(500) === 1 && UPGRADE_THRESHOLDS[0] === 500)
-check('neutral flips add 1 charge, so 500 neutrals unlock at a pill of 500', upgradeChargeFor(0, 1) === 1)
-check('enemy flips add 2 charge, so the pill reaches 500 faster than the flip count', upgradeChargeFor(2, 1) === 2 && paintedScoreFor(2, 1) === 1)
+check('1000 charge is the first unlock the pill should match', unlockedUpgradeCount(1000) === 1 && UPGRADE_THRESHOLDS[0] === 1000)
+check('neutral flips add 1 charge, so 1000 neutrals unlock at a pill of 1000', upgradeChargeFor(0, 1) === 1)
+check('enemy flips add 2 charge, so the pill reaches 1000 faster than the flip count', upgradeChargeFor(2, 1) === 2 && paintedScoreFor(2, 1) === 1)
 
 const serverSrc = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
 const tickStart = serverSrc.indexOf("room.onMessage('paintTick'")

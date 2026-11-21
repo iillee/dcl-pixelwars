@@ -270,7 +270,7 @@ export type UpgradeHud = {
   hover: UpgradeKind | null
   /** Waiting picks while a selection is pending (0 otherwise). */
   pendingCount: number
-  /** Vertical badge offset in UI pixels (0 when the badge is hidden). */
+  /** Vertical badge offset in UI pixels (0 when nothing is pending). */
   badgeBob: number
   notice: string
   flash: boolean
@@ -303,7 +303,7 @@ export function getUpgradeHud(): UpgradeHud {
     highlight: highlightKind && now < highlightUntil ? highlightKind : null,
     hover: visible && !closing ? hoverKind : null,
     pendingCount: pendingUpgradeCount(state),
-    badgeBob: state.pending && !visible ? badgeBobPx(now) : 0,
+    badgeBob: state.pending ? badgeBobPx(now) : 0,
     notice: now < noticeUntil ? notice : '',
     flash: now < flashUntil,
     flashUntil,

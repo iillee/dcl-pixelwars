@@ -4,7 +4,7 @@
  *
  * A one-shot gold color flash plays when a pick becomes ready, then the
  * pill stays gold until the player picks. A red bouncing badge on the
- * pill marks tucked pending picks. Click / tap the pill to open the cards.
+ * pill marks pending picks as soon as they unlock. Click / tap the pill to open the cards.
  */
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
@@ -63,8 +63,8 @@ function readyFill(now: number, flashUntil: number, base: Color4): Color4 {
 
 /**
  * The painted-tile count pill. Turns gold when an upgrade is ready.
- * Click / tap opens the card overlay. If a pending pick is tucked away,
- * a red bouncing count badge sits on the top-right corner.
+ * Click / tap opens the card overlay. A red bouncing count badge sits on
+ * the top-right corner as soon as a pick is pending, and clears when none remain.
  */
 export function PaintedCountPill(props: { width: number; height: number; font: number; countText: string; ink: Color4 }) {
   const { width, height, font, countText, ink } = props
@@ -82,7 +82,7 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
   } else if (hud.maxed) {
     rim = GOLD_EDGE
   }
-  const showBadge = ready && !hud.clusterVisible && hud.pendingCount > 0
+  const showBadge = ready && hud.pendingCount > 0
   const badge = Math.max(22, Math.round(height * 0.48))
   return (
     <UiEntity uiTransform={{
