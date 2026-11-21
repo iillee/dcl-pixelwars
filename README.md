@@ -17,6 +17,16 @@ The scene is intended to be **downloaded, remixed, and shared**. All source asse
 
 ---
 
+## Current branch: `territory-economy`
+
+Active development is on **`territory-economy`**. A current-state handoff for Cursor or the next session is in [`docs/HANDOFF-TERRITORY-ECONOMY.md`](docs/HANDOFF-TERRITORY-ECONOMY.md). Rebuild in Creator Hub before you preview or deploy, and keep `npx tsc --noEmit` passing.
+
+- **Upgrades:** Speed, Paint, and Haste, each to III, cap 9. Unlocks every 1000 charge (1000…9000). Server-authoritative; walking paint credits charge; a fall wipes buffs and pending picks but keeps charge. Bots get no upgrades.
+- **Card popup:** centered, hover grow + white border, hover SFX `Clip_Click_1.wav`, select SFX `pop.mp3`. No timer bar, no Close button, 5 s auto-tuck. A red bouncing badge on the gold points pill appears as soon as a pick is pending (including while the cards are open) and clears when the count hits 0. The pill turns gold when ready and does not pulse.
+- **Match HUD:** eye, mute, timer, fixed 144 px score pill, then buff icons. The territory bar spans that row (not the buffs). Lobby HUD is eye, timer, mute.
+- **Lobby:** 15 s countdown from the first player standing in a zone, shrinking to 5 s when every non-AFK player is in a zone. Centered “ROUND STARTS IN N” with ticks on the last 5 s. Sign counts are live occupancy (leaving a zone goes to 0); sticky picks are kept for round-start assignment.
+- **Bots** have no colliders; the server checks hits by distance. **Water** is built once at boot and is not rebuilt between lobby and level.
+
 ## Status: V0 live · V1 in progress · sky level on branch `level`
 
 ### V0 — vertical slice (live, classic mode)
@@ -213,7 +223,7 @@ To deploy to your own World, change `worldConfiguration.name` to a DCL NAME or E
 maze/
 ├── archive/                # Superseded plans (not current design)
 ├── design/                 # gdd.md (current) + one-page summary
-├── docs/                   # HANDOFF.md — current state for the next person
+├── docs/                   # HANDOFF-TERRITORY-ECONOMY.md — current branch handoff
 ├── scripts/                # verify-graph.ts / verify-bot.ts
 ├── assets/
 │   ├── blender/            # Blender source (.blend)

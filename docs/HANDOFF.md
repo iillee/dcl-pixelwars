@@ -1,3 +1,5 @@
+> **Current branch is `territory-economy`.** Use [HANDOFF-TERRITORY-ECONOMY.md](HANDOFF-TERRITORY-ECONOMY.md) for the live upgrade system, HUD, lobby, and workflow. This document is a 2026-10 historical handoff for branch `level`.
+
 # Pixelwars — Handoff (2026-10-19, PvP note 2026-10-20)
 
 For a teammate (e.g. stom) or a future session picking this up cold. Facts only. Branch `level` has passed `npm run build` (clean type check) and both verify scripts. `pixelwars.dcl.eth` is running a sky-scene deploy from 2026-10-20 00:54 UTC whose `bin/index.js` still spawns the greybox columns; the source on `level` does not. Pull `level` and redeploy to replace that bundle.

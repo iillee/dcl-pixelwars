@@ -1,3 +1,5 @@
+> Historical plan for the Prototype / paint-tank lobby mode. For how the game works on `territory-economy` now, see [`docs/HANDOFF-TERRITORY-ECONOMY.md`](../docs/HANDOFF-TERRITORY-ECONOMY.md).
+
 # Territory economy — Prototype mode
 
 Plan only. Bot Fight and Team Fight stay as they are. The paint tank, depots, territory respawn, and territory elimination are a new lobby mode, `prototype`, turned on by a flag on that mode. No deploys. `BOT_RECOVERY_ENABLED` stays false. No Decentraland surround.

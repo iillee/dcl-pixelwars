@@ -1,3 +1,5 @@
+> Historical plan for the original physical-lobby design. For how the game works on `territory-economy` now, see [`docs/HANDOFF-TERRITORY-ECONOMY.md`](../docs/HANDOFF-TERRITORY-ECONOMY.md).
+
 # Physical lobby — plan
 
 Status: planning only. Branch `physical-lobby` is `bots-water` @ `7460a8c` (20×20, sea off) plus this note. No gameplay code yet.
