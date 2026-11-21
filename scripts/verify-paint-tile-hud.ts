@@ -46,4 +46,7 @@ const timerD = deskMatch.indexOf('MATCH_TIMER_W')
 const pillD = deskMatch.indexOf('<PaintedHud')
 check(eyeD >= 0 && muteD > eyeD && timerD > muteD && pillD > timerD, 'desktop match order is eye, mute, timer, score pill')
 
+const paintedFn = ui.slice(ui.indexOf('function PaintedHud()'), ui.indexOf('function PaintTankBar()'))
+check(paintedFn.includes('inLobby()') && paintedFn.includes('getSummaryProgress()') && !paintedFn.includes('standingsOpen'), 'the score pill and buff icons stay visible while mid-round standings are open')
+
 console.log('✓ painted-tile pill is a fixed-width slot after the timer; the territory bar matches the row')

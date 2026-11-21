@@ -675,9 +675,9 @@ function LobbyStartCountdown() {
 /** Personal upgrade charge this round (the same number that unlocks
  *  upgrades). Sits in the match top row, just to the right of the timer,
  *  at a fixed width equal to the eye and mute together. The font shrinks
- *  if a large number would overflow. Hidden in the lobby, summary, and
- *  standings. When an upgrade is ready the pill turns gold (click / tap
- *  opens the cards). */
+ *  if a large number would overflow. Hidden in the lobby and the round
+ *  summary, but it stays up while mid-round standings are open. When an
+ *  upgrade is ready the pill turns gold (click / tap opens the cards). */
 function scorePillFont(text: string, mobile: boolean, width: number): number {
   const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
   const inner = Math.max(8, width - 16 - frame)
@@ -687,7 +687,7 @@ function scorePillFont(text: string, mobile: boolean, width: number): number {
 }
 
 function PaintedHud() {
-  if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
+  if (inLobby() || getSummaryProgress() >= 0) return null
   const n = getUpgradeHud().charge
   const countText = String(n)
   const mob = isMobile()
