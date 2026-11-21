@@ -1,7 +1,8 @@
 /**
  * Feet samples for the lobby. The server names the zone. A client never
- * sends a team id. Standing on a team tile sets a sticky choice; walking
- * off or standing still does not drop it. Leaving the scene does.
+ * sends a team id. Standing on a team tile sets a sticky choice used at
+ * round start; walking off or standing still does not drop it. Leaving
+ * the scene does. Sign counts follow live occupancy, not the sticky pick.
  */
 import { CELL, MAZE_ORIGIN, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
@@ -153,6 +154,22 @@ export function tallyTeams(present: string[], _now?: number): TeamCounts & { vot
   const voted = new Set<string>()
   for (const id of voterIds(present)) {
     const team = countedTeam(id)
+    if (!team) continue
+    if (team === 1) counts.red++
+    else if (team === 2) counts.blue++
+    else if (team === 3) counts.green++
+    else if (team === 4) counts.yellow++
+    voted.add(id)
+  }
+  return { ...counts, voted }
+}
+
+/** Players actually standing in each team zone right now. Sticky picks do not count. */
+export function occupancyTeams(present: string[], now: number): TeamCounts & { voted: Set<string> } {
+  const counts = emptyTeamCounts()
+  const voted = new Set<string>()
+  for (const id of voterIds(present)) {
+    const team = standingTeam(id, now)
     if (!team) continue
     if (team === 1) counts.red++
     else if (team === 2) counts.blue++

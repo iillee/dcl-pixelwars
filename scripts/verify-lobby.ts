@@ -2,7 +2,7 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, countedTeam, everyoneStandingReady, lobbyVerdict, noteLobbyPos, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
+import { clearLobbyVotes, countedTeam, everyoneStandingReady, lobbyVerdict, noteLobbyPos, occupancyTeams, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
@@ -357,6 +357,11 @@ if (onBlue.log !== 'start' || onBlue.next.countdownEnds !== aged + 3_000 + LOBBY
   console.error(`✗ a lone player standing in blue should start the last ${LOBBY_READY_MS}ms (${onBlue.log})`)
   process.exit(1)
 }
+const onBlueOcc = occupancyTeams(['proto'], aged + 3_000)
+if (onBlueOcc.blue !== 1 || onBlueOcc.red !== 0) {
+  console.error(`✗ standing in blue should show 1 on the blue sign (got red=${onBlueOcc.red} blue=${onBlueOcc.blue})`)
+  process.exit(1)
+}
 if (!noteLobbyPos('proto', hubX, 190, hubZ, aged + 4_000)) {
   console.error('✗ server rejected walking off blue to the hub')
   process.exit(1)
@@ -368,6 +373,11 @@ if (offBlue.log !== 'close' || offBlue.next.countdownEnds !== 0) {
 }
 if (countedTeam('proto') !== 2) {
   console.error('✗ walking off blue should keep the sticky pick')
+  process.exit(1)
+}
+const leftBlue = occupancyTeams(['proto'], aged + 4_000)
+if (leftBlue.blue !== 0 || leftBlue.red !== 0) {
+  console.error(`✗ leaving a team zone should drop the sign count to 0 (got red=${leftBlue.red} blue=${leftBlue.blue})`)
   process.exit(1)
 }
 

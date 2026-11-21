@@ -57,7 +57,7 @@ import { noteHit, noteAnvilTouch, anvilCredit, noteFell, kosOf, deathsOf, statId
 import { initAnvils, anvilsMazeChanged, anvilsHit, anvilsRespawnRequest, anvilsPush, anvilsAwake, tryAnvilPlayerStrike } from './anvils'
 import { LOBBY_VOTE_MS, assignLobbyTeams, modeById, teamIdOf, type ModeId } from '../shared/lobby'
 import { BALLOON_START, balloonTimeout, dropParticipant, lastStanding, paintAllowed, popBalloon, startingBalloons, type BalloonCounts } from '../shared/balloon'
-import { clearLobbyVotes, countedTeam, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, snapshotLobbyChoices, stepLobby, tallyTeams } from './lobbyVote'
+import { clearLobbyVotes, countedTeam, forgetLobbyPlayer, lobbySampleIds, lobbyVerdict, lobbyWho, noteLobbyPos, occupancyTeams, snapshotLobbyChoices, stepLobby, tallyTeams } from './lobbyVote'
 import { BURST_KNOCKBACK, LUNGE_KNOCKBACK } from '../shared/pvp'
 import { SCENE_SIZE, baseSpawn, baseTeamOfCellId, getPlacedTilesInOrder, placeLobbyLayout } from '../maze/generator'
 import { BASE_PAINT_LOCK, SKY_TOP_Y } from '../maze/level'
@@ -552,7 +552,7 @@ export async function setupServer(): Promise<void> {
       voteMs,
       winner: '',
       votes: (() => {
-        const teams = tallyTeams(presentIds(), now)
+        const teams = occupancyTeams(presentIds(), now)
         return [{ id: 'red', n: teams.red }, { id: 'blue', n: teams.blue }, { id: 'green', n: teams.green }, { id: 'yellow', n: teams.yellow }]
       })(),
       present: presentIds().length,
@@ -885,7 +885,8 @@ export async function setupServer(): Promise<void> {
     if (isRoundActive()) return
     if (intermission !== 'lobby') openLobby(false)
     lastPingAt.set(from, Date.now())
-    noteLobbyPos(from, x, y, z, Date.now())
+    const accepted = noteLobbyPos(from, x, y, z, Date.now())
+    if (accepted && intermission === 'lobby') sendRoundClock()
     const pick = countedTeam(from)
     if (pick && getTeam(from) !== pick) {
       setTeam(from, pick)
