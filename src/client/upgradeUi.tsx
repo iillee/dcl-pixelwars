@@ -179,19 +179,7 @@ function IconRow(props: { hud: UpgradeHud; size: number; font: number }) {
   )
 }
 
-/** Brief toast only. Not a persistent READY chip. */
-function Toast(props: { text: string; font: number }) {
-  if (!props.text) return null
-  const w = Math.max(120, Math.ceil(props.text.length * props.font * 0.8 + 24))
-  return (
-    <UiEntity uiTransform={{ width: w, height: props.font + 14, margin: { left: 8 }, borderRadius: 10, borderWidth: 2, borderColor: GOLD, justifyContent: 'center', alignItems: 'center', flexShrink: 0, pointerFilter: 'none' }}
-      uiBackground={{ color: Color4.create(0.12, 0.1, 0.05, 0.92) }}>
-      <Label value={bold(props.text)} fontSize={props.font} color={GOLD} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-    </UiEntity>
-  )
-}
-
-/** Desktop extras immediately right of the painted-tile pill: buff icons, maybe a short toast. */
+/** Desktop extras immediately right of the painted-tile pill: buff icons only. */
 export function DesktopUpgradeExtras(props: { pillWidth: number; topBtn: number; gap: number }) {
   if (isMobile()) return null
   const hud = getUpgradeHud()
@@ -203,7 +191,6 @@ export function DesktopUpgradeExtras(props: { pillWidth: number; topBtn: number;
       height: props.topBtn, flexDirection: 'row', alignItems: 'center', pointerFilter: 'none',
     }}>
       <IconRow hud={hud} size={props.topBtn} font={18} />
-      <Toast text={hud.notice} font={14} />
     </UiEntity>
   )
 }
@@ -213,12 +200,11 @@ export function MobileUpgradeRow() {
   if (!isMobile()) return null
   const hud = getUpgradeHud()
   if (!hud.show) return null
-  const any = hud.speed > 0 || hud.paint > 0 || hud.haste > 0 || !!hud.notice
+  const any = hud.speed > 0 || hud.paint > 0 || hud.haste > 0
   if (!any) return null
   return (
     <UiEntity uiTransform={{ width: '100%', margin: { top: 8 }, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
       <IconRow hud={hud} size={68} font={18} />
-      <Toast text={hud.notice} font={16} />
     </UiEntity>
   )
 }

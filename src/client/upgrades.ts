@@ -9,7 +9,7 @@ import { events } from '../shared/events'
 import { room } from '../shared/messages'
 import {
   emptyUpgrade, hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, pendingUpgradeCount, speedMoveMult, burstPaintRadiusCellsFor,
-  trySelectUpgrade, upgradeKindFromId, upgradeProgress, UPGRADE_KIND_ID, UPGRADE_LABEL,
+  trySelectUpgrade, upgradeKindFromId, upgradeProgress, UPGRADE_KIND_ID,
   type UpgradeKind, type UpgradeState, type UpgradeProgress,
 } from '../shared/upgrades'
 import { playUiClick, playUpgradeHoverSfx, playUpgradeReadySfx, playUpgradeSelectSfx } from './audio'
@@ -19,8 +19,6 @@ import {
   CARD_AUTO_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, badgeBobPx, cardPopScale, cardSlidePx,
 } from '../shared/upgradeCards'
 
-const READY_NOTICE_MS = 1800
-const SELECT_NOTICE_MS = 1400
 export const FLASH_MS = 450
 const HIGHLIGHT_MS = 380
 
@@ -35,8 +33,6 @@ let reopenAt = 0
 let highlightKind: UpgradeKind | null = null
 let hoverKind: UpgradeKind | null = null
 let highlightUntil = 0
-let notice = ''
-let noticeUntil = 0
 let flashUntil = 0
 let wired = false
 
@@ -83,8 +79,6 @@ function resetLocal(): void {
   highlightKind = null
   highlightUntil = 0
   hoverKind = null
-  notice = ''
-  noticeUntil = 0
   flashUntil = 0
   applyModifiers()
 }
@@ -119,16 +113,12 @@ function setState(next: UpgradeState): void {
   applyModifiers()
   if (stripped) {
     closeClusterNow()
-    notice = ''
-    noticeUntil = 0
     flashUntil = 0
     return
   }
   if (becameReady) {
     const now = Date.now()
     flashUntil = now + FLASH_MS
-    notice = 'UPGRADE READY!'
-    noticeUntil = now + READY_NOTICE_MS
     playUpgradeReadySfx()
     const delay = autoOpenDelayMs(justPicked)
     if (delay > 0) {
@@ -138,8 +128,8 @@ function setState(next: UpgradeState): void {
     }
   }
   if (justPicked) {
-    // Confirm SFX / name are triggered in requestUpgradeSelect so a
-    // server echo does not play them twice. Keep the highlight window.
+    // Confirm SFX is triggered in requestUpgradeSelect so a server echo
+    // does not play it twice. Keep the highlight window.
     highlightUntil = Math.max(highlightUntil, Date.now() + HIGHLIGHT_MS)
   }
 }
@@ -164,7 +154,6 @@ export function initUpgrades(): void {
     const now = Date.now()
     if (highlightKind && now >= highlightUntil) highlightKind = null
     if (hoverKind && !clusterVisible(now)) hoverKind = null
-    if (notice && now >= noticeUntil) notice = ''
     if (closing && now >= closeAt + CARD_POP_MS) {
       cardsOpen = false
       closing = false
@@ -236,8 +225,6 @@ export function requestUpgradeSelect(kind: UpgradeKind): void {
   const now = Date.now()
   highlightKind = kind
   highlightUntil = now + HIGHLIGHT_MS
-  notice = UPGRADE_LABEL[kind]
-  noticeUntil = now + SELECT_NOTICE_MS
   playUpgradeSelectSfx()
   beginClose(now, false)
   try { room.send('upgradeSelect', { kind: UPGRADE_KIND_ID[kind] }) } catch (err) {
@@ -272,7 +259,6 @@ export type UpgradeHud = {
   pendingCount: number
   /** Vertical badge offset in UI pixels (0 when nothing is pending). */
   badgeBob: number
-  notice: string
   flash: boolean
   /** When the ready-flash ends and the scale pulse may start (ms). */
   flashUntil: number
@@ -304,7 +290,6 @@ export function getUpgradeHud(): UpgradeHud {
     hover: visible && !closing ? hoverKind : null,
     pendingCount: pendingUpgradeCount(state),
     badgeBob: state.pending ? badgeBobPx(now) : 0,
-    notice: now < noticeUntil ? notice : '',
     flash: now < flashUntil,
     flashUntil,
   }
