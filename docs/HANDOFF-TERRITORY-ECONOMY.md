@@ -33,7 +33,7 @@ A fall (`playerFell`) wipes buffs and any pending pick, but keeps charge. `earne
 
 Bots get no upgrades.
 
-During a match, other players' current upgrades show as a small row of black silhouette icons (bolt, drop, stopwatch) just above their nametag, facing the camera. Quantity is the icon repeated, grouped Speed, then Paint, then Haste. The row is a Y-billboarded `AvatarAttach` on `AAPT_NAME_TAG` (`src/client/upgradeTags.ts`). The server broadcasts `upgradeBuffs` when levels change (pick, fall wipe, leave, late-join snapshot, or round clear). The icons clear on a fall, at round end, and in the lobby, same as the top HUD buff tiles. They are not drawn on your own avatar (avoids first-person clutter). Textures are unlit, alpha-tested `assets/images/world/upgrade-tag-*.png`.
+During a match, other players' current upgrades show as a small row of black silhouette icons (bolt, drop, stopwatch) just above their nametag, facing the camera. Quantity is the icon repeated, grouped Speed, then Paint, then Haste. The row is a Y-billboarded `AvatarAttach` on `AAPT_NAME_TAG` (`src/client/upgradeTags.ts`). The server broadcasts `upgradeBuffs` when levels change (pick, fall wipe, leave, late-join snapshot, or round clear). The icons clear on a fall, at round end, and in the lobby, same as the top HUD buff tiles. Your own icons show in third person and hide in first person (`CameraMode` on `engine.CameraEntity`). Textures are unlit, alpha-tested `assets/images/world/upgrade-tag-*.png`.
 
 
 Bonus totals: Speed +15 / +25 / +30% move (jog/run only; Dash distance unchanged). Paint +20 / +35 / +45% area (tile-count approximation). Haste −15 / −25 / −30% Dash and Burst cooldown (future activations only).

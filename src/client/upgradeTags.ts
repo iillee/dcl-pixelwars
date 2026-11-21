@@ -1,15 +1,16 @@
 /**
- * upgradeTags.ts — black upgrade silhouettes above other players' nametags.
+ * upgradeTags.ts — black upgrade silhouettes above players' nametags.
  *
  * AvatarNametag is text-only, so this is a separate Y-billboarded row
  * attached just above the plate (AvatarAttach on AAPT_NAME_TAG), the
  * same follow style as the Classic ghost team plates. Quantity is shown
  * by repeating the icon, grouped Speed, Paint, then Haste.
  *
- * Levels are server-authoritative (`upgradeBuffs`). The row is hidden
- * on your own avatar (avoids first-person clutter), and bots never get
- * upgrades so they show nothing. A fall wipe, round end, or the lobby
- * clears the row, same as the top HUD buff tiles.
+ * Levels are server-authoritative (`upgradeBuffs` for others, the same
+ * `upgrade:state` mirror as the HUD for your own). Your row shows in
+ * third person and hides in first person. Bots never get upgrades, so
+ * they show nothing. A fall wipe, round end, or the lobby clears the
+ * row, same as the top HUD buff tiles.
  */
 
 import {
@@ -23,6 +24,8 @@ import {
   AvatarAttach,
   AvatarAnchorPointType,
   PlayerIdentityData,
+  CameraMode,
+  CameraType,
   TextureFilterMode,
   TextureWrapMode,
 } from '@dcl/sdk/ecs'
@@ -31,6 +34,7 @@ import { getPlayer } from '@dcl/sdk/players'
 import { events } from '../shared/events'
 import { isLobbyLayout } from '../maze/rebuild'
 import type { UpgradeKind } from '../shared/upgrades'
+import { localUpgradeState } from './upgrades'
 
 const ICON_SRC: Record<UpgradeKind, string> = {
   speed: 'assets/images/world/upgrade-tag-speed.png',
@@ -116,7 +120,13 @@ function clearAll(): void {
   levels.clear()
 }
 
-function buildRow(id: string, avatarId: string, buffs: Buffs): void {
+function isThirdPerson(): boolean {
+  const cam = CameraMode.getOrNull(engine.CameraEntity)
+  return !!cam && cam.mode === CameraType.CT_THIRD_PERSON
+}
+
+/** Self attach omits avatarId, same pattern as balloons and overdrive. */
+function buildRow(id: string, avatarId: string | null, buffs: Buffs): void {
   const parts: UpgradeKind[] = []
   for (const kind of KIND_ORDER) {
     const n = buffs[kind]
@@ -125,10 +135,16 @@ function buildRow(id: string, avatarId: string, buffs: Buffs): void {
   if (parts.length === 0) return
 
   const anchor = engine.addEntity()
-  AvatarAttach.create(anchor, {
-    avatarId,
-    anchorPointId: AvatarAnchorPointType.AAPT_NAME_TAG,
-  })
+  if (avatarId) {
+    AvatarAttach.create(anchor, {
+      avatarId,
+      anchorPointId: AvatarAnchorPointType.AAPT_NAME_TAG,
+    })
+  } else {
+    AvatarAttach.create(anchor, {
+      anchorPointId: AvatarAnchorPointType.AAPT_NAME_TAG,
+    })
+  }
 
   const row = engine.addEntity()
   Transform.create(row, {
@@ -152,11 +168,25 @@ function buildRow(id: string, avatarId: string, buffs: Buffs): void {
     icons.push(ent)
   }
 
-  rigs.set(id, { anchor, row, icons, key: countKey(buffs), avatarId })
+  rigs.set(id, { anchor, row, icons, key: countKey(buffs), avatarId: avatarId ?? 'self' })
+}
+
+function syncLocalLevels(): void {
+  const me = localId()
+  if (!me) return
+  const s = localUpgradeState()
+  const buffs = { speed: s.speed, paint: s.paint, haste: s.haste }
+  if (totalOf(buffs) === 0) levels.delete(me)
+  else levels.set(me, buffs)
 }
 
 function applyOne(id: string): void {
-  if (isLocalUser(id) || isLobbyLayout()) {
+  if (isLobbyLayout()) {
+    destroyRig(id)
+    return
+  }
+  const local = isLocalUser(id)
+  if (local && !isThirdPerson()) {
     destroyRig(id)
     return
   }
@@ -165,19 +195,23 @@ function applyOne(id: string): void {
     destroyRig(id)
     return
   }
-  const avatarId = remoteAvatarId(id)
-  if (!avatarId) {
+  const avatarId = local ? null : remoteAvatarId(id)
+  if (!local && !avatarId) {
     destroyRig(id)
     return
   }
+  const attachKey = local ? 'self' : avatarId!
   const existing = rigs.get(id)
-  if (existing && existing.key === countKey(buffs) && existing.avatarId === avatarId) return
+  if (existing && existing.key === countKey(buffs) && existing.avatarId === attachKey) return
   destroyRig(id)
   buildRow(id, avatarId, buffs)
 }
 
 function applyPass(): void {
+  syncLocalLevels()
   const ids = new Set<string>([...levels.keys(), ...rigs.keys()])
+  const me = localId()
+  if (me) ids.add(me)
   for (const id of ids) applyOne(id)
 }
 
@@ -204,6 +238,18 @@ export function initUpgradeTags(): void {
   events.on('upgrade:buffs', ({ reset, entries }) => {
     applyBuffs(reset, entries)
   })
+  events.on('upgrade:state', (s) => {
+    const me = localId()
+    if (!me) return
+    const buffs = {
+      speed: Math.max(0, s.speed | 0),
+      paint: Math.max(0, s.paint | 0),
+      haste: Math.max(0, s.haste | 0),
+    }
+    if (totalOf(buffs) === 0) levels.delete(me)
+    else levels.set(me, buffs)
+    applyOne(me)
+  })
   events.on('lobby:floor', () => {
     clearAll()
   })
@@ -214,7 +260,15 @@ export function initUpgradeTags(): void {
     clearAll()
   })
   let clock = 0
+  let lastThird: boolean | null = null
   engine.addSystem((dt: number) => {
+    const third = isThirdPerson()
+    if (lastThird !== third) {
+      lastThird = third
+      applyPass()
+      clock = 0
+      return
+    }
     clock += dt
     if (clock < PASS_INTERVAL_S) return
     clock = 0
