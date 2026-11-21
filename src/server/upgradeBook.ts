@@ -39,6 +39,22 @@ export class UpgradeBook {
     return this.get(id)
   }
 
+  /** Non-zero Speed / Paint / Haste counts for every human, for nametag icons. */
+  buffEntries(): Array<{ id: string; speed: number; paint: number; haste: number }> {
+    const out: Array<{ id: string; speed: number; paint: number; haste: number }> = []
+    for (const [id, s] of this.states) {
+      if (!id || id.startsWith('bot:')) continue
+      if (s.speed <= 0 && s.paint <= 0 && s.haste <= 0) continue
+      out.push({ id, speed: s.speed, paint: s.paint, haste: s.haste })
+    }
+    return out
+  }
+
+  buffOf(id: string): { id: string; speed: number; paint: number; haste: number } {
+    const s = this.get(id)
+    return { id: keyOf(id), speed: s.speed, paint: s.paint, haste: s.haste }
+  }
+
   ownerState(id: string): {
     charge: number; pending: number; earned: number; speed: number; paint: number; haste: number
   } {

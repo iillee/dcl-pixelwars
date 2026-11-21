@@ -33,6 +33,9 @@ A fall (`playerFell`) wipes buffs and any pending pick, but keeps charge. `earne
 
 Bots get no upgrades.
 
+During a match, other players' current upgrades show as a small row of black silhouette icons (bolt, drop, stopwatch) just above their nametag, facing the camera. Quantity is the icon repeated, grouped Speed, then Paint, then Haste. The row is a Y-billboarded `AvatarAttach` on `AAPT_NAME_TAG` (`src/client/upgradeTags.ts`). The server broadcasts `upgradeBuffs` when levels change (pick, fall wipe, leave, late-join snapshot, or round clear). The icons clear on a fall, at round end, and in the lobby, same as the top HUD buff tiles. They are not drawn on your own avatar (avoids first-person clutter). Textures are unlit, alpha-tested `assets/images/world/upgrade-tag-*.png`.
+
+
 Bonus totals: Speed +15 / +25 / +30% move (jog/run only; Dash distance unchanged). Paint +20 / +35 / +45% area (tile-count approximation). Haste −15 / −25 / −30% Dash and Burst cooldown (future activations only).
 
 ## Card popup and badge
@@ -74,6 +77,8 @@ No client-side latency masking. Flagtag is read-only when porting code from it.
 | Card timing, badge bob | `src/shared/upgradeCards.ts` |
 | Card overlay, pill, badge, buff tiles | `src/client/upgradeUi.tsx` |
 | Client upgrade state and HUD model | `src/client/upgrades.ts` |
+| Nametag upgrade icon row | `src/client/upgradeTags.ts` |
+| Black silhouette icon textures | `assets/images/world/upgrade-tag-*.png` |
 | Hover / select SFX | `src/client/audio.ts` |
 | Match / lobby HUD, territory bar, standings | `src/ui.tsx` |
 | Overview eye and left-opening view row | `src/client/overviewUi.tsx` |

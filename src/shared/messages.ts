@@ -80,6 +80,18 @@ export const Messages = {
   }),
   // Client → Server: pick one of the three cards (1 SPEED, 2 PAINT, 3 HASTE).
   upgradeSelect: Schemas.Map({ kind: Schemas.Int }),
+  // Server → everyone: each human's current Speed / Paint / Haste counts for
+  // the nametag icon row. reset=1 clears all rows first, then applies entries.
+  // Sent on pick, fall wipe, leave, late-join snapshot, and round clear.
+  upgradeBuffs: Schemas.Map({
+    reset: Schemas.Int,
+    entries: Schemas.Array(Schemas.Map({
+      id: Schemas.String,
+      speed: Schemas.Int,
+      paint: Schemas.Int,
+      haste: Schemas.Int,
+    })),
+  }),
 
   // Server → everyone: a star orb appeared or disappeared. i is the orb id.
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),

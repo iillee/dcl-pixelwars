@@ -36,6 +36,7 @@ import { initWaterSplash } from './waterSplash'
 import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
+import { initUpgradeTags } from './upgradeTags'
 import { initSpeedBonus } from './speed'
 // Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
@@ -141,6 +142,7 @@ export async function setupClient(): Promise<void> {
   initRoundNet()
   initPlayerNet()
   initNametags()
+  initUpgradeTags()
   initSpeedBonus()
   initBotVisual()
   initLunge()

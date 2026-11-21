@@ -106,6 +106,17 @@ function wireInbound(): void {
       speed: speed ?? 0, paint: paint ?? 0, haste: haste ?? 0,
     })
   })
+  room.onMessage('upgradeBuffs', ({ reset, entries }) => {
+    events.emit('upgrade:buffs', {
+      reset: (reset ?? 0) !== 0,
+      entries: (entries ?? []).map((e) => ({
+        id: (e.id ?? '').toLowerCase(),
+        speed: e.speed ?? 0,
+        paint: e.paint ?? 0,
+        haste: e.haste ?? 0,
+      })),
+    })
+  })
   room.onMessage('starSpawn', ({ i, x, y, z }) => {
     events.emit('star:spawn', { i: i ?? 0, x: x ?? 0, y: y ?? 0, z: z ?? 0 })
   })

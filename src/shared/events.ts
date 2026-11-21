@@ -56,6 +56,8 @@ export type Events = {
   'paint:wallet': { tank: number; denied: string[]; regen: number }
   'paint:score': { n: number }
   'upgrade:state': { charge: number; pending: number; earned: number; speed: number; paint: number; haste: number }
+  // Broadcast: other players' visible upgrade counts for nametag icons.
+  'upgrade:buffs': { reset: boolean; entries: Array<{ id: string; speed: number; paint: number; haste: number }> }
 
   'star:spawn': { i: number; x: number; y: number; z: number }
   'star:despawn': { i: number }

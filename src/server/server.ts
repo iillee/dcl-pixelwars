@@ -305,12 +305,22 @@ export async function setupServer(): Promise<void> {
     if (!id || id.startsWith('bot:')) return
     room.send('upgradeState', upgrades.ownerState(id), { to: [id] })
   }
+  const sendUpgradeBuffs = (id: string): void => {
+    if (!id || id.startsWith('bot:')) return
+    room.send('upgradeBuffs', { reset: 0, entries: [upgrades.buffOf(id)] })
+  }
+  const sendUpgradeBuffsSnapshot = (to?: string): void => {
+    const payload = { reset: 1, entries: upgrades.buffEntries() }
+    if (to) room.send('upgradeBuffs', payload, { to: [to] })
+    else room.send('upgradeBuffs', payload)
+  }
   const flushUpgrades = (): void => {
     for (const id of upgrades.takeDirty()) sendUpgradeTo(id)
   }
   const clearUpgradesAndNotify = (): void => {
     const ids = upgrades.clearRound()
     for (const id of ids) sendUpgradeTo(id)
+    room.send('upgradeBuffs', { reset: 1, entries: [] })
   }
   const abilityGapS = (id: string, base: number, now: number): number => {
     let g = base
@@ -918,6 +928,7 @@ export async function setupServer(): Promise<void> {
     if (overdrive.isActive(left, Date.now())) endStar(left)
     overdrive.forget(left)
     upgrades.forget(left)
+    room.send('upgradeBuffs', { reset: 0, entries: [{ id: left, speed: 0, paint: 0, haste: 0 }] })
     if (rescueRiders.delete(left)) {
       rescueStartAt.delete(left)
       room.send('rescueEnd', { who: left })
@@ -1042,6 +1053,7 @@ export async function setupServer(): Promise<void> {
     if (!k) return
     if (!upgrades.trySelect(from, k)) return
     sendUpgradeTo(from)
+    sendUpgradeBuffs(from)
     console.log('[Server] upgradeSelect ' + from.slice(0, 8) + ' ' + k + ' earned=' + upgrades.stateOf(from).earned)
   })
 
@@ -1505,7 +1517,10 @@ export async function setupServer(): Promise<void> {
     const by = noteFell(from)
     onBalloonFall(from)
     if (overdrive.onDeath(from)) endStar(from.toLowerCase())
-    if (upgrades.loseBuffsOnFall(from)) sendUpgradeTo(from)
+    if (upgrades.loseBuffsOnFall(from)) {
+      sendUpgradeTo(from)
+      sendUpgradeBuffs(from)
+    }
     console.log(`[Server] playerFell ${from.slice(0, 10)}${by ? ` — KO by ${by.slice(0, 10)}` : ''}`)
   })
   // Relay the rider's cloud so every other client can show it. who is the
@@ -1683,6 +1698,7 @@ export async function setupServer(): Promise<void> {
     sendRoundClock(from) // late joiners: current round + time left (or idle)
     sendPaintScoreTo(from)
     sendUpgradeTo(from)
+    sendUpgradeBuffsSnapshot(from)
     sendStarSnapshotTo(from)
   })
 
