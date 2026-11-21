@@ -247,9 +247,10 @@ check('no badge count when nothing is pending', pendingUpgradeCount(emptyUpgrade
 check('the pending badge bobs a few pixels at 1.5 Hz', BADGE_BOB_HZ === 1.5 && BADGE_BOB_PX === 5 && Math.abs(badgeBobPx(0)) < 1e-12 && Math.abs(badgeBobPx(1000 / 4 / BADGE_BOB_HZ) - BADGE_BOB_PX) < 1e-9)
 
 const overlaySrc = readFileSync(new URL('../src/client/upgradeUi.tsx', import.meta.url), 'utf8')
-check('the upgrade cards are centered and have no timer bar', overlaySrc.includes("justifyContent: 'center'") && overlaySrc.includes('fitCardSize(') && !overlaySrc.includes('showTimer') && !overlaySrc.includes('autoFrac'))
+check('the upgrade cards are centered and have no timer bar or close button', overlaySrc.includes("justifyContent: 'center'") && overlaySrc.includes('fitCardSize(') && !overlaySrc.includes('showTimer') && !overlaySrc.includes('autoFrac') && !overlaySrc.includes("bold('CLOSE')") && !overlaySrc.includes('closeUpgradeCards'))
 check('cards highlight and grow on pointer hover', overlaySrc.includes('onMouseEnter') && overlaySrc.includes('CARD_HOVER_SCALE') && overlaySrc.includes('setUpgradeCardHover'))
 check('a tucked pending pick shows a red bouncing badge on the pill', overlaySrc.includes('BADGE_RED') && overlaySrc.includes('badgeBob') && overlaySrc.includes('showBadge'))
+check('the ready pill stays gold but no longer pulses', !overlaySrc.includes('pillPulseScale') && !overlaySrc.includes('PILL_PULSE') && overlaySrc.includes('readyFill') && overlaySrc.includes('openUpgradeCards'))
 
 const audioSrc = readFileSync(new URL('../src/client/audio.ts', import.meta.url), 'utf8')
 check('hover uses Clip_Click_1 and select uses pop.mp3', audioSrc.includes("assets/sounds/Clip_Click_1.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/pop.mp3"))

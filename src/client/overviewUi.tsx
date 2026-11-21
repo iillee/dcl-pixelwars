@@ -120,13 +120,13 @@ export function OverviewEyeInline() {
 }
 
 /** Overview buttons parked to the LEFT of the eye as an overlay. The eye /
- *  timer / mute cluster does not shift. On a narrow canvas the three buttons
- *  stack so they stay fully on screen. */
-export function OverviewRow(props: { desktop?: boolean; besideEye?: boolean; inline?: boolean } = {}) {
+ *  timer / mute / score cluster does not shift. On a narrow canvas the three
+ *  buttons stack so they stay fully on screen. */
+export function OverviewRow(props: { desktop?: boolean; besideEye?: boolean; inline?: boolean; clusterW?: number } = {}) {
   if (!isOverviewActive()) return null
   const c = UiCanvasInformation.getOrNull(engine.RootEntity)
   const uiW = c && c.height > 0 ? (c.width / c.height) * 1080 : 1280
-  const clusterW = SMALL + TOP_GAP + 200 + TOP_GAP + SMALL
+  const clusterW = props.clusterW ?? (SMALL + TOP_GAP + 200 + TOP_GAP + SMALL)
   const eyeLeft = (uiW - clusterW) / 2
   const rowW = SMALL * 3 + ROW_GAP * 2
   const stack = eyeLeft < rowW + ROW_GAP + 8

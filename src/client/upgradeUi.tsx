@@ -1,12 +1,10 @@
 /**
- * upgradeUi.tsx — painted-tile pill (gold pulse when an upgrade is ready),
+ * upgradeUi.tsx — painted-tile pill (gold when an upgrade is ready),
  * buff icons, and the three-card selection overlay.
  *
- * The ready pulse follows Duck's animation kit: a reserved, unscaled wrapper
- * and a child that eases from scale 1 → 1.08 and back (ease-out grow,
- * ease-in shrink, 0.9 s period) so neighbors do not shift. A one-shot gold
- * color flash plays first, then the pill stays gold and pulses until the
- * player picks. Click / tap the pill to open the cards.
+ * A one-shot gold color flash plays when a pick becomes ready, then the
+ * pill stays gold until the player picks. A red bouncing badge on the
+ * pill marks tucked pending picks. Click / tap the pill to open the cards.
  */
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
@@ -14,7 +12,7 @@ import { isMobile } from '@dcl/sdk/platform'
 import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
 import { RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from './abilityHotbar'
 import {
-  closeUpgradeCards, FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, setUpgradeCardHover, type UpgradeHud,
+  FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, setUpgradeCardHover, type UpgradeHud,
 } from './upgrades'
 import { OutlinedLabel } from './outlinedLabel'
 import {
@@ -48,29 +46,11 @@ function lighten(c: Color4, t: number): Color4 {
   return Color4.create(c.r + (1 - c.r) * t, c.g + (1 - c.g) * t, c.b + (1 - c.b) * t, c.a)
 }
 
-/** Duck Pulse defaults, tuned to a gentle continuous 1 → 1.08 over 0.9 s. */
-export const PILL_PULSE_PERIOD = 0.9
-export const PILL_PULSE_MIN = 1
-export const PILL_PULSE_MAX = 1.08
-
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
 const easeInCubic = (t: number) => t * t * t
 const lerpC = (a: Color4, b: Color4, t: number) => Color4.create(
   a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t,
 )
-
-/** Scale at `now` after the ready-flash ends. Resting value is 1. */
-export function pillPulseScale(now: number, flashUntil: number, pending: boolean): number {
-  if (!pending || now < flashUntil) return PILL_PULSE_MIN
-  const elapsed = (now - flashUntil) / 1000
-  const cycleT = ((elapsed % PILL_PULSE_PERIOD) + PILL_PULSE_PERIOD) % PILL_PULSE_PERIOD / PILL_PULSE_PERIOD
-  if (cycleT < 0.5) {
-    const amount = easeOutCubic(cycleT * 2)
-    return PILL_PULSE_MIN + amount * (PILL_PULSE_MAX - PILL_PULSE_MIN)
-  }
-  const amount = easeInCubic((cycleT - 0.5) * 2)
-  return PILL_PULSE_MAX + amount * (PILL_PULSE_MIN - PILL_PULSE_MAX)
-}
 
 function readyFill(now: number, flashUntil: number, base: Color4): Color4 {
   if (now >= flashUntil) return GOLD
@@ -82,19 +62,15 @@ function readyFill(now: number, flashUntil: number, base: Color4): Color4 {
 }
 
 /**
- * The painted-tile count pill. Turns gold and pulses when an upgrade is ready.
- * Click / tap opens the card overlay. The wrapper stays at the rest size so a
- * pulse cannot shove the mute button or the buff icons. If a pending pick is
- * tucked away, a red bouncing count badge sits on the top-right corner.
+ * The painted-tile count pill. Turns gold when an upgrade is ready.
+ * Click / tap opens the card overlay. If a pending pick is tucked away,
+ * a red bouncing count badge sits on the top-right corner.
  */
 export function PaintedCountPill(props: { width: number; height: number; font: number; countText: string; ink: Color4 }) {
   const { width, height, font, countText, ink } = props
   const hud = getUpgradeHud()
   const now = Date.now()
   const ready = hud.pending
-  const scale = pillPulseScale(now, hud.flashUntil, ready)
-  const drawW = Math.max(1, Math.round(width * scale))
-  const drawH = Math.max(1, Math.round(height * scale))
   const innerR = HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING
   let fill = PANEL_LIGHT
   let rim = HOTBAR_RIM
@@ -108,8 +84,6 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
   }
   const showBadge = ready && !hud.clusterVisible && hud.pendingCount > 0
   const badge = Math.max(22, Math.round(height * 0.48))
-  const insetX = Math.max(0, Math.round((width - drawW) / 2))
-  const insetY = Math.max(0, Math.round((height - drawH) / 2))
   return (
     <UiEntity uiTransform={{
       width, height, flexShrink: 0, justifyContent: 'center', alignItems: 'center',
@@ -118,7 +92,7 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
     }} onMouseDown={ready ? openUpgradeCards : undefined}>
       <UiEntity
         uiTransform={{
-          width: drawW, height: drawH, borderRadius: HOTBAR_RADIUS,
+          width, height, borderRadius: HOTBAR_RADIUS,
           borderWidth: HOTBAR_BORDER_W, borderColor: rim, padding: TILE_RING,
           pointerFilter: ready ? 'block' : 'none',
         }}
@@ -136,8 +110,8 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
         <UiEntity uiTransform={{
           positionType: 'absolute',
           position: {
-            top: insetY - Math.round(badge * 0.35) + hud.badgeBob,
-            right: insetX - Math.round(badge * 0.35),
+            top: -Math.round(badge * 0.35) + hud.badgeBob,
+            right: -Math.round(badge * 0.35),
           },
           width: badge, height: badge, borderRadius: badge / 2,
           borderWidth: 3, borderColor: WHITE,
@@ -320,7 +294,7 @@ function fitCardSize(mobile: boolean, count: number, pop: number): { cardW: numb
   const { w, h } = canvasSize()
   const gap = mobile ? 10 : 16
   const side = mobile ? 36 : 72
-  const chromeH = mobile ? 170 : 200
+  const chromeH = mobile ? 120 : 150
   const n = Math.max(1, count)
   const maxRow = Math.max(80, w - side)
   const maxH = Math.max(180, h - chromeH)
@@ -362,16 +336,15 @@ function OutlinedTitle(props: { text: string; font: number; height: number }) {
 
 /**
  * Centered upgrade cards, shared by auto-open and a manual pill tap.
- * Gameplay is not paused; only the cards and Close capture clicks.
- * The 5-second auto-tuck still runs, but there is no visible timer bar.
+ * Gameplay is not paused; only the cards capture clicks. The popup
+ * dismisses when the player picks a card or when the 5-second auto-tuck
+ * expires. There is no visible timer bar or Close button.
  */
 export function UpgradeOverlay() {
   const hud = getUpgradeHud()
   if (!hud.clusterVisible) return null
   const mobile = isMobile()
   const { cardW, cardH, gap } = fitCardSize(mobile, hud.offer.length, hud.popScale)
-  const closeW = mobile ? 120 : 140
-  const closeH = mobile ? 40 : 46
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
@@ -387,16 +360,6 @@ export function UpgradeOverlay() {
           {hud.offer.map((kind, i) => (
             <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} gap={gap} />
           ))}
-        </UiEntity>
-        <UiEntity
-          uiTransform={{
-            width: closeW, height: closeH, margin: { top: 16 }, borderRadius: 12,
-            borderWidth: 4, borderColor: INK, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block',
-          }}
-          uiBackground={{ color: PANEL_LIGHT }}
-          onMouseDown={closeUpgradeCards}
-        >
-          <Label value={bold('CLOSE')} fontSize={mobile ? 15 : 18} color={INK} font="sans-serif" textAlign="middle-center" uiTransform={{ width: '100%', height: '100%' }} />
         </UiEntity>
       </UiEntity>
     </UiEntity>

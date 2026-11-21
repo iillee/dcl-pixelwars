@@ -89,9 +89,11 @@ const BANNER_BG    = Color4.create(0, 0, 0, 0.55)
 // No texture, no label.
 const BAR_BORDER = 3
 const BAR_FILL_H = 18
-/** In-match top row: eye + timer + mute, matching the lobby desktop order. */
+/** In-match top row: eye + mute + timer + fixed-width score pill. */
 const MATCH_TIMER_W = 200
-const MATCH_TOP_W = TOP_BTN + TOP_GAP + MATCH_TIMER_W + TOP_GAP + TOP_BTN
+/** Eye width + gap + mute width. The score pill no longer grows with the number. */
+const SCORE_PILL_W = TOP_BTN + TOP_GAP + TOP_BTN
+const MATCH_TOP_W = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + MATCH_TIMER_W + TOP_GAP + SCORE_PILL_W
 const BAR_W = MATCH_TOP_W
 const BAR_INNER_W = BAR_W - BAR_BORDER * 2
 const MOBILE_TIMER_W = MATCH_TIMER_W
@@ -671,25 +673,29 @@ function LobbyStartCountdown() {
 }
 
 /** Personal upgrade charge this round (the same number that unlocks
- *  upgrades). Parked to the right of mute as an overlay so the centered
- *  eye / timer / mute cluster never shifts. The pill's left edge stays put
- *  and the width grows right with the digit count. Hidden in the lobby,
- *  summary, and standings. When an upgrade is ready the pill turns gold
- *  and pulses in place (click / tap opens the cards). */
+ *  upgrades). Sits in the match top row, just to the right of the timer,
+ *  at a fixed width equal to the eye and mute together. The font shrinks
+ *  if a large number would overflow. Hidden in the lobby, summary, and
+ *  standings. When an upgrade is ready the pill turns gold (click / tap
+ *  opens the cards). */
+function scorePillFont(text: string, mobile: boolean, width: number): number {
+  const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
+  const inner = Math.max(8, width - 16 - frame)
+  let font = mobile ? 22 : 26
+  while (font > 14 && textWSafe(text, font) > inner) font -= 1
+  return font
+}
+
 function PaintedHud() {
   if (inLobby() || getSummaryProgress() >= 0 || standingsOpen) return null
   const n = getUpgradeHud().charge
   const countText = String(n)
   const mob = isMobile()
-  const font = mob ? 22 : 26
-  const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
-  const width = Math.max(TOP_BTN, Math.ceil(textWSafe(countText, font) + 16 + frame))
-  const left = TOP_BTN + TOP_GAP
+  const width = SCORE_PILL_W
+  const font = scorePillFont(countText, mob, width)
   return (
     <UiEntity
       uiTransform={{
-        positionType: 'absolute',
-        position: { top: 0, left },
         width,
         height: TOP_BTN,
         flexShrink: 0,
@@ -819,8 +825,8 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
-            {/* Mobile + desktop, lobby + match: eye | timer | mute. View controls overlay to
-                the left of the eye so the top bar never shifts. */}
+            {/* Lobby: eye | timer | mute. Match: eye | mute | timer | score.
+                View controls overlay to the left of the eye so the top bar never shifts. */}
             {isMobile() ? (
             lobby ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -849,10 +855,16 @@ export const uiMenu = () => (
               </UiEntity>
             </UiEntity>
             ) : (
-            <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ width: MATCH_TOP_W, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <OverviewRow />
+                <OverviewRow clusterW={MATCH_TOP_W} />
                 <OverviewEye />
+              </UiEntity>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
+                <TileButton id="ui_top_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
               <UiEntity
                 uiTransform={{
@@ -866,13 +878,7 @@ export const uiMenu = () => (
                   <Label value={hudBold(hudClockText(secs))} fontSize={36} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
                 </UiEntity>
               </UiEntity>
-              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <TileButton id="ui_top_mute" onPress={toggleMusic}>
-                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-                </TileButton>
-                <PaintedHud />
-              </UiEntity>
+              <PaintedHud />
             </UiEntity>
             )
             ) : lobby ? (
@@ -901,10 +907,16 @@ export const uiMenu = () => (
               </TileButton>
             </UiEntity>
             ) : (
-            <UiEntity uiTransform={{ width: MATCH_TOP_W, height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ width: MATCH_TOP_W, height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <OverviewRow desktop besideEye />
+                <OverviewRow desktop besideEye clusterW={MATCH_TOP_W} />
                 <OverviewEye />
+              </UiEntity>
+              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { left: TOP_GAP } }}>
+                <TileButton id="ui_match_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
               <UiEntity
                 uiTransform={{
@@ -919,13 +931,7 @@ export const uiMenu = () => (
                   uiBackground={{ color: SUMMARY_CARD_BG }} />
                 <Label value={hudBold(hudClockText(secs))} fontSize={42} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" />
               </UiEntity>
-              <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <TileButton id="ui_match_mute" onPress={toggleMusic}>
-                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-                </TileButton>
-                <PaintedHud />
-              </UiEntity>
+              <PaintedHud />
             </UiEntity>
             )}
             {/* Territory bar: team colours plus a white unpainted remainder. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
