@@ -52,8 +52,6 @@ export type Events = {
     total: number
   }
 
-  // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
-  'paint:wallet': { tank: number; denied: string[]; regen: number }
   'paint:score': { n: number }
   'upgrade:state': { charge: number; pending: number; earned: number; bonus: number; speed: number; paint: number; haste: number }
   // Broadcast: other players' visible upgrade counts for nametag icons.
@@ -61,8 +59,6 @@ export type Events = {
 
   'star:spawn': { i: number; x: number; y: number; z: number; fall: number }
   'star:despawn': { i: number }
-  'star:hold': { id: string; until: number; ms: number }
-  'overdrive:impact': { attacker: string; target: string; dx: number; dz: number }
   'feed:line': { kind: number; a: string; b: string; team: number; teamB: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.
@@ -84,7 +80,7 @@ export type Events = {
     finalGreen: number
     finalYellow: number
     finalTotal: number
-    kind: 'paint' | 'balloon' | 'bases'
+    kind: 'paint'
     victor: string
     victorName: string
   }
@@ -93,7 +89,7 @@ export type Events = {
   'round:clock': {
     idx: number
     active: boolean
-    format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
+    format: 'pvp'
     phase: 'match' | 'summary' | 'lobby' | 'idle'
     voteMs: number
     winner: string
@@ -109,27 +105,13 @@ export type Events = {
     finalGreen: number
     finalYellow: number
     finalTotal: number
-    format: 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
+    format: 'pvp'
     layout?: 'arena' | 'lobby'
     seq?: number
   }
 
   // The lobby cross is in the world at full size. Teleport onto it before teardown.
   'lobby:floor': { ready: boolean }
-
-  'balloon:state': { entries: Array<{ id: string; n: number }> }
-  'balloon:pop': { id: string; n: number }
-  'base:state': {
-    redConnected: number
-    blueConnected: number
-    redProgress: number
-    blueProgress: number
-    threshold: number
-    redGrowing: boolean
-    blueGrowing: boolean
-  }
-  'base:win': { team: number }
-
 
   // 2 Hz broadcast: current bot positions (empty when no bots active).
   // Subscriber: client/botVisual renders one box per entry.
@@ -138,10 +120,6 @@ export type Events = {
     /** Server bot-simulation clock (s) for these positions. */
     t: number
   }
-
-  // Broadcast: server accepted a dash hit. Subscriber: client/dash
-  // (victim self-applies knockback; everyone shows the impact).
-  'dash:impact': { attacker: string; target: string; dx: number; dz: number }
 
   // Broadcast: a lunge started / an accepted lunge hit. Subscriber: client/lunge.
   'lunge:started': { attacker: string; id: number; dx: number; dz: number; x: number; y: number; z: number; dry: number }
@@ -153,9 +131,6 @@ export type Events = {
   'burst:impact': { attacker: string; id: number; target: string; dx: number; dz: number; air: number }
   // Attacker only: the server applied this burst's footprint. Subscriber: client/paintBurst.
   'burst:painted': { id: number; n: number }
-  // Broadcast: Paint Bomb telegraph / detonation. Subscriber: client/paintBomb.
-  'bomb:armed': { attacker: string; team: Team; x: number; y: number; z: number }
-  'bomb:blast': { attacker: string; team: Team; x: number; y: number; z: number; cells: number }
 
   // Fall rescue, for everyone except the rider. Subscriber: client/fallRescue.
   // mobile 1: animate the cloud catch → base. mobile 0: follow that avatar.

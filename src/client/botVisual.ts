@@ -59,7 +59,7 @@ import {
 } from '../shared/pvp'
 import { botShowsGlider, ghostClipForPose, doubleJumpSpinDeg, DOUBLE_JUMP_SPIN_DUR_S, jumpPop, knockFaceYaw, KNOCK_FACE_HOLD_S, BOT_ANIM_JUMP, BOT_ANIM_DOUBLE, BOT_ANIM_GLIDE, type GhostClip } from '../shared/botAnim'
 import { attachBotFace, destroyBotFace, hitBotFace, initBotFace, playBotFaceClip, tickBotFace } from './botFace'
-import { anvilKnock, burstKnock, lungeKnock, overdriveKnock, spikeKnock } from '../shared/knocks'
+import { anvilKnock, burstKnock, lungeKnock, spikeKnock } from '../shared/knocks'
 import { Team, TEAM_RGB } from '../shared/team'
 import { applyBotBodyForTeam, clearBotBodyColor, onBotBodyThemeChange } from './botBody'
 import { teamPlatesHidden } from './nametags'
@@ -272,11 +272,7 @@ function rgb(team: number): Color3 {
 }
 
 function hideGhostPlates(): boolean {
-  // Only Balloon Battle is team-neutral. isLobbyLayout() must not force
-  // the balloon (blue) swatch — a late joiner can still have the lobby
-  // floor while mid-match botPositions already arrived, which painted
-  // every bot blue and then never refreshed because the team id was already set.
-  return roundFormat === 'balloon'
+  return false
 }
 
 function lightColor(team: number): Color3 {
@@ -292,7 +288,7 @@ function ghostModelSrc(): string {
 
 function applyCustomBotBody(entity: Entity, team: number): void {
   if (BOT_MODEL !== 'custom') return
-  applyBotBodyForTeam(entity, team, hideGhostPlates())
+  applyBotBodyForTeam(entity, team)
 }
 
 function paintLight(entity: Entity, team: number): void {
@@ -561,7 +557,7 @@ function beginKnockFace(rec: BotVisual, dx: number, dz: number): void {
 }
 
 /** Play the confirmed knock arc locally, then blend toward the server path once snapshots arrive. */
-export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' | 'burst' | 'spike' | 'anvil' | 'overdrive'): void {
+export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' | 'burst' | 'spike' | 'anvil'): void {
   const rec = bots.get(id)
   if (!rec || rec.riding) return
   const len = Math.hypot(dx, dz)
@@ -571,7 +567,6 @@ export function playBotKnock(id: number, dx: number, dz: number, kind: 'lunge' |
   const spec = kind === 'lunge' ? lungeKnock(ux, uz)
     : kind === 'spike' ? spikeKnock(ux, uz, grounded)
     : kind === 'anvil' ? anvilKnock(ux, uz)
-    : kind === 'overdrive' ? overdriveKnock(ux, uz)
     : burstKnock(ux, uz)
   const u = BOT_KNOCK_UNIT
   rec.localKnock = {

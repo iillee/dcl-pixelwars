@@ -36,15 +36,14 @@ import {
   PlayerIdentityData, PointerEventType, Transform, AudioSource, inputSystem, Physics, Tween, EasingFunction, AvatarMask,
 } from '@dcl/sdk/ecs'
 import { triggerEmote } from '~system/RestrictedActions'
-import { isPlayerGrounded, paintEconomyOn, paintTank } from '../paint'
-import { isBalloonRound } from '../round'
+import { isPlayerGrounded } from '../paint'
 import { Color4, Vector3 } from '@dcl/sdk/math'
 import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
   LUNGE_MODE, LUNGE_DEBUG, LUNGE_ACTIVE_S, LUNGE_DISTANCE, LUNGE_IMPULSE, LUNGE_LIFT, LUNGE_BRAKE, LUNGE_STICK_FORCE,
-  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, STAR_COOLDOWN_MULT, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
+  LUNGE_RECOVERY_S, LUNGE_COOLDOWN_S, LUNGE_HIT_GRACE_S, LUNGE_KNOCKBACK, LUNGE_KNOCK_LIFT,
   LUNGE_KNOCK_FORCE, LUNGE_KNOCK_FORCE_S, LUNGE_IMPACT_MAX_AGE_MS, lungeEnabledForRound,
   LUNGE_EMOTE, LUNGE_EMOTE_NAME, LUNGE_KNOCKBACK_LOCK, LUNGE_KNOCKBACK_LOCK_S, LUNGE_HITBOX_FORWARD, LUNGE_HITBOX_D, LUNGE_HITBOX_W,
   LUNGE_HIT_POP_TO, LUNGE_HIT_CORE_TO, LUNGE_MISS_DUST_TO,
@@ -60,7 +59,6 @@ import { getDummyTargets, hitDummy } from './lungeDummy'
 import { initLungeSlash, startSlash, flashSlash, tickSlash } from './lungeSlash'
 import { dashPop, dashPopEnd } from './burstRipple'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
-import { isLocalOverdriveActive } from './overdrive'
 import { localHasteCooldownMult } from './upgrades'
 import { inLobby } from './phase'
 import { lungeKnock } from '../shared/knocks'
@@ -129,9 +127,9 @@ export function playFollowedSfx(who: string, at: V3, src: string, vol = 0.9): vo
     { who, off: { x: 0, y: 1.1, z: 0 } },
   )
 }
-const shownTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
+const shownTeam = (t: Team, _dry: boolean) => (inLobby() ? Team.None : t)
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? WHITE
-const localDry = () => paintEconomyOn() && paintTank() <= 0
+const localDry = () => false
 const GREY = { r: 0.55, g: 0.55, b: 0.55 }
 const RECOVERY_CLICK = 'assets/sounds/click.wav'
 let recoveryClickEnt: Entity = 0 as Entity
@@ -375,7 +373,7 @@ export function triggerLunge(): void {
   startPos = { x: t.position.x, y: t.position.y, z: t.position.z }
   prevPos = startPos
   state = 'active'; stateLeft = LUNGE_ACTIVE_S
-  cooldownTotal = LUNGE_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownTotal = LUNGE_COOLDOWN_S * localHasteCooldownMult()
   cooldownLeft = cooldownTotal
   hitWindowLeft = LUNGE_ACTIVE_S + LUNGE_HIT_GRACE_S
   hitAny = false

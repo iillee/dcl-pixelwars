@@ -33,7 +33,7 @@ import { events } from '../shared/events'
 import { Team, TEAM_RGB } from '../shared/team'
 import { getRoundIndex } from '../shared/roundTiming'
 import {
-  BURST_MODE, BURST_COOLDOWN_S, STAR_COOLDOWN_MULT, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
+  BURST_MODE, BURST_COOLDOWN_S, BURST_RADIUS, BURST_LOS, BURST_LOS_HEIGHT, BURST_LOS_TIMEOUT_S,
   BURST_KNOCKBACK, BURST_KNOCK_LIFT, BURST_KNOCK_FORCE, BURST_KNOCK_FORCE_S, BURST_IMPACT_MAX_AGE_MS,
   BURST_RING_S, BURST_PARTICLES,
   AIR_SPIKE_BOOM_VOL, AIR_SPIKE_DIVE_IMPULSE, AIR_SPIKE_DIVE_FORWARD, AIR_SPIKE_DIVE_FORCE, AIR_SPIKE_DIVE_FORCE_S,
@@ -49,8 +49,6 @@ import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } fro
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
 import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock, playFollowedSfx } from './lunge'
 import { isMoveLocked } from './moveLock'
-import { paintEconomyOn, paintTank } from '../paint'
-import { isBalloonRound } from '../round'
 import { BURST_EMOTE_ENABLED, BURST_EMOTE_SRC, BURST_EMOTE_S, BURST_EMOTE_FREEZE_S } from '../shared/pvp'
 
 // Pending switch from the one-shot ground punch to the looping hold of its final pose.
@@ -67,7 +65,6 @@ import { hitsOpen, inLobby, paintOpen } from './phase'
 import { FLOAT_HEIGHT, getBotRenderPositions, playBotKnock } from './botVisual'
 import { getDummyTargets, hitDummy } from './lungeDummy'
 import { localTeam, teamOfUser, isKnockbackImmune, myAddress, safePhysics, initKnockbackState, applyKnock, botFeet } from './knockback'
-import { isLocalOverdriveActive } from './overdrive'
 import { localHasteCooldownMult } from './upgrades'
 import { burstKnock, spikeKnock } from '../shared/knocks'
 
@@ -81,8 +78,8 @@ let diveForceEnt: Entity = 0 as Entity
 const gate = new ImpactGate(BURST_IMPACT_MAX_AGE_MS)
 
 const WHITE = { r: 1, g: 1, b: 1 }
-const localDry = () => paintEconomyOn() && paintTank() <= 0
-const vfxTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
+const localDry = () => false
+const vfxTeam = (t: Team, _dry: boolean) => (inLobby() ? Team.None : t)
 const rgbOf = (t: Team) => TEAM_RGB[t] ?? WHITE
 function glow(ent: Entity, rgb: { r: number; g: number; b: number }, a: number, intensity: number): void {
   Material.setPbrMaterial(ent, {
@@ -104,7 +101,7 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
 function showShockwave(p: V3, team: Team, local: boolean, cell = '', who = ''): void {
   const rgb = rgbOf(team)
-  startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
+  startRipple(p, inLobby() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
   for (let i = 0; i < BURST_PARTICLES; i++) {
     const a = (i / BURST_PARTICLES) * Math.PI * 2 + Math.random() * 0.4
@@ -557,7 +554,7 @@ export function triggerBurst(): void {
   const f = Vector3.rotate(Vector3.Forward(), t.rotation)
   burstId = (burstId + 1) % 1_000_000
   const id = burstId
-  cooldownTotal = BURST_COOLDOWN_S * localHasteCooldownMult() * (isLocalOverdriveActive() && STAR_COOLDOWN_MULT > 0 ? STAR_COOLDOWN_MULT : 1)
+  cooldownTotal = BURST_COOLDOWN_S * localHasteCooldownMult()
   cooldownLeft = cooldownTotal
   // A step, the 0.55 m surface offset, and a short hop stay a ground circle.
   // Only a real jump or fall (burstPressIsAir) closes the glider and waits to land.

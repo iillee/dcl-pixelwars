@@ -39,11 +39,9 @@ const PLATE_MIN = 4
 const SPACES_PER_SLOT = 3
 
 const PASS_INTERVAL_S = 0.5
-/** True while a Balloon Battle arena is live (not the lobby). */
-let balloonMode = false
 
 export function teamPlatesHidden(): boolean {
-  return balloonMode || isLobbyLayout()
+  return isLobbyLayout()
 }
 
 function color(team: Team): Color3 {
@@ -137,19 +135,11 @@ export function initNametags(): void {
     applyPass()
   })
   events.on('lobby:floor', () => {
-    balloonMode = false
     clearNametags()
   })
-  events.on('round:reset', ({ format, layout }) => {
-    balloonMode = layout !== 'lobby' && format === 'balloon'
+  events.on('round:reset', () => {
     if (teamPlatesHidden()) clearNametags()
     else applyPass()
-  })
-  // Late join into a Balloon Battle already running (no roundReset).
-  events.on('round:clock', ({ format, active }) => {
-    if (!active || format !== 'balloon') return
-    balloonMode = true
-    clearNametags()
   })
   // Periodic pass picks up avatars that load after the roster arrived.
   let clock = 0

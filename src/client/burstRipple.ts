@@ -15,7 +15,6 @@
  * nearest walkable cell to the broadcast position).
  */
 import { engine, Entity, Material, MeshRenderer, Transform } from '@dcl/sdk/ecs'
-import { isBalloonRound } from '../round'
 import { Vector3, Quaternion, Color4 } from '@dcl/sdk/math'
 import { Team } from '../shared/team'
 import { inLobby } from './phase'

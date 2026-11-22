@@ -27,7 +27,6 @@ import { syncEntity } from '@dcl/sdk/network'
 import { SeedHolder, seedHolder, LeaderboardState, leaderboardStateEntity } from '../shared/components'
 import { setupUi } from '../ui'
 import { setupOverviewCamera } from './overviewCamera'
-import { runStress } from '../stress'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
 import { initClientHandler } from './clientHandler'
@@ -38,10 +37,8 @@ import { initBotVisual } from './botVisual'
 import { initPlayerNet } from './player'
 import { initNametags } from './nametags'
 import { initSpeedBonus } from './speed'
-// Dash parked (shared/pvp.ts DASH_MODE 'off'); re-add `initDash()` from './dash' to bring it back.
 import { initLunge } from './lunge'
 import { initPaintBurst } from './paintBurst'
-import { initDepots } from './depots'
 import { initLungeDummy } from './lungeDummy'
 import { setupTouchControls } from './touchControls'
 import { CELL, STEP, lookupTile } from '../maze/generator'
@@ -49,14 +46,7 @@ import { ensureMazeSeed, initMazeNet, isLobbyLayout, rebuildMaze, setHoldMazeSee
 import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
-import { initBalloons } from './balloons'
-import { initBaseBeams } from './baseBeams'
 import { initLagHud } from './lagHud'
-
-// ─── Stress-test toggle (Pixelwars design §8.1) ─────────────────────
-// Set to 0 for normal maze. Non-zero = spawn N planes at spawn, skip maze.
-// Try: 5000, 15000, 30000. Read fps from the floating text at spawn.
-const STRESS_COUNT = 0
 
 // ─── Seed watcher ───────────────────────────────────────────────────
 // Reacts to any change in the synced seed (set by first-joiner init or by
@@ -109,7 +99,6 @@ engine.addSystem((dt: number) => {
 // ─── setupClient — boot sequence ────────────────────────────────────
 export async function setupClient(): Promise<void> {
   setupUi()
-  if (STRESS_COUNT > 0) { runStress(STRESS_COUNT); return }
   initAudio()
   initWaterSplash()
   setupOverviewCamera()
@@ -147,10 +136,7 @@ export async function setupClient(): Promise<void> {
   initLunge()
   initLungeDummy()
   initPaintBurst()
-  initDepots()
   initLobby()
-  initBalloons()
-  initBaseBeams()
   // Lobby GLBs go up now. A primitive hold floor was already created in
   // main() before this bundle loaded, so a mobile join has something to
   // stand on if these colliders are still coming in. The server also

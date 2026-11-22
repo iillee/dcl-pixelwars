@@ -2,15 +2,12 @@ import { SplashScreen } from "./client/splash"
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
-import { coverage, paintEconomyOn, paintRefilling, paintTank, painterTeam } from "./paint"
-import { PAINT_CAPACITY, PAINT_REFILL_MODE } from "./shared/territory"
+import { coverage } from "./paint"
 import { hudClockText } from "./client/lobby"
 import { hudRoundStartsLine } from "./shared/lobby"
 import { lagHudLine, lagHudOn } from "./client/lagHud"
 import { inLobby, isLobbyStarting, voteRemainingMs } from "./client/phase"
-import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES, isBalloonRound, isBasesRound } from "./round"
-import { baseCharge } from "./client/baseBeams"
-import { GROWTH_PER_CELL_PER_SEC } from "./shared/bases"
+import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
 import { room } from "./shared/messages"
 import { Team, TEAM_NAME, TEAM_RGB, PLAYING_TEAMS, isPlayingTeam, leadingTeams, rankedTeams, type TeamCoverage } from "./shared/team"
@@ -551,7 +548,7 @@ function StandingsPopup() {
   const pcts = summaryPcts(share)
   const { order, leaders } = summaryRank(share)
   const counts = order.map(team => rows.filter(r => r.team === team).length)
-  const hidePill = isBasesRound()
+  const hidePill = false
   const lay = standingsLayout(counts, cv, STANDINGS_TOP_PX, { hidePill })
   const { k, stacked, bodyCap, pillW, pillH, panelW, panelH } = lay
   const border = SUMMARY_OUTLINE * k
@@ -606,10 +603,10 @@ function RoundSummary(p: number) {
   const endCov: TeamCoverage = { red: b.red, blue: b.blue, green: b.green, yellow: b.yellow, total: b.total }
   const pcts = summaryPcts(endCov)
   const ranked = summaryRank(endCov)
-  const leaders = b.kind === 'balloon' ? [] : ranked.leaders
-  const order = b.kind === 'balloon' ? [...PLAYING_TEAMS] : ranked.order
+  const leaders = ranked.leaders
+  const order = ranked.order
   const counts = order.map(team => rows.filter(r => r.team === team).length)
-  const hidePill = b.kind === 'balloon'
+  const hidePill = false
   // Same compact panel as the mid-game standings (capped width, content-sized cards),
   // reserved under the title so the block stays fully on screen at 16:9 and 21:9.
   const lay = standingsLayout(counts, cv, SUMMARY_HEAD_H, { hidePill })
@@ -636,21 +633,13 @@ function RoundSummary(p: number) {
           </UiEntity>
         )}
       </UiEntity>
-      {/* Territory pill: four team segments. Hidden for Balloon Battle. */}
-      {b.kind !== 'balloon' && (
-        <UiEntity uiTransform={{ width: panelW, height: show ? panelH : ph, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
-          <UiEntity uiTransform={{ width: Math.max(pw, 1), height: ph + (show ? SUMMARY_GAP * k : 0), flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
-            <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pw} height={ph} border={border} track={p > 0.5 ? SUMMARY_INK : BAR_TRACK} innerBg={p > 0.5 ? SUMMARY_UNPAINTED : Color4.White()} showLabels={show} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={b.kind !== 'bases'} />
-            <UiEntity uiTransform={{ width: pw, height: show ? SUMMARY_GAP * k : 0, flexShrink: 0 }} />
-          </UiEntity>
-          {show ? grid : null}
+      <UiEntity uiTransform={{ width: panelW, height: show ? panelH : ph, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+        <UiEntity uiTransform={{ width: Math.max(pw, 1), height: ph + (show ? SUMMARY_GAP * k : 0), flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
+          <TeamScorePill pcts={[pcts.red, pcts.blue, pcts.green, pcts.yellow]} width={pw} height={ph} border={border} track={p > 0.5 ? SUMMARY_INK : BAR_TRACK} innerBg={p > 0.5 ? SUMMARY_UNPAINTED : Color4.White()} showLabels={show} fontSize={fnt(SUMMARY_PILL_FONT, k)} leaders={leaders} showUnpainted={true} />
+          <UiEntity uiTransform={{ width: pw, height: show ? SUMMARY_GAP * k : 0, flexShrink: 0 }} />
         </UiEntity>
-      )}
-      {b.kind === 'balloon' && show ? (
-        <UiEntity uiTransform={{ width: panelW, height: panelH, flexShrink: 0, flexDirection: 'column', alignItems: 'center' }}>
-          {grid}
-        </UiEntity>
-      ) : null}
+        {show ? grid : null}
+      </UiEntity>
       <UiEntity uiTransform={{ width: 1, flexGrow: p, height: 0 }} />
     </UiEntity>
   )
@@ -658,16 +647,6 @@ function RoundSummary(p: number) {
 
 /** Territory shares in %, same source and 1-decimal rounding the old text readout showed. */
 function coveragePct(): { red: number; blue: number; green: number; yellow: number } {
-  if (isBasesRound()) {
-    const c = baseCharge()
-    const t = c.threshold > 0 ? c.threshold : 1
-    return {
-      red: Number(((c.redProgress / t) * 100).toFixed(1)),
-      blue: Number(((c.blueProgress / t) * 100).toFixed(1)),
-      green: 0,
-      yellow: 0,
-    }
-  }
   const { red, blue, green, yellow, total } = coverage()
   if (total === 0) return { red: 0, blue: 0, green: 0, yellow: 0 }
   return {
@@ -694,19 +673,6 @@ function bannerHeadline(): string {
 }
 
 /** Shared vertical pill used by the Prototype paint tank. */
-function SideFillTrack(props: { trackW: number; trackH: number; pad: number; radius: number; innerR: number; fillH: number; fillColor: any; empty: boolean }) {
-  const { trackW, trackH, pad, radius, innerR, fillH, fillColor, empty } = props
-  return (
-    <UiEntity
-      uiTransform={{ width: trackW, height: trackH, borderRadius: radius, padding: pad, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}
-      uiBackground={{ color: Color4.create(0, 0, 0, empty ? 0.72 : 0.5) }}
-    >
-      <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: innerR, flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
-        <UiEntity uiTransform={{ width: '100%', height: fillH, borderRadius: innerR }} uiBackground={{ color: fillColor }} />
-      </UiEntity>
-    </UiEntity>
-  )
-}
 
 /** Centered lobby countdown, shown to every player in the lobby (including
  *  anyone not standing on a team tile). The top status pill is unchanged. */
@@ -777,78 +743,6 @@ function PaintedHud() {
   )
 }
 
-/** Prototype only. Vertical pill on the right: caption and team-colored fill from the bottom. */
-function PaintTankBar() {
-  if (!paintEconomyOn() || inLobby()) return null
-  const mob = isMobile()
-  const cv = canvasSize()
-  const trackH = mob ? 168 : 240
-  const trackW = mob ? 28 : 36
-  const pad = 3
-  const radius = trackW / 2
-  const innerW = trackW - pad * 2
-  const innerH = trackH - pad * 2
-  const innerR = innerW / 2
-  const n = Math.max(0, Math.min(PAINT_CAPACITY, paintTank()))
-  const filling = paintRefilling()
-  const empty = n <= 0 && !filling
-  const fillH = n <= 0 ? 0 : Math.max(innerW, Math.round(innerH * (n / PAINT_CAPACITY)))
-  const teamColor = isPlayingTeam(painterTeam()) ? barColor(painterTeam()) : BAR_RED
-  const pulse = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(Date.now() / 180))
-  const fillColor = filling ? Color4.create(teamColor.r, teamColor.g, teamColor.b, pulse) : teamColor
-  const labelColor = empty ? Color4.create(1, 0.82, 0.45, 1) : Color4.White()
-  const top = Math.max(16, Math.round((cv.h - trackH - 24) / 2))
-  return (
-    <UiEntity
-      uiTransform={{
-        positionType: 'absolute',
-        position: { top, right: mob ? 10 : 22 },
-        width: 72,
-        height: trackH + 24,
-        flexDirection: 'column',
-        alignItems: 'center',
-        pointerFilter: 'none',
-      }}
-    >
-      <Label value={empty ? 'NO PAINT' : filling ? (PAINT_REFILL_MODE === 'depot' ? 'REFILL' : 'RECHARGE') : 'PAINT'} fontSize={mob ? 13 : 15} color={labelColor} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: 72, height: 16, margin: { bottom: 8 } }} />
-      <SideFillTrack trackW={trackW} trackH={trackH} pad={pad} radius={radius} innerR={innerR} fillH={fillH} fillColor={fillColor} empty={empty} />
-    </UiEntity>
-  )
-}
-
-/** Two side-by-side BASES charge meters. Replaces the shared territory bar. */
-function chargeHudW() {
-  return isMobile() ? MOBILE_TOP_W : 420
-}
-function BasesChargeMeter(props: { team: 1 | 2; progress: number; connected: number; growing: boolean; threshold: number }) {
-  const mob = isMobile()
-  const color = props.team === 1 ? BAR_RED : BAR_BLUE
-  const name = props.team === 1 ? 'RED' : 'BLUE'
-  const t = props.threshold > 0 ? props.threshold : 1
-  const u = Math.max(0, Math.min(1, props.progress / t))
-  const pct = `${Math.round(u * 100)}%`
-  const rate = Math.round(props.connected * GROWTH_PER_CELL_PER_SEC)
-  const cue = u >= 0.999 ? 'FULL' : props.growing ? `+${rate}/s` : `${props.connected} tiles`
-  const pulse = props.growing ? 0.7 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 180)) : 0.9
-  const trackH = mob ? 14 : 16
-  const meterW = (chargeHudW() - 10) / 2
-  const innerW = Math.max(8, meterW - 4)
-  const fillW = Math.max(u > 0 ? 6 : 0, Math.round(innerW * u))
-  return (
-    <UiEntity uiTransform={{ width: meterW, flexDirection: 'column', alignItems: 'stretch', margin: { left: props.team === 2 ? 5 : 0, right: props.team === 1 ? 5 : 0 } }}>
-      <UiEntity uiTransform={{ width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: mob ? 14 : 16, margin: { bottom: 2 } }}>
-        <Label value={name} fontSize={mob ? 11 : 13} color={color} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: mob ? 14 : 16 }} />
-        <Label value={pct} fontSize={mob ? 11 : 13} color={Color4.White()} textAlign="middle-right" textWrap="nowrap" uiTransform={{ height: mob ? 14 : 16 }} />
-      </UiEntity>
-      <UiEntity uiTransform={{ width: '100%', height: trackH, borderRadius: trackH / 2, padding: 2 }} uiBackground={{ color: BAR_TRACK }}>
-        <UiEntity uiTransform={{ width: '100%', height: '100%', borderRadius: (trackH - 4) / 2 }} uiBackground={{ color: PANEL_LIGHT }}>
-          <UiEntity uiTransform={{ width: fillW, height: '100%', borderRadius: (trackH - 4) / 2 }} uiBackground={{ color }} />
-        </UiEntity>
-      </UiEntity>
-      <Label value={cue} fontSize={mob ? 10 : 12} color={Color4.create(1, 1, 1, pulse)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: mob ? 13 : 15, margin: { top: 1 } }} />
-    </UiEntity>
-  )
-}
 /** Same framed tile as mute. The ★ is the old top-painters button. */
 function LobbyStarButton() {
   return (
@@ -865,26 +759,12 @@ function LobbyHelpButton() {
   )
 }
 
-function BasesChargeHud() {
-  const c = baseCharge()
-  const mob = isMobile()
-  return (
-    <UiEntity uiTransform={{ width: chargeHudW(), margin: { top: 6 }, flexDirection: 'column', alignItems: 'center', pointerFilter: 'none' }}>
-      <Label value="FILL THE BASE" fontSize={mob ? 10 : 12} color={Color4.create(0.92, 0.92, 0.94, 1)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ height: mob ? 13 : 15, margin: { bottom: 2 } }} />
-      <UiEntity uiTransform={{ width: '100%', flexDirection: 'row', alignItems: 'flex-start' }}>
-        <BasesChargeMeter team={1} progress={c.redProgress} connected={c.redConnected} growing={c.redGrowing} threshold={c.threshold} />
-        <BasesChargeMeter team={2} progress={c.blueProgress} connected={c.blueConnected} growing={c.blueGrowing} threshold={c.threshold} />
-      </UiEntity>
-    </UiEntity>
-  )
-}
 
 // Full-screen UI root. Everything is a child of this so absolute-positioned
 // overlays (like the round-end banner) can size themselves as 100%×100% of
 // the viewport, not of the tiny HUD strip.
 export const uiMenu = () => (
   <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 } }}>
-    <PaintTankBar />
 
     {/* ─── Top-left: mute button ─────────────────────────────────────── */}
     {/* Mute button lives inside the timer panel below, pinned to its right edge. */}
@@ -1031,10 +911,8 @@ export const uiMenu = () => (
               <PaintedHud />
             </UiEntity>
             )}
-            {/* Territory bar: team colours plus a white unpainted remainder. Hidden in the lobby, Balloon Battle, and BASES (BASES has its own charge meters). */}
-            {lobby || isBalloonRound() ? null : isBasesRound() ? (
-              getSummaryProgress() >= 0 ? <UiEntity uiTransform={{ width: chargeHudW(), height: isMobile() ? 58 : 66, margin: { top: 6 } }} /> : <BasesChargeHud />
-            ) : getSummaryProgress() >= 0 || standingsOpen ? (
+            {/* Territory bar: team colours plus a white unpainted remainder. Hidden in the lobby. */}
+            {lobby ? null : getSummaryProgress() >= 0 || standingsOpen ? (
               <UiEntity uiTransform={{ width: barW(), height: BAR_FILL_H + BAR_BORDER * 2, margin: { top: 6 } }} />
             ) : (() => {
               const pct = coveragePct()

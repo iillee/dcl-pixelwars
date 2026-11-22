@@ -114,7 +114,7 @@ export function clearBotBodyColor(entity: Entity): void {
   GltfNodeModifiers.deleteFrom(entity)
 }
 
-/** Apply the palette color for a team. balloonNeutral keeps Balloon Battle on the balloon swatch (blue). */
-export function applyBotBodyForTeam(entity: Entity, team: number, balloonNeutral = false): void {
-  setBotBodyColor(entity, botBodySwatchForTeam(team, { theme: currentTheme, balloonNeutral }))
+/** Apply the palette color for a team. */
+export function applyBotBodyForTeam(entity: Entity, team: number): void {
+  setBotBodyColor(entity, botBodySwatchForTeam(team, { theme: currentTheme }))
 }

@@ -1,50 +1,8 @@
 /**
- * pvp.ts — PvP prototype config: Lunge (E) + Paint Burst (F). Dash and Paint Bomb parked (mode 'off').
- * EXPERIMENT, not approved V1 scope. See design/pvp-prototype.md.
- *
- * Pure constants + helpers, no engine imports: read by the client
- * (client/dash.ts, client/paintBomb.ts, client/abilityHotbar.tsx) and the
- * server (dashHit / bombDrop validation), so both sides agree on whether
- * an ability is live this round.
- *
- * Dash magnitudes are first guesses — the SDK does not document the units
- * of Physics impulses/forces (the docs examples use 40–50). Paint Bomb
- * knockback reuses flagtag's tuned bomb values. Tune in a two-player playtest.
+ * pvp.ts — Classic Pixelwars combat: Lunge (E) and Paint Burst (F).
+ * Pure constants, no engine imports, so the client and the server agree.
  */
-
-// ═══ Playtest round format (temporary) ══════════════════════════════
-// One switch. FORMAT_ALTERNATE false → every round is PvP (normal Pixelwars).
-// true → startNextRound flips pvp/pvb after each round that continues from
-// the summary. A cold start or an idle start is always PvP.
-// PvB: every human on one colour (Red, then Blue, … across PvB rounds);
-// bots fill the other colour. Count = min(PVB_BOT_MAX, ceil(humans * PVB_RATIO)).
-// Taken at round start and again whenever humans join or leave, so the pool
-// stays at 2× the humans. PVB_BOT_MAX is the hard cap.
-export const FORMAT_ALTERNATE = true
-/** Bots per active human in a Bot Invasion round. */
-export const PVB_RATIO = 2
-/** Hard cap on Bot Invasion bots. 8 humans would be 16; the pool stops at 15. */
-export const PVB_BOT_MAX = 15
-
-export type RoundFormat = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon'
-
-export function pvbBotCount(activeHumans: number): number {
-  if (!(activeHumans > 0) || !(PVB_RATIO > 0)) return 0
-  return Math.min(PVB_BOT_MAX, Math.ceil(activeHumans * PVB_RATIO))
-}
-
-/** Next round's format. `continuing` is false for a cold start and an idle start.
- *  Prototype and Balloon Battle are voted modes, not part of the pvp/pvb flip. */
-export function nextRoundFormat(current: RoundFormat, continuing: boolean): RoundFormat {
-  if (current === 'prototype' || current === 'balloon') return current
-  if (!FORMAT_ALTERNATE || !continuing) return 'pvp'
-  return current === 'pvb' ? 'pvp' : 'pvb'
-}
-
-/** Human colour for PvB round `index` (0-based, PvB rounds only). Red, then Blue, then Red… */
-export function pvbHumanTeam(index: number): 1 | 2 {
-  return index % 2 === 0 ? 1 : 2
-}
+export type RoundFormat = 'pvp'
 
 /**
  * 'on'        — every round.
@@ -53,11 +11,6 @@ export function pvbHumanTeam(index: number): 1 | 2 {
  *               an ability round alternate (playtest comparison).
  */
 export type AbilityMode = 'on' | 'off' | 'alternate'
-// Dash is parked (Luke, Oct 2026 pivot to Lunge): client/dash.ts stays but isn't
-// wired into client/index.ts or the hotbar, and with 'off' the server drops
-// dashHit. Paint Bomb (F) is back on alongside Lunge (E).
-export const DASH_MODE: AbilityMode = 'off'
-export const BOMB_MODE: AbilityMode = 'off' // replaced by Paint Burst on F (Luke, 2026-10-20); code kept, not wired
 /** Paint Burst (F): cooldown ability, see the ═══ Paint Burst block below. */
 export const BURST_MODE: AbilityMode = 'on'
 
@@ -67,91 +20,8 @@ export function modeEnabledForRound(mode: AbilityMode, roundIndex: number): bool
   return roundIndex % 2 === 0
 }
 
-// ═══ Dash (E) ═══════════════════════════════════════════════════════
-// ─── Attacker burst ─────────────────────────────────────────────────
-/** Length of the dash (s): the sustain force and the hit window. */
-export const DASH_DURATION_S = 0.22 // was 0.4: shorter + faster (Luke). Trail and HIT_WINDOW_S follow this.
-/** Seconds between dashes. Keeps running through respawn (never reset). */
-export const DASH_COOLDOWN_S = 5
-/** One-shot horizontal impulse at dash start (direction × this). Tuned up for a snappy burst. */
-export const DASH_IMPULSE = 50 // was 40
-/** Small upward part of the start impulse so ground friction doesn't eat it. */
-export const DASH_LIFT = 3 // was 4; low so the faster burst doesn't hop
-/** Horizontal force held for DASH_DURATION_S to sustain the burst. 0 = impulse only. */
-export const DASH_FORCE = 80 // was 55
-// Rough no-drag estimate (impulse as Δv m/s, force as m/s², carry after the
-// burst ignored): old 40·0.4 + ½·55·0.4² ≈ 20.4 m, peak ≈ 62 m/s;
-// new 50·0.22 + ½·80·0.22² ≈ 12.9 m (≈63%), peak ≈ 68 m/s. Units unconfirmed in Explorer.
-/** Stop the sustain force on the first hit (attacker "spends" the dash on the target). */
-export const DASH_STOP_ON_HIT = true
-/** Above this horizontal speed (m/s) dash goes along movement; below, along avatar facing. */
-export const DASH_MIN_MOVE_SPEED = 1
-
-// ─── Hit detection (attacker's client) ──────────────────────────────
-/** Horizontal distance (m) between attacker and enemy avatar that counts as contact. */
-export const HIT_RADIUS = 1.6
-/** Max vertical offset (m) for a hit — ramps/levels must not hit through floors. */
-export const HIT_MAX_DY = 2
-/** Hit window after dash start (s); slightly longer than the dash to cover avatar lag. */
-export const HIT_WINDOW_S = DASH_DURATION_S + 0.1
-/** Weight of the dash direction vs the attacker→target direction in the knockback push. */
-export const KNOCKBACK_DASH_DIR_WEIGHT = 0.5
-
-// ─── Victim knockback (victim's own client) ─────────────────────────
-/** Horizontal knockback impulse. */
-export const KNOCKBACK_IMPULSE = 40
-/** Upward part of the knockback impulse (lifts the victim off the floor). */
-export const KNOCKBACK_LIFT = 12
-/** Horizontal force held after the impulse to carry the victim further. 0 = impulse only. */
-export const KNOCKBACK_FORCE = 20
-export const KNOCKBACK_FORCE_S = 0.3
 /** No knockback for this long after any respawn/teleport home (s). */
 export const RESPAWN_IMMUNITY_S = 1.5
-
-// ─── Server validation ──────────────────────────────────────────────
-/** Hits from one attacker are accepted within this window from its first hit (s). */
-export const SERVER_HIT_WINDOW_S = 0.6
-/** Next hit window opens no sooner than this after the previous one (s). */
-export const SERVER_MIN_DASH_GAP_S = DASH_COOLDOWN_S - 0.5
-/** Max distinct targets per hit window. */
-export const SERVER_MAX_HITS_PER_DASH = 3
-
-/** Is Dash live for this UTC round index (shared/roundTiming getRoundIndex)? */
-export function dashEnabledForRound(roundIndex: number): boolean {
-  return modeEnabledForRound(DASH_MODE, roundIndex)
-}
-
-// ═══ Paint Bomb (F) ═════════════════════════════════════════════════
-// Starting point: flagtag's bomb (src/systems/bombSystem.ts,
-// src/server/combat.ts). Kept from flagtag: 6 m blast radius, knockback
-// Physics.applyKnockbackToPlayer(blast, 40, radius, LINEAR), fireball +
-// shockwave + debris FX, blinking Bomb_01/Bomb_red model, fuse +
-// bomb_exploding sounds. Changed for pixelwars: 0.4 s fuse (flagtag 5 s),
-// 8 s cooldown (flagtag 10 s), no stun/emote/input lock, paints a circle.
-
-/** Telegraph time between the press and the blast (s). */
-export const BOMB_FUSE_S = 0.4
-/** Seconds between bombs. Keeps running through respawn (never reset). */
-export const BOMB_COOLDOWN_S = 8
-/** Walkable cells whose centre is within this horizontal distance get painted (m). ~2× the first prototype. */
-export const BOMB_PAINT_RADIUS = 11
-/** Only cells within this height of the blast are painted (no painting through levels). */
-export const BOMB_PAINT_MAX_DY = 4
-/** Opponents within this 3D distance of the blast are knocked back (~2× flagtag's 6). */
-export const BOMB_KNOCKBACK_RADIUS = 12
-/** applyKnockbackToPlayer magnitude at the centre, LINEAR falloff to 0 at the radius. */
-export const BOMB_KNOCKBACK = 48
-/** Extra upward impulse at the centre (same falloff), so floor friction doesn't eat the push. 0 = off. */
-export const BOMB_KNOCKBACK_LIFT = 10
-/** Server snaps the bomb down onto the floor if a walkable cell is this close below (m). */
-export const BOMB_SNAP_MAX_DROP = 4
-/** Server cooldown slack: accept the next bomb this long after the previous one (s). */
-export const SERVER_MIN_BOMB_GAP_S = BOMB_COOLDOWN_S - 0.5
-
-/** Is Paint Bomb live for this UTC round index? */
-export function bombEnabledForRound(roundIndex: number): boolean {
-  return modeEnabledForRound(BOMB_MODE, roundIndex)
-}
 
 // ═══ Paint Burst (F) ═════════════════════════════════════════════════
 // Luke's spec 2026-10-20. Code: shared/burst.ts (pure), client/paintBurst.ts,
@@ -514,13 +384,12 @@ export function botJumpSpeed(heightM: number): number {
 }
 
 /**
- * Edge recovery after a knock. On in every live mode (Classic, Base Charge,
- * Paint Limit, Balloon Battle, and Bot Invasion). A bot that makes it back
+ * Edge recovery after a knock. On in Classic Pixelwars. A bot that makes it back
  * never starts the cloud trip; one that still crosses fallTriggerY gets the
  * same cloud rescue a human does. BotBody.recoveryEnabled is set from this
  * each tick.
  */
-export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp', 'pvb', 'bases', 'prototype', 'balloon'])
+export const BOT_RECOVERY_MODES: ReadonlySet<RoundFormat> = new Set(['pvp'])
 
 export function botRecoveryEnabled(format: RoundFormat): boolean {
   return BOT_RECOVERY_MODES.has(format)
@@ -670,17 +539,7 @@ export const STAR_FALL_HEIGHT = 36
 /** Drop time. The star cannot be picked up until this elapses. */
 export const STAR_FALL_MS = 2800
 export const STAR_ORB_DIAMETER = 0.6
-/** How long the star lasts once picked up (ms). Matches the star theme (~23.01 s). */
-export const STAR_MS = 23000
-/** Jog/run multiplier via AvatarLocomotionSettings while the star is held. */
-export const STAR_SPEED_MULT = 1.4
-/** Client cooldown ticks and server min-gaps are multiplied by this while starred. */
-export const STAR_COOLDOWN_MULT = 0.5
-/** Spatial star theme on the carrier. Played once; duration matches STAR_MS. */
-export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
-/** Carrier theme + BGM duck. Off for now; flip to re-enable. The unpicked-star idle loop is separate. */
-export const STAR_THEME_ENABLED = false
-/** Star orbs, beacons, and the idle loop. Pickup opens a normal upgrade; it does not start the old star buff. */
+/** Star orbs, beacons, and the idle loop. Pickup opens a normal upgrade. */
 export const STAR_PICKUPS_ENABLED = true
 
 // ═══ Round upgrades (paint-earned, last until the round ends) ════════
@@ -704,24 +563,13 @@ export const UPGRADE_CHARGE_NEUTRAL = 1
 export const UPGRADE_CHARGE_ENEMY = 2
 /** Charge for a friendly tile (no conversion, no credit). */
 export const UPGRADE_CHARGE_FRIENDLY = 0
-/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog/run only; Dash distance is unchanged. */
+/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog/run only. */
 export const UPGRADE_SPEED_BONUS = [0, 0.15, 0.25, 0.30] as const
 /** Paint *area* bonus by level: 0, +20%, +35% total, +45% total. Applied as a tile-count approximation, not a raw radius bump. */
 export const UPGRADE_PAINT_AREA_BONUS = [0, 0.20, 0.35, 0.45] as const
-/** Dash and Burst cooldown reduction by level: 0, −15%, −25% total, −30% total. Future activations only. */
+/** Lunge and Burst cooldown reduction by level: 0, −15%, −25% total, −30% total. Future activations only. */
 export const UPGRADE_HASTE_REDUCTION = [0, 0.15, 0.25, 0.30] as const
-/** Horizontal reach (m) for a bump that launches an enemy. */
-export const OVERDRIVE_TOUCH_RADIUS = 2
-/** Vertical pad (m) for that bump. */
-export const OVERDRIVE_TOUCH_MAX_DY = 1.5
-/** Same victim cannot be launched again until this many ms pass. */
-export const OVERDRIVE_HIT_WINDOW_MS = 800
-/** Movement-paint brush radius multiplier (1 = 3x3, 2 = 5x5). */
-export const OVERDRIVE_PAINT_RADIUS_MULT = 2
-/** Knock impulse. Defaults to the anvil hit so a bump carries across the floor. */
-export const OVERDRIVE_KNOCK = ANVIL_HIT_KNOCK
-export const OVERDRIVE_LIFT = ANVIL_HIT_LIFT
-/** Last-known feet older than this are ignored for touch tests (ms). */
+/** Last-known feet older than this are ignored when placing a star (ms). */
 export const OVERDRIVE_FEET_STALE_MS = 1000
 /** Attacker-side anvil prediction (client/lungeDummy.ts): our own lunge/burst hit knocks the anvil
  *  locally at once (shared/anvilSim.ts, same knock the server applies) until the server's snapshot

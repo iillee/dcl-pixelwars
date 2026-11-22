@@ -23,8 +23,6 @@ export {
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S, summaryProgressAt } from './shared/roundTiming'
 import { type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
-import { gamePhase } from './client/phase'
-import { modeSubtitle, modeTitle } from './shared/lobby'
 
 export function getCountdownSeconds(): number {
   return Math.max(0, Math.floor((getRoundEndMs() - Date.now()) / 1000))
@@ -86,12 +84,12 @@ interface BannerState {
   bluePct: number
   greenPct: number
   yellowPct: number
-  /** RED / BLUE / GREEN / YELLOW, TIE, or PLAYER (balloon). */
+  /** RED / BLUE / GREEN / YELLOW or TIE. */
   winner: string
   /** Full title: 'RED WINS!', 'RED & BLUE TIE!', or "IT'S A TIE!". */
   headline: string
   victorName: string
-  kind: 'paint' | 'balloon' | 'bases'
+  kind: 'paint'
   shownAtMs: number
   /** Personal line, e.g. "YOU PAINTED 124 CELLS · 38% OF RED". '' if none. */
   personal: string
@@ -197,7 +195,7 @@ export function initRoundNet(): void {
   // Scores arrive on round:ended and are frozen on the banner. The lobby
   // roundReset that follows swaps the floor and must not dismiss this screen
   // or rewrite those scores.
-  events.on('round:ended', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victorName }) => {
+  events.on('round:ended', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal }) => {
     const snap = lastMatchCoverage()
     const red = finalRed
     const blue = finalBlue
@@ -209,9 +207,7 @@ export function initRoundNet(): void {
       `[Client] roundEnded final red=${red} blue=${blue} green=${green} yellow=${yellow} ` +
       `serverTotal=${finalTotal} localTotal=${coverage().total} matchTotal=${snap?.total ?? 0} walkable=${walkable}`
     )
-    if (kind === 'balloon') showBalloonBanner(victorName || 'SOMEONE')
-    else if (kind === 'bases') showBasesBanner(finalRed, finalBlue, finalTotal)
-    else showRoundEndBanner(red, blue, walkable, green, yellow)
+    showRoundEndBanner(red, blue, walkable, green, yellow)
   })
   events.on('round:clock', ({ idx, active, format }) => {
     // Late join into a round already running (no roundReset for them). Resyncs of the same idx do not replay.
@@ -248,57 +244,6 @@ function armFormatSplash(format: RoundFormat, idx: number, fromReset: boolean): 
 /** The round that just finished (or is live). Summary uses this for "Next round". */
 export function nextRoundBlurb(): string {
   return 'Next round: Pick your team'
-}
-
-export function showBalloonBanner(name: string): void {
-  banner.visible = true
-  banner.red = 0
-  banner.blue = 0
-  banner.green = 0
-  banner.yellow = 0
-  banner.redPct = 0
-  banner.bluePct = 0
-  banner.greenPct = 0
-  banner.yellowPct = 0
-  banner.winner = name ? 'PLAYER' : 'TIE'
-  banner.headline = name ? (name.toUpperCase() + ' WINS!') : "IT'S A TIE!"
-  banner.victorName = name
-  banner.kind = 'balloon'
-  openBannerClock()
-  banner.personal = ''
-  banner.myCells = 0
-  banner.total = 0
-  banner.owners = []
-}
-
-export function isBalloonRound(): boolean {
-  return currentFormat === 'balloon' && gamePhase() === 'match'
-}
-
-export function isBasesRound(): boolean {
-  return currentFormat === 'bases' && gamePhase() === 'match'
-}
-
-export function showBasesBanner(red: number, blue: number, threshold: number): void {
-  const t = threshold > 0 ? threshold : 1
-  banner.visible = true
-  banner.red = red
-  banner.blue = blue
-  banner.green = 0
-  banner.yellow = 0
-  banner.redPct = (red / t) * 100
-  banner.bluePct = (blue / t) * 100
-  banner.greenPct = 0
-  banner.yellowPct = 0
-  banner.winner = red > blue ? 'RED' : blue > red ? 'BLUE' : 'TIE'
-  banner.headline = red > blue ? 'RED WINS!' : blue > red ? 'BLUE WINS!' : "IT'S A TIE!"
-  banner.victorName = ''
-  banner.kind = 'bases'
-  openBannerClock()
-  banner.personal = ''
-  banner.myCells = 0
-  banner.total = threshold
-  banner.owners = []
 }
 
 /** The PIXELWARS / Classic pop-up at round start is retired. currentFormat is still set by armFormatSplash. */

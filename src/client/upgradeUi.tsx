@@ -12,7 +12,6 @@ import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
 import { isMobile } from '@dcl/sdk/platform'
 import { RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from './abilityHotbar'
 import { TOP_BTN, TOP_GAP } from './overviewUi'
-import { isBalloonRound, isBasesRound } from '../round'
 import {
   FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, setUpgradeCardHover, type UpgradeHud,
 } from './upgrades'
@@ -235,7 +234,7 @@ function buffDock(mobile: boolean, count: number, slot: number): { x: number; y:
     return { x: -rowW / 2 + fromLeft + size / 2, y: HUD_TOP + size / 2, size }
   }
   const rowW = n * step
-  const below = isBalloonRound() ? 0 : isBasesRound() ? 65 : 30
+  const below = 30
   const top = HUD_TOP + size + below + 8
   return { x: -rowW / 2 + ICON_GAP + i * step + size / 2, y: top + size / 2, size }
 }

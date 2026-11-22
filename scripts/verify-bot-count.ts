@@ -2,11 +2,10 @@
  * verify-bot-count.ts — one active human is one bot, including across a round.
  * Run: npx tsx scripts/verify-bot-count.ts
  *
- * PvP fill evens all four teams to the largest human side (1 red human → one
- * bot each on blue, green, and yellow). A round rebuild reseats those bots; it must not spawn extras. PvB with one human is also
- * one bot, and a fresh population trims a pool that grew.
+ * Classic fill evens all four teams to the largest human side (1 red human → one
+ * bot each on blue, green, and yellow). A round rebuild reseats those bots; it must not spawn extras.
  */
-import { initBots, rebuildBotGraph, tickBots, getBotPositions, setPopulation } from '../src/server/bots/manager'
+import { initBots, rebuildBotGraph, tickBots, getBotPositions } from '../src/server/bots/manager'
 
 let counts = { red: 1, blue: 0 }
 initBots({ applyPaint: () => false, paint: { teamOf: () => 0 }, activeHumans: () => counts })
@@ -55,15 +54,6 @@ if (teamsOf(split) !== '3,4') {
 counts = { red: 1, blue: 0, green: 0, yellow: 0 }
 expect(3, 'back to 1 human')
 
-setPopulation({ kind: 'pvb', humanTeam: 1 })
-expect(2, 'PvB 1 human', 2)
-counts = { red: 2, blue: 0 }
-expect(4, 'PvB a second human joins', 2)
-counts = { red: 1, blue: 0 }
-setPopulation({ kind: 'pvb', humanTeam: 1 })
-expect(2, 'PvB fresh round trims back to 2x', 2)
-
-setPopulation({ kind: 'pvp' })
 counts = { red: 0, blue: 1, green: 0, yellow: 0 }
 const flipped = expect(3, 'PvP one blue human')
 if (teamsOf(flipped) !== '1,3,4') {

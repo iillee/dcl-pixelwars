@@ -431,7 +431,6 @@ export class Bot {
   sense: BotSense = { humans: [], avoidCells: new Set(), avoidHumans: new Set() }
   private goal: string | null = null
   private readonly speedMul: number
-  private starSpeedMul = 1
   /** 0 = keep a path until it ends (the verifies). */
   private readonly retargetEveryMs: number
   private retargetLeftMs: number
@@ -460,16 +459,7 @@ export class Bot {
   }
 
   nextRand(): number { return this.rng() }
-  private pace(): number { return this.speedMul * this.starSpeedMul }
-  /** 1 = normal pace. Composes with the rolled personality speed. */
-  setStarSpeedMul(m: number): void {
-    const next = Number.isFinite(m) && m > 0 ? m : 1
-    if (next === this.starSpeedMul) return
-    const old = this.pace()
-    this.starSpeedMul = next
-    if (old > 0) this.baseStepIntervalMs *= old / this.pace()
-    this.stepIntervalMs = this.jitteredInterval()
-  }
+  private pace(): number { return this.speedMul }
   /** Current step rate, after the route picked jog or run. */
   stepsPerSec(): number { return 1000 / this.baseStepIntervalMs }
   /** Cell this bot is walking toward, if it has one. */

@@ -201,15 +201,14 @@ function expect(got: BotFaceExpr, want: BotFaceExpr, why: string): void {
   const checks: Array<[boolean, string]> = [
     [face.includes("events.on('lunge:started'") && face.includes("latch(id, 'dash')"), 'botFace listens for lunge:started → dash'],
     [face.includes("events.on('burst:fired'") && face.includes("latch(id, 'burst')"), 'botFace listens for burst:fired → burst'],
-    [face.includes("events.on('lunge:impact'") && face.includes("events.on('burst:impact'") && face.includes("events.on('dash:impact'"), 'botFace listens for lunge, burst, and dash impacts → hit'],
+    [face.includes("events.on('lunge:impact'") && face.includes("events.on('burst:impact'"), 'botFace listens for lunge and burst impacts → hit'],
     [visual.includes('hitBotFace(') && face.includes('export function hitBotFace'), 'playBotKnock latches the hit face'],
     [server.includes("attacker: `bot:${id}`") && server.includes("room.send('lungeStarted'"), 'server sends lungeStarted for bot attackers'],
     [server.includes("room.send('burstFired'") && server.includes('attacker: by'), 'server sends burstFired for bot attackers (by = bot:N)'],
     [server.includes("target: `bot:${"), 'server sends lunge/burst impact targets as bot:N'],
     [face.includes('tickBotFace') && visual.includes('tickBotFace(rec.id, rec.pose, rec.st)'), 'the draw loop ticks the face with pose and wire state'],
-    [face.includes('export function setBotStarFace') && face.includes("star: 'assets/images/bots/faces/star.png'"), 'botFace can swap the star-eyes texture'],
-    [readFileSync(new URL('../src/client/overdrive.ts', import.meta.url), 'utf8').includes('setBotStarFace('), 'overdrive turns star-eyes on and off with the hold'],
-    [face.includes('if (!BOT_STAR_EYES) return') && BOT_STAR_EYES === false, 'BOT_STAR_EYES is false, so setBotStarFace is a no-op'],
+    [!readFileSync(new URL('../src/client/overdrive.ts', import.meta.url), 'utf8').includes('setBotStarFace('), 'star pickup does not swap bot faces'],
+    [BOT_STAR_EYES === false, 'BOT_STAR_EYES stays off'],
   ]
   for (const [pass, msg] of checks) {
     if (!pass) fail(msg)

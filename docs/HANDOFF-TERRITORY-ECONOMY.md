@@ -35,10 +35,10 @@ Bots get no upgrades.
 
 A star orb still spawns in a paint round, after an 8s grace, then a minute after each pickup, one at a time. It falls from the sky with a particle tail and no beacon. The beacon and idle sound start when it lands, and it cannot be picked up before then. Touching it opens a normal upgrade pick. It does not start the old star buff, sparkles, speed, or theme. That pick does not spend a paint threshold. Bots do not chase or claim it.
 
-During a match the nameplate is the team color with no team word. Each upgrade level adds one ★, so nine stars is every buff maxed. The plate starts at the width of four stars and grows only past that. Stars stay centered. A blank plate is four stars drawn in the plate color. Counts come from `upgradeBuffs` (and `upgrade:state` for you) in `src/client/nametags.ts`. They clear on a fall, at round end, and in the lobby. Balloon Battle still hides the plates.
+During a match the nameplate is the team color with no team word. Each upgrade level adds one ★, so nine stars is every buff maxed. The plate starts at the width of four stars and grows only past that. Stars stay centered. A blank plate is four stars drawn in the plate color. Counts come from `upgradeBuffs` (and `upgrade:state` for you) in `src/client/nametags.ts`. They clear on a fall, at round end, and in the lobby. Plates are hidden in the lobby.
 
 
-Bonus totals: Speed +15 / +25 / +30% move (jog/run only; Dash distance unchanged). Paint +20 / +35 / +45% area (tile-count approximation). Haste −15 / −25 / −30% Dash and Burst cooldown (future activations only).
+Bonus totals: Speed +15 / +25 / +30% move (jog/run only). Paint +20 / +35 / +45% area (tile-count approximation). Haste −15 / −25 / −30% Lunge and Burst cooldown (future activations only).
 
 ## Card popup and badge
 
@@ -56,7 +56,7 @@ Mid-round, clicking the team territory bar opens standings. That must **not** hi
 
 Match top row: **eye, mute, timer, score pill**, then buff icons after the pill. The score pill is a fixed **144 px** (eye 68 + gap 8 + mute 68) and no longer grows with the digit count; the font shrinks if a large number would overflow (4–5 digits fit at the normal size). The team territory bar under the row is **504 px**, spanning eye through the score pill, not the buff icons. Short toasts sit under that bar: `GREEN TAKES THE LEAD` when a team becomes the only leader, and `ALICE KO'D BOB` when a player or bot is knocked out. They last about 3 seconds. The overview zoom/rotate row still opens to the left of the eye without shifting the HUD.
 
-Lobby top row: **eye, mute, timer, star, ?**. The star opens a top-10 wins board and the question mark opens How To Play; both slide down from the top, match that full row, and close when the round begins. Opening one closes the other. A sole team win credits each connected player on that team; Balloon credits the winner. Ties credit nobody. Bots are not listed.
+Lobby top row: **eye, mute, timer, star, ?**. The star opens a top-10 wins board and the question mark opens How To Play; both slide down from the top, match that full row, and close when the round begins. Opening one closes the other. A sole team win credits each connected player on that team. Ties credit nobody. Bots are not listed.
 
 ## Lobby
 

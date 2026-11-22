@@ -58,11 +58,9 @@ const teamSrc = readFileSync(new URL('../src/shared/team.ts', import.meta.url), 
   expect(botBodySwatchForTeam(Team.Blue), '#6A99FC', 'swatch for blue team')
   expect(botBodySwatchForTeam(Team.Green), '#4FD68C', 'swatch for green team')
   expect(botBodySwatchForTeam(Team.Yellow), '#FFE04A', 'swatch for yellow team')
-  expect(botBodySwatchForTeam(Team.Red, { balloonNeutral: true }), '#6A99FC', 'balloonNeutral keeps blue')
-  expect(botBodySwatchForTeam(Team.Blue, { balloonNeutral: true }), '#6A99FC', 'balloonNeutral on blue team')
   expect(botBodySwatchForTeam(Team.None), '#6A99FC', 'unassigned team falls back to blue')
   expect(botBodySwatch('missing'), '#6A99FC', 'unknown swatch falls back to blue')
-  ok('swatch helpers map teams, balloon-neutral, and fallbacks')
+  ok('swatch helpers map teams and fallbacks')
 }
 
 {

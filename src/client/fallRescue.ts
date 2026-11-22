@@ -82,7 +82,6 @@ import { waterClipArmed, waterVisualSeconds } from './water'
 import { Team, isPlayingTeam } from '../shared/team'
 import { playFallRescueSfx } from './audio'
 import { playWaterSplash } from './waterSplash'
-import { refillPredictedTank } from '../paint'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
@@ -884,7 +883,6 @@ function sendRescueStart(hold: Vec, mobile: boolean): void {
 }
 
 function sendRescueEnd(): void {
-  refillPredictedTank()
   try { room.send('rescueEnd', { who: '' }) } catch (err) { console.log('[FallRescue] rescueEnd send failed', err) }
 }
 

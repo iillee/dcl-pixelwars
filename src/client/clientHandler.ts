@@ -28,7 +28,7 @@ import { initPaintScore } from './paintScore'
 import { initOverdrive } from './overdrive'
 import { initUpgrades } from './upgrades'
 import { Team, teamName } from '../shared/team'
-import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, paintEconomyOn, setLocalTeam } from '../paint'
+import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, setLocalTeam } from '../paint'
 import { feetDue } from '../shared/territory'
 import { noteLagPong, noteServerRx } from './lagHud'
 
@@ -74,8 +74,7 @@ export function initClientHandler(): void {
 // Handlers do the minimum needed to translate wire types to event payloads.
 // `team as Team` casts are safe: server enforces wire values 0/1/2 (see
 // shared/team.ts and server/roster.ts).
-function wireFormat(format: string): 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' {
-  if (format === 'pvb' || format === 'bases' || format === 'prototype' || format === 'balloon') return format
+function wireFormat(_format: string): 'pvp' {
   return 'pvp'
 }
 
@@ -94,9 +93,6 @@ function wireInbound(): void {
     })
   })
 
-  room.onMessage('paintWallet', ({ tank, denied, regen }) => {
-    events.emit('paint:wallet', { tank, denied: denied ?? [], regen: regen ? 1 : 0 })
-  })
   room.onMessage('paintScore', ({ n }) => {
     events.emit('paint:score', { n: n ?? 0 })
   })
@@ -123,16 +119,9 @@ function wireInbound(): void {
   room.onMessage('starDespawn', ({ i }) => {
     events.emit('star:despawn', { i: i ?? 0 })
   })
-  room.onMessage('starHold', ({ id, until, ms }) => {
-    events.emit('star:hold', { id: id ?? '', until: until ?? 0, ms: typeof ms === 'number' && isFinite(ms) ? ms : 0 })
-  })
   room.onMessage('feed', ({ kind, a, b, team, teamB }) => {
     events.emit('feed:line', { kind: kind ?? 0, a: a ?? '', b: b ?? '', team: team ?? 0, teamB: teamB ?? 0 })
   })
-  room.onMessage('overdriveImpact', ({ attacker, target, dx, dz }) => {
-    events.emit('overdrive:impact', { attacker: attacker ?? '', target: target ?? '', dx: dx ?? 0, dz: dz ?? 0 })
-  })
-
   room.onMessage('snapshot', ({ entries, red, blue, green, yellow, total, seed, layout, seq, format, phase }) => {
     noteServerRx()
     console.log(`[Client] snapshot received: ${entries.length} cells, seed ${seed}`)
@@ -193,23 +182,7 @@ function wireInbound(): void {
   })
 
   room.onMessage('roundEnded', ({ finalRed, finalBlue, finalGreen, finalYellow, finalTotal, kind, victor, victorName }) => {
-    events.emit('round:ended', { finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal, kind: kind === 'balloon' ? 'balloon' : kind === 'bases' ? 'bases' : 'paint', victor: victor ?? '', victorName: victorName ?? '' })
-  })
-
-  room.onMessage('balloonState', ({ entries }) => {
-    events.emit('balloon:state', { entries: entries ?? [] })
-  })
-  room.onMessage('balloonPop', ({ id, n }) => {
-    events.emit('balloon:pop', { id, n })
-  })
-  room.onMessage('baseState', ({ redConnected, blueConnected, redProgress, blueProgress, threshold, redGrowing, blueGrowing }) => {
-    events.emit('base:state', {
-      redConnected, blueConnected, redProgress, blueProgress, threshold,
-      redGrowing: !!redGrowing, blueGrowing: !!blueGrowing,
-    })
-  })
-  room.onMessage('baseWin', ({ team }) => {
-    events.emit('base:win', { team })
+    events.emit('round:ended', { finalRed, finalBlue, finalGreen: finalGreen ?? 0, finalYellow: finalYellow ?? 0, finalTotal, kind: 'paint', victor: victor ?? '', victorName: victorName ?? '' })
   })
 
   room.onMessage('roundReset', ({ seed, finalRed, finalBlue, finalGreen, finalYellow, finalTotal, format, layout, seq }) => {
@@ -221,10 +194,6 @@ function wireInbound(): void {
     })
   })
 
-
-  room.onMessage('dashImpact', ({ attacker, target, dx, dz }) => {
-    events.emit('dash:impact', { attacker, target, dx, dz })
-  })
 
   room.onMessage('lungeStarted', (m) => {
     events.emit('lunge:started', { attacker: m.attacker, id: m.id, dx: m.dx, dz: m.dz, x: m.x, y: m.y, z: m.z, dry: m.dry ? 1 : 0 })
@@ -249,14 +218,6 @@ function wireInbound(): void {
     events.emit('burst:painted', { id, n })
   })
 
-  room.onMessage('bombArmed', ({ attacker, team, x, y, z }) => {
-    events.emit('bomb:armed', { attacker, team: team as Team, x, y, z })
-  })
-
-  room.onMessage('bombBlast', ({ attacker, team, x, y, z, cells }) => {
-    events.emit('bomb:blast', { attacker, team: team as Team, x, y, z, cells })
-  })
-
   room.onMessage('rescueStart', (m) => {
     events.emit('rescue:start', m)
   })
@@ -265,24 +226,12 @@ function wireInbound(): void {
   })
 }
 
-/** Paint Bomb prototype: drop a bomb at our position (see client/paintBomb.ts). */
 export function sendLobbyPos(x: number, y: number, z: number): void {
   room.send('lobbyPos', { x, y, z })
 }
 
 export function sendLobbyReady(): void {
   room.send('lobbyReady', {})
-}
-
-export function sendBombDrop(x: number, y: number, z: number): void {
-  console.log(`[Client] → bombDrop ${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`)
-  room.send('bombDrop', { x, y, z })
-}
-
-/** Dash prototype: report that our dash touched `target` (see client/dash.ts). */
-export function sendDashHit(target: string, dx: number, dz: number): void {
-  console.log(`[Client] → dashHit ${target.slice(0, 8)}`)
-  room.send('dashHit', { target, dx, dz })
 }
 
 // ─── Team assignment reply ────────────────────────────────────────────
@@ -395,8 +344,8 @@ function wireOutbound(): void {
     if (!paintOpen()) return
     const now = Date.now()
     const grounded = isPlayerGrounded()
-    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || !paintEconomyOn() || grounded !== lastGrounded)) return
-    if (ids.length === 0 && !paintEconomyOn()) return
+    if (!feetDue(at, lastFeetCell, lastFeetAt, now, ids.length > 0 || grounded !== lastGrounded)) return
+    if (ids.length === 0) return
     const y = Transform.getOrNull(engine.PlayerEntity)?.position.y ?? 0
     room.send('paintTick', { ids, at, y, g: grounded ? 1 : 0 })
     lastFeetCell = at

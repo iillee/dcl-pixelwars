@@ -24,7 +24,6 @@ import {
   UPGRADE_HASTE_REDUCTION, UPGRADE_LEVEL_MAX, UPGRADE_MAX,
   UPGRADE_PAINT_AREA_BONUS, UPGRADE_SPEED_BONUS, UPGRADE_THRESHOLDS,
 } from '../src/shared/pvp'
-import { PAINT_BRUSH_RADIUS_CELLS, paintBrushOffsets } from '../src/shared/overdrive'
 
 let fails = 0
 function check(name: string, ok: boolean): void {
@@ -155,7 +154,7 @@ check('Paint L1 burst radius is sqrt(1.20) times the base', Math.abs(r1 - r0 * M
 check('a +20% radius would have overshot area by more than +20%', Math.pow(1.2, 2) > 1.2)
 
 // Movement brush tile-count approximation (base 9-tile 3×3).
-check('default brush is 3x3 / 9 tiles', paintBrushOffsets(2, PAINT_BRUSH_RADIUS_CELLS).length === 9)
+check('default brush is 3x3 / 9 tiles', upgradePaintBrushOffsets(2, 1).length === 9)
 check('Paint L1 brush is 11 tiles (~+22%, target +20%)', upgradePaintTileCount(paintAreaMult(1)) === 11 && upgradePaintBrushOffsets(2, paintAreaMult(1)).length === 11)
 check('Paint L2 brush is 13 tiles (closest symmetric shape to +35%)', upgradePaintTileCount(paintAreaMult(2)) === 13 && upgradePaintBrushOffsets(2, paintAreaMult(2)).length === 13)
 check('Paint L3 brush is 13 tiles (exact +44% vs +45%)', upgradePaintTileCount(paintAreaMult(3)) === 13 && upgradePaintBrushOffsets(2, paintAreaMult(3)).length === 13)

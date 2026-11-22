@@ -123,13 +123,12 @@ const TEAM_SWATCH_NAME: Record<PlayingTeam, string> = {
   [Team.Yellow]: 'yellow',
 }
 
-/** Team body color for the current (or given) theme. Balloon Battle passes balloonNeutral. */
+/** Team body color for the current (or given) theme. */
 export function botBodySwatchForTeam(
   team: number,
-  opts?: { theme?: string; balloonNeutral?: boolean },
+  opts?: { theme?: string },
 ): string {
   const theme = opts?.theme ?? DEFAULT_BOT_BODY_THEME
-  if (opts?.balloonNeutral) return botBodySwatch('balloon', theme)
   if (isPlayingTeam(team)) return botBodySwatch(TEAM_SWATCH_NAME[team], theme)
   return botBodySwatch('blue', theme)
 }

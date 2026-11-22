@@ -901,7 +901,7 @@ if (!everyPresentInZone(['a', 'b'], new Set(['a', 'b'])) || everyPresentInZone([
 }
 
 const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
-for (const name of ['paintTick', 'lungeHit', 'burstHit', 'dashHit', 'anvilHit', 'anvilPush', 'bombDrop', 'playerFell']) {
+for (const name of ['paintTick', 'lungeHit', 'burstHit', 'anvilHit', 'anvilPush', 'playerFell']) {
   const at = server.indexOf(`room.onMessage('${name}'`)
   if (at < 0) {
     console.error(`✗ missing handler ${name}`)
@@ -936,8 +936,8 @@ if (!rippleSrc.includes('graphLayout') || !rippleSrc.includes('isLobbyLayout()')
   process.exit(1)
 }
 const roundSrc = readFileSync(new URL('../src/round.ts', import.meta.url), 'utf8')
-if (!roundSrc.includes("gamePhase() === 'match'") || !roundSrc.includes('isBalloonRound')) {
-  console.error('✗ the balloon white-effect override must end when the match ends')
+if (roundSrc.includes('isBalloonRound') || roundSrc.includes('isBasesRound')) {
+  console.error('✗ balloon and bases banners are not part of Classic Pixelwars')
   process.exit(1)
 }
 const rebuild = readFileSync(new URL('../src/maze/rebuild.ts', import.meta.url), 'utf8')
@@ -986,32 +986,12 @@ if (!phaseSrc.includes("next === 'red'") || !phaseSrc.includes("next === 'blue'"
   console.error('✗ red and blue team picks must not be dropped')
   process.exit(1)
 }
-if (handler.includes("format === 'pvb' ? 'pvb' : 'pvp'")) {
-  console.error('✗ the client still collapses every format that is not Bot Fight into Team Fight')
+if (handler.includes("format === 'pvb'") || handler.includes("format === 'balloon'") || handler.includes("format === 'bases'") || handler.includes("format === 'prototype'")) {
+  console.error('✗ the client should only run Classic Pixelwars')
   process.exit(1)
 }
-if (!server.includes("mode === 'prototype' ? 'prototype'") || server.includes("kind: 'prototype'")) {
-  console.error('✗ Prototype should keep its format and use Team Fight population')
-  process.exit(1)
-}
-if (!server.includes("mode === 'balloon' ? 'balloon'") || server.includes("kind: 'balloon'")) {
-  console.error('✗ Balloon Battle should keep its format and use Team Fight population')
-  process.exit(1)
-}
-if (!handler.includes("format === 'balloon'")) {
-  console.error('✗ the client must keep Balloon Battle as its own wire format')
-  process.exit(1)
-}
-if (!handler.includes("format === 'bases'")) {
-  console.error('✗ the client must keep Bases as its own wire format')
-  process.exit(1)
-}
-if (!server.includes("mode === 'bases' ? 'bases'")) {
-  console.error('✗ Bases should keep its own round format')
-  process.exit(1)
-}
-if (!server.includes("roundFormat !== 'pvb'")) {
-  console.error('✗ Prototype should use the Team Fight rejoin flip')
+if (!server.includes("roundFormat = 'pvp'") || server.includes("mode === 'prototype'") || server.includes("mode === 'balloon'") || server.includes("mode === 'bases'")) {
+  console.error('✗ the server should only start Classic Pixelwars')
   process.exit(1)
 }
 
@@ -1020,7 +1000,7 @@ if (!nametags.includes("events.on('lobby:floor'") || !nametags.includes('isLobby
   console.error('✗ team nametags should clear on the lobby floor, including leftover plates')
   process.exit(1)
 }
-if (!nametags.includes('isPlayingTeam(team)') || nametags.includes('team !== Team.Red && team !== Team.Blue') || !nametags.includes('TEAM_NAME[team]')) {
+if (!nametags.includes('isPlayingTeam(team)') || nametags.includes('team !== Team.Red && team !== Team.Blue') || !nametags.includes("const STAR = '★'")) {
   console.error('✗ player nametags should use every playing team, not only red and blue')
   process.exit(1)
 }

@@ -41,9 +41,7 @@ let claimSfxEnt: Entity = 0 as Entity
 let upgradeReadySfxEnt: Entity = 0 as Entity
 let upgradeHoverSfxEnt: Entity = 0 as Entity
 let upgradeSelectSfxEnt: Entity = 0 as Entity
-let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
-let balloonPopSfxEnt: Entity = 0 as Entity
 const GHOST_HIT_VOICES = 3
 const ghostHitEnts: Entity[] = []
 let ghostHitVoice = 0
@@ -72,12 +70,8 @@ export function initAudio(): void {
   initFlagtagSfx()
   initRescueSfx()
   initSplashSfx()
-  dashSfxEnt = engine.addEntity()
-  Transform.create(dashSfxEnt, { parent: engine.CameraEntity })
   dashHitSfxEnt = engine.addEntity()
   Transform.create(dashHitSfxEnt, { parent: engine.CameraEntity })
-  balloonPopSfxEnt = engine.addEntity()
-  Transform.create(balloonPopSfxEnt, { parent: engine.CameraEntity })
   for (let i = 0; i < GHOST_HIT_VOICES; i++) {
     const ent = engine.addEntity()
     Transform.create(ent, { parent: engine.CameraEntity })
@@ -87,9 +81,7 @@ export function initAudio(): void {
   AssetLoad.create(engine.addEntity(), { assets: [GHOST_HIT_SRC] })
   events.on('lunge:impact', onGhostHit)
   events.on('burst:impact', onGhostHit)
-  events.on('dash:impact', onGhostHit)
   events.on('anvil:impact', onGhostHit)
-  events.on('overdrive:impact', onGhostHit)
   musicEnt = engine.addEntity()
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
@@ -202,15 +194,6 @@ export function playClaimSfx(): void {
   })
 }
 
-/** Dash prototype: wind whoosh (flagtag swoosh.mp3) when the local player dashes. */
-export function playDashSfx(): void {
-  if (!dashSfxEnt) return
-  AudioSource.createOrReplace(dashSfxEnt, {
-    audioClipUrl: DASH_SRC,
-    playing: true, loop: false, volume: 0.85, global: true,
-  })
-}
-
 /** Lunge start: Luke's takes split from one WAV. WAV (not mp3): no encoder
  *  priming silence; trimmed to ~3 ms lead-in. */
 export const LUNGE_SRCS = [1, 2, 3, 4, 5, 6].map(n => `assets/sounds/lunge_0${n}.wav`)
@@ -246,15 +229,6 @@ export function playLungeSfx(): void {
   const e = lungeSfxEnts[pickLungeIdx()]
   // Same clip on the same entity: createOrReplace restarts it from 0 without a reload.
   AudioSource.createOrReplace(e, { audioClipUrl: LUNGE_SRCS[lungeSfxEnts.indexOf(e)], playing: true, loop: false, volume: 0.9, global: true, currentTime: 0 })
-}
-
-/** Dash prototype: hit thud for the attacker (on contact) and the victim (on knockback). */
-export function playBalloonPopSfx(): void {
-  if (!balloonPopSfxEnt) return
-  AudioSource.createOrReplace(balloonPopSfxEnt, {
-    audioClipUrl: CLAIM_SRC,
-    playing: true, loop: false, volume: 0.55, global: true,
-  })
 }
 
 export function playDashHitSfx(): void {

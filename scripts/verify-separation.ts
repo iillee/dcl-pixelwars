@@ -6,7 +6,7 @@
  * After they walk, nearest neighbours sit around the 3–4 m band, and teammates do not
  * all lock onto one tile. Two humans nearby get split across the bots that chase.
  */
-import { initBots, rebuildBotGraph, tickBots, getBotPositions, getBotProfiles, getWalkableGraph, setPopulation } from '../src/server/bots/manager'
+import { initBots, rebuildBotGraph, tickBots, getBotPositions, getBotProfiles, getWalkableGraph } from '../src/server/bots/manager'
 import { Bot, rollPersonality, mulberry32 } from '../src/server/bots/bot'
 import { BOT_SPEED_SPREAD, BOT_ENGAGE_MIN_M, BOT_ENGAGE_MAX_M, BOT_SEPARATE_M } from '../src/shared/pvp'
 
@@ -29,12 +29,11 @@ initBots({
   abilities: () => ({ lunge: false, burst: false }),
 })
 rebuildBotGraph(42)
-setPopulation({ kind: 'pvb', humanTeam: 1 })
-// Fifteen humans, all far below the floor, so the round fills 15 bots and nobody chases yet.
+// Fifteen red humans, all far below the floor. Classic fill caps at 3 bots on each other team.
 humans = Array.from({ length: 15 }, (_, i) => ({ id: 'pad' + i, team: 1, x: 0, y: -999, z: i }))
 tickBots(0)
 const spawned = getBotProfiles()
-if (spawned.length !== 15) { console.error(`✗ expected 15 bots, got ${spawned.length}`); process.exit(1) }
+if (spawned.length !== 9) { console.error(`✗ expected 9 bots, got ${spawned.length}`); process.exit(1) }
 
 const speeds = spawned.map(b => b.speedMul)
 const engages = spawned.map(b => b.engageM)

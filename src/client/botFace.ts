@@ -217,7 +217,4 @@ export function initBotFace(): void {
   }
   events.on('lunge:impact', onHitTarget)
   events.on('burst:impact', onHitTarget)
-  // dash:impact currently only targets human victims (dashHit is roster-only),
-  // but hook it so a bot target would still get a hit face if that changes.
-  events.on('dash:impact', onHitTarget)
 }

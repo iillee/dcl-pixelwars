@@ -29,7 +29,6 @@ import {
 } from './generator'
 import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
-import { clearTeleportOrbs, spawnTeleportOrbsForMaze } from '../teleportOrbs'
 import { events } from '../shared/events'
 import { LOBBY_TEAMS } from '../shared/lobby'
 import { SeedHolder, seedHolder } from '../shared/components'
@@ -119,7 +118,6 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     const arms = getPlacedTilesInOrder().filter(p =>
       p.type === 'end' && !earlyEnd(p.x, p.z))
     spawnQueue = arms.map((p, i) => ({ p, delay: i * STAGGER }))
-    clearTeleportOrbs()
     console.log(`Lobby laid, ${gridSize()} tiles`)
     return
   }
@@ -140,12 +138,6 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   spawnQueue = tiles
     .filter(p => !(isPersistentTile(p) && persistentEntities.has(tileKey(p))))
     .map((p, i) => ({ p, delay: i * STAGGER }))
-
-  // Teleport orb pair — deterministic on the current seed: generateWithRetry
-  // leaves the RNG in a fixed state, so every client picks the same tile
-  // pair without any network sync. Called after tiles are queued so the
-  // tiles array is stable.
-  spawnTeleportOrbsForMaze(tiles)
 }
 
 /** Build the maze for this synced seed unless it's already the one built (seed watcher + snapshot). */

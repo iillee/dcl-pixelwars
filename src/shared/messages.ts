@@ -57,14 +57,6 @@ export const Messages = {
     total: Schemas.Int,
   }),
 
-  // Server → the painter only. Prototype tank after a spend or a respawn.
-  // denied cells were requested and not applied because the tank was empty.
-  paintWallet: Schemas.Map({
-    tank: Schemas.Int,
-    denied: Schemas.Array(Schemas.String),
-    regen: Schemas.Int,
-  }),
-
   // Server → the painter only. Batched personal tiles-painted total for this round
   // (not one message per tile). Sent with the 5 Hz paint flush, on snapshot, and as 0 on reset.
   paintScore: Schemas.Map({ n: Schemas.Int }),
@@ -97,10 +89,6 @@ export const Messages = {
   // Server → everyone: a star orb appeared or disappeared. i is the orb id.
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fall: Schemas.Int }),
   starDespawn: Schemas.Map({ i: Schemas.Int }),
-  // Server → everyone: who is holding the star, and until when (0 = ended).
-  starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number, ms: Schemas.Number }),
-  // Server → everyone: accepted star bump. The victim applies overdriveKnock.
-  overdriveImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   // Server → everyone. kind 1 = team took the sole lead (a is the team name).
   // kind 2 = a KO (a knocked out b). team / teamB tint those names.
   feed: Schemas.Map({
@@ -148,7 +136,7 @@ export const Messages = {
   // banner denominator from its own walkable-cell count (same math as HUD).
   // Server → Client: the server-owned round (round-on-join). Broadcast on start / boundary / idle, and sent to
   // each joiner (joinRoster, requestSnapshot). remainingMs is relative so client clock skew doesn't matter.
-  // format: 'pvp' | 'pvb' (playtest alternation, shared/pvp.ts FORMAT_ALTERNATE). Late joiners read it here.
+  // format is always Classic Pixelwars ('pvp'). Late joiners read it here.
   roundClock: Schemas.Map({
     idx: Schemas.Int,
     remainingMs: Schemas.Int,
@@ -265,18 +253,6 @@ export const Messages = {
   // bot is in the round (client/botVisual.ts). Lets the bot chase and aim.
   botAim: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
 
-  // Dash PvP prototype (shared/pvp.ts, design/pvp-prototype.md).
-  // Client → Server: the sender's dash touched `target` (PlayerIdentityData
-  // address) on the sender's screen. dx/dz = horizontal push direction.
-  // The server can't see positions, so distance is the attacker's call;
-  // it validates teams, round mode and per-attacker rate only.
-  dashHit: Schemas.Map({ target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
-
-  // Server → Clients (broadcast): an accepted dashHit. The target's own
-  // client applies the knockback (a scene can only push its local player);
-  // everyone else shows the impact effect. dx/dz normalised by the server.
-  dashImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
-
   // Lunge (shared/pvp.ts LUNGE_*, client/lunge.ts). Client → Server: we
   // started lunge `id` (per-client counter) at (x, y, z) along (dx, dz).
   // Server checks cooldown and rebroadcasts lungeStarted so every client
@@ -326,21 +302,6 @@ export const Messages = {
   // Server → Clients: accepted anvil strike. Player targets knock themselves; bot:<id> plays the bot knock.
   anvilImpact: Schemas.Map({ i: Schemas.Int, attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
   playerFell: Schemas.Map({}),
-  // Server -> Clients: Balloon Battle counts (full book) and one pop.
-  balloonState: Schemas.Map({ entries: Schemas.Array(Schemas.Map({ id: Schemas.String, n: Schemas.Int })) }),
-  balloonPop: Schemas.Map({ id: Schemas.String, n: Schemas.Int }),
-  // Server → Clients: BASES connected counts and charge (5 Hz + late-join).
-  baseState: Schemas.Map({
-    redConnected: Schemas.Int,
-    blueConnected: Schemas.Int,
-    redProgress: Schemas.Int,
-    blueProgress: Schemas.Int,
-    threshold: Schemas.Int,
-    redGrowing: Schemas.Int,
-    blueGrowing: Schemas.Int,
-  }),
-  // Server → Clients: BASES winner (0 tie, 1 red, 2 blue). Visual shockwave only.
-  baseWin: Schemas.Map({ team: Schemas.Int }),
   // Fall rescue cloud for everyone else. The rider sends rescueStart at the
   // catch (who is ignored; the server stamps the authenticated id). mobile 1
   // means observers fly the cloud along catch → base; 0 means they follow the
@@ -363,22 +324,6 @@ export const Messages = {
       yaw: Schemas.Int, alive: Schemas.Int, moving: Schemas.Int, slide: Schemas.Int,
     })),
   }),
-
-  // Paint Bomb (shared/pvp.ts). Client → Server: drop a bomb at the
-  // sender's position. Server checks round mode, team and cooldown, snaps
-  // it to the floor, broadcasts bombArmed, and after BOMB_FUSE_S paints
-  // the circle itself from its walkable graph (no client cell ids, so the
-  // paintTick cap doesn't apply) and broadcasts bombBlast.
-  bombDrop: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-
-  // Server → Clients (broadcast): telegraph. Everyone shows the blinking
-  // bomb + fuse + blast-area ring at (x, y, z).
-  bombArmed: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
-
-  // Server → Clients (broadcast): detonation. Everyone shows the explosion;
-  // opponents of `team` within BOMB_KNOCKBACK_RADIUS push themselves.
-  // Painted cells arrive through the normal paintDelta tick.
-  bombBlast: Schemas.Map({ attacker: Schemas.String, team: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, cells: Schemas.Int }),
 
   // Cheap lag probe. Client sends its clock; the server echoes it to that
   // sender only. Used by the optional lag HUD, about once every 2s.
