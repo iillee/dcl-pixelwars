@@ -5,11 +5,10 @@ neither may diverge from it unilaterally. `dcl-prototype` references it at
 `../dcl-gdd/references/hypothesis-log.md` rather than keeping a second copy.
 
 **The log is not part of the GDD.** The template has no Hypothesis Log section: the log lives as a
-separate generated file, `design/hypothesis-log.md`, next to the document. It is **agent
-infrastructure** — the owner is never asked to fill it, read it, or submit it, and it never goes
-into the submitted GDD (the working markers in `design/gdd.md` are cleaned at submission; `TBD:`
-stays — see the GDD skill's rules). It does travel with the repo the owner submits, but it is **not
-an application requirement and never a bar to quote at a creator**.
+separate generated file, `design/hypothesis-log.md`, whether a GDD exists or not. It is **agent
+infrastructure** — the owner is never asked to fill it, read it, or submit it. For a Creator
+Success submission, keep it outside the submitted GDD and clean working markers as that workflow
+specifies; `TBD:` stays. The log may travel with the repo, but is never an application requirement.
 
 ## One owner per fact
 
@@ -35,5 +34,5 @@ moment you need it, never the set:
 | [parking.md](hypothesis-log/parking.md) | parking something: what earns an experiment file, what goes to `ideas.md`, `implementation-notes.md` or `decisions.md` instead, and the header block you write |
 | [files.md](hypothesis-log/files.md) | placing or naming a file: the `design/` layout, IDs, slugs, the status suffixes |
 | [index.md](hypothesis-log/index.md) | rebuilding `design/hypothesis-log.md`: the events that trigger it, the pass, the columns, the two invariants |
-| [handoff.md](hypothesis-log/handoff.md) | jumping to `dcl-prototype`: the vehicle question |
+| [handoff.md](hypothesis-log/handoff.md) | jumping to `dcl-prototype`: playable scope or focused test, and destination |
 | [verdicts.md](hypothesis-log/verdicts.md) | closing an experiment — `dcl-prototype`'s zone: the machine-readable verdict line and who owns which write |

@@ -119,11 +119,7 @@ export const WATER = {
   swellMobileStepM: 16,
   /** Mobile amplitude starts easing this far inside the lite mesh edge. */
   swellMobileFadeM: 64,
-  swellNearSrc: 'assets/models/water-swell-near.glb',
-  swellMidSrc: 'assets/models/water-swell-mid.glb',
-  swellFarSrc: 'assets/models/water-swell-far.glb',
-  swellLiteSrc: 'assets/models/water-swell-lite.glb',
-  /** The meshes from ba05fa0, which the preview did draw. 48 m waves. */
+  /** 48 m waves. The older 110 m meshes are gone. */
   swell48NearSrc: 'assets/models/water-swell-48-near.glb',
   swell48MidSrc: 'assets/models/water-swell-48-mid.glb',
   swell48FarSrc: 'assets/models/water-swell-48-far.glb',
@@ -150,9 +146,8 @@ export const SWELL_TRAINS: Array<{
 ]
 
 /**
- * Which swell files to spawn. `48m` is the ba05fa0 set, placed at the
- * current mean (y 114). `110m` is the tall set. The 110 m files stay in
- * the repo either way.
+ * Which swell height to use. `48m` is the live set. `110m` is only the
+ * analytic tall set; its meshes are not in the scene.
  */
 export const SWELL_VARIANT: '48m' | '110m' = '48m'
 
@@ -268,16 +263,10 @@ export const FOAM = {
 }
 
 export function swellMesh(part: 'near' | 'mid' | 'far' | 'lite'): string {
-  if (SWELL_VARIANT === '48m') {
-    if (part === 'near') return WATER.swell48NearSrc
-    if (part === 'mid') return WATER.swell48MidSrc
-    if (part === 'far') return WATER.swell48FarSrc
-    return WATER.swell48LiteSrc
-  }
-  if (part === 'near') return WATER.swellNearSrc
-  if (part === 'mid') return WATER.swellMidSrc
-  if (part === 'far') return WATER.swellFarSrc
-  return WATER.swellLiteSrc
+  if (part === 'near') return WATER.swell48NearSrc
+  if (part === 'mid') return WATER.swell48MidSrc
+  if (part === 'far') return WATER.swell48FarSrc
+  return WATER.swell48LiteSrc
 }
 
 export function meanSwellWavelength(): number {

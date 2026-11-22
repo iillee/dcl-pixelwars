@@ -1,6 +1,9 @@
 # Preflight — P1–P9
 
-Load at phase 0; repeat in phase 3. Report hits and useful next moves, never a total score or
+Creator Success proposal route only: load at phase 0; repeat in phase 3.
+For general design, check the chosen experience and actual claims through
+[review-lens.md](review-lens.md); this table does not supply missing goals or requirements.
+Report hits and useful next moves, never a total score or
 predicted funding verdict. Keep check IDs backstage; the programme decides submissions.
 
 Problems worth naming early, because they are cheaper to fix early. These rows are the merged

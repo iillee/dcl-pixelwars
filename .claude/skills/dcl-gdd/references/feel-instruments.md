@@ -3,7 +3,7 @@
 Load only for a concrete measurement or tuning question. A short observation may be enough;
 these tools are not required for a GDD. Agree what uncertainty matters before choosing an
 instrument. Keep build, device, conditions and limitations with the result. For scene controls,
-apply [platform-fit.md](platform-fit.md); a book does not establish an SDK capability.
+apply [platform-fit.md](platform-fit.md); a design reference does not establish an SDK capability.
 
 ## Pick an instrument for the question
 
@@ -29,26 +29,19 @@ or simplify the interaction before adding more button combinations. Check touch 
 old controller examples do not establish a good phone mapping. Test camera and object motion
 within the controls actually available, not assumed access to platform avatar physics.
 
-## Historical numerical prompts, not acceptance limits
+## Rough numerical orientations, not acceptance limits
 
-The following passages were checked in the named local source editions. This verifies attribution,
-not scientific validity, present-day hardware suitability or DCL requirements. Do not replace the
-programme's separate criteria with these figures.
+Rules of thumb from design practice. They are not scientific findings, present-day hardware
+requirements or DCL requirements. Do not replace the programme's separate criteria with these figures.
 
-| Source and context | Reported orientation | Useful question / limit |
+| Context | Orientation | Useful question / limit |
 |---|---|---|
-| Swink, *Game Feel* (2009), pp.36, 43–47: model of perception and real-time control | About 240 ms for a correction cycle; 100 ms continuity; discussion of motion at 10 fps | These model-based figures are not a target frame rate or a universal boundary of playable control. Inspect actual timing and experience. |
-| Swink p.45, reporting Mick West on response | 50–100 ms described as responsive | Which event is timed? Compare the actual action and client; neither a pass below 100 nor a failure above it follows automatically. |
-| Schell, *The Art of Game Design*, third edition, chapter 15, feedback discussion | A tenth of a second rule, illustrated by an unwanted jump anticipation delay | Does the player receive a meaningful early response? A deliberately readable wind-up is a different design question. |
-| Chou, *Actionable Gamification*, chapter 10, Evolved UI | Start with two or three features, reveal more later | Try reducing overload when it exists; not a quota for controls or choices in every game. |
-| Chou, chapter 13, First Major Win-State | Measure minutes to the first moment of perceived value; no universal duration supplied | What counts as value here, and did the player experience it? The author's dropout claim does not establish a per-second attrition law. |
+| Perception and real-time control | About 240 ms for a correction cycle; 100 ms continuity; motion still reads at 10 fps | Model-based figures, not a target frame rate or a universal boundary of playable control. Inspect actual timing and experience. |
+| Response to input | 50–100 ms feels responsive | Which event is timed? Compare the actual action and client; neither a pass below 100 nor a failure above it follows automatically. |
+| Feedback after an action | About a tenth of a second | Does the player receive a meaningful early response? A deliberately readable wind-up is a different design question. |
+| Feature exposure | Start with two or three features, reveal more later | Try reducing overload when it exists; not a quota for controls or choices in every game. |
+| First moment of value | Measure minutes to the first moment of perceived value; no universal duration | What counts as value here, and did the player experience it? Early dropout does not establish a per-second attrition law. |
 
 If a creator asks for a threshold, tie a proposed criterion to the specific experiment and mark
 it as proposed. Faster completion, more retries or lower delay alone cannot prove that play is
 more satisfying. Do not use a single self-test as a population benchmark.
-
-## Background
-
-Instrument ideas informed by Swink pp.45, 83–85, 122–147, 163–170, 187, 269 and 335. Their
-application here is an original practical synthesis, with safe parameter comparison and explicit
-measurement limits; it is not a reproduction of book diagrams or a required seven-step procedure.

@@ -1,4 +1,4 @@
-# The Greybox — Building the Least That Could Kill It
+# The Greybox — A Small Playable Build
 
 Use the simplest representation that preserves the property being explored. Primitives are the
 default, but a model, light, sound, menu or saved state belongs when the question depends on it.
@@ -10,8 +10,16 @@ For a mood, light or sound question, choose a relevant [atmosphere trial](atmosp
 
 1. **Plan the observation first.** Instrument the selected measured criterion; an exploratory or
    owner-feel pass needs perceivable feedback and notes, not an invented numeric proxy.
-2. **The verb under test, real.** Input path, timing, collision, camera, feedback on the action.
-3. **Everything else, faked.** In the crudest form that lets a tester keep playing.
+2. **The interaction, real.** Input, timing, collision, camera and feedback; for a toy, connect
+   the actions needed to play with it before tuning each part separately.
+3. **Everything else, faked.** In the crudest form that lets a tester keep playing. With the
+   Creator Hub MCP connected, place greybox geometry live in the editor. If the scene is not and
+   will not be open in the Creator Hub, write it to `assets/scene/main.composite`. If it is or may
+   be open, follow `sdk-scenes` (*Building static geometry in code*): ask its three choices without
+   recommending one; code-spawned geometry is never a default, not even for a throwaway greybox.
+   Re-check the Hub state each session; a recorded answer holds only while that state holds.
+   Size the space with **add-3d-models** → *RULE: Scale interiors up for the third-person camera*,
+   and keep interactables the test depends on away from parcel edges.
 4. **Smoke-check the setup.** Confirm the action and observation work. For a registered test,
    check that its outcomes can be distinguished; smoke is not evidence of human enjoyment.
 
@@ -49,9 +57,9 @@ what this pass tests; a future external criterion may remain unmeasured in an ow
 
 **Never write SDK7 API from memory.** Two sources, in this order:
 
-- **`sdk-skills`** — the official skill set, `npx skills add decentraland/sdk-skills --all` (add `-g`
-  for user level). Composite-first rules and the component reference live there, and parts of the API
-  are newer than any model's training data.
+- **`sdk-skills`** — the official skill set, `npx skills add decentraland/sdk-skills --all`. If it
+  is missing, ask the owner before installing it, and at which scope (project or `-g` user level).
+  The component reference lives there, and parts of the API are newer than any model's training data.
 - **[`sdk7-test-scenes`](https://github.com/decentraland/sdk7-test-scenes)** — the greybox mechanics
   catalog. Small single-mechanic scenes named by parcel coordinate: trigger areas,
   tweens and moving platforms, proximity interactions, pointer-event feedback, modifier areas, input
@@ -59,9 +67,9 @@ what this pass tests; a future external criterion may remain unmeasured in an ow
   the folder before writing a mechanic from scratch** — an experiment that starts from a working
   reference scene starts a day earlier.
 
-**Neither source available and installing fails?** Say so to the owner — then work from the
+**Neither source available, and installing declined or failed?** Say so to the owner — then work from the
 official SDK7 docs, indexed in
-[dcl-capability-links-2026-08.md](../../dcl-gdd/references/research/dcl-capability-links-2026-08.md),
+[dcl-capability-links.md](../../dcl-gdd/references/platform/dcl-capability-links.md),
 and mark every mechanic written that way as built from the docs, no verified reference behind it.
 The fallback replaces the source, never the rule — writing from memory stays off the table.
 
@@ -80,7 +88,7 @@ Use these shortcuts only for properties outside the current question; do not fak
 | Thing | Fake |
 |---|---|
 | progression, unlocks | a number printed on screen, set by hand |
-| economy, rewards | arithmetic in the brief; a debug button that grants |
+| economy, rewards | arithmetic in the brief; a debug button that grants (remove before publishing) |
 | other players | a scripted entity, or another client in an explicitly arranged multiplayer setup |
 | art, characters, environment | primitives; colour carries meaning |
 | audio | one sound on the verb under test if the feel depends on it, otherwise silence |
@@ -104,7 +112,7 @@ merely because it was absent from the first note. Use the [exploratory route](ex
 
 For a registered test, keep it in the scene repo, named after the experiment ID (`H1-02-pop-feel/` or a branch of the same
 name), so a verdict can be re-checked and a re-test on a higher rung starts from the same build. Note
-where it lives in `## Sessions`. Screenshots, recordings and raw notes go in the stage folder next to
+where it lives in `## Sessions`. Screenshots, recordings and raw notes go in the folder next to
 the experiment file — the contract says intermediate files park there.
 For exploration, reuse the scene's existing location and record the build/version and observations
 in its dated note. No new branch or H-named folder is required.

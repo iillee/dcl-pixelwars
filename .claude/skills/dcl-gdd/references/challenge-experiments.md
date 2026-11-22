@@ -54,11 +54,3 @@ When a proposed fix sounds certain, trace: the changed rule, the behaviour expec
 and the experience it might create. Which connection is untested? Compare another explanation
 such as unclear feedback or unfamiliar controls before adding difficulty. Use the cheapest test
 that distinguishes them. The result may support only one connection, not the whole promise.
-
-## Background
-
-Original synthesis informed by Koster, *A Theory of Fun* (2010 reprint, chapter 7); Schell,
-*The Art of Game Design*, third edition (pp.179–182, 220–223, 298–305); Swink, *Game Feel* (2009,
-p.305); and *MDA* (2004, pp.3–5), via the wiki. Challenge anatomy, risk/reward and causal layers
-are lenses with limited scope. The fictional example and test suggestions are ours; no author's
-full checklist or fixed loss rule is reproduced.

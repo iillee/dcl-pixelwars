@@ -15,10 +15,12 @@ still takes precedence (hard rule 8).
   screenshot strengthens §0.
 - **Hand them a generation prompt.** When the signature settles or two candidates tie, offer a
   ready-to-paste image prompt per candidate (composition, palette, mood, lighting, aspect ratio; no
-  text or logos), **anchored to Decentraland's avatars and art direction** so it stays buildable —
+  text or logos), **anchored to Decentraland's avatars and art direction** for visual context —
   with a line asking the generator to look up Decentraland's current in-world visuals if it can
   browse. A greybox screenshot still outweighs generated art in a submission; generated images
-  choose the signature or stand in as placeholders.
+  choose the signature or stand in as placeholders. Visual resemblance does not establish
+  available lighting, camera or material controls; use [platform-fit](../platform-fit.md)
+  for effects essential to the intended experience.
 - **Sound, optionally:** ask what the player hears and what survives on a muted phone.
 - **Good:** Story that changes what the player does; a signature recognisable in one screenshot.
   Lore walls and polished concept art in place of a space plan are smells. If the story cannot
@@ -31,7 +33,9 @@ mockups as intended states, not screenshots of an existing build. Let the wordin
 
 ## Stage 2 — Close Audience (§8)
 
-On a stage-1 interview, stop above; do not ask these fields yet.
+This closes the proposal's compact audience fields. Earlier audience-led design and research
+can use [acquisition](../acquisition.md) when relevant; do not wait for this stage to help with them.
+On a stage-1 interview, stop above rather than opening the full field interview below.
 
 - **Ask:** the primary player + arrival context in one sentence (the template's shape:
   *for players who already enjoy ___, arriving alone / with friends / from an Event or Community,

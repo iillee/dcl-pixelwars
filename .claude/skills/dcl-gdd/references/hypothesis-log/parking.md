@@ -5,21 +5,32 @@ Part of the [Hypothesis Log contract](../hypothesis-log.md); hard-rule numbers r
 
 ## Writing a hypothesis worth parking
 
+General design uses these records too. When the owner wants to answer a specific design or
+technical question, distinguish a test from an open-ended try. Reuse their stated claim and
+criterion; if the criterion is still open, clarify it only when needed for the requested test.
+Otherwise keep the question as `TBD:` beside the affected design and carry it into the try.
+Exploration may reveal a question worth testing; register the later test before running it,
+without relabelling the earlier exploration or forcing every adjustment into an experiment.
+
 `dcl-gdd` creates the file at park time. A row is only worth a file if all four exist:
 
 1. **A falsifiable IF/THEN.** *"IF the drop cycle is 45 s, THEN 4 of 5 first-time players complete
    three cycles without being told what to do."* If you cannot describe what failure looks like, it is
    still an assumption, not a hypothesis — keep working on it or write it as `TBD:` instead.
-2. **The source section**, so a verdict knows what to go back and rewrite.
+2. **The source**, so a verdict knows where to return: link the file and passage that holds
+   the claim, including a design note when there is no GDD. Use `— (standalone)` only when
+   no design source exists and the experiment itself is the claim's home.
 3. **The cheapest test that could kill it.** This is the ordering key for the whole log: arithmetic
    in the doc (only when [its inputs can settle the claim](arithmetic.md)) → desktop Explorer (via Creator Hub; estimate from the actual setup and dependencies) →
    mobile. A hypothesis testable by arithmetic must never survive untested to a vertical slice —
    each rung costs more, so it must answer costlier questions. Every rung is something the studio
    can run **before or during the build**: a claim whose only killing test is a live dashboard
    after launch is not yet parked as testable — give it a pre-launch line from this ladder first,
-   and let the live metric be a second line at most (post-launch analytics are the programme's job,
-   not the creator's).
-4. **One key metric matching the IF/THEN.** Preserve the owner's criterion, units and conditions.
+   and let the live metric be a second line at most. In the Creator Success workflow,
+   post-launch programme analytics are separate from this pre-build test.
+4. **One observable criterion matching the IF/THEN.** A checkable yes/no outcome can be enough;
+   a number is needed only when the claim needs it. The header calls this `Key metric`.
+   Preserve the owner's criterion, units and conditions.
    Do not add a frequency, threshold or proxy to make a file possible. An undecided criterion stays
    `TBD:` in the source section; do not interrupt creative exploration just to complete this header.
    A proposed criterion needs the owner's choice before parking; never label yours as theirs.
@@ -30,12 +41,13 @@ Do not turn an easy-to-measure proxy into the outcome merely to fit the test lad
 Reuse only known build/device conditions. A proposed Explorer test does not mean the existing
 mock-up runs there. A stated intention can inform a hypothesis, not settle future behavior.
 
-Mark **mobile-sensitive** hypotheses explicitly — for hobbyist core loops that is most input and
-performance claims. The suffix still goes **terminal at the verdict** (`_validated` / `_survived` /
+Mark **mobile-sensitive** hypotheses explicitly when mobile is in the chosen scope and the claim
+depends on input, performance or another device condition. The suffix still goes **terminal at the verdict** (`_validated` / `_survived` /
 `_failed`) — there is no special filename state for the open mobile rung. Instead the generated
 index renders *… — mobile pending* for any file with `Mobile-sensitive: yes` whose `Tested on` says
-only `desktop`, for as long as that is true. The mobile check itself costs minutes (the QR pass —
-see the ladder) and is offered at core-loop stage close, never forced.
+only `desktop`, for as long as that is true. The mobile check (the QR pass —
+see the ladder) is offered when relevant to the chosen target, including at core-loop stage close
+when using stages; never forced.
 
 ## The header block you write
 
@@ -45,7 +57,7 @@ see the ladder) and is offered at core-loop stage close, never forced.
 # H1-02 · Pop feel
 
 - **IF/THEN:** IF <the change> THEN <the observable, falsifiable outcome>
-- **Source section:** §3 Core Loop — "why repetition 10 remains appealing"
+- **Source section:** <source file and passage, or — (standalone) if none>
 - **Cheapest killing test:** <test that can settle this claim; known build/device conditions>
 - **Key metric:** <chosen observable criterion, units and failure condition>
 - **Mobile-sensitive:** yes / no
@@ -81,7 +93,7 @@ Ideas cut for scope — good, but not in this version — park here too, marked 
 scope`): a cut idea is future material or a hypothesis candidate, and losing it costs more than one
 line. An idea graduates when it earns it: into a **taste decision** written into a section; into a
 **look-see** build ("make it visible, the owner judges by eye" — no metric, no criterion, not an
-experiment); or into an **experiment file**, once it makes a falsifiable claim about players.
+experiment); or into an **experiment file**, once it makes a falsifiable design or technical claim.
 Never edit or delete the original: append a dated line beneath it for graduation (`→ H1-04` /
 `→ §7 decision`) or correction (`superseded — see decisions.md <date>` or the H-file).
 

@@ -1,37 +1,48 @@
 # The Review Lens — Used Openly
 
-Your working copy of the programme's `reviewer-checklist.md`: it lets you see the document as a
-reviewer will, early enough to act. **Never an authority you hold over a creator** — the programme
-decides submissions, and an unproven promise is what a proposal *is*.
+For general design, review the owner's intended experience, actual decisions and evidence. Use
+the shared principles below, Action readability, and relevant Pressure tests. A solo, one-shot
+or desktop design does not acquire social, retention or mobile goals from this review.
+Creator Success sections below adapt the programme's review criteria for its proposal
+route. The programme decides submissions; an unproven promise is what a proposal *is*.
+
+When audience or first-player arrival matters to the request, use [acquisition](acquisition.md):
+compare the promise with the available first experience and the relevant entry path. Read a
+linked acquisition document before calling evidence missing; it need not be copied into the GDD.
+When an invitation or promotion feedback exposes a gap, use acquisition's
+[design check](acquisition.md#let-reaching-players-inform-the-game) to distinguish presentation,
+audience/route fit and a missing playable benefit. An absent commercial plan is not a defect
+for an owner who has not chosen that goal.
 
 - **No totals, no thresholds, no predicted verdict.** Report what is weak and what would lift it.
-- Before calling something a contradiction, verify both premises against the owner's decisions or
-  original evidence. An unspecified behaviour is an open question; your inferred rule cannot prove
-  a design defect. Check the relevant saved section before saying a fact or experience is missing;
-  an empty later section does not erase an answer elsewhere. Keep uncertain deductions conditional.
+- **Review the supplied design, not a completed version you imagined.** Before delivering strengths
+  and weaknesses, compare their premises with the source, including known benefits and costs.
+  Label your inferences where they appear; a general disclaimer does not qualify later factual claims.
+  Distinguish a rule explicitly
+  absent from one not specified. Preserve relative claims as relative. Before asserting a defect,
+  consider whether another outcome fits the same facts; if so, state the dependency instead of
+  the verdict. Check relevant saved sections; an empty later section does not erase an answer elsewhere.
   Reconcile findings shared by several checks: one consequence for the same
-  unresolved issue. Choosing to leave it open does not remove its application risk. A design
+  unresolved issue. Choosing to leave it open does not remove its consequence. A design
   weakness is not an official eligibility rule; name which kind of gap the evidence supports.
-  A paper pressure-test pass establishes coherence, not observed player enjoyment.
-- **A hit is a move, not a rejection** — a clarification, a targeted revision, or the one thing worth
-  deciding before more writing happens.
+  A paper pressure-test pass establishes coherence, not player comprehension or enjoyment.
 - "P4", "preflight", "status" are your words, never the owner's (hard rule 7) — to them it is *"Why
   Players Come Back is the thin one"*.
 
-Load for phase 3's audit, or a full review on entry. Phase 0 ordinarily needs only
-[preflight.md](preflight.md). The probe questions can also guide targeted revisions.
+Load for a design review or targeted revision. In the proposal route, phase 3 uses the full
+audit; phase 0 ordinarily needs only [preflight.md](preflight.md).
 
 ---
 
 ## Preflight — P1–P9
 
-The entry checks live in [preflight.md](preflight.md); repeat all nine during the audit.
+Proposal only: the entry checks live in [preflight.md](preflight.md); repeat all nine during its audit.
 
 ---
 
 ## Review areas — the acceptance lens
 
-One status per area, never averaged, never totalled. This is the merged checklist's decision record,
+Proposal only: one status per area, never averaged, never totalled. This is the merged checklist's decision record,
 used on yourself before a reviewer uses it on the document.
 
 - **Clear** — specific, internally consistent, scoped, and supported by suitable evidence or a
@@ -46,7 +57,7 @@ used on yourself before a reviewer uses it on the document.
 | Review area | Where it lives | Clear looks like |
 |---|---|---|
 | Player promise & Decentraland fit | §0, §1, §8 | ≤25 words, a role, a verb, a goal and exactly one strange thing; repeatable from memory. The promised action has a credible input/control/feedback path on the target client, or an explicit feasibility test ([platform fit](platform-fit.md)). |
-| Immediate comprehension | §2 | The spawn frame communicates the verb; first useful action inside 5 s, the goal stateable by 10; first reward inside a minute. |
+| Immediate comprehension | §2 | The spawn frame communicates the verb; first useful action inside 5 s, the goal stateable by 10; first reward inside a minute. Use the optional [action readability lens](#action-readability) when player understanding is uncertain. |
 | Core gameplay & repeatability | §3 | 3–5 verbs, a 30–90 s cycle, and a concrete reason repetition 10 remains appealing, through variation or a repeatable pleasure. |
 | Progression & return design | §2, §4 | A concrete D1 reason known or anticipated before re-entry; timing when the mechanism needs it; two hooks explained *in the design*, not name-dropped; a first-week player with named persistent state. |
 | Intentional social play | §5 | Worthwhile solo play is described, with uncertainty intact; other players improve it concretely. Waiting, inviting or theoretical survival is not the solo answer; play is legible to bystanders. |
@@ -62,14 +73,27 @@ That is a revision, not a decline — and unproven is not the same as missing. A
 mechanism behind it and no playtest yet is Clear with a test plan; a hook that is a word is
 Follow-up.
 
-Deliver any weak area **as the next step, never as a verdict**. The collaborative register is in
+Present weaknesses with their consequences and possible improvements. The collaborative register is in
 [playbook.md](playbook.md)'s Voice notes — *"that is the question doing its job, not you failing"*.
 
 ---
 
+## Action readability
+
+When comprehension is uncertain, consider what the player can do, how they notice the outcome
+(including failure where applicable), and what they can try next. Visual, sound, movement or state
+cues may carry this information. Preserve intended mystery; internal rules and timers need only
+be exposed enough for meaningful action.
+
+With a build, offer a short pass without explaining the rules first, ideally with an unfamiliar
+player. A working cue establishes implementation, not player understanding; distinguish observed
+behaviour from what the player says it meant. Without a build, keep this as a design question or
+a proposed `dcl-prototype` trial. Record useful findings with their limits. This optional lens adds
+no completion gate; an unresolved question can remain open while the owner continues.
+
 ## Conformance count
 
-Run in the phase-3 audit — mechanical, no judgement, straight against the template: 25 words on
+Proposal only: run in the phase-3 audit — mechanical, no judgement, straight against the template: 25 words on
 the promise · 180 across the First Minutes player-experience cells, excluding fixed time labels · 3 × 8 words of How to Play · 2 sentences of story · 1
 sentence for the primary player · 2 for arrival and 2 for bring-a-friend · exactly 2 return hooks
 · exactly 2 comparables · real cuts when needed · at most 4 live-ops lines · at most 3 examples anywhere
@@ -79,14 +103,15 @@ Count **presence** the same way: every template section and fixed block — the 
 included — is present, or absent by a written decision (a stage banner naming it, an honest
 `TBD:`); a full-looking document with a silently missing block reads complete and fails review
 on the gap. The reverse also fails: a section the template does not name is overflow — move its
-content to `design/implementation-notes.md` (technical) or `design/ideas.md`, and leave the
+content to its record home — `design/implementation-notes.md` (technical), `design/acquisition.md`
+(audience/recruitment detail) or `design/ideas.md` (later ideas) — and leave the
 design-facing sentence where the template has a home for it.
 
 ---
 
 ## The audit checks
 
-The phase-3 audit runs these five checks over the whole draft; SKILL.md keeps their names, this is
+The proposal phase-3 audit runs these five checks over the whole draft; creator-success.md keeps their names, this is
 the prose.
 
 1. The template's own **submit self-check** — its criteria table is the program's assessment frame,
@@ -108,37 +133,37 @@ the prose.
 
 ## Pressure tests
 
-Run these in phase 3, over the full draft. Each is a pass over the document, not a question — report
-what fails, then fix it, park it as `TBD:` with a plan, or accept it out loud with a reason.
+Use relevant tests against the intended experience. The proposal audit runs the full set;
+general design selects only those supported by its goals and current work. A finding can become
+a fix, an open question or an accepted trade-off; it need not create another interview task.
 
 | Test | Passes when |
 |---|---|
-| **Verb trace** | Every verb in §3 appears in §2's first session and has a touch row in §6. A verb missing from either is a hole. |
+| **Verb trace** | The described actions have a credible input and response on the target client. For the proposal, every §3 verb appears in §2's first session and has a touch row in §6. |
 | **Promise trace** | §2's first session shows the distinctive experience promised in §1. That may be a quiet sensation or act of expression; it need not be conflict, novelty or tension. Check the actual promise, not a different game you prefer. |
 | **Repetition test** | §3 names what changes or stays enjoyable at repetition 10; “procedural” or “relaxing” alone is not an explanation. A concrete familiar pleasure is a valid hypothesis. |
-| **No-push test** | Walk §4 assuming nothing will ever remind the player this experience exists: what survives is a hook, what does not is a wish. |
-| **Quiet-hour test** | §5 re-run at 2 concurrent players still has an answer. Silence is a failing answer. |
+| **No-push test** | When return is a goal, ask what the player anticipates before re-entry and how they know. For the proposal, apply this to §4's hooks without reminders. |
+| **Quiet-hour test** | When play depends on others, examine the intended population and arrival pattern. For the proposal, §5 must also explain worthwhile play at 2 concurrent players. |
 | **Scope coherence** | Check the chosen playable outcome, dependencies and actual deferrals. Assess effort against capacity only when an estimate was discussed, with its assumptions. Missing hours or budget figures are not a submission defect; do not start a financial interview during audit. |
-| **Cut-list test** | The cut list hurts. A painless one means nothing was decided — go back. |
-| **Stranger test** | Someone who was not in this conversation could prototype the core loop from this document alone. Name every place they would have to guess. |
-| **Evidence test** | §0 links to something playable — or names the cheapest thing that could exist there by next week, and it is already in the Hypothesis Log. |
-| **Hypothesis audit** | Every `[HYPOTHESIS]` marker has a row in `design/hypothesis-log.md`; every row has a falsifiable IF/THEN and a cheapest killing test. A core loop still hypothetical is the next experiment, before anything else in the document gets built. |
-| **Lore ratio** | World and story do not outweigh the rest of the document — otherwise it is a lore wall regardless of how good the lore is. |
+| **Cut-list test** | When scope needs cuts, check their actual effect on work and the intended experience. A general design session need not invent rejected features; the proposal records its real cuts. |
+| **Stranger test** | Could the intended reader use this artifact for its stated purpose? For a prototype handoff, name load-bearing guesses about the action and response. A short idea note need not become a complete build specification. |
+| **Evidence test** | Claims retain their evidence and limits; missing proof stays open. For the proposal, §0 links to something playable or names the cheapest next proof in the Hypothesis Log. |
+| **Hypothesis audit** | Registered hypotheses retain their question, evidence and cheapest useful test under [hypothesis-log.md](hypothesis-log.md). In the proposal, each `[HYPOTHESIS]` marker has a log row with a falsifiable IF/THEN and cheapest killing test. For a chosen test, focus on the uncertainty it can settle; an exploratory toy or ordinary design question need not become a registered experiment or wait for a complete loop. |
+| **Lore ratio** | Does the story detail help this artifact's purpose and the intended player experience? A narrative concept may need substantial world or story work; a prototype handoff also needs the actions its reader will implement. Flag obscured essentials, not a fixed ratio of lore to mechanics. |
 
 ---
 
-## Probe questions — reuse them verbatim as interview questions
+## Probe questions — proposal examples
 
-The full set of fourteen, with what good and bad answers sound like, is in the merged
-`reviewer-checklist.md` (a citation, not a path — the file is not bundled). The ones that earn their
-keep mid-interview:
+Use these questions when they help the current conversation; the answer examples illustrate
+what to look for, not a required response format:
 
 1. *"What does the player repeatedly do, how long is one cycle, and why is the 10th repetition still
    fun?"* — good: one verb, 30–90 s, a concrete repeat-play appeal. Bad: a feature list or “exploring” without an action and response.
 2. *"A new player spawns in. What in the first camera frame tells them what to do — without text?"* —
    good: one dominant affordance, or other players visibly mid-loop. A short hint on top of a visible
    cue is fine.
-3. *"Decentraland cannot send push notifications. What will a Day-1 player *remember*, or *who* will
+3. *"Without relying on a reminder, what will a Day-1 player *remember*, or *who* will
    call them back on Day 2?"* — good: "their plot finishes in 20 h", "Sunday reset", "crew race
    Friday". Bad: "the fun".
 4. *"What is different for a Day-7 player, and walk me through their session as a scene."* — good:
@@ -152,12 +177,17 @@ keep mid-interview:
 8. *"Name a feature you already rejected because it did not serve a pillar."*
 9. *"Which two comparables did you actually play, and what did not fit your audience in each?"*
 
-The good-answer examples are drawn from the reviewer's guidance: agreeing to one decides nothing —
+These examples use the proposal's targets. For general design, adapt a relevant question to the
+owner's actual goals rather than importing those targets. The good-answer examples are drawn
+from the reviewer's guidance: agreeing to one decides nothing —
 see rubric cosplay in [interview-moves.md](interview-moves.md).
 
 ---
 
 ## Calibration
+
+Proposal review calibration only; these weights, targets and funding judgements do not grade a
+general design. Useful social or return questions remain available when those goals matter.
 
 - **Retention numbers.** First-week return — the share of eligible new players back at least once
   in days 1–7: v1 floor **>10%**, programme target **>20%**, *insufficient evidence* below ten
@@ -174,7 +204,10 @@ see rubric cosplay in [interview-moves.md](interview-moves.md).
   re-formable groups over one large fragile community.
 - **Social ties are the strongest late-retention force in the literature.** A document that nails
   social design earns benefit of the doubt elsewhere.
-- **Familiar genre plus one twist beats novelty** for inexperienced teams. Do not penalize a
-  derivative anchor; penalize a missing twist.
+- **Distinctive appeal:** assess the experience promised to this audience and where play delivers
+  it. Familiarity can be intentional; a novel mechanic is not required. If the intended distinction
+  is unclear, report the gap and relevant possibilities using
+  [concept exploration](interview-moves.md#explore-different-directions). Do not demand a twist
+  or open another interview during a review-only request.
 - **Text cannot prove fun.** Anything playable outranks pages of description, and the document's job
   is to answer what a prototype cannot show.

@@ -11,9 +11,6 @@
  * the entity, including a later outline mesh). The face shell is a child
  * entity with its own GltfContainer, so these modifiers never touch it.
  * Animator clips on the same entity are unchanged.
- *
- * Official ghost-recover.glb (BOT_MODEL === 'ghost') is left alone; call
- * sites in botVisual skip this module in that mode.
  */
 import {
   Entity, GltfNodeModifiers, Material, MaterialTransparencyMode,

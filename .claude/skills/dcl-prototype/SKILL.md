@@ -1,26 +1,22 @@
 ---
 name: dcl-prototype
-description: "Explore or test one Decentraland mechanic: make a small SDK7 prototype, run an owner self-test or a registered experiment, and record what it does and does not establish. Use for an early sound, movement or look trial without a finished GDD; for a parked hypothesis, greybox, playtest, arithmetic check, mobile check or verdict. Pairs with dcl-gdd through its shared Hypothesis Log. Exploration needs no invented metric; registered experiments preserve their agreed criterion. Takes a hypothesis ID or resume."
+description: "Explore a Decentraland toy or test a design question: make a small playable SDK7 prototype, run an owner self-test or a registered experiment, and record what it does and does not establish. Use for an early sound, movement or look trial without a finished GDD; for a parked hypothesis, greybox, playtest, arithmetic check, pre-build audience check, mobile check or verdict. Pairs with dcl-gdd through its shared Hypothesis Log. Exploration needs no invented metric; registered experiments preserve their agreed criterion. Takes a hypothesis ID or resume. For playtest surveys and organizing test rounds, use scene-feedback."
 ---
 
-# Game Prototype Assist: The Prototype Axis
+# Game Prototyping in Decentraland
 
-The prototype axis answers **"is it actually fun?"**. The document axis (`dcl-gdd`) answers
-**"what do we promise, and why should it work?"**. They interleave through two files in the scene
-repo: `design/gdd.md` — the document — and `design/hypothesis-log.md` — the generated Hypothesis Log
-index, the interface between the two skills. The log is agent infrastructure; the owner is never
-required to fill it or read it.
+Explore **"what happens when we play it?"** through a playable idea or a focused experiment.
+Make the action tangible and record learning, including inconclusive results; exploration needs
+no invented metric. Share records under `design/` with `dcl-gdd`. A standalone prototype needs
+no GDD; continuing a `dcl-gdd` project preserves and updates its `design/gdd.md`. Registered tests
+use the generated `design/hypothesis-log.md` index, which the owner need not fill or read.
 
-Run one small experiment, or an exploratory try when the owner has not chosen a criterion yet.
-Make the intended action tangible and record what was learned, including an inconclusive result.
-An exploratory build is useful without proving a claim; do not invent a metric to justify it.
-
-You address **the design owner** in one voice, the same as `dcl-gdd` — studio or Creator
-Success team member, no modes.
+You address **the design owner** in one voice, the same as `dcl-gdd`.
 
 The file conventions, statuses, ownership split and verdict format are fixed by the interface
 contract: [../dcl-gdd/references/hypothesis-log.md](../dcl-gdd/references/hypothesis-log.md).
-Read it in phase 0. Never keep a second copy of it, and never diverge from it on your own.
+Install this skill alongside `dcl-gdd` so the shared references resolve. Read the contract
+in phase 0. Never keep a second copy of it, and never diverge from it on your own.
 
 ## Hard rules
 
@@ -30,10 +26,14 @@ Read it in phase 0. Never keep a second copy of it, and never diverge from it on
    and judged unchanged at the end. Moving a threshold after seeing the sessions turns an experiment
    into a story. If a mid-experiment change genuinely invalidates the criterion, that is a return to
    the Brief with a new pre-registration recorded in `## Sessions` — never a silent edit.
-3. **Build the least that could kill it.** Use primitives and placeholders; omit menus, persistence
-   and polished assets unless essential to the claim. Keep the tested action and the feedback
-   needed to perceive it real; a small sound or visual response can be part of the experiment.
-   Everything unrelated is faked.
+3. **Toy first for exploration.** Prefer the smallest connected interaction the owner can play with.
+   One focus can need several mechanics, feedback and a space together. Cut content and polish,
+   not the connections that make the experience meaningful; no full story or win state is required.
+   Choose a narrow trial when it better answers a meaningful design or technical question, or the
+   owner wants it. Check its findings in the intended experience before generalising; an isolated
+   result need not explain the whole game. This is guidance, not an extra gate.
+   For registered experiments, build the least that can answer the claim. Use placeholders for
+   unrelated parts; keep the tested actions and the feedback needed to perceive them real.
    For a Creator Success milestone, apply [funding and scope](../dcl-gdd/references/funding-and-scope.md)
    when sizing the experiment: fixed support for the studio's own game, within its chosen time
    commitment. Simplify or reuse; do not prescribe unpaid work or recommend more funding merely to fit an oversized idea.
@@ -42,10 +42,11 @@ Read it in phase 0. Never keep a second copy of it, and never diverge from it on
    builds normally start on **desktop Explorer via Creator Hub**, then mobile where needed.
    Estimate from the existing setup, dependencies and action being built; do not promise a fixed duration.
    A hypothesis testable by arithmetic must
-   never reach a build untested.
+   never reach a build untested. Whether chosen people understand or act on the promise can be
+   asked before any build: an optional [audience check](references/the-ladder.md#0--before-a-build-audience-check), never a gate.
 5. **Do not narrate the expected feel before a pass.** Say what to do, never what it should feel
    like — a narrated feeling gets found. The full no-hinting session discipline belongs to external
-   testers and lives in the program's `Games/prod-staging/` folder (separate protocol).
+   testers; for Creator Success testing, use the program's external-player protocol when supplied.
 6. **Save meaningful evidence when it appears.** In a registered experiment, write the Brief before building, smoke before
    the human pass, each completed pass with its conditions, and amendments before the next pass;
    save the current state before any pause or stop. Keep debug chatter out of the record.
@@ -66,12 +67,13 @@ existing instance before launching or restarting. Follow [preview lifecycle](ref
 
 ## Phases
 
-The numbered experiment phases below apply to registered tests. Exploration follows its own
-route from phase 0 through stopping or handoff; use shared build guidance without requiring
-Brief/Sessions headings, an H-ID, a verdict or an index for an exploratory note.
+Registered tests follow the numbered phases. Exploration takes its own route from phase 0 to
+stop or handoff, using shared build guidance without Brief/Sessions headings, H-ID, verdict or index.
 
 ### 0 — Orient and pick
 
+Read the shared [working direction](../dcl-gdd/references/hypothesis-log/files.md#working-direction)
+and its saved record before choosing work, including any doc-only boundary.
 Use the established `design/` path in the scene repo; clarify only if unknown. Resume the current
 note or experiment before choosing new work, preserving [next-step ownership](../dcl-gdd/references/hypothesis-log/files.md#shared-working-memory).
 For registered tests, glob `design/*/H*_*.md` and
@@ -100,8 +102,8 @@ the most design if it turns out false. Cheapest first is the ordering key; risk 
 inside a band — not the other way round. See [references/the-ladder.md](references/the-ladder.md).
 
 If nothing is parked, you may create **one** experiment file per invocation under the contract's four
-requirements, and you must say aloud that you did. With no `design/gdd.md` yet, `Source section` reads
-`— (backfill via dcl-gdd)`.
+requirements, and you must say aloud that you did. `Source section` names an existing design
+document or note, or reads `— (standalone)`; a GDD is not required.
 
 Close the phase by naming the pick, its rung and its cost in one sentence, and getting a yes. If the
 owner picks something a cheaper test could kill first, say so once — then do what they chose.
@@ -121,13 +123,13 @@ evidence consistently; different people may experience the action differently.
 ### 2 — Build
 
 Greybox on the rung the brief chose: [references/greybox-build.md](references/greybox-build.md).
-For layout, camera clearance, navigation or spatial feel, read the relevant moves in the
+Greybox geometry goes through the Creator Hub MCP or the scene file; code-spawned geometry only
+as the owner's explicit choice, per the build guidance. For layout, camera clearance, navigation or spatial feel, read the relevant moves in the
 [level-design playbook](references/level-design-playbook.md) before shaping the space.
-SDK7 API comes from the `sdk-skills` set and mechanics from the `sdk7-test-scenes` catalog — never
-from memory. If neither is available and installing fails, say so aloud, build from the official
-SDK7 docs ([capability index](../dcl-gdd/references/research/dcl-capability-links-2026-08.md)), and
-mark that code as built from docs with no verified reference — the fallback replaces the source,
-never the rule.
+Use `sdk-skills` for SDK7 APIs and `sdk7-test-scenes` for mechanics, never memory. If neither is
+available and installation is declined or fails (ask the owner before installing), report that and use official SDK7 docs via the
+[capability index](../dcl-gdd/references/platform/dcl-capability-links.md). Mark the code
+as built from docs with no verified reference.
 
 **Make the selected check observable.** A measured criterion needs its instrument; an owner-only
 pass needs the action and feedback for its kill-check, not instrumentation for a future external test.
@@ -148,8 +150,8 @@ For this early experiment, **the owner self-tests** for a feel verdict. This is 
 convention, not completion of funded V0 or a substitute for its agreed player testing. Fix the instrument between owner passes and log what changed between
 which passes, or the passes stop being comparable. The criterion does not move with them (hard
 rule 2). Stop early when the answer is already unambiguous: a clean kill after two passes is a
-result, not a half-experiment. A separate external-player protocol is
-staged in the program's `Games/prod-staging/` folder.
+result, not a half-experiment. For Creator Success testing, use the program's external-player protocol when supplied;
+it is not required for a standalone experiment.
 
 For a solo-enjoyment claim, run the intended lone-arrival condition rather than a group test or
 mere winability check. Observe the action and its perceivable response; let the tester describe
@@ -186,27 +188,23 @@ Then write back, in this order:
 3. Rename the file `_validated` / `_survived` / `_failed` — the suffix goes terminal at the verdict.
    A **mobile-sensitive** hypothesis closed on desktop keeps its terminal suffix; the index renders
    *… — mobile pending* from `Mobile-sensitive: yes` + `Tested on: desktop` while that is true.
-4. Rewrite the **source section** in `design/gdd.md` to state what is now known, and report what you
-   changed and where. For `survived` the rewrite is scoped exactly to the kill-check — indicative
+4. Update the **existing linked source**, if any, to state what is now known, and report what you
+   changed and where. A standalone test needs no GDD or backfill. For `survived` the rewrite is scoped exactly to the kill-check — indicative
    mood for what held; the unmeasured criterion stays in the section as `[HYPOTHESIS]` with its
    H-link. If the rewrite would *contradict* the design rather than refine it, raise the conflict
    instead.
-5. Regenerate the Hypothesis Log index (`design/hypothesis-log.md`). The `design/gdd.html` render is a gate
-   artifact and not yours.
+5. Regenerate the Hypothesis Log index (`design/hypothesis-log.md`). Any HTML render follows the
+   chosen document workflow; a verdict does not require one.
 
 ### 5 — Hand off
 
-Never end with "keep building". End with the next cheapest experiment against the riskiest open
-hypothesis, named by its ID — or with `dcl-gdd` when the verdict moves the document: a closed
-stage, a section that needs re-interviewing, or a bare-idea experiment waiting to be backfilled.
-
-When you offer the jump to `dcl-gdd`, ask **one more question — which vehicle**: (1) a
-**separate session** the owner opens themselves (*recommended for a full document pass*; emit a
-three-line bootstrap prompt — short because all state lives on disk: working folder + hypothesis
-IDs + doc path/stage + carry-over constraints); (2) **this session** (fine for a single section
-rewrite or while context is light); (3) a **sub-agent** (*not recommended*: the interview is
-interactive — the owner cannot answer questions through a sub-agent; acceptable only for mechanical
-passes such as a harvest with no holes to interview).
+Close with the result, remaining uncertainty and the owner's chosen next step; distinguish your
+suggestion from their choice. That may be another experiment, an adjustment, a pause or design work
+with `dcl-gdd`. No next H-ID or document is compulsory. For a useful transition in either direction,
+follow the shared [handoff](../dcl-gdd/references/hypothesis-log/handoff.md): carry the working
+direction and existing record, reuse the established chat/path, and ask about the vehicle only
+if unclear or changing. A full document pass may suit a separate session; interactive work
+stays with the owner.
 
 ## Escape hatches
 
@@ -224,9 +222,6 @@ resume). Honour all four immediately without arguing.
 
 ## Files
 
-The interface contract lives in the other skill and is linked, never copied:
-[../dcl-gdd/references/hypothesis-log.md](../dcl-gdd/references/hypothesis-log.md). The
-knowledge references are loaded per phase: [experiment-brief](references/experiment-brief.md) ·
-[the-ladder](references/the-ladder.md) · [greybox-build](references/greybox-build.md). The
-external-tester playtest protocol (RITE) is separate and lives in the program's
-`Games/prod-staging/` folder, not in this skill.
+Shared contract: [../dcl-gdd/references/hypothesis-log.md](../dcl-gdd/references/hypothesis-log.md).
+Load by phase: [experiment-brief](references/experiment-brief.md) ·
+[the-ladder](references/the-ladder.md) · [greybox-build](references/greybox-build.md).

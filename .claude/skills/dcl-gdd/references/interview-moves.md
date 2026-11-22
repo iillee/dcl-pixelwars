@@ -1,6 +1,7 @@
 # Interview Moves
 
-The section map says *what* to ask. This says *how*, how to unstick an answer that will not come,
+The proposal section map says *what* to ask for that route. This file also serves general
+design: choose moves for the owner's question, without a section schedule. It says *how* to unstick an answer that will not come,
 when to offer a break, and what an AI-written GDD smells like. Stress-testing the finished draft is
 the **Pressure tests** block of [review-lens.md](review-lens.md).
 
@@ -30,9 +31,8 @@ the **Pressure tests** block of [review-lens.md](review-lens.md).
    what it could mean in play. Warmth comes from noticing their idea, not routine praise.
    A brief scene, example or question can help; do not attach a lesson to every turn.
 
-**Presentation:** after saving, give the meaningful change in a line and the next useful question;
-expand when the owner asks or a real trade-off needs it. Do not narrate file operations or teach
-the section before every question. Show the question before the options, including constraints that change
+**Presentation:** follow Hard rule 7 in [the skill](../SKILL.md#hard-rules) for reply depth and
+save summaries. Show the question before the options, including constraints that change
 what agreeing means. Use numbered options with neutral labels and real consequences. Do not pick
 a creative winner through a badge, preselection or unsolicited "I prefer" / "this works best".
 If the owner wants your view, give it with reasons; otherwise leave room for theirs. Keep free-form answers,
@@ -45,11 +45,10 @@ When requesting sign-off on several existing decisions, show the actual list and
 chat first. A file link, item count or instruction to read a file is not the list. One answer can
 confirm that visible group; later additions remain yours until separately agreed.
 
-**How many options.** Two when they are written-out drafts (three lines each); three or four when
-each is a one-liner with its consequence. **Never more than four** — the ceiling governs *choices*.
-A requested *menu* of examples may run longer; do not turn it into a required selection exercise. *"More options"* widens to four; *"more
-examples"* answers with a menu of named patterns from the section's reference or the filled example —
-an example, never a set to choose from.
+**How many options.** For a local question, use two short written-out drafts or three or four
+one-line choices with consequences. A requested menu may be broader. The
+[whole-game brief route](whole-game-briefs.md) has its own suggested breadth; it is material to
+choose, mix or change, not a requirement to pick one numbered answer. Match an explicit count.
 
 **Park more than they pick.** A menu's rejects are byproducts, not waste. When a line is too strong
 to lose but wrong for the field on the table — a twist that reads as a tagline, a phrase that wants
@@ -57,6 +56,44 @@ to be a banner, a trailer beat, an audio motif — **offer to park it** in `desi
 suggested surface (*"tagline for a banner or trailer, not the player promise"*). Offer it yourself:
 an owner will not think to save a line they just declined, and hook-work throws these off
 constantly. One answer enters the document; several keepers can leave the step.
+
+## Grow the design in one GDD
+
+Help shape the game, not just collect answers. Start with a brief view of the intended experience
+and known constraints; develop it into a concept connecting player actions, responses and choices,
+then make the first playable scope concrete. These are growing layers of `design/gdd.md`, not
+separate documents or approval gates. Use supplied material to fill what is already known.
+Choose the next question for a meaningful design gap. Explain a relevant consequence, offer
+concrete alternatives or apply a design lens when it helps the owner move forward; distinguish
+your suggestions from their decisions. Save the developing connections as well as the answers.
+Follow an already developed concept or a request to try a build without restarting this sequence.
+
+## Explore different directions
+
+When the attraction is clear but the concept is open, offer questions or short whole-game
+proposals to react to. The owner can choose, combine and change them. Also use this move for
+requests to stand out, familiar options that feel stuck, or research that opens a new direction.
+Read [whole-game briefs](whole-game-briefs.md) for the creative directions, designer focuses,
+short briefs and HTML, and how an author's mix becomes one connected first playable.
+An explicit request for a menu needs no second invitation. Respect a decline, a ready design
+or a request to build. This is creative help, not a novelty gate. For a review-only request,
+report possibilities at the requested depth without starting an interview or rewriting files.
+
+## Keep the first playable in view
+
+When the owner wants something playable, draw a short picture from their story and existing
+material: what the player does, how the game responds, and the space and interactions needed
+together for this first version. Separate that version from later possibilities. Use the relevant
+part of `design/gdd.md`. Ask only for a missing
+detail that changes the current try; this is a working sketch, not a new questionnaire or a
+requirement to finish the design or prove it fun before building.
+
+Explain an unfamiliar platform term briefly in relation to that try; use
+[platform-fit.md](platform-fit.md) for factual claims. If repeated decorative tuning stops
+teaching anything or serving the intended experience, name the trade-off and offer a temporary
+version or a focused technical trial. Light, sound and atmosphere belong in the first version
+when the action or intended feeling depends on them. Preserve an explicitly chosen narrow
+atmosphere or paper trial; do not expand it into a whole game or demand research first.
 
 ## Delegation without a completion treadmill
 
@@ -116,8 +153,9 @@ All of these replace *specifying* with *reacting*, which is far easier.
 
 ## Breaks at the summits
 
-A phase-2 posture rule (SKILL.md keeps the stub); the scripts are owner-calibrated — say them as
-written.
+A conversation move in either direction: offer a brief pause after substantial work when useful,
+in the owner's words. The section boundaries below belong to the Creator Success route;
+general design uses meaningful boundaries in the actual conversation.
 
 **Offer a break at the summits** — Core Loop (§3), Why Players Come Back (§4), Social by Design
 (§5), and the 4 Week Plan (§9) once the cuts get real. Two tiers, one line each:

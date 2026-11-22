@@ -56,8 +56,8 @@ if (botShowsGlider(BOT_ANIM_JUMP) || botShowsGlider(BOT_ANIM_DOUBLE) || botShows
 }
 
 const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
-if (!visualSrc.includes('ghost-recover.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
-  fail('ghosts should play jump, double, and glide clips from ghost-recover.glb')
+if (!visualSrc.includes('bot-custom-flat.glb') || !visualSrc.includes('Animator.playSingleAnimation') || !visualSrc.includes('ghostClipForPose')) {
+  fail('bots should play jump, double, and glide clips from bot-custom-flat.glb')
 }
 if (!visualSrc.includes("function visualKind(): VisualKind") || !visualSrc.includes("return 'ghost'") || visualSrc.includes('botRecoveryEnabled(roundFormat) ?')) {
   fail('the bot visual should always be the ghost, not gated on the current format')

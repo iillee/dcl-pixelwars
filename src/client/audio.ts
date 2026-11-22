@@ -28,7 +28,7 @@ const UPGRADE_READY_SRC = 'assets/sounds/pickup2.wav'
 /** Fantasy UI hover tick. */
 const UPGRADE_HOVER_SRC = 'assets/sounds/Fantasy_UI_44.wav'
 /** Fantasy UI confirm when a card is picked. */
-const UPGRADE_SELECT_SRC = 'assets/sounds/Fantasy_UI_51.wav'
+const UPGRADE_SELECT_SRC = 'assets/sounds/Fantasy_UI_51.mp3'
 /** Cartoon sting when a ghost bot takes a hit. */
 const GHOST_HIT_SRC = 'assets/sounds/ghost-hit.mp3'
 /** flagtag's swoosh.mp3 — dash wind whoosh. */

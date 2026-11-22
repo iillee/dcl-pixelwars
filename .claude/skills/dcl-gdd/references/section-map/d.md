@@ -9,6 +9,10 @@ from inside is **a plus, not a requirement** (two outside games are fine — hob
 don't know the DCL catalog yet, and an invented Decentraland comparable is worse than an omitted
 one).
 
+This limit selects the proposal's comparisons, not the wider development library in
+`design/references.md`. Preserve that library; [prior art](../prior-art.md) serves development
+and does not require the owner to have personally played every researched game.
+
 - **Ask:** Which game outside Decentraland is closest to what you want — and, if the owner knows the
   catalog, which Decentraland experience? For each: what worked, and — the useful half — what did
   **not** fit this audience or context? Then, with the twist in hand, what you will do differently —

@@ -1,7 +1,9 @@
 # Social by Design
 
-Loaded at Step G (§5). The template's definition is the frame: *social gaming is play whose value
-depends on other people being present, recognizable, and consequential.* The program requirement:
+Use when other people matter to the intended experience, including audience, traces or
+collaboration. A general design may be solo or deliberately require a group.
+For Creator Success, load at Step G (§5). The template's definition is the frame: *social gaming
+is play whose value depends on other people being present, recognizable, and consequential.* Its requirement:
 **Fun alone, better with friends — designed, not hoped for.** Hoped-for social is solo play with
 strangers in the room. The ladder is **present → recognizable → consequential**: place the design
 honestly and support the step it claims. Co-presence can pass; "these particular people" is the
@@ -42,7 +44,8 @@ creator or host observes something → responds next time. Fill each link with s
 
 ## Solo means worthwhile, not merely possible
 
-With nobody else present, describe one satisfying moment: action, readable response, a meaningful
+When solo enjoyment is promised, or for the proposal's Fun alone requirement, describe one
+satisfying moment with nobody else present: action, readable response, a meaningful
 choice or discovery, and a reason to continue. Mood and feedback belong to that experience too.
 Being able to survive, grind, wait or invite someone is not evidence that it is interesting alone.
 High difficulty can be deliberate; judge the intended experience, not ease or theoretical winability.
@@ -51,21 +54,23 @@ The disappearance test above measures social dependence; it does not establish s
 Traces from earlier visitors can help, but say what a first visitor gets before such traces exist.
 Then name what another player improves. Do not solve the gap by silently adding bots, a separate
 minigame or more systems. Preserve the author's idea: discuss the mismatch and smallest candidate
-change, or leave it explicitly unresolved. A social-only concept gets no automatic exemption.
+change, or leave it explicitly unresolved. In the proposal, a social-only concept gets no automatic
+exemption; in general design, an intentionally group-only game can specify its group and arrival conditions.
 Solo enjoyment stays a hypothesis until a relevant playtest; a written scene is not validation.
 
-## Quiet hours are the baseline
+## Quiet hours and arrival conditions
 
-Most scenes sit at **0–3 concurrent players**. Test claims there before event peaks:
-*"What does your world look like at 4 a.m. with 2 players?"* Silence is a failing answer; a design
-that only works at peak mostly does not work. Other avatars can be present regardless of the
+For an open DCL scene, low concurrency is a useful design scenario; the proposal checks
+**0–3 concurrent players** before event peaks: *"What does your world look like at 4 a.m. with
+2 players?"* For a scheduled or group-only general design, use its actual arrival conditions and
+ask what happens outside them. Other avatars can be present regardless of the
 intended design, so always answer what a bystander can **see** and **break**.
 
 Ways a second player makes play better:
 
 - **Group-scaled rewards:** the same act pays more together; two is already a group.
-- **Multiplayer-only moments:** two-lever door, carry, pass, vote. Use sparingly; a critical-path
-  dependency blocks quiet-hour play.
+- **Multiplayer-only moments:** two-lever door, carry, pass, vote. A critical-path dependency
+  needs the intended group; for the proposal, preserve worthwhile quiet-hour play.
 - **Competition:** a comparable score makes a race or board possible; storage, ranking,
   synchronization and abuse handling still need a scoped implementation estimate.
 - **An audience:** something worth watching, with a performer who knows they are watched — the most
@@ -74,7 +79,10 @@ Ways a second player makes play better:
 Ways a lone arrival finds interaction by design, not luck:
 
 - **Async traces:** boards, ghost runs, builds, messages or marks left by earlier players.
-  They make a 1-CCU world feel inhabited at near-zero ongoing cost, but must sit on the loop's path.
+  They can make a lone visit feel inhabited when they sit on the loop's path. Use
+  [platform-fit](platform-fit.md) to identify how traces persist and reach later visitors.
+  Existing storage or examples may help; integration, hosting and moderation depend on
+  what players leave and who can see it. Do not assume near-zero ongoing work.
 - **Spawn near activity**, facing it, instead of at the parcel edge.
 - **Concentrate the space:** three people in a small area beat twelve in an empty-looking one.
 - **Schedule a peak window:** Friday 20:00 UTC gathers scattered visits and supplies a §4 event hook.
@@ -83,14 +91,16 @@ Ways a lone arrival finds interaction by design, not luck:
 
 ## Player counts and joining
 
-The quiet-hours row carries four load-bearing values: what a solo player can do, the **social
-threshold**, ideal group, and **target player count**. Week 2 tests at the threshold; §6 measures
+For a social design, useful values are what a solo player can do, the **social
+threshold**, ideal group, and **target player count**. In the proposal's quiet-hours row,
+Week 2 tests at the threshold; §6 measures
 performance at the stated target load (program baseline: up to 20); §8 explains how the first group
 reaches the threshold. Keep target capacity separate from tested capacity. A measured count names its source and test
 conditions; no test means "not tested", not a copied target. A multiplayer session does not by
 itself prove FPS at that population, and a future FPS test does not erase an earlier playtest.
 
-A newcomer joins meaningfully within **30 seconds**, without voice or a shared language:
+The proposal targets meaningful joining within **30 seconds**, without voice or a shared language.
+For general design, explore joining time and communication against the intended group:
 whom to join, what role to take, how to coordinate. A late arrival contributes immediately;
 a departure or griefer must not break everyone else's round — a design where a leaver breaks the
 round fails at Decentraland's real concurrency, not just at the review.
@@ -103,9 +113,8 @@ round fails at Decentraland's real concurrency, not just at the review.
 - **Bring-a-friend:** what in the game makes an invitation useful? A second person needed for a
   desired act, "both earn double", something unlocked together, or an immediate newcomer gift.
   A share button alone is not the answer.
-- **Memorable moment:** name a specific screenshot or clip, then the systems it needs. If no moment
-  can be named, the experience produces no stories, and stories are the only distribution channel a
-  small experience has.
+- **Memorable moment:** if sharing matters, imagine a specific screenshot or clip and the systems
+  it needs. This can help discover what players might want to show others.
 
 Social ties support late retention: friend count predicts longevity better than achievement at high
 engagement, and ungrouped players abandon more. But **churn is contagious**: a four-person crew can

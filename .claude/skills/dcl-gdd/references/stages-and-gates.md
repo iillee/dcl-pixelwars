@@ -1,8 +1,13 @@
 # Stages, Gates and the Spiral
 
+The stages, gates and automatic render offers below belong to the Creator Success proposal
+route. General design uses the shared **Focused pilot review** when its triggers apply and
+may use **The `.html` render** for an explicit presentation request; it does not inherit the
+stage table, funding questions or scheduled offers.
+
 ## Two axes, one spiral
 
-The two axes (SKILL.md intro) form a **spiral**, not a sequence and not a loop. One turn: the
+The proposal's two axes (creator-success.md) form a **spiral**, not a sequence and not a loop. One turn: the
 document poses falsifiable IF/THEN hypotheses → the cheapest
 experiment that could kill them runs → verdicts flow back into the log and rewrite the sections that
 made the claims → the document leaps a gate and the prototype graduates a rung.
@@ -12,6 +17,8 @@ Never spend a vertical slice answering a one-pager question. A hypothesis testab
 survive untested to the slice.
 
 ## The three document stages
+
+These are proposal stages, not a required path for every game-design session.
 
 One `design/gdd.md` grows through all three — you never start a second file. What changes is how much
 of the template is real. A readable concept can be rendered before its experimental gate.
@@ -82,6 +89,9 @@ The Hypothesis Log index also rebuilds at section closes and verdict write-backs
 
 ### Focused pilot review
 
+Shared across routes. Proposal stage gates and submission are additional triggers only within
+that route; ordinary general design uses the meaningful-work triggers below.
+
 After your own source checks, ask the owner to read the saved, completed or changed portion:
 at each stage gate, before a substantial planned break after meaningful work, after a major
 concept/scope rewrite, and at submission. Merge coinciding triggers. Not after every question,
@@ -115,33 +125,41 @@ this supplements your checks and does not resolve known model errors or guarante
 
 ### The `.html` render
 
-**Offer when the concept is showable**, before initiating detailed Retention/Social, including
+For general design, create a render on explicit request, using the actual source document's
+structure. Use only pages supported by the chosen experience; return and social pages are
+optional. Across both routes, refresh an existing HTML on request, at an agreed milestone, or
+once after all source edits at the requested concluding finalization, unless the owner opts out.
+An ordinary pause or edit does not trigger a refresh. Scheduled offers below belong to the proposal.
+
+**In the proposal, offer when the concept is showable**, before initiating detailed Retention/Social, including
 in doc-only. Use the existing promise, typical solo episode, loop, world/visual direction and
 useful comparables; missing details stay open. This is not a completeness check or proof of fun.
 On an explicit request, an earlier partial sketch is fine. Create `design/gdd.html` after consent;
 declining does not delay the interview or a test.
 
-After a meaningful expansion (such as Retention or Social) or a major concept change, offer an
-update at that section's close, not after every edit. Render on request, at an agreed milestone, or at final submission sign-off;
-automatic updates also batch there unless the owner explicitly asks otherwise. Minor source
-edits do not trigger HTML reads, edits or repeated offers. Preserve the owner's update preference.
+In the proposal, after a meaningful expansion (such as Retention or Social) or a major concept
+change, offer an update at that section's close. Minor source edits do not trigger HTML reads,
+edits or repeated offers. Preserve the owner's update preference.
 Record the offer/answer briefly in `design/decisions.md` so Resume does not repeat it; after a
 decline, offer again only when the concept materially changes or another stage's written set is
 ready. A request not to offer again persists. No separate tracking file is needed.
 
 `.md` is the source of truth. `.html` is a **disposable, free-form creative render** of it —
 self-contained, inline CSS, no JS frameworks, no build step, no pipeline: you simply rewrite the
-file. Start from [deck-shell.html](../assets/deck-shell.html) for navigation only; replace its
+file. Load nothing from the network (no remote scripts, fonts, images or embeds), and HTML-escape
+any text quoted from sources or the owner. Start from [deck-shell.html](../assets/deck-shell.html) for navigation only; replace its
 sample content and style for this game. Keep only pages supported by the source. Grow it as a
 small pitch deck inside this one HTML, with distinct slide-like pages:
-1. **Core:** player fantasy, core mechanic (input, response and choice), core loop and intended
-   game feel. Show a typical solo moment: why the first action should feel good, and what makes
-   the tenth repetition interesting — mastery, variation, expression or another author-grounded
-   reason. Use a lively visual sequence or diagram to make the experience imaginable, not a
+1. **Core:** player fantasy, core mechanic (input, response and choice), the shape of play and intended
+   game feel. Show a typical moment for the intended solo or group experience: why the first action
+   should feel good and, when repetition matters, what keeps it interesting — mastery, variation,
+   expression or another author-grounded reason. The proposal also shows its worthwhile solo
+   moment. Use a lively visual sequence or diagram to make the experience imaginable, not a
    checklist of these labels. Keep the key untested question visible; intended fun is not proof.
    Interest within repeated play belongs here; reasons to return on another day belong on page 2.
 2. **Retention:** add when developed — why another visit is worthwhile and what remains to test.
-3. **Social:** add when developed — how friends improve the already worthwhile solo experience.
+3. **Social:** add when developed — how other people affect the intended play. For the proposal,
+   show how friends improve the already worthwhile solo experience.
 Keep the core page independently readable; later systems belong on their own pages, not squeezed
 into page 1. At the next agreed render, update core too if the concept changed.
 On screen, show one page at a time with ← / → buttons, accessible Previous/Next page labels,
@@ -164,17 +182,16 @@ motion. No external service, image generation or bespoke asset is required.
 HTML communicates atmosphere and intended feel; it cannot prove how playing feels. Never
 delay a small playable test to polish the page.
 
-Stamp each render: *"Snapshot from design/gdd.md · v<n> · <date>; Markdown may contain newer
+Stamp each render with its actual source path: *"Snapshot from <source path> · v<n> · <date>; Markdown may contain newer
 changes."* HTML stays a dated presentation until its next agreed update. Do not edit it merely
 to mark each source change stale. Never use HTML as a factual source or call an older snapshot
 current; return to the `.md` and its evidence. When an update is agreed, sync all affected content.
 Preserve whether a claim is intended, untested, reported or measured. A shorter render may omit
 detail, never the uncertainty that changes its meaning; a proposed test may remain inconclusive.
 
-**It is never the submission** — say so the first time you produce one (*"this one is for looking at
-and sharing; `design/gdd.md` is what goes in"*). At final submission sign-off, rebuild an existing
-HTML once after all Markdown edits unless the owner explicitly opts out. An ordinary pause or
-draft does not trigger this. If no HTML exists, offer it once. A refusal never blocks submission.
+**For the proposal, it is never the submission** — say so the first time you produce one (*"this one is for looking at
+and sharing; `design/gdd.md` is what goes in"*). Final submission sign-off uses the shared
+finalization refresh rule above. If no HTML exists, offer it once. A refusal never blocks submission.
 
 ## Where the program's rounds sit
 

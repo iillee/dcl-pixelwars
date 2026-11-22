@@ -1,8 +1,8 @@
 # Agent notes
 
-You are working on **Pixelwars**, branch `territory-economy` (Decentraland SDK 7.32.1).
+You are working on **Pixelwars**, branch `main` (Decentraland SDK 7.32.1).
 
-Read [`docs/HANDOFF-TERRITORY-ECONOMY.md`](docs/HANDOFF-TERRITORY-ECONOMY.md) first. It is the current-state handoff: upgrades, card popup, badge, HUD, lobby, bots, water, and workflow.
+The current design is [`design/gdd.md`](design/gdd.md). Older plans and handoffs are in [`archive/`](archive/README.md). They are not the game.
 
 Short rules:
 
@@ -13,4 +13,6 @@ Short rules:
 - No client-side latency masking. Flagtag is read-only when porting from it.
 - Check UI at portrait mobile, 16:9, and ultrawide.
 
-`CLAUDE.md` and `.cursor/rules/rules.md` only point at SDK context folders; they are not the game handoff.
+The live match is Classic Pixelwars: four teams, lobby, Dash (E), Burst (F), upgrades, a falling star, bots, and the sea. Old mode names still sit in an unused lobby list. They do not start a round.
+
+`CLAUDE.md` and `.cursor/rules/rules.md` only point at SDK context folders; they are not the game design.

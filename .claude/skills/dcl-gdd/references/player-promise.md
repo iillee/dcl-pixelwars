@@ -2,9 +2,11 @@
 
 Loaded at Step C (§1). The seed at Step A aims it; the optional familiar comparison closes at Step D.
 
-**Job:** in at most 25 words, convey a role or situation, main action, goal and meaningful tension
+**Job:** convey a role or situation, main action, goal and meaningful tension
 or distinction. The sentence shape is free. Start with the owner's imagery and intent, not a
 ready-made concept. If their line already works, keep it.
+The 25-word cap belongs to the Creator Success template; general design uses the detail needed
+to make the idea understandable.
 
 ## Help the owner find the line
 
@@ -13,6 +15,10 @@ idea is hard to picture, try a familiar activity or genre as an anchor. A named 
 but explain this game's difference rather than promising a better version of someone else's.
 Check that any comparison implies the right activity: a marketplace suggests trading, not just
 browsing objects. If the promise is clear without a comparison, omit the optional anchor.
+
+If the owner wants a stronger distinction but the play itself is still open, use
+[concept exploration](interview-moves.md#explore-different-directions) before polishing the line.
+Express the chosen experience; a more dramatic tagline does not create a design difference.
 
 When useful, offer one or two short drafts using only agreed material. The fictional lines below
 illustrate ways to frame a promise; they are examples written for this reference, not real pitches,
@@ -64,4 +70,4 @@ One agreed promise enters the document; offer to park useful alternatives in `de
 Earlier coaching drew on Chris Zukowski's [anchor discussion](https://howtomarketagame.com/2019/12/23/know-your-games-anchor/),
 [Rebekah Saltsman's pitching interview](https://www.gamedeveloper.com/business/pitching-your-game-with-rebekah-saltsman)
 and public pitch examples. These are background references, not endorsement or evidence that the
-fictional examples above succeed. The project's provenance record tracks the removed excerpts.
+fictional examples above succeed.

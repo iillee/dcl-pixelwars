@@ -10,7 +10,7 @@ Could they miss the event while making a reasonable choice? Try the same small e
 another approach. A composed image does not establish the experience of moving through it.
 
 Restricted control can express vulnerability; it can also make someone fight the interface.
-Bycer favours approachable movement, while Taylor and other critics discuss restriction as an
+Some designers favour approachable movement; others treat restriction as an
 expressive tool. Keep that choice open. Ask which limitation the player understands and what
 decision it creates. Try removing one restriction; easier control does not automatically weaken
 horror. Check load-bearing camera, movement and sensory effects through [platform-fit](platform-fit.md).
@@ -37,7 +37,8 @@ Clear warnings and uncertain sounds serve different aims; neither is inherently 
 sound texture or silence as well as melody. Do not import a prescribed number of layers, pitch,
 volume or a claim that music overpowers every other effect. Try the intended listening conditions;
 painful loudness and missing information are not successful scares. For a practical sound or light
-probe, reuse [atmosphere trials](../../dcl-prototype/references/atmosphere-trials.md).
+probe, use the optional `dcl-prototype` atmosphere trials or [hand off](hypothesis-log/handoff.md)
+the cue sequence, listening conditions and question to the chosen builder.
 
 ## Let recovery mean something
 
@@ -61,14 +62,3 @@ specific moment without supplying the emotion. Silence can mean concentration, s
 continuous commentary can change play. Note first exposure versus replay, company and listening
 conditions. Retesting can examine familiarity, but cannot recreate a first surprise. A reaction
 video, a gaze trace or a body signal alone does not distinguish enjoyable fear from frustration.
-
-## Reading behind these prompts
-
-Original coaching synthesis, not reproduced exercises or a validated fear test:
-Joshua Bycer, *Game Design Deep Dive: Horror* (2022), §§4.3–4.4, 9.6;
-Bernard Perron, *The World of Scary Video Games* (2018), chs.7–9, and *Silent Hill: The Terror Engine*
-(2012), pp.81–85, 112–119, 128;
-Simon Niedenthal and Laurie N. Taylor in Perron (ed.), *Horror Video Games* (2009);
-Isabella van Elferen, “Sonic Descents,” in *The Dark Side of Game Play* (2015), pp.226–241;
-Tracy Fullerton, *Game Design Workshop*, 5th ed. (2024), chs.7–9;
-Jesse Schell, *The Art of Game Design*, 3rd ed. (2019), pp.484–494.

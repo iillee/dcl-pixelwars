@@ -1,6 +1,23 @@
 # Document-only sessions
 
-Loaded from SKILL.md the moment the mode is set. It binds **your initiative only** (hard rule 8).
+Loaded when the owner chooses document-only, in either working direction. It binds **your
+initiative only** (hard rule 8). Save and reuse the preference through
+[working direction](hypothesis-log/files.md#working-direction).
+
+Continue writing or brainstorming without initiating a build, a mobile pass or a pause waiting
+for playable evidence. Imagined episodes and open arithmetic remain available; distinguish them
+from observations. Save testable claims using the usual records. The owner can still ask to build:
+honour that request and record whether it is a one-off or a standing change, clarifying only if
+needed for the next action. Otherwise retain the document-only preference on return.
+
+For general design, finish the requested work with honest open questions and its saved next step.
+A presentation is optional, on request. A document's completeness does not trigger a prototype
+invitation or a submission audit.
+
+## Creator Success document-only
+
+The remaining stage and submission rules apply only to the chosen
+[proposal route](creator-success.md); phase numbers refer to that file.
 
 **Default:** continue the document without initiating a build/test detour, a mobile QR pass, or a
 pause pending playable evidence — hard rule 6, the empty-disk offer in phase 0 (open the interview
@@ -26,9 +43,7 @@ doc-only is not permission to settle deferred design choices or require their im
 
 Two exceptions:
 
-- **The owner asks to build** — *"let's build this one"*: honour it immediately, as a one-off; the
-  controls card is unchanged. When they return from the build, ask once: *"continue document-only,
-  or with prototyping from here?"*
+- **The owner asks to build** — honour the scope under the shared preference above.
 - **The current stage's section set is written** — no `[OPEN]` left (`TBD:`, `[HYPOTHESIS]` and
   `[agent-decided]` may remain) and only untested hypotheses left: say so and offer — once — the
   switch to `dcl-prototype`. The set, not sections 0–9, or the exception never fires. **If the owner

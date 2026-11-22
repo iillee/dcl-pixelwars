@@ -58,11 +58,3 @@ For a proposed incentive, trace the behaviour it rewards, including an unintende
 that behaviour serve the intended experience? More actions or longer sessions could mean confusion
 or obligation. Ask whether players understand the mechanism and can stop when they wish. Use this
 when relevant; do not add a mandatory motivation matrix, score or business dashboard to the GDD.
-
-## Background
-
-Original prompts informed by wiki readings of Lazzaro, *Four Keys* (2004, pp.2–7); Hunicke,
-LeBlanc and Zubek, *MDA* (2004, pp.2–5); Schell, *The Art of Game Design*, third edition (pp.133–137,
-298–309, 347–351); and Chou, *Actionable Gamification* (chapters 6, 10, 13–17).
-Their vocabularies ask different questions. Observational work and practitioner advice are not
-universal recipes. Fictional examples and suggested comparisons above are our own.

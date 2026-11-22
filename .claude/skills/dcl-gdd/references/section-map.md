@@ -1,5 +1,9 @@
 # The GDD Section Map
 
+This section order and template contract belong to the [Creator Success route](creator-success.md).
+General design can use the optional core-lens exploration below without adopting these stages,
+fields or the Retention/Social sequence.
+
 The interview order, which is **not** the document order. Sections are ordered by dependency: each
 answer constrains the ones below it. Apply hard rule 4's write-before-reply sequence after
 each answer that changes content, including a partial seed. Keep template order on disk while asking in this order.

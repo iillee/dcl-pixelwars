@@ -69,11 +69,3 @@ For a useful comparison, keep unrelated conditions similar, note practice/order 
 record both behaviour and the player's account. Reversing the order can help expose a practice
 effect, but a small self-test remains limited. Reuse a relevant hypothesis rather than creating
 one for every idea. An unresolved result can remain open without blocking the document.
-
-## Intellectual background
-
-This is an experimental, original coaching synthesis informed by wiki readings of Raph Koster,
-*A Theory of Fun* (2010 reprint, chapters 3–5); Jesse Schell, *The Art of Game Design*, third edition
-(pp. 179–182, 220–223); and Hunicke, LeBlanc and Zubek, *MDA* (2004, pp. 2–5). Their accounts guide
-questions, not a universal diagnosis. The examples and proposed comparisons here are our own;
-source locators come from draft wiki notes, not a fresh verification of those books.

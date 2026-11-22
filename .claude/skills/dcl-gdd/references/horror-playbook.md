@@ -58,17 +58,19 @@ the cues carrying it: perhaps actual sound, light contrast, obscured sightlines 
 proceed. Add only what that question needs; a finished setting is not a prerequisite.
 An incomplete scene's weak atmosphere does not settle the concept.
 [Grip 2017](https://frictionalgames.com/2017-04-navigating-the-space-of-game-design/)
-For a concrete build–play–adjust probe, use the prototype's
-[atmosphere trials](../../dcl-prototype/references/atmosphere-trials.md); no handoff is required
-just to discuss a trial.
+For a concrete build–play–adjust probe, the optional `dcl-prototype` skill provides atmosphere
+trials. Otherwise [hand off](hypothesis-log/handoff.md) the question, essential cues and playable
+scope to the chosen builder. No handoff is required just to discuss a trial.
 
 Fictional probe: a player brings a borrowed key to a locked boathouse while a bell sounds from
 inside. Test one uncertain moment, such as recognising where the sound comes from or deciding
 whether to open the door. This is an example to adapt, not a proposed game for every creator.
 
-Use [platform-fit](platform-fit.md) for load-bearing controls and effects. A dark enclosure,
-handheld light, camera change or hidden avatar needs current SDK evidence and a client check;
-none guarantees atmosphere. If the intended experience depends on company, a solo pass cannot
+Use [platform-fit](platform-fit.md) for load-bearing controls and effects. For a dark enclosure,
+handheld light, camera change or hidden avatar, reuse applicable documented capabilities and
+resolve the remaining dependency. Check the intended effect in the target client before
+calling its feel proven; documentation alone does not establish atmosphere. If the intended
+experience depends on company, a solo pass cannot
 settle that question. Do not force multiplayer into an intentionally solo prototype.
 
 After play, ask neutrally: “What did you expect there?” or “What made you turn back?” Keep the

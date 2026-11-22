@@ -1,7 +1,15 @@
-# Finalization — preparing the document for submission, and after
+# Finalization — finishing writing or preparing a submission
 
-Loaded from phase 3 of SKILL.md when the owner is actually submitting, and on a finalized
-document for the closing move.
+For general design, finish the requested writing, check changed claims against their sources,
+preserve open choices and uncertainty, and link the saved document. Apply the shared
+[Focused pilot review](stages-and-gates.md#focused-pilot-review) when due; the owner may postpone it.
+Stop there unless they ask to continue. Finishing does not select the proposal route, require
+template cleanup or IP declarations, or start a submission sign-off.
+
+## Creator Success submission
+
+The remaining procedure is loaded from the proposal route's phase 3 when the owner is actually
+submitting, and on a finalized proposal for its closing move.
 
 A request for a draft is not a request for submission sign-off. Do not initiate this walk merely
 because the owner asked you to finish writing or stop asking questions. For explicit submission,

@@ -21,7 +21,7 @@ export function botShowsGlider(an: number): boolean {
 
 export type GhostClip = 'idle' | 'jump' | 'double' | 'glide' | 'fall' | 'slide'
 
-/** Clip baked into ghost-recover.glb for this pose code. */
+/** Clip baked into the custom bot body for this pose code. */
 export function ghostClipForPose(an: number): GhostClip {
   if (an === BOT_ANIM_JUMP) return 'jump'
   if (an === BOT_ANIM_DOUBLE) return 'double'

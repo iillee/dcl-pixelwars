@@ -2,7 +2,7 @@
 
 Use when the action is understandable but its sensation, atmosphere or feedback is uncertain.
 Pick the relevant comparison, not a checklist. “Feel” here includes control, sensory response and
-the author's intended mood; it is broader than Steve Swink's particular definition of game feel.
+the author's intended mood.
 This is optional experiment design, not a requirement to build or instrument before submission.
 
 ## Turn an adjective into a moment
@@ -58,6 +58,8 @@ little response. Try a short solo route: what invites attention or manipulation 
 space or responsive surface may help a spatial problem; it does not manufacture social connection.
 For each added sound, motion, light or effect, ask what it communicates and whether it obscures
 another cue. Deliberate contrast can be expressive; realism and uniformity are not universal goals.
+If strobes, lightning or damage flashes carry the mood, plan from the start a way to turn them
+off or tone them down, and keep flashing to at most 3 per second (photosensitivity).
 
 ## Measure only what answers the question
 
@@ -65,7 +67,7 @@ Separate observations from impressions. If timing matters, a recording showing i
 first visible response can provide an estimate; note frame rate, counting uncertainty and the
 build/device. A recording of the screen alone cannot establish physical input-to-display delay.
 For networked play, distinguish immediate local acknowledgment from authoritative outcome.
-Do not turn a book's timing figures into universal limits or DCL guarantees.
+Do not turn rule-of-thumb timing figures into universal limits or DCL guarantees.
 
 For spatial or repeated actions, useful observations might be overshoots per attempt, time spent
 waiting, or which approach a player tries next. “Felt calmer than the previous version” is a
@@ -80,11 +82,3 @@ For a handoff to a prototype, carry the uncertain moment, supported control path
 preserving, comparison and what its outcome would leave unknown. Use the existing hypothesis
 contract, not a new mandatory form. A solo test comes first when testing solo appeal; another
 player must not conceal an empty-world problem.
-
-## Intellectual background
-
-Original practical synthesis informed by draft wiki readings of Steve Swink, *Game Feel* (2009):
-pp. 24, 45, 83–85, 122–126, 147, 155–170 and 269; and Jesse Schell, *The Art of Game Design*, third
-edition, pp. 53–55. We use these as prompts for observation, not validated causal rules. No timing
-threshold, book diagram or catalogue is reproduced. The example and DCL adaptation are ours;
-source locators have not been independently rechecked against the books in this iteration.

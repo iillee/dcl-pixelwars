@@ -1,8 +1,9 @@
 # Mobile-First
 
-Load at Step H (§6). **Touch is the primary design target, not a port.** Design the input and the
-small-screen UI first, then scale up to desktop: a mechanic that only works with a mouse is a design
-failure here, not a porting task for later. The clients are different programs — Unity on desktop,
+Use when mobile is a target or the owner wants to explore it. In the Creator Success proposal,
+load at Step H (§6): **touch is the primary design target, not a port**. For general design, use
+the chosen devices and inputs; a desktop-only game has no missing touch requirement.
+When designing for mobile, work on input and small-screen UI early. The clients are different programs — Unity on desktop,
 Godot on mobile — so a desktop capability proves nothing about mobile. Apply the
 [playbook's fact-checking rules](playbook.md).
 
@@ -13,14 +14,16 @@ Decentraland requirements.
 ## Desktop evidence, mobile design
 
 Mobile parity is **not a blocker**: desktop may sign off a design intended to work on mobile.
-Every verdict carries `tested on`. A **mobile-sensitive** hypothesis (for a hobbyist loop, most input
-and performance claims) can close terminal on desktop but renders *… — mobile pending* until the
-Creator Hub QR pass, offered at core-loop stage close. See [parking.md](hypothesis-log/parking.md) and
+Every verdict carries `tested on`. For a promised mobile experience, a **mobile-sensitive**
+hypothesis (often input or performance) can close its desktop question while the mobile part
+stays pending. The proposal offers a Creator Hub QR pass at core-loop stage close; general
+design offers a mobile test when it addresses the current question. See [parking.md](hypothesis-log/parking.md) and
 [stage gate](stages-and-gates.md).
 
-## Every verb gets a touch row
+## Mapping verbs to touch
 
-One row per §3 verb, including the rarest; a missing row is an unfinished design and fails P5.
+For the proposal, use one row per §3 verb, including the rarest; a missing row is unfinished and
+fails P5. For general mobile design, use the mapping when it exposes an uncertain input or response.
 
 | Fights touch | Design toward |
 |---|---|
@@ -37,9 +40,11 @@ does."* A choice put on the table, never a verdict.
 
 ## Performance and dependencies
 
-Target **60 fps on recommended desktop hardware** and **30 fps on a *named* mobile device and
-client**, both at §5's **target player count** (programme baseline: up to 20 players). If §5's count is
+The proposal targets **60 fps on recommended desktop hardware** and **30 fps on a *named* mobile device and
+client**, both at §5's **target player count** (programme baseline: up to 20 players), per the
+template's §6 *Performance* line ([s6.md](../assets/gdd-template/s6.md)). If §5's count is
 `TBD:`, the load for the performance target is too.
+For general design, choose performance goals appropriate to the intended devices, load and experience.
 
 Distinguish the device available for a test, the design's chosen target device and any official
 hardware baseline. Owning or borrowing a phone establishes only test availability; a performance
@@ -56,18 +61,24 @@ physics, particle and post effects, the number of simultaneously animated entiti
 this design will actually hit — a scene with 200 physics objects needs a different plan from one
 with 4K textures.
 
-**Never quote numeric scene budgets from memory.** Triangle, entity, texture and file-size limits are
-not in this reference on purpose — look them up in the current SDK7 docs before a number enters the
-document, and cite the source. A wrong budget in a GDD is worse than a `TBD:` with a plan to check.
+**Never quote numeric scene budgets from memory.** For triangle, entity, texture or file-size
+limits, use source-backed evidence applicable to the target SDK, client and deployment, and
+cite it. Apply [platform-fit's reuse rule](platform-fit.md#reuse-the-platform-answer-before-researching-it-again):
+reuse an inspected limit within its scope; check the affected official docs when that scope
+has changed or is missing. A wrong budget is worse than a `TBD:` with a focused check.
 
 For a desktop-only dependency the question is not "does it work" but **"can the feature switch on
 later without a redesign?"** — name the feature, the fallback that ships now, and the seam where the
-real version drops in. Check the
+real version drops in. Reuse feature evidence for the intended client and release. For a changed
+client, an active rollout or a missing or conflicting answer, check the affected entry in the
 [Desktop vs Mobile Feature Gap tracker](https://github.com/decentraland/godot-explorer/issues/2402)
 (the link the template hands the owner in §6) and the
-[official missing-features inventory](https://docs.decentraland.org/creator/build-for-mobile/mobile-client/missing-features)
-rather than guessing what is missing this month. If a source will not open, record the check as
-`TBD:`, never a guess. A core loop that depends on a desktop-only feature with no fallback is not
+[official missing-features inventory](https://docs.decentraland.org/creator/build-for-mobile/mobile-client/missing-features).
+For mechanics that fail silently on mobile (Draco GLBs, thin colliders, `TweenSequence`), check
+`{baseDir}/../sdk-scenes/references/mobile-parity.md`.
+Do not infer a rollout's availability from an older release. If a needed source will not open,
+keep any still-applicable evidence and mark the unresolved claim `TBD:`; do not guess.
+A core loop that depends on a desktop-only feature with no fallback is not
 mobile-ready in any useful sense, whatever the section says.
 
 ## Small-screen UI

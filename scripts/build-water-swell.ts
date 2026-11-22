@@ -19,13 +19,13 @@ import { deflateSync, crc32 } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import { SCENE_SIZE } from '../src/maze/generator'
 import { LOOK, SURFACE, SWELL_48_AMPLITUDE_M, SWELL_48_PERIOD_S, WATER, WATER_FOG } from '../src/shared/waterLook'
-import { SWELL_NORM, SWELL_NORM_48, SWELL_PARTS, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
+import { SWELL_NORM_48, SWELL_PARTS_48, swellPartY } from '../src/shared/swell'
 
-let CLIP = WATER.swellClipS
-let AMP = WATER.swellAmplitudeM
-let TRAINS = SWELL_PARTS
+let CLIP = SWELL_48_PERIOD_S
+let AMP = SWELL_48_AMPLITUDE_M
+let TRAINS = SWELL_PARTS_48
 let TARGETS = TRAINS.length * 2
-let NORM = SWELL_NORM
+let NORM = SWELL_NORM_48
 const SEA_HALF = (SCENE_SIZE - WATER.edgeInsetM * 2) / 2
 const FLAT_OVERLAP = 4
 
@@ -983,26 +983,17 @@ let mobVerts = 0
 function emit(mesh: Built, rel: string): void {
   const bytes = writeGlb(mesh, new URL('../' + rel, import.meta.url))
   const s = report(mesh, bytes)
-  if (rel === WATER.swellNearSrc || rel === WATER.swellMidSrc || rel === WATER.swellFarSrc || rel === WATER.swell48NearSrc || rel === WATER.swell48MidSrc || rel === WATER.swell48FarSrc) {
+  if (rel === WATER.swell48NearSrc || rel === WATER.swell48MidSrc || rel === WATER.swell48FarSrc) {
     deskTris += s.tris
     deskVerts += s.verts
   }
   if (rel === WATER.flatSrc) deskTris += s.tris
-  if (rel === WATER.swellLiteSrc || rel === WATER.swell48LiteSrc) {
+  if (rel === WATER.swell48LiteSrc) {
     mobTris += s.tris
     mobVerts += s.verts
   }
   if (rel === WATER.flatLiteSrc) mobTris += s.tris
 }
-const swells110 = makeSwells()
-emit(swells110.near, WATER.swellNearSrc)
-emit(swells110.mid, WATER.swellMidSrc)
-emit(swells110.far, WATER.swellFarSrc)
-emit(swells110.lite, WATER.swellLiteSrc)
-TRAINS = SWELL_PARTS_48
-AMP = SWELL_48_AMPLITUDE_M
-CLIP = SWELL_48_PERIOD_S
-NORM = SWELL_NORM_48
 const swells48 = makeSwells()
 emit(swells48.near, WATER.swell48NearSrc)
 emit(swells48.mid, WATER.swell48MidSrc)

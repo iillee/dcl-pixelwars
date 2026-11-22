@@ -56,14 +56,3 @@ A label such as horror, parody or folklore cannot guarantee a shared interpretat
 intended tone understandable and provide a way out when a scene asks for disturbing participation.
 A critical or uncomfortable response can be relevant evidence without becoming an automatic
 instruction to remove the theme.
-
-## Reading behind these lenses
-
-Original coaching synthesis, not a reproduction of the books' examples or frameworks:
-Bernard Perron, *Silent Hill: The Terror Engine* (2012), and *The World of Scary Video Games* (2018);
-Andrei Nae, *Immersion, Narrative, and Gender Crisis in Survival Horror Video Games* (2022);
-Kirkland, Ekman & Lankoski, and other contributors in Perron (ed.), *Horror Video Games* (2009);
-Chapman & Linderoth and Brown in Mortensen, Linderoth & Brown (eds.), *The Dark Side of Game Play*
-(2015); Joshua Bycer, *Game Design Deep Dive: Horror* (2022). These mostly interpret games, rather
-than establishing measured effects across players. Tan's emotion distinction is encountered through
-Perron; Hawreliak's agreement between modes through Nae; Goffman's framing through the anthology.

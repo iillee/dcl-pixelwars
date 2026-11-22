@@ -1,6 +1,8 @@
 # The progress line — canon
 
-Loaded by SKILL.md before the first showing (phase-0 handshake); hard-rule numbers refer to SKILL.md.
+Loaded by [creator-success.md](creator-success.md) before the proposal's first progress showing
+(phase-0 handshake); phase numbers refer to that file, hard-rule numbers to SKILL.md. General design uses its saved focus
+and next step instead of this template progress bar.
 
 One line, never a table: kept current by the same write that lands each answer, re-derived from the
 document at session entry and on resume (hard rule 4) — against the template's section list, quoted

@@ -1,6 +1,8 @@
 # Scope and Evidence
 
-Load at Step J (§9 the 4 Week Plan) and for §0's evidence rules (Step K) — the reality-check act.
+Use the evidence and IP guidance when relevant in either direction. The numbered sections,
+template caps, funding schedule and programme success criteria apply only to Creator Success.
+That route loads this at Step J (§9 the 4 Week Plan) and for §0's evidence rules (Step K).
 Two review areas live here (the four-week build, evidence quality) plus the v1-scope preflight (P6).
 The template has no separate team, success-criteria or deliverables sections; what survives of them
 is folded in below.
@@ -21,8 +23,9 @@ state what it actually supports.
 | Playable core loop in SDK7 | **great** |
 | Small vertical slice live in a World | **excellent** |
 
-One link outweighs pages of description. With no build, ask what is the cheapest thing that could
-be linked by next week — and park its test: that thing is a Hypothesis Log row.
+For a proposal, one relevant playable link outweighs pages of description. With no build,
+consider a useful small try within the owner's time. A connected toy needs no invented hypothesis;
+a focused test earns its record under the parking contract. Respect document-only and deferrals.
 
 **Match each claim to its evidence.** Record who observed what, on which build/client and under
 which conditions when known. An owner report is a report, not agent-verified measurement; your own
@@ -31,7 +34,8 @@ Keep observations in a short attributed evidence note beside the relevant sectio
 existing test record. Design fields still describe the action, intended outcome or player
 anticipation; do not put sample counts or test caveats into those cells. Preserve a useful small
 sample as a limited report, even when it cannot support the dashboard metric or a causal claim.
-Do not add an evidence column or fill prototype-owned Sessions/Verdict on the owner's behalf.
+Keep proposal table shapes; general notes may use a suitable evidence layout. Do not fill
+prototype-owned Sessions/Verdict on the owner's behalf.
 A before/after preference supports the reported improvement, not an isolated cause. If several
 things changed, practice or recall may also matter; do not declare one change the proven fix.
 Keep the useful observation and the causal question separate. No automatic A/B study is needed;
@@ -92,6 +96,9 @@ If the estimate exceeds capacity, simplify the promise with the owner; do not as
 
 ## Success criteria are the programme's, not the owner's
 
+Creator Success only. General work uses the owner's intended experience and agreed test
+questions; it need not adopt return targets, a dashboard or any formal success metric.
+
 Use the template's submit self-check and the programme's *What Makes a Great Experience* criteria:
 5/10, voluntary continuation, the return targets and the Discoverability Bar. Return definitions,
 numbers and sample limits live in one place — [Retention — Benchmarks](retention.md#benchmarks);
@@ -108,7 +115,7 @@ identifier), studio branding, and used characters, logos, music, art, models and
 A named inspiration is not by itself copied content; distinguish comparison from actual use.
 Raise a concrete concern when it appears, without declaring an uncertain case a proven violation.
 
-Before submission preparation ends, if no current confirmation exists, ask one short question:
+Before Creator Success submission preparation ends, if no current confirmation exists, ask one short question:
 "Have you checked the game, scene and World names and the materials you use for IP and Content
 Policy issues — anything needing permission or still uncertain?" Reuse an explicit earlier answer;
 do not repeat for formatting edits. An owner may leave the check TBD without another question loop.
@@ -131,7 +138,9 @@ the search was not done, say `not searched`; model familiarity is not a search. 
 name screening, not a trademark/legal clearance. A collision is a concern to investigate, not
 proof of infringement; no hits do not prove rights. Asset ownership does not check a title.
 
-Save a short, scoped status in the **Public experience title** cell, restoring it if absent:
+For the proposal, save a short, scoped status in the **Public experience title** cell, restoring
+it if absent. For general design, save it beside the affected title/material or in the existing
+evidence note; no template cell or declaration ceremony is required:
 `IP & Content Policy: owner declaration: <reported scope or TBD>; name screening: <not searched /
 concern found / no obvious match in sources checked, date>; unresolved: <specific gaps or none
 reported>`. Use these scoped findings, not `clear`, `passed`, `safe` or `IP Check Passed`, even

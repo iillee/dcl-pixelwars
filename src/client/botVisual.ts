@@ -1,11 +1,9 @@
 /**
  * botVisual.ts — client-side bot renderer.
  *
- * Every live mode draws a GltfContainer bot. Flip BOT_MODEL between
- * 'custom' (Luke's Tripo mesh with a small arm rig; arms raise only in
- * the glide clip) and 'ghost' (the original Aug 2026 mesh in
- * ghost-recover.glb, with official DCL locomotion clips). The glider
- * pops out only while gliding. Classic, Base Charge, and Paint Limit get
+ * Every live mode draws a GltfContainer bot: the custom mesh
+ * (bot-custom-flat.glb). The glider pops out only while gliding.
+ * Classic, Base Charge, and Paint Limit get
  * a team light and, for the custom mesh, a runtime body tint from the
  * team palette (GltfNodeModifiers on BotBody, Arm_L, and Arm_R). Balloon
  * Battle is FFA so the body uses the balloon swatch (blue) and the light
@@ -90,9 +88,6 @@ const BLUE_CLOTHES = [
 /** Avatar origin is the feet, same as a player. Hit tests subtract this. Ghost float is applied only when drawing. */
 export const FLOAT_HEIGHT = 0
 
-/** Flip to `'ghost'` to restore the official DCL ghost mesh. */
-export const BOT_MODEL: 'ghost' | 'custom' = 'custom'
-
 type BotModelProfile = {
   src: string
   scale: number
@@ -107,31 +102,17 @@ type BotModelProfile = {
   clipDurS: Record<GhostClip, number>
 }
 
-const BOT_PROFILES: Record<'ghost' | 'custom', BotModelProfile> = {
-  ghost: {
-    src: 'assets/models/bots/ghost-recover.glb',
-    scale: 1.2,
-    gliderLocalY: -0.25,
-    lightLocalY: 0,
-    knotLocalY: 1.68 / 1.2,
-    knotLocalZ: 0.2 / 1.2,
-    clipDurS: { idle: 2, jump: 0.633, double: 0.633, glide: 0.167, fall: 0.667, slide: 0.667 },
-  },
-  custom: {
-    // Flattened underside. Flip to 'assets/models/bots/bot-custom.glb' to compare the original bumps.
-    src: 'assets/models/bots/bot-custom-flat.glb',
-    scale: 1.2,
-    gliderLocalY: -0.25,
-    lightLocalY: 1.35,
-    knotLocalY: 1.48,
-    knotLocalZ: 0.42,
-    clipDurS: { idle: 2, jump: 0.667, double: 0.667, glide: 0.333, fall: 0.667, slide: 0.667 },
-  },
+const profile: BotModelProfile = {
+  src: 'assets/models/bots/bot-custom-flat.glb',
+  scale: 1.2,
+  gliderLocalY: -0.25,
+  lightLocalY: 1.35,
+  knotLocalY: 1.48,
+  knotLocalZ: 0.42,
+  clipDurS: { idle: 2, jump: 0.667, double: 0.667, glide: 0.333, fall: 0.667, slide: 0.667 },
 }
-
-const profile = BOT_PROFILES[BOT_MODEL]
 const GLIDER_SRC = 'assets/models/glider.glb'
-/** Seconds. Official ghost clips match scripts/build-ghost-anims.py; custom clips are 24 fps. */
+/** Seconds. Custom clips are 24 fps. */
 const GHOST_CLIP_LOOP: Record<GhostClip, boolean> = {
   idle: true, jump: false, double: false, glide: true, fall: true, slide: true,
 }
@@ -280,14 +261,12 @@ function lightColor(team: number): Color3 {
   return team === Team.Red ? RED_LIGHT : BLUE_LIGHT
 }
 
-/** One custom body GLB for every team. Color is applied at runtime. The
- *  official ghost mesh is unchanged. */
+/** One custom body GLB for every team. Color is applied at runtime. */
 function ghostModelSrc(): string {
   return profile.src
 }
 
 function applyCustomBotBody(entity: Entity, team: number): void {
-  if (BOT_MODEL !== 'custom') return
   applyBotBodyForTeam(entity, team)
 }
 

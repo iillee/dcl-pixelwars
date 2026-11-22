@@ -210,7 +210,7 @@
 
 *Name the planned test device/client, or leave them TBD with a plan to confirm. A device available to you is not automatically an official hardware baseline, and a target is not a test result.*
 
-**Desktop-only dependencies.** *Do you rely on any feature not yet available on mobile? (Check the [Desktop vs Mobile Feature Gap tracker](https://github.com/decentraland/godot-explorer/issues/2402).) If yes: how can it switch on later without a redesign?*
+**Desktop-only dependencies.** *Do you rely on any feature not yet available on mobile? (Reuse applicable evidence for the target client; check an unresolved or changed dependency in the [Desktop vs Mobile Feature Gap tracker](https://github.com/decentraland/godot-explorer/issues/2402).) If yes: how can it switch on later without a redesign?*
 
 [Your answer]
 
@@ -288,7 +288,7 @@
 
 ## Before you submit — self-check, delete before submitting
 
-*The criteria and thresholds below are the program's — you do not invent a measurement framework, and the [dashboard](https://decentraland.zone/creators-data/dashboard.html) already tracks return for you. Do not plan around custom in-game tracking.*
+*The criteria and thresholds below are the program's — you do not invent a measurement framework, and the program dashboard already tracks return for you. Do not plan around custom in-game tracking.*
 
 | Criterion | Decision rule |
 |---|---|
@@ -344,4 +344,4 @@
 | **power gap** | When long-time players are so far ahead that a new player cannot compete or contribute. |
 | **retention** | How well your experience brings players back after their first visit. |
 | **D1** | The share of new players who come back the next day. |
-| **dashboard D7** | First-week return: the share of new players who come back at least once during days 1–7, as shown on the [program dashboard](https://decentraland.zone/creators-data/dashboard.html). |
+| **dashboard D7** | First-week return: the share of new players who come back at least once during days 1–7, as shown on the program dashboard. |

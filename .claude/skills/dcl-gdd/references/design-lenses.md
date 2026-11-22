@@ -1,6 +1,6 @@
 # Design lenses — questions, alternatives, experiments
 
-Use before a difficult core-mechanic decision or during the cross-lens audit. These are working
+Use during design conversation as well as before a difficult decision or during an audit. These are working
 questions for this skill, not universal laws or a scoring system. Pick what helps the author's
 idea; do not turn the list into an interview script or add document fields.
 
@@ -44,10 +44,11 @@ keep actual return behaviour separate from a stated intention to return.
 
 ## Agency, company and feel: what changes the experience?
 
-At Steps E (§2) and G (§5), ask whether the player can understand a consequence, make a meaningful
+When exploring the first encounter or social play, ask whether the player can understand a consequence, make a meaningful
 choice, or express the intended fantasy. When others are present, what can players notice or do
-for each other? When nobody else is there, what remains enjoyable? Preserve “fun alone, better
-with friends”; do not require every psychological need to be met in every session.
+for each other? When lone arrival is part of the intended experience, what remains enjoyable?
+An intentional group-only game need not acquire a solo mode. Do not require every psychological
+need to be met in every session.
 
 If players hesitate or disengage, possible explanations include unclear feedback, awkward
 controls, unwanted pressure or simply a different preference. Do not infer a missing social
@@ -57,17 +58,8 @@ A leaderboard, favour or cosmetic is an option whose effect needs checking, not 
 
 ## Cross-lens audit
 
-During phase 3, inspect the draft through the questions above. Report only consequential gaps:
+During a relevant audit, inspect the draft through the questions above. Report only consequential gaps:
 what is claimed about enjoyment or return, what else could explain it, and what small experiment
 could help decide? Reuse existing hypotheses; do not create a row for every alternative thought.
 An unresolved claim may remain a `TBD:` with a way to learn, or an explicit accepted risk.
 This pass advises the author; it does not add a submission gate.
-
-## Background and provenance
-
-Earlier versions drew on Raph Koster's *A Theory of Fun for Game Design*, Yu-kai Chou's
-*Actionable Gamification* (Octalysis), and Jamie Madigan's *Getting Gamers*, through an adaptation
-in `decentraland/dcl-army-of-darkness`. These are intellectual references, not authorship claims
-for the questions above. This revision replaces the book-by-book digest with applied questions;
-it is not a verified summary of those books or a declaration of rights clearance. Source and
-permission review remains open in the project's G28 provenance record.

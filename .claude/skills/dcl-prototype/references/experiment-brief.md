@@ -6,7 +6,7 @@ can discover a useful question; do not retroactively call it a pre-registered te
 
 ## Exploratory try
 
-For "let me try the sound/movement/look first", agree only the small action or impression to explore
+For an early toy or a sound/movement/look trial, agree only the playable interaction or impression to explore
 and the build boundary, reusing the owner's request. No metric, numeric threshold or H-file is required.
 Save the intent and build location in an existing dated note under `design/`; create one only if
 needed and resume from it. No fixed headings or Hypothesis Log index is needed for this note.
@@ -39,14 +39,14 @@ The Brief pre-registers **two lines**, judged unchanged at the end:
 
 - **`Criterion (external):`** the agreed observable criterion and its failure condition. This is
   the claim's full test. In an owner-only experiment it usually stays unmeasured — measuring it takes players the owner
-  does not have — and waits in the source section as `[HYPOTHESIS]`.
+  does not have — and stays open in the experiment and any linked source as `[HYPOTHESIS]`.
 - **`Kill-check (owner-testable):`** the part of the claim the owner can kill alone, by feel. The
   owner's impression is evidence about this pass, not about every player's response or the cause.
   A kill-check that holds writes `survived`; one that fails can write a failure of that check only,
   under the shared verdict limits.
 
-The separate external-player protocol is staged in the program's
-`Games/prod-staging/` folder.
+For Creator Success testing, use the program's separate external-player protocol when supplied;
+it is not bundled here or required for a standalone experiment.
 
 > **If you cannot describe what failure looks like, it is still an assumption, not a hypothesis.**
 
@@ -70,7 +70,8 @@ Do not rewrite their hypothesis or invent a proxy to make your experiment easier
 2. **Would a different result change what we do?** If both outcomes lead to the same next step, this
    is not the experiment worth running today.
 3. **Is this the cheapest rung that could answer it?** [the-ladder.md](the-ladder.md). Arithmetic
-   beats a build; a build beats a build on mobile.
+   beats a build; a build beats a build on mobile. A question about whether chosen people
+   understand or act on the promise may need [no build](the-ladder.md#0--before-a-build-audience-check).
 4. **Does the criterion actually follow from the IF/THEN?** A criterion that could pass while the
    hypothesis is false measures the wrong thing. Check units, population and time window too;
    several input variables may feed one metric. For calculation-only tests apply
@@ -83,7 +84,7 @@ Do not rewrite their hypothesis or invent a proxy to make your experiment easier
 
 - **Criterion (external):** <agreed observable outcome; units/threshold where applicable>. Failure: <one sentence>.
 - **Kill-check (owner-testable):** <the claim the owner can kill alone, by feel — one sentence>.
-- **Rung:** paper/arithmetic / desktop Explorer / mobile — because <what this method can settle>
+- **Rung:** paper/arithmetic / audience check / desktop Explorer / mobile — because <what this method can settle>
 - **Who tests:** skill via MCP (mechanical smoke only) / the creator by hand (any *feel* verdict) /
   both — *recommended: both, MCP smoke first* ([the-ladder.md](the-ladder.md))
 - **Who launches:** the creator via Creator Hub / the skill via the preview server — asked, never

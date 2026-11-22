@@ -168,7 +168,7 @@ if (!(lum(WATER_COLOR) < lum(RIM_COLOR) && lum(HAZE_COLOR) + 0.02 >= lum(RIM_COL
   console.error('✗ haze should match the horizon; near water should be a little deeper')
   process.exit(1)
 }
-const meshes = [WATER.swellNearSrc, WATER.swellMidSrc, WATER.swellFarSrc, WATER.swellLiteSrc, WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near'), SURFACE.albedoSrc, LOOK.softNormalSrc]
+const meshes = [WATER.swell48NearSrc, WATER.swell48MidSrc, WATER.swell48FarSrc, WATER.swell48LiteSrc, WATER.flatSrc, WATER.flatLiteSrc, WATER_FOG.hazeSrc, swellMesh('near'), SURFACE.albedoSrc, LOOK.softNormalSrc]
 for (const f of meshes) {
   if (!existsSync(new URL('../' + f, import.meta.url))) {
     console.error(`✗ missing ${f}`)

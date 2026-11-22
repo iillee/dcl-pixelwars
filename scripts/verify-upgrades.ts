@@ -270,7 +270,7 @@ check('a pending pick shows a red bouncing badge as soon as it unlocks', overlay
 check('the ready pill stays gold but no longer pulses', !overlaySrc.includes('pillPulseScale') && !overlaySrc.includes('PILL_PULSE') && overlaySrc.includes('readyFill') && overlaySrc.includes('openUpgradeCards'))
 
 const audioSrc = readFileSync(new URL('../src/client/audio.ts', import.meta.url), 'utf8')
-check('hover uses Fantasy_UI_44 and select uses Fantasy_UI_51', audioSrc.includes("assets/sounds/Fantasy_UI_44.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/Fantasy_UI_51.wav"))
+check('hover uses Fantasy_UI_44 and select uses Fantasy_UI_51', audioSrc.includes("assets/sounds/Fantasy_UI_44.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/Fantasy_UI_51.mp3"))
 
 
 // The HUD pill must show the same number that unlocks upgrades (charge),
