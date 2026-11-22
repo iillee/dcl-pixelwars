@@ -947,7 +947,7 @@ export const uiMenu = () => (
       const clusterW = dropW > 0 ? dropW : topClusterW()
       const total = rows.length * (LB_ROW_H + 3)
       const view = rows.length === 0 ? 60 : (mob ? total : Math.min(total, Math.max(LB_ROW_H * 3, h * 0.85 - LB_HEAD_H)))
-      const helpH = 48 + 5 * 44 + 8 + 14 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2
+      const helpH = 48 + 4 * 44 + 8 + 14 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2
       const panelH = help ? helpH : view + 48 + 24 + 8 + 14 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2
       const top = -panelH + (LB_REST_TOP + panelH) * motion.p
       return (
@@ -975,7 +975,7 @@ export const uiMenu = () => (
               uiBackground={{ color: PANEL_LIGHT }}>
             {/* Header */}
             <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Label value={help ? '? HOW TO PLAY' : '★ TOP WINS'} fontSize={28} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 48 }} />
+              <Label value={help ? 'HOW TO PLAY' : '★ LEADERBOARD'} fontSize={28} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 48 }} />
               <UiEntity
                 uiTransform={{ width: 32, height: 32, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
                 onMouseDown={() => closeDrop(true)}
@@ -985,7 +985,7 @@ export const uiMenu = () => (
             </UiEntity>
             {help ? (
               <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', alignItems: 'stretch' }}>
-                {['Stand on a color to pick your team.', 'Paint territory with Dash and Burst.', 'The gold pill opens upgrades. Each buff shows 1–3.', 'Nametag stars are total strength.', 'A sole winner gets the win.'].map(line => (
+                {['1. Stand on a platform to choose a team.', '2. Claim territory by walking around the level.', '3. Use Dash (E) and Burst (F) to defend your territory.', '4. The team with the most territory at round end wins!'].map(line => (
                   <Label value={line} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="wrap" uiTransform={{ width: '100%', height: 40, margin: { top: 4 } }} />
                 ))}
               </UiEntity>

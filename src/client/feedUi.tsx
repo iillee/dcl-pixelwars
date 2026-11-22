@@ -19,7 +19,9 @@ function tint(team: number): Color4 {
 }
 
 function textW(text: string, font: number): number {
-  return Math.ceil(text.length * font * 0.62) + 4
+  // Bold caps run wider than the regular 0.62 estimate. A short box lets
+  // YELLOW and GREEN paint over the gap before the next word.
+  return Math.ceil(text.length * font * 0.72) + 2
 }
 
 export function FeedToasts() {
@@ -28,18 +30,20 @@ export function FeedToasts() {
   if (!rows.length) return null
   const font = isMobile() ? 13 : 15
   const h = font + 14
+  const gap = Math.max(6, Math.round(font * 0.45))
   return (
     <UiEntity uiTransform={{ margin: { top: 8 }, flexDirection: 'column', alignItems: 'center', pointerFilter: 'none' }}>
       {rows.map(row => {
-        const mid = row.kind === 1 ? ' TAKES THE LEAD' : " KO'D "
+        const mid = row.kind === 1 ? 'TAKES THE LEAD' : "KO'D"
         const aW = textW(row.a, font)
         const midW = textW(mid, font)
         const bW = row.kind === 2 ? textW(row.b, font) : 0
+        const gaps = row.kind === 2 ? gap * 2 : gap
         return (
           <UiEntity
             key={`ui_feed_${row.id}`}
             uiTransform={{
-              width: aW + midW + bW + 24,
+              width: aW + midW + bW + gaps + 24,
               height: h,
               margin: { top: 4 },
               padding: { left: 12, right: 12 },
@@ -51,9 +55,9 @@ export function FeedToasts() {
             uiBackground={{ color: CHIP }}
           >
             <Label value={`<b>${row.a}</b>`} fontSize={font} font="sans-serif" color={tint(row.team)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: aW, height: h }} />
-            <Label value={`<b>${mid}</b>`} fontSize={font} font="sans-serif" color={WHITE} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: midW, height: h }} />
+            <Label value={`<b>${mid}</b>`} fontSize={font} font="sans-serif" color={WHITE} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: midW, height: h, margin: { left: gap } }} />
             {row.kind === 2
-              ? <Label value={`<b>${row.b}</b>`} fontSize={font} font="sans-serif" color={tint(row.teamB)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: bW, height: h }} />
+              ? <Label value={`<b>${row.b}</b>`} fontSize={font} font="sans-serif" color={tint(row.teamB)} textAlign="middle-left" textWrap="nowrap" uiTransform={{ width: bW, height: h, margin: { left: gap } }} />
               : null}
           </UiEntity>
         )
