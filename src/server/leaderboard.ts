@@ -1,9 +1,9 @@
 /**
- * leaderboard.ts — server-side top-painters leaderboard.
+ * leaderboard.ts — server-side wins leaderboard.
  *
- * Accumulates lifetime cells-painted counts per userId, persists to
- * Storage on round boundaries, and publishes the top-N to a synced
- * component (LeaderboardState) that clients read for the popup UI.
+ * Accumulates lifetime round wins per userId (paint cells stay on the
+ * row for the paint credit path), persists to Storage on round
+ * boundaries, and publishes the top 10 by wins to LeaderboardState.
  *
  * Design choices (vs flagtag's leaderboard.ts, which we lightly
  * referenced):
@@ -26,6 +26,7 @@ export interface LeaderboardEntry {
   userId: string
   name: string
   cellsPainted: number
+  wins: number
 }
 
 // Lowercased userId → entry. Lowercase avoids duplicate rows when the
@@ -33,7 +34,7 @@ export interface LeaderboardEntry {
 const entries = new Map<string, LeaderboardEntry>()
 
 const STORAGE_KEY = 'leaderboard-v1'
-const TOP_N = 20  // synced payload size cap — keep the broadcast small
+const TOP_N = 10
 
 /** Bots (`bot:<id>`) are live/round scoreboard only. Never store or publish them. */
 function isBotId(userId: string): boolean {
@@ -55,12 +56,14 @@ export async function loadFromStorage(): Promise<void> {
     if (!Array.isArray(parsed)) throw new Error('not an array')
     entries.clear()
     for (const e of parsed) {
-      if (typeof e?.userId !== 'string' || typeof e?.cellsPainted !== 'number') continue
+      if (typeof e?.userId !== 'string') continue
+      if (typeof e?.cellsPainted !== 'number' && typeof e?.wins !== 'number') continue
       if (isBotId(e.userId)) continue
       entries.set(e.userId.toLowerCase(), {
         userId: e.userId.toLowerCase(),
         name: typeof e.name === 'string' ? e.name : e.userId.slice(0, 8),
-        cellsPainted: Math.max(0, Math.floor(e.cellsPainted)),
+        cellsPainted: typeof e.cellsPainted === 'number' ? Math.max(0, Math.floor(e.cellsPainted)) : 0,
+        wins: typeof e.wins === 'number' ? Math.max(0, Math.floor(e.wins)) : 0,
       })
     }
     console.log(`[Leaderboard] loaded ${entries.size} entries from storage`)
@@ -102,6 +105,7 @@ export function incrementPaint(userId: string, count: number): void {
       userId: key,
       name: shortAddress(key),
       cellsPainted: count,
+      wins: 0,
     })
   }
 }
@@ -122,8 +126,17 @@ export function updateName(userId: string, name: string): void {
       e.name = trimmed
     }
   } else {
-    entries.set(key, { userId: key, name: trimmed, cellsPainted: 0 })
+    entries.set(key, { userId: key, name: trimmed, cellsPainted: 0, wins: 0 })
   }
+}
+
+/** One round win. Bots never get a row. A missing name falls back to a short address. */
+export function recordWin(userId: string): void {
+  if (!userId || isBotId(userId)) return
+  const key = userId.toLowerCase()
+  const e = entries.get(key)
+  if (e) e.wins += 1
+  else entries.set(key, { userId: key, name: shortAddress(key), cellsPainted: 0, wins: 1 })
 }
 
 // ─── Queries ────────────────────────────────────────────────────────
@@ -134,11 +147,11 @@ export function getName(userId: string): string | null {
   return e && e.name && !e.name.startsWith('0x') && !e.name.includes('…') ? e.name : null
 }
 
-/** Top-N entries sorted by cellsPainted desc. Used for publish + on-demand replies. */
+/** Top players who have at least one win, highest first. */
 export function getTopN(n: number = TOP_N): LeaderboardEntry[] {
   return [...entries.values()]
-    .filter(e => !isBotId(e.userId))
-    .sort((a, b) => b.cellsPainted - a.cellsPainted)
+    .filter(e => !isBotId(e.userId) && e.wins > 0)
+    .sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
     .slice(0, n)
 }
 

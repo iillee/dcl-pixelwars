@@ -20,8 +20,11 @@ export type UpgradeKind = typeof UPGRADE_KINDS[number]
 
 export type UpgradeState = {
   charge: number
+  /** Paint-threshold picks already taken. Star pickups do not increment this. */
   earned: number
   pending: boolean
+  /** Unspent upgrade picks from star pickups. These stack on top of paint unlocks. */
+  bonus: number
   speed: number
   paint: number
   haste: number
@@ -45,7 +48,7 @@ export function upgradeKindFromId(id: number): UpgradeKind | null {
 }
 
 export function emptyUpgrade(): UpgradeState {
-  return { charge: 0, earned: 0, pending: false, speed: 0, paint: 0, haste: 0 }
+  return { charge: 0, earned: 0, pending: false, bonus: 0, speed: 0, paint: 0, haste: 0 }
 }
 
 /** Neutral +1, enemy +2, friendly 0. `prevTeam` 0 is unpainted. */
@@ -70,10 +73,25 @@ export function unlockedUpgradeCount(charge: number): number {
   return Math.min(n, UPGRADE_MAX)
 }
 
-/** How many picks are waiting. 0 when nothing is pending. */
+/** Paint unlocks not yet picked. */
+export function chargeWaiting(state: UpgradeState): number {
+  return Math.max(0, unlockedUpgradeCount(state.charge) - state.earned)
+}
+
+/** How many picks are waiting: unspent paint unlocks plus star bonuses. */
 export function pendingUpgradeCount(state: UpgradeState): number {
-  if (!state.pending) return 0
-  return Math.max(1, unlockedUpgradeCount(state.charge) - state.earned)
+  return chargeWaiting(state) + Math.max(0, state.bonus)
+}
+
+function upgradeRoom(state: UpgradeState): number {
+  const held = state.speed + state.paint + state.haste
+  return Math.max(0, UPGRADE_MAX - held - pendingUpgradeCount(state))
+}
+
+/** One extra card offer from a star. Does not change paint charge or spend a future threshold. */
+export function grantUpgradeBonus(state: UpgradeState): UpgradeState {
+  if (offeredUpgradeKinds(state).length === 0 || upgradeRoom(state) <= 0) return state
+  return { ...state, bonus: state.bonus + 1, pending: true }
 }
 
 /** Cards still below level III, in SPEED / PAINT / HASTE order. */
@@ -88,7 +106,7 @@ export function offeredUpgradeKinds(state: UpgradeState): UpgradeKind[] {
  */
 export function stripUpgradesOnFall(state: UpgradeState): UpgradeState {
   const earned = Math.max(state.earned, unlockedUpgradeCount(state.charge))
-  return { charge: state.charge, earned, pending: false, speed: 0, paint: 0, haste: 0 }
+  return { charge: state.charge, earned, pending: false, bonus: 0, speed: 0, paint: 0, haste: 0 }
 }
 
 function clampLevel(n: number): number {
@@ -99,37 +117,35 @@ function clampLevel(n: number): number {
 export function accrueUpgradeCharge(state: UpgradeState, gained: number): UpgradeState {
   if (gained <= 0) return state
   const charge = state.charge + gained
-  if (state.earned >= UPGRADE_MAX || offeredUpgradeKinds(state).length === 0) {
-    return { ...state, charge, pending: false }
+  if (offeredUpgradeKinds(state).length === 0 || state.speed + state.paint + state.haste >= UPGRADE_MAX) {
+    return { ...state, charge, pending: false, bonus: 0 }
   }
-  const pending = state.pending || (unlockedUpgradeCount(charge) > state.earned)
+  const pending = Math.max(0, unlockedUpgradeCount(charge) - state.earned) + state.bonus > 0
   return { ...state, charge, pending }
 }
 
 export function trySelectUpgrade(state: UpgradeState, kind: UpgradeKind): { ok: boolean; state: UpgradeState } {
-  if (!state.pending || state.earned >= UPGRADE_MAX) return { ok: false, state }
+  if (pendingUpgradeCount(state) <= 0) return { ok: false, state }
+  if (state.speed + state.paint + state.haste >= UPGRADE_MAX) return { ok: false, state }
   if (!UPGRADE_KINDS.includes(kind)) return { ok: false, state }
   const cur = state[kind]
   if (cur >= UPGRADE_LEVEL_MAX) return { ok: false, state }
+  const fromCharge = chargeWaiting(state) > 0
   const next: UpgradeState = {
     ...state,
     [kind]: cur + 1,
-    earned: state.earned + 1,
+    earned: state.earned + (fromCharge ? 1 : 0),
+    bonus: fromCharge ? state.bonus : Math.max(0, state.bonus - 1),
     pending: false,
   }
-  if (
-    next.earned < UPGRADE_MAX
-    && offeredUpgradeKinds(next).length > 0
-    && unlockedUpgradeCount(next.charge) > next.earned
-  ) {
-    next.pending = true
-  }
+  if (offeredUpgradeKinds(next).length > 0 && pendingUpgradeCount(next) > 0) next.pending = true
   return { ok: true, state: next }
 }
 
 export function upgradeProgress(state: UpgradeState): UpgradeProgress {
   const charge = state.charge
-  if (state.earned >= UPGRADE_MAX && !state.pending) {
+  const capped = offeredUpgradeKinds(state).length === 0 || state.speed + state.paint + state.haste >= UPGRADE_MAX
+  if ((state.earned >= UPGRADE_MAX || capped) && !state.pending) {
     const last = UPGRADE_THRESHOLDS[UPGRADE_THRESHOLDS.length - 1]
     return { fill: 1, mode: 'max', prev: last, next: null, charge }
   }

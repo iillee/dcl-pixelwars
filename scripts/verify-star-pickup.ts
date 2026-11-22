@@ -30,7 +30,7 @@ const t0 = 1_000_000
 let painted = 0
 
 check('STAR_MS is 23 seconds, matching the star theme', STAR_MS === 23000)
-check('spawn window is 20-35s', STAR_SPAWN_MIN_MS === 20000 && STAR_SPAWN_MAX_MS === 35000)
+check('next star waits a minute after pickup', STAR_SPAWN_MIN_MS === 60000 && STAR_SPAWN_MAX_MS === 60000)
 check('at most one orb', STAR_MAX_ACTIVE === 1)
 check('pickup radius is 1.2m', STAR_PICKUP_RADIUS === 1.2)
 check('speed and cooldown tunables', STAR_SPEED_MULT === 1.4 && STAR_COOLDOWN_MULT === 0.5)
@@ -181,7 +181,7 @@ check('a grant with until>0 still activates when ms is missing', resolveStarHold
 check('claimOrb is always fresh even if a hold were still live', e2e.claimOrb('p1', e2e.addOrb({ x: 1, y: 2, z: 1, cell: 'c3' }).i, tSecond + 100)!.until === tSecond + 100 + STAR_MS)
 
 const bookSrc = readFileSync(new URL('../src/server/overdriveBook.ts', import.meta.url), 'utf8')
-check('server pickups go through claimOrb', serverSrc.includes('overdrive.claimOrb(') && !/overdrive\.removeOrb\(orb\.i\)/.test(serverSrc))
+check('server pickups remove the orb and grant an upgrade instead of the star buff', serverSrc.includes('overdrive.removeOrb(orb.i)') && serverSrc.includes('upgrades.grantBonus(winner)') && !serverSrc.includes('overdrive.claimOrb(') && !serverSrc.includes('sendStarHold(winner'))
 check('claimOrb grants a fresh hold', bookSrc.includes('this.grant(winner, now, true)') && bookSrc.includes('this.holds.delete(id)'))
 check('client uses resolveStarHoldEnd for every starHold', odSrc.includes('resolveStarHoldEnd(') && odSrc.includes('if (who === myAddress()) setLocal(localEnd)'))
 check('feet are reported during a match so a second orb can be claimed', odSrc.includes('hasStarOrbs() || !inLobby()'))

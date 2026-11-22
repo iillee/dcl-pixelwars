@@ -55,14 +55,15 @@ export type Events = {
   // Addressed. Prototype tank correction. denied cells revert the optimistic paint.
   'paint:wallet': { tank: number; denied: string[]; regen: number }
   'paint:score': { n: number }
-  'upgrade:state': { charge: number; pending: number; earned: number; speed: number; paint: number; haste: number }
+  'upgrade:state': { charge: number; pending: number; earned: number; bonus: number; speed: number; paint: number; haste: number }
   // Broadcast: other players' visible upgrade counts for nametag icons.
   'upgrade:buffs': { reset: boolean; entries: Array<{ id: string; speed: number; paint: number; haste: number }> }
 
-  'star:spawn': { i: number; x: number; y: number; z: number }
+  'star:spawn': { i: number; x: number; y: number; z: number; fall: number }
   'star:despawn': { i: number }
   'star:hold': { id: string; until: number; ms: number }
   'overdrive:impact': { attacker: string; target: string; dx: number; dz: number }
+  'feed:line': { kind: number; a: string; b: string; team: number; teamB: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.
   // Same shape family as paint:delta, but semantically "authoritative

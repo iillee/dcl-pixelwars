@@ -47,7 +47,7 @@ import {
 } from '../shared/pvp'
 import { inBurst, inAirSpike, burstDir, burstPressIsAir, shockwaveHits, V3 } from '../shared/burst'
 import { triggerSceneEmote, stopEmote } from '~system/RestrictedActions'
-import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock } from './lunge'
+import { holdForEmote, startKnockLock, startGlideLock, startDiveGlideLock, clearDiveGlideLock, playFollowedSfx } from './lunge'
 import { isMoveLocked } from './moveLock'
 import { paintEconomyOn, paintTank } from '../paint'
 import { isBalloonRound } from '../round'
@@ -102,7 +102,7 @@ function addFx(life: number, setup: (ent: Entity) => void, step: Fx['step'] = ()
 }
 const easeOut = (u: number) => 1 - (1 - u) * (1 - u)
 
-function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
+function showShockwave(p: V3, team: Team, local: boolean, cell = '', who = ''): void {
   const rgb = rgbOf(team)
   startRipple(p, inLobby() || isBalloonRound() ? Team.None : team, cell) // raised-tile ripple over the paint footprint (BURST_TILE_RIPPLE)
   // Light paint particle burst (BURST_PARTICLES blobs flying outward).
@@ -123,11 +123,19 @@ function showShockwave(p: V3, team: Team, local: boolean, cell = ''): void {
       tr.scale = Vector3.create(s, s, s)
     })
   }
-  if (local) { playBurstSfx(); return }
-  addFx(1.0, e => {
-    Transform.create(e, { position: Vector3.create(p.x, p.y + 0.8, p.z) })
-    AudioSource.create(e, { audioClipUrl: BURST_SFX_SRC, playing: true, loop: false, volume: 1, global: false })
-  })
+  if (local) playBurstSfx()
+}
+
+/** One burst_impact per attacker#id. A landing rebroadcast must not play it again. */
+const burstHeard = new Map<string, number>()
+/** burst_impact.wav on the same followed sphere dash uses for its whoosh. */
+function playRemoteBurst(who: string, p: V3, key: string): void {
+  const now = Date.now()
+  const prev = burstHeard.get(key)
+  if (prev !== undefined && now - prev < 4000) return
+  burstHeard.set(key, now)
+  if (burstHeard.size > 64) burstHeard.delete(burstHeard.keys().next().value as string)
+  playFollowedSfx(who, p, BURST_SFX_SRC, 0.9)
 }
 
 /** Team motes falling down the dive, same sphere family as the ground Burst puff.
@@ -297,7 +305,7 @@ function tickStamps(dt: number): void {
       // Whichever arrives first plays burst_impact; the other stays silent.
       if (!repeat && !sawShock(`${s.who}#${s.id}`, now)) {
         if (localShock) { localShockId = s.id; localShockAt = now }
-        showShockwave(pos, s.team, localShock, cell)
+        showShockwave(pos, s.team, localShock, cell, s.who)
       }
       // The server paints once. Retries keep going until burstPainted, so a lost
       // burstUse or an empty centre does not leave the shockwave unpainted.
@@ -311,6 +319,9 @@ function tickStamps(dt: number): void {
       console.log(`[Burst] #${s.id} landing shockwave ${localShock ? 'local' : s.who.slice(0, 8)} pos=${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}${repeat ? ' (audio already played)' : ''}`)
       stampWatch.splice(i, 1)
     } else if (s.left <= 0) {
+      // A ghost dive that never reads as landed still gets the shockwave clip.
+      // sawShock keeps this from stacking on the server's air-0 rebroadcast.
+      if (s.who !== '' && pos && !sawShock(`${s.who}#${s.id}`, Date.now())) showShockwave(pos, s.team, false, '', s.who)
       // The stamp window is 1.4 s, inside the server's 4.5 s landing window.
       // If the feet never read as landed, paint the last known point anyway.
       if (s.who === '' && pos) {
@@ -726,12 +737,15 @@ export function initPaintBurst(): void {
       break
     }
     if (att !== myAddress()) {
+      // Same moment and same carrier as a ghost's dash. Air and ground both, on the trigger.
+      const heard = posOf(att) ?? { x, y, z }
+      playRemoteBurst(att, heard, `${att}#${id}`)
       if (air) {
-        showAirTrail({ x, y, z }, look, faceX, faceZ)
+        showAirTrail(heard, look, faceX, faceZ)
         armLandingStamp(att, look, id)
       } else if (!sawShock(`${att}#${id}`, Date.now())) {
         // Ground press, or the landing rebroadcast. The stamp may have played it already.
-        showShockwave({ x, y, z }, look, false)
+        showShockwave(heard, look, false, '', att)
       }
     }
     // Victim anticipation: if we're already in the volume, knock now

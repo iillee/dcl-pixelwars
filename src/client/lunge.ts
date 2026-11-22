@@ -114,6 +114,21 @@ function spawnFx(pos: V3, rgb: { r: number; g: number; b: number }, dur: number,
   fx.push({ ent, t: 0, dur, life, from, to, follow })
 }
 const WHITE = { r: 1, g: 1, b: 1 }
+
+/** Same sphere dash uses: world-space mesh, clip on that mesh, position rewritten onto `who` each frame. */
+export function playFollowedSfx(who: string, at: V3, src: string, vol = 0.9): void {
+  spawnFx(
+    { x: at.x, y: at.y + 1.1, z: at.z },
+    WHITE,
+    0.08,
+    1.1,
+    0.5,
+    1.1,
+    0.5,
+    { src, vol },
+    { who, off: { x: 0, y: 1.1, z: 0 } },
+  )
+}
 const shownTeam = (t: Team, dry: boolean) => (inLobby() || isBalloonRound() || dry ? Team.None : t)
 const teamRgb = (t: Team) => TEAM_RGB[t] ?? WHITE
 const localDry = () => paintEconomyOn() && paintTank() <= 0

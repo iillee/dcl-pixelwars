@@ -3,7 +3,7 @@
  * Bots never receive charge, pending selections, or modifiers.
  */
 import {
-  emptyUpgrade, accrueUpgradeCharge, stripUpgradesOnFall, trySelectUpgrade, type UpgradeKind, type UpgradeState,
+  emptyUpgrade, accrueUpgradeCharge, grantUpgradeBonus, stripUpgradesOnFall, trySelectUpgrade, type UpgradeKind, type UpgradeState,
 } from '../shared/upgrades'
 
 const keyOf = (id: string) => id.toLowerCase()
@@ -25,6 +25,16 @@ export class UpgradeBook {
   gain(id: string, charge: number): void {
     if (!id || id.startsWith('bot:') || charge <= 0) return
     this.set(id, accrueUpgradeCharge(this.get(id), charge))
+  }
+
+  /** Star pickup. One card offer, with no paint-charge change. Bots are ignored. */
+  grantBonus(id: string): boolean {
+    if (!id || id.startsWith('bot:')) return false
+    const cur = this.get(id)
+    const next = grantUpgradeBonus(cur)
+    if (next === cur) return false
+    this.set(id, next)
+    return true
   }
 
   trySelect(id: string, kind: UpgradeKind): boolean {
@@ -56,13 +66,14 @@ export class UpgradeBook {
   }
 
   ownerState(id: string): {
-    charge: number; pending: number; earned: number; speed: number; paint: number; haste: number
+    charge: number; pending: number; earned: number; bonus: number; speed: number; paint: number; haste: number
   } {
     const s = this.get(id)
     return {
       charge: s.charge,
       pending: s.pending ? 1 : 0,
       earned: s.earned,
+      bonus: s.bonus,
       speed: s.speed,
       paint: s.paint,
       haste: s.haste,
@@ -95,6 +106,7 @@ export class UpgradeBook {
       && next.haste === cur.haste
       && next.pending === cur.pending
       && next.earned === cur.earned
+      && next.bonus === cur.bonus
       && next.charge === cur.charge
     ) {
       return false

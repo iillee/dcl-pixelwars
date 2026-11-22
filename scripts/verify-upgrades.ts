@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { UpgradeBook } from '../src/server/upgradeBook'
 import {
-  accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade,
+  accrueUpgradeCharge, bonusPct, burstPaintRadiusCellsFor, emptyUpgrade, grantUpgradeBonus,
   hasteCooldownMult, offeredUpgradeKinds, paintAreaMult, paintedScoreFor, pendingUpgradeCount,
   speedMoveMult, stripUpgradesOnFall, trySelectUpgrade, unlockedUpgradeCount,
   upgradeChargeFor, upgradeOfferLine, upgradePaintBrushOffsets, upgradePaintTileCount,
@@ -16,7 +16,7 @@ import {
 import {
   BADGE_BOB_HZ, BADGE_BOB_PX, CARD_AUTO_MS, CARD_HOVER_SCALE, CARD_POP_MS,
   CARD_REOPEN_MS, CARD_TARGET_W, autoOpenDelayMs, autoTimerFrac, badgeBobPx,
-  cardPopScale, cardSlidePx,
+  cardFlyMove, cardFlyShrink, cardPopScale, cardSlidePx,
 } from '../src/shared/upgradeCards'
 import {
   BURST_PAINT_RADIUS_CELLS, STAR_PICKUPS_ENABLED,
@@ -32,7 +32,7 @@ function check(name: string, ok: boolean): void {
   if (!ok) fails++
 }
 
-check('star pickups are disabled by config', STAR_PICKUPS_ENABLED === false)
+check('star pickups are enabled and grant a card, not the old buff', STAR_PICKUPS_ENABLED === true)
 check('thresholds step every 1000 up to 9000',
   UPGRADE_CHARGE_STEP === 1000
   && UPGRADE_MAX === 9
@@ -166,7 +166,7 @@ const charging = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 200))
 check('charging fill is 200/1000', Math.abs(charging.fill - 200 / 1000) < 1e-12 && charging.mode === 'charging')
 const ready = upgradeProgress(accrueUpgradeCharge(emptyUpgrade(), 1000))
 check('ready fill is full', ready.mode === 'ready' && ready.fill === 1)
-const maxed: UpgradeState = { charge: 9000, earned: 9, pending: false, speed: 3, paint: 3, haste: 3 }
+const maxed: UpgradeState = { charge: 9000, earned: 9, pending: false, bonus: 0, speed: 3, paint: 3, haste: 3 }
 check('max upgrades reports a completed bar', upgradeProgress(maxed).mode === 'max' && upgradeProgress(maxed).fill === 1)
 
 // Falling off the level clears buffs and any pending pick, but keeps charge.
@@ -209,6 +209,23 @@ check('the next threshold after a fall can still unlock', book.ownerState('p1').
 book.clearRound()
 check('a new round resets charge, pending, and levels', book.ownerState('p1').charge === 0 && book.ownerState('p1').pending === 0 && book.ownerState('p1').speed === 0 && book.ownerState('p1').earned === 0)
 
+const starred = grantUpgradeBonus(emptyUpgrade())
+check('a star grants one pending upgrade without paint charge', starred.pending && starred.bonus === 1 && starred.charge === 0 && starred.earned === 0 && pendingUpgradeCount(starred) === 1)
+const starPick = trySelectUpgrade(starred, 'speed')
+check('a star pick applies the buff and does not spend a paint threshold', starPick.ok && starPick.state.speed === 1 && starPick.state.earned === 0 && starPick.state.bonus === 0 && !starPick.state.pending && starPick.state.charge === 0)
+check('paint charge after a star still unlocks at 1000', accrueUpgradeCharge(starPick.state, 1000).pending && accrueUpgradeCharge(starPick.state, 1000).earned === 0)
+const stackedStar = grantUpgradeBonus(grantUpgradeBonus(emptyUpgrade()))
+check('two stars stack two waiting picks', stackedStar.bonus === 2 && pendingUpgradeCount(stackedStar) === 2)
+const withCharge = grantUpgradeBonus(accrueUpgradeCharge(emptyUpgrade(), 1000))
+check('a star stacks on top of a paint unlock', withCharge.bonus === 1 && withCharge.earned === 0 && pendingUpgradeCount(withCharge) === 2)
+const chargeFirst = trySelectUpgrade(withCharge, 'paint')
+check('a mixed queue spends the paint unlock before the star', chargeFirst.ok && chargeFirst.state.paint === 1 && chargeFirst.state.earned === 1 && chargeFirst.state.bonus === 1 && chargeFirst.state.pending)
+check('a maxed loadout ignores another star', grantUpgradeBonus(cap) === cap)
+check('a fall discards an unspent star upgrade', stripUpgradesOnFall(starred).bonus === 0 && !stripUpgradesOnFall(starred).pending && stripUpgradesOnFall(starred).charge === 0)
+const starBook = new UpgradeBook()
+check('the book grants a star upgrade to a human', starBook.grantBonus('p1') && starBook.ownerState('p1').bonus === 1 && starBook.ownerState('p1').pending === 1 && starBook.ownerState('p1').charge === 0)
+check('bots do not receive a star upgrade', !starBook.grantBonus('bot:1') && starBook.ownerState('bot:1').bonus === 0)
+
 // Four-team charge table: every enemy colour is +2, every friendly is 0.
 let fourOk = true
 for (const team of [1, 2, 3, 4]) {
@@ -238,6 +255,7 @@ check('the auto timer is full at the start and empty at the end', autoTimerFrac(
 check('the auto timer is halfway at 2.5 s', Math.abs(autoTimerFrac(2500, 5000) - 0.5) < 1e-12)
 check('the pop-in starts undersized and finishes at 1', cardPopScale(0, false) < 0.9 && Math.abs(cardPopScale(CARD_POP_MS, false) - 1) < 1e-12)
 check('the pop-out ends undersized', cardPopScale(CARD_POP_MS, true) < 0.9 && Math.abs(cardPopScale(0, true) - 1) < 1e-12)
+check('the pick shrinks fast and the glide runs the whole way', cardFlyShrink(0) === 0 && cardFlyShrink(0.34) > 0.99 && cardFlyShrink(1) === 1 && cardFlyMove(0) === 0 && Math.abs(cardFlyMove(0.5) - 0.5) < 1e-9 && cardFlyMove(1) === 1)
 check('the cluster slides up on open and down on close', cardSlidePx(0, false) > 0 && cardSlidePx(CARD_POP_MS, false) === 0 && cardSlidePx(0, true) === 0 && cardSlidePx(CARD_POP_MS, true) > 0)
 
 
@@ -253,7 +271,7 @@ check('a pending pick shows a red bouncing badge as soon as it unlocks', overlay
 check('the ready pill stays gold but no longer pulses', !overlaySrc.includes('pillPulseScale') && !overlaySrc.includes('PILL_PULSE') && overlaySrc.includes('readyFill') && overlaySrc.includes('openUpgradeCards'))
 
 const audioSrc = readFileSync(new URL('../src/client/audio.ts', import.meta.url), 'utf8')
-check('hover uses Clip_Click_1 and select uses pop.mp3', audioSrc.includes("assets/sounds/Clip_Click_1.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/pop.mp3"))
+check('hover uses Fantasy_UI_44 and select uses Fantasy_UI_51', audioSrc.includes("assets/sounds/Fantasy_UI_44.wav") && audioSrc.includes('playUpgradeHoverSfx') && audioSrc.includes('playUpgradeSelectSfx') && audioSrc.includes("assets/sounds/Fantasy_UI_51.wav"))
 
 
 // The HUD pill must show the same number that unlocks upgrades (charge),

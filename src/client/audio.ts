@@ -25,10 +25,12 @@ const MUSIC_SRC = 'assets/sounds/bgm-main.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
 const UPGRADE_READY_SRC = 'assets/sounds/pickup2.wav'
-/** Softer, distinct from the countdown tick (click.wav). */
-const UPGRADE_HOVER_SRC = 'assets/sounds/Clip_Click_1.wav'
-/** Short confirm, distinct from the hover click and the ready chime. */
-const UPGRADE_SELECT_SRC = 'assets/sounds/pop.mp3'
+/** Fantasy UI hover tick. */
+const UPGRADE_HOVER_SRC = 'assets/sounds/Fantasy_UI_44.wav'
+/** Fantasy UI confirm when a card is picked. */
+const UPGRADE_SELECT_SRC = 'assets/sounds/Fantasy_UI_51.wav'
+/** Cartoon sting when a ghost bot takes a hit. */
+const GHOST_HIT_SRC = 'assets/sounds/ghost-hit.mp3'
 /** flagtag's swoosh.mp3 — dash wind whoosh. */
 export const DASH_SRC = 'assets/sounds/swoosh.mp3'
 export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
@@ -42,6 +44,10 @@ let upgradeSelectSfxEnt: Entity = 0 as Entity
 let dashSfxEnt: Entity = 0 as Entity
 let dashHitSfxEnt: Entity = 0 as Entity
 let balloonPopSfxEnt: Entity = 0 as Entity
+const GHOST_HIT_VOICES = 3
+const ghostHitEnts: Entity[] = []
+let ghostHitVoice = 0
+const ghostHitCue: number[] = []
 let musicMuted = false
 let musicDucked = false
 let playStartMs = 0
@@ -72,6 +78,18 @@ export function initAudio(): void {
   Transform.create(dashHitSfxEnt, { parent: engine.CameraEntity })
   balloonPopSfxEnt = engine.addEntity()
   Transform.create(balloonPopSfxEnt, { parent: engine.CameraEntity })
+  for (let i = 0; i < GHOST_HIT_VOICES; i++) {
+    const ent = engine.addEntity()
+    Transform.create(ent, { parent: engine.CameraEntity })
+    ghostHitEnts.push(ent)
+    ghostHitCue.push(0)
+  }
+  AssetLoad.create(engine.addEntity(), { assets: [GHOST_HIT_SRC] })
+  events.on('lunge:impact', onGhostHit)
+  events.on('burst:impact', onGhostHit)
+  events.on('dash:impact', onGhostHit)
+  events.on('anvil:impact', onGhostHit)
+  events.on('overdrive:impact', onGhostHit)
   musicEnt = engine.addEntity()
   Transform.create(musicEnt, { parent: engine.CameraEntity })
   AudioSource.create(musicEnt, {
@@ -135,12 +153,20 @@ export function playUiClick(): void {
   })
 }
 
-/** Local-only hover tick on an upgrade card. Quieter than the UI click. */
+/**
+ * Local-only hover tick on an upgrade card. Quieter than the UI click.
+ * A second hover while the clip is still playing sends the same
+ * playing=true / currentTime=0 component and the renderer keeps the old
+ * playhead. Alternating a 1 ms start offset makes each hover a new cue.
+ */
+let hoverCue = 0
 export function playUpgradeHoverSfx(): void {
   if (!upgradeHoverSfxEnt) return
+  hoverCue = hoverCue === 1 ? 2 : 1
   AudioSource.createOrReplace(upgradeHoverSfxEnt, {
     audioClipUrl: UPGRADE_HOVER_SRC,
-    playing: true, loop: false, volume: 0.32, global: true, currentTime: 0,
+    playing: true, loop: false, volume: 0.32, global: true,
+    currentTime: hoverCue * 0.001,
   })
 }
 
@@ -236,6 +262,24 @@ export function playDashHitSfx(): void {
   AudioSource.createOrReplace(dashHitSfxEnt, {
     audioClipUrl: DASH_HIT_SRC,
     playing: true, loop: false, volume: 1, global: true,
+  })
+}
+
+function onGhostHit({ target }: { target: string }): void {
+  if (!target.toLowerCase().startsWith('bot:')) return
+  playGhostHitSfx()
+}
+
+/** Cartoon sting for every accepted hit on a ghost bot. */
+export function playGhostHitSfx(): void {
+  if (ghostHitEnts.length === 0) return
+  const i = ghostHitVoice
+  ghostHitVoice = (ghostHitVoice + 1) % ghostHitEnts.length
+  ghostHitCue[i] = ghostHitCue[i] === 1 ? 2 : 1
+  AudioSource.createOrReplace(ghostHitEnts[i], {
+    audioClipUrl: GHOST_HIT_SRC,
+    playing: true, loop: false, volume: 0.9, global: true,
+    currentTime: ghostHitCue[i] * 0.001,
   })
 }
 

@@ -99,8 +99,12 @@ export interface ManagerDeps {
   onBurst?: (id: number, burstId: number, team: number, at: V3, air?: number, fx?: number, fz?: number) => void
   /** Air spike missed and the body met a floor: one ground footprint, like a player's burstLand. */
   onBurstLand?: (id: number, burstId: number, team: number, at: V3, fx: number, fz: number) => void
-  /** Bot's lunge reached `human` by reported positions (round stats only; the victim's client knocks itself). */
-  onBotHit?: (id: number, human: string) => void
+  /**
+   * Bot landed a hit. `target` is a player address (stats only; that client knocks
+   * itself) or `bot:N` (the server already shoved that ghost; the host should
+   * broadcast the impact so other clients play it).
+   */
+  onBotHit?: (id: number, target: string, kind?: 'lunge' | 'burst' | 'spike', dx?: number, dz?: number) => void
   /** A bot just entered the round (live scoreboard row). */
   onSpawn?: (id: number, team: number) => void
   /** Prototype only. Absent in Team Fight and Bot Fight. */
@@ -623,7 +627,7 @@ function shoveLungeBot(attacker: LiveBot, targetId: string): boolean {
   const dx = q.x - p.x, dz = q.z - p.z
   const len = Math.hypot(dx, dz) || 1
   if (!hitBot(id, p.x, p.y, p.z, 2, BOT_SAME_LEVEL_DY, () => lungeKnock(dx / len, dz / len))) return false
-  deps?.onBotHit?.(attacker.botId, targetId)
+  deps?.onBotHit?.(attacker.botId, targetId, 'lunge', dx / len, dz / len)
   return true
 }
 
@@ -633,7 +637,7 @@ function shoveBurstBots(attacker: LiveBot, origin: V3, fx: number, fz: number): 
     if (!inBurst(origin, o.body.pos)) continue
     const d = burstDir(origin, o.body.pos, fx, fz)
     if (hitBot(o.botId, origin.x, origin.y, origin.z, BURST_RADIUS + SERVER_LUNGE_BOT_SLACK, BURST_HIT_MAX_DY + 3, () => burstKnock(d.x, d.z))) {
-      deps?.onBotHit?.(attacker.botId, `bot:${o.botId}`)
+      deps?.onBotHit?.(attacker.botId, `bot:${o.botId}`, 'burst', d.x, d.z)
     }
   }
 }
@@ -666,7 +670,7 @@ function trySpike(b: LiveBot): void {
   if (hit && aim && aim.kind === 'bot') {
     const bid = parseInt(aim.id.slice(4), 10)
     if (hitBot(bid, p.x, p.y, p.z, AIR_SPIKE_RADIUS + 1, AIR_SPIKE_DEPTH + 1, grounded => spikeKnock(c.dive!.fx, c.dive!.fz, grounded))) {
-      deps?.onBotHit?.(b.botId, aim.id)
+      deps?.onBotHit?.(b.botId, aim.id, 'spike', c.dive!.fx, c.dive!.fz)
     }
   }
   console.log(`[Bots] ghost ${b.botId} spikes${hit ? ` ${aim!.id.slice(0, 8)}` : ' (miss)'}`)
@@ -712,25 +716,7 @@ function separate(b: LiveBot, pos: V3): V3 {
   return { x: nx, y: pos.y, z: nz }
 }
 
-const STAR_SEEK_M = 24
 function botStarred(id: number): boolean { return !!deps?.starHold?.(id) }
-function seekStar(b: LiveBot): boolean {
-  if (b.body.inRescue() || b.combat.windup || b.combat.dive || b.combat.sweep) return false
-  const orbs = deps?.starOrbs?.() ?? []
-  if (!orbs.length) return false
-  const p = b.body.pos
-  let best: { cell: string } | null = null
-  let bestD = STAR_SEEK_M
-  for (const o of orbs) {
-    if (Math.abs(o.y - p.y) > 4) continue
-    const d = Math.hypot(o.x - p.x, o.z - p.z)
-    if (d < bestD) { bestD = d; best = o }
-  }
-  if (!best || best.cell === b.currentCell) return false
-  if (b.goalOf() === best.cell) return true
-  b.chase(best.cell)
-  return true
-}
 function fight(b: LiveBot, dt: number): void {
   const c = b.combat
   const starred = botStarred(b.botId)
@@ -783,8 +769,6 @@ function fight(b: LiveBot, dt: number): void {
   const best = tgt ? Math.hypot(tgt.x - p.x, tgt.z - p.z) : engage
   c.chaseHuman = tgt ? tgt.id : null
   const can = deps?.abilities?.() ?? { lunge: false, burst: false }
-  const melee = !!tgt && (best <= BOT_LUNGE_RANGE || inBurst(p, tgt, BURST_RADIUS * BOT_BURST_RANGE_FRAC))
-  if (!melee && seekStar(b)) return
   if (!tgt) {
     // Nobody to fight: Burst for paint, like a player does, where most of the footprint isn't ours yet.
     if (!can.burst || c.burstCd > 0 || !deps) return

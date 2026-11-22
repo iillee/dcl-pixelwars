@@ -38,6 +38,25 @@ export function cardPopScale(elapsedMs: number, closing: boolean): number {
   return 1 + easeInCubic(t) * (SCALE_FROM - 1)
 }
 
+/** Selected card: shrink fast, then glide into the buff icon. */
+export const CARD_FLY_MS = 560
+
+const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+export function cardFlyT(elapsedMs: number): number {
+  return clamp01(elapsedMs / CARD_FLY_MS)
+}
+
+/** 0 at full card size, 1 at icon size. Finishes in the first third of the flight. */
+export function cardFlyShrink(t: number): number {
+  return easeOutCubic(clamp01(t / 0.34))
+}
+
+/** 0 at the card, 1 at the icon. Smooth across the whole flight. */
+export function cardFlyMove(t: number): number {
+  return easeInOutCubic(clamp01(t))
+}
+
 /** Extra pixels toward the bottom of the screen (0 at rest). */
 export function cardSlidePx(elapsedMs: number, closing: boolean): number {
   const t = cardPopT(elapsedMs)

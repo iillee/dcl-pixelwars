@@ -8,16 +8,18 @@
  */
 import ReactEcs, { UiEntity, Label } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
-import { isMobile } from '@dcl/sdk/platform'
 import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
+import { isMobile } from '@dcl/sdk/platform'
 import { RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from './abilityHotbar'
+import { TOP_BTN, TOP_GAP } from './overviewUi'
+import { isBalloonRound, isBasesRound } from '../round'
 import {
   FLASH_MS, getUpgradeHud, openUpgradeCards, requestUpgradeSelect, setUpgradeCardHover, type UpgradeHud,
 } from './upgrades'
 import { OutlinedLabel } from './outlinedLabel'
 import {
   UPGRADE_CARD_ICON_SRC, UPGRADE_LABEL,
-  UPGRADE_LEVEL_MAX, UPGRADE_ROMAN, upgradeOfferLine, type UpgradeKind,
+  UPGRADE_LEVEL_MAX, upgradeOfferLine, type UpgradeKind,
 } from '../shared/upgrades'
 import { CARD_ASPECT, CARD_HOVER_SCALE, CARD_TARGET_W } from '../shared/upgradeCards'
 
@@ -35,11 +37,22 @@ export const UPGRADE_CARD_FILL: Record<UpgradeKind, Color4> = {
 const WHITE = Color4.White()
 const bold = (t: string) => '<b>' + t + '</b>'
 
+/**
+ * The UI root is the safe area, not the raw canvas. A window resize mid-round
+ * changes that inset, and a flight aimed at the full canvas then misses the icon.
+ */
 function canvasSize(): { w: number; h: number } {
+  const mobile = isMobile()
+  const vw = mobile ? 1600 : 1920
+  const vh = mobile ? 720 : 1080
   const c = UiCanvasInformation.getOrNull(engine.RootEntity)
-  if (!c || c.width <= 0) return { w: 1280, h: 720 }
-  const dpr = c.devicePixelRatio > 0 ? c.devicePixelRatio : 1
-  return { w: c.width / dpr, h: c.height / dpr }
+  if (!c || c.width <= 0 || c.height <= 0) return { w: vw, h: vh }
+  const scale = Math.min(c.width / vw, c.height / vh)
+  if (!(scale > 0)) return { w: vw, h: vh }
+  const inset = c.screenInsetArea
+  const w = c.width - (inset?.left ?? 0) - (inset?.right ?? 0)
+  const h = c.height - (inset?.top ?? 0) - (inset?.bottom ?? 0)
+  return { w: Math.max(1, w / scale), h: Math.max(1, h / scale) }
 }
 
 function lighten(c: Color4, t: number): Color4 {
@@ -133,50 +146,98 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
   )
 }
 
-function IconBadge(props: { kind: UpgradeKind; level: number; size: number; font: number }) {
-  const { kind, level, size, font } = props
+/** Same corner chip as the red pending badge: white fill, dark count, thick ring. */
+function CountChip(props: { n: number; size: number }) {
+  const badge = Math.max(14, Math.round(props.size))
+  const hang = Math.round(badge * 0.35)
+  return (
+    <UiEntity uiTransform={{
+      positionType: 'absolute',
+      position: { top: -hang, right: -hang },
+      width: badge, height: badge, borderRadius: badge / 2,
+      borderWidth: 3, borderColor: INK,
+      justifyContent: 'center', alignItems: 'center',
+      pointerFilter: 'none',
+      zIndex: 4,
+    }} uiBackground={{ color: WHITE }}>
+      <Label
+        value={bold(String(props.n))}
+        fontSize={Math.max(11, Math.round(badge * 0.55))}
+        color={INK}
+        font="sans-serif"
+        textAlign="middle-center"
+        textWrap="nowrap"
+        uiTransform={{ width: '100%', height: '100%' }}
+      />
+    </UiEntity>
+  )
+}
+
+const ICON_GAP = 6
+const TIMER_W = 200
+const HUD_TOP = 10
+
+function IconBadge(props: { kind: UpgradeKind; level: number; size: number; gap?: number; z?: number }) {
+  const { kind, level, size } = props
   if (level <= 0) return null
-  const roman = UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)
-  const badge = Math.max(22, Math.round(size * 0.4))
   const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
   const innerR = HOTBAR_RADIUS - HOTBAR_BORDER_W - TILE_RING
   const icon = Math.max(20, size - frame - 4)
   return (
     <UiEntity uiTransform={{
-      width: size, height: size, margin: { left: 6 }, flexShrink: 0,
-      borderRadius: HOTBAR_RADIUS, borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
-      padding: TILE_RING, pointerFilter: 'none',
-    }} uiBackground={{ color: HOTBAR_TILE_BG }}>
+      width: size, height: size, margin: { left: props.gap ?? ICON_GAP }, flexShrink: 0,
+      overflow: 'visible', pointerFilter: 'none',
+      // The chip hangs onto the next tile. Earlier slots stack above later ones.
+      zIndex: props.z ?? 1,
+    }}>
       <UiEntity uiTransform={{
-        width: '100%', height: '100%', borderRadius: innerR,
-        justifyContent: 'center', alignItems: 'center',
-      }} uiBackground={{ color: UPGRADE_CARD_FILL[kind] }}>
-        <UiEntity uiTransform={{ width: icon, height: icon, pointerFilter: 'none' }}
-          uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
+        width: size, height: size,
+        borderRadius: HOTBAR_RADIUS, borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM,
+        padding: TILE_RING, pointerFilter: 'none',
+      }} uiBackground={{ color: HOTBAR_TILE_BG }}>
+        <UiEntity uiTransform={{
+          width: '100%', height: '100%', borderRadius: innerR,
+          justifyContent: 'center', alignItems: 'center',
+        }} uiBackground={{ color: UPGRADE_CARD_FILL[kind] }}>
+          <UiEntity uiTransform={{ width: icon, height: icon, pointerFilter: 'none' }}
+            uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
+        </UiEntity>
       </UiEntity>
-      <UiEntity uiTransform={{
-        positionType: 'absolute', position: { right: -3, bottom: -3 },
-        width: badge, height: badge, borderRadius: badge / 2,
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 2, borderColor: INK, pointerFilter: 'none',
-      }} uiBackground={{ color: WHITE }}>
-        <Label value={bold(roman)} fontSize={font} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-      </UiEntity>
+      <CountChip n={Math.min(level, UPGRADE_LEVEL_MAX)} size={Math.round(size * 0.48)} />
     </UiEntity>
   )
 }
 
-function IconRow(props: { hud: UpgradeHud; size: number; font: number }) {
-  const { hud, size, font } = props
-  const any = hud.speed > 0 || hud.paint > 0 || hud.haste > 0
-  if (!any) return null
+function IconRow(props: { hud: UpgradeHud; size: number }) {
+  const { hud, size } = props
+  if (hud.iconOrder.length === 0) return null
+  const flying = hud.fly?.kind ?? null
+  const n = hud.iconOrder.length
   return (
-    <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', height: size, flexShrink: 0, pointerFilter: 'none' }}>
-      <IconBadge kind="speed" level={hud.speed} size={size} font={font} />
-      <IconBadge kind="paint" level={hud.paint} size={size} font={font} />
-      <IconBadge kind="haste" level={hud.haste} size={size} font={font} />
+    <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', height: size, flexShrink: 0, overflow: 'visible', pointerFilter: 'none' }}>
+      {hud.iconOrder.map((kind, i) => flying === kind && hud.fly?.fresh
+        ? <UiEntity uiTransform={{ width: size, height: size, margin: { left: ICON_GAP }, flexShrink: 0 }} />
+        : <IconBadge kind={kind} level={hud[kind]} size={size} z={n - i} />)}
     </UiEntity>
   )
+}
+
+/** Center of one buff tile, as an offset from the screen center. Slot 0 sits just right of the score. */
+function buffDock(mobile: boolean, count: number, slot: number): { x: number; y: number; size: number } {
+  const size = TOP_BTN
+  const n = Math.max(1, count)
+  const i = Math.max(0, Math.min(slot, n - 1))
+  const step = size + ICON_GAP
+  if (!mobile) {
+    const pillW = TOP_BTN + TOP_GAP + TOP_BTN
+    const rowW = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW
+    const fromLeft = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW + TOP_GAP + ICON_GAP + i * step
+    return { x: -rowW / 2 + fromLeft + size / 2, y: HUD_TOP + size / 2, size }
+  }
+  const rowW = n * step
+  const below = isBalloonRound() ? 0 : isBasesRound() ? 65 : 30
+  const top = HUD_TOP + size + below + 8
+  return { x: -rowW / 2 + ICON_GAP + i * step + size / 2, y: top + size / 2, size }
 }
 
 /** Desktop extras immediately right of the painted-tile pill: buff icons only. */
@@ -190,7 +251,7 @@ export function DesktopUpgradeExtras(props: { pillWidth: number; topBtn: number;
       positionType: 'absolute', position: { top: 0, left },
       height: props.topBtn, flexDirection: 'row', alignItems: 'center', pointerFilter: 'none',
     }}>
-      <IconRow hud={hud} size={props.topBtn} font={18} />
+      <IconRow hud={hud} size={props.topBtn} />
     </UiEntity>
   )
 }
@@ -200,43 +261,42 @@ export function MobileUpgradeRow() {
   if (!isMobile()) return null
   const hud = getUpgradeHud()
   if (!hud.show) return null
-  const any = hud.speed > 0 || hud.paint > 0 || hud.haste > 0
-  if (!any) return null
+  if (hud.iconOrder.length === 0) return null
   return (
     <UiEntity uiTransform={{ width: '100%', margin: { top: 8 }, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-      <IconRow hud={hud} size={68} font={18} />
+      <IconRow hud={hud} size={68} />
     </UiEntity>
   )
 }
 
-function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number; gap: number }) {
-  const { kind, hud, width, height, mobile, index, gap } = props
-  const level = hud[kind]
+function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height: number; mobile: boolean; index: number; scale?: number; level?: number; frozen?: boolean; locked?: boolean }) {
+  const { kind, hud, width, height, mobile, index } = props
+  const scale = props.scale ?? 1
+  const level = props.level ?? hud[kind]
   const maxed = level >= UPGRADE_LEVEL_MAX
-  const selected = hud.highlight === kind
-  const hovered = !mobile && hud.hover === kind
-  const offer = upgradeOfferLine(kind, level)
+  const selected = !props.locked && (hud.highlight === kind || !!props.frozen)
+  const hovered = !props.locked && !props.frozen && !mobile && hud.hover === kind
+  const offer = upgradeOfferLine(kind, Math.max(0, level - (props.frozen ? 1 : 0)))
   const rim = hovered ? WHITE : (selected ? GOLD : HOTBAR_RIM)
   const fill = hovered ? lighten(UPGRADE_CARD_FILL[kind], 0.16) : UPGRADE_CARD_FILL[kind]
-  const icon = mobile ? 72 : 112
-  const titleF = mobile ? 18 : 26
-  const bodyF = mobile ? 14 : 18
-  const disabled = maxed || !hud.pending
-  const badge = Math.max(22, Math.round((mobile ? 52 : 68) * 0.38))
-  const roman = level > 0 ? (UPGRADE_ROMAN[Math.min(level, UPGRADE_LEVEL_MAX)] ?? String(level)) : ''
-  const left = index === 0 ? 0 : gap
-  const padY = mobile ? 18 : 28
-  const padX = mobile ? 10 : 14
-  const grow = hovered ? CARD_HOVER_SCALE : 1
-  const drawW = Math.max(1, Math.round(width * grow))
-  const drawH = Math.max(1, Math.round(height * grow))
+  // Grow the icon only. Growing the frame makes that card wider and eats the gap beside it.
+  const icon = Math.max(8, Math.round((mobile ? 72 : 112) * scale * (hovered ? CARD_HOVER_SCALE : 1)))
+  const titleF = Math.max(8, Math.round((mobile ? 18 : 26) * scale))
+  const bodyF = Math.max(8, Math.round((mobile ? 14 : 18) * scale))
+  const disabled = !!props.locked || props.frozen || maxed || !hud.pending
+  const padY = Math.max(4, Math.round((mobile ? 18 : 28) * scale))
+  const padX = Math.max(4, Math.round((mobile ? 10 : 14) * scale))
+  const titleGap = Math.max(0, Math.round((mobile ? 12 : 18) * scale))
+  const bodyGap = Math.max(0, Math.round(6 * scale))
   return (
     <UiEntity
+      key={`ui_upgrade_card_${kind}`}
       uiTransform={{
-        width, height, margin: { left }, flexShrink: 0,
+        width, height, flexShrink: 0,
         justifyContent: 'center', alignItems: 'center',
         overflow: 'visible',
         pointerFilter: disabled ? 'none' : 'block',
+        zIndex: 12 - index,
       }}
       onMouseDown={disabled ? undefined : () => requestUpgradeSelect(kind)}
       onMouseEnter={disabled || mobile ? undefined : () => setUpgradeCardHover(kind)}
@@ -244,7 +304,7 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
     >
       <UiEntity
         uiTransform={{
-          width: drawW, height: drawH, flexShrink: 0,
+          width, height, flexShrink: 0,
           borderRadius: HOTBAR_RADIUS, borderWidth: hovered || selected ? 4 : HOTBAR_BORDER_W, borderColor: rim,
           padding: TILE_RING, pointerFilter: 'none',
         }}
@@ -258,18 +318,8 @@ function Card(props: { kind: UpgradeKind; hud: UpgradeHud; width: number; height
         }} uiBackground={{ color: fill }}>
           <UiEntity uiTransform={{ width: icon, height: icon, flexShrink: 0, pointerFilter: 'none' }}
             uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
-          <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: mobile ? 12 : 18 } }} />
-          <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 6, margin: { top: 6 } }} />
-          {roman ? (
-            <UiEntity uiTransform={{
-              positionType: 'absolute', position: { right: 6, top: 6 },
-              width: badge, height: badge, borderRadius: badge / 2,
-              justifyContent: 'center', alignItems: 'center',
-              borderWidth: 2, borderColor: INK, pointerFilter: 'none',
-            }} uiBackground={{ color: GOLD }}>
-              <Label value={bold(roman)} fontSize={mobile ? 12 : 16} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: '100%' }} />
-            </UiEntity>
-          ) : null}
+          <Label value={bold(UPGRADE_LABEL[kind])} fontSize={titleF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: titleF + 6, margin: { top: titleGap } }} />
+          <Label value={bold(offer)} fontSize={bodyF} color={INK} font="sans-serif" textAlign="middle-center" textWrap="wrap" uiTransform={{ width: '100%', height: bodyF * 2 + 6, margin: { top: bodyGap } }} />
         </UiEntity>
       </UiEntity>
     </UiEntity>
@@ -320,17 +370,61 @@ function OutlinedTitle(props: { text: string; font: number; height: number }) {
   )
 }
 
+/** Selected card shrinks quickly, then glides into that buff's slot. */
+function FlyingPick(props: { hud: UpgradeHud }) {
+  const fly = props.hud.fly
+  if (!fly) return null
+  const mobile = isMobile()
+  const { h: uiH } = canvasSize()
+  const { cardW, cardH, gap } = fitCardSize(mobile, fly.count, 1)
+  const titleH = (mobile ? 28 : 36) + 6 + 16
+  const rowW = cardW * fly.count + gap * Math.max(0, fly.count - 1)
+  const fromX = -rowW / 2 + fly.index * (cardW + gap) + cardW / 2
+  const fromY = (uiH - (titleH + cardH)) / 2 + titleH + cardH / 2
+  const dock = buffDock(mobile, props.hud.iconOrder.length, fly.slot)
+  const w = cardW + (dock.size - cardW) * fly.shrink
+  const h = cardH + (dock.size - cardH) * fly.shrink
+  const offX = fromX + (dock.x - fromX) * fly.move
+  const cy = fromY + (dock.y - fromY) * fly.move
+  const iconish = fly.shrink > 0.92
+  return (
+    <UiEntity uiTransform={{
+      width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
+      pointerFilter: 'none', overflow: 'visible',
+    }}>
+      {/* Left edge sits on the live screen center, so a resize mid-round cannot shove the flight. */}
+      <UiEntity uiTransform={{
+        positionType: 'absolute', position: { left: '50%', top: 0 },
+        width: 0, height: '100%', pointerFilter: 'none', overflow: 'visible',
+      }}>
+      <UiEntity uiTransform={{
+        positionType: 'absolute',
+        position: { left: offX - w / 2, top: cy - h / 2 },
+        width: w, height: h, overflow: 'visible', pointerFilter: 'none',
+        justifyContent: 'center', alignItems: 'center',
+        zIndex: 30,
+      }}>
+        {iconish
+          ? <IconBadge kind={fly.kind} level={fly.level} size={Math.max(1, Math.round(Math.min(w, h)))} gap={0} />
+          : <Card kind={fly.kind} hud={props.hud} width={w} height={h} mobile={mobile} index={0} scale={w / cardW} level={fly.level} frozen />}
+      </UiEntity>
+      </UiEntity>
+    </UiEntity>
+  )
+}
+
 /**
  * Centered upgrade cards, shared by auto-open and a manual pill tap.
  * Gameplay is not paused; only the cards capture clicks. The popup
  * dismisses when the player picks a card or when the 5-second auto-tuck
- * expires. There is no visible timer bar or Close button.
+ * expires. A pick shrinks that card into its buff slot. The other
+ * cards stay put until the flight ends. There is
+ * no visible timer bar or Close button.
  */
-export function UpgradeOverlay() {
-  const hud = getUpgradeHud()
-  if (!hud.clusterVisible) return null
-  const mobile = isMobile()
-  const { cardW, cardH, gap } = fitCardSize(mobile, hud.offer.length, hud.popScale)
+function CardCluster(props: { hud: UpgradeHud; mobile: boolean; cardW: number; cardH: number; gap: number; hold: boolean }) {
+  const { hud, mobile, cardW, cardH, gap, hold } = props
+  const kinds = hold && hud.fly ? hud.fly.offer : hud.offer
+  const flying = hold ? hud.fly?.kind ?? null : null
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
@@ -342,12 +436,50 @@ export function UpgradeOverlay() {
         overflow: 'visible', pointerFilter: 'none',
       }}>
         <OutlinedTitle text="CHOOSE AN UPGRADE" font={mobile ? 20 : 28} height={mobile ? 28 : 36} />
-        <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', overflow: 'visible', pointerFilter: 'none' }}>
-          {hud.offer.map((kind, i) => (
-            <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} gap={gap} />
+        <UiEntity uiTransform={{
+          width: kinds.length * cardW + Math.max(0, kinds.length - 1) * gap,
+          height: cardH,
+          flexShrink: 0,
+          overflow: 'visible',
+          pointerFilter: 'none',
+        }}>
+          {kinds.map((kind, i) => (
+            <UiEntity
+              key={`ui_upgrade_pos_${kind}`}
+              uiTransform={{
+                positionType: 'absolute',
+                position: { left: i * (cardW + gap), top: 0 },
+                width: cardW,
+                height: cardH,
+                overflow: 'visible',
+                pointerFilter: 'none',
+              }}
+            >
+              {flying === kind
+                ? null
+                : <Card kind={kind} hud={hud} width={cardW} height={cardH} mobile={mobile} index={i} level={hold && hud.fly ? hud.fly.levels[kind] : undefined} locked={hold} />}
+            </UiEntity>
           ))}
         </UiEntity>
       </UiEntity>
     </UiEntity>
   )
+}
+
+export function UpgradeOverlay() {
+  const hud = getUpgradeHud()
+  if (hud.fly) {
+    const mobile = isMobile()
+    const { cardW, cardH, gap } = fitCardSize(mobile, hud.fly.count, 1)
+    return (
+      <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none', overflow: 'visible' }}>
+        <CardCluster hud={hud} mobile={mobile} cardW={cardW} cardH={cardH} gap={gap} hold />
+        <FlyingPick hud={hud} />
+      </UiEntity>
+    )
+  }
+  if (!hud.clusterVisible) return null
+  const mobile = isMobile()
+  const { cardW, cardH, gap } = fitCardSize(mobile, hud.offer.length, hud.popScale)
+  return <CardCluster hud={hud} mobile={mobile} cardW={cardW} cardH={cardH} gap={gap} hold={false} />
 }

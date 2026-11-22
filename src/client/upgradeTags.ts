@@ -7,10 +7,12 @@
  * by repeating the icon, grouped Speed, Paint, then Haste.
  *
  * Levels are server-authoritative (`upgradeBuffs` for others, the same
- * `upgrade:state` mirror as the HUD for your own). Your row shows in
- * third person and hides in first person. Bots never get upgrades, so
- * they show nothing. A fall wipe, round end, or the lobby clears the
- * row, same as the top HUD buff tiles.
+ * `upgrade:state` mirror as the HUD for your own). Other players use
+ * `AAPT_NAME_TAG`. Your own row uses AvatarAttach with no avatar id on
+ * `AAPT_POSITION`, the same local attach the balloons use, raised to
+ * nametag height. A yaw billboard shows the plane's −Z face, which is
+ * the side the camera sees. Bots never get upgrades. A fall wipe, round
+ * end, or the lobby clears the row, same as the top HUD buff tiles.
  */
 
 import {
@@ -48,6 +50,8 @@ const ICON_M = 0.13
 const GAP_M = 0.02
 /** Rise above the AAPT_NAME_TAG anchor so the row sits just over the plate. */
 const ROW_Y_M = 0.16
+/** Self row height above the feet, just over a normal nametag. */
+const SELF_ROW_Y_M = 2.35
 const PASS_INTERVAL_S = 0.5
 
 type Buffs = { speed: number; paint: number; haste: number }
@@ -120,12 +124,21 @@ function clearAll(): void {
   levels.clear()
 }
 
-function isThirdPerson(): boolean {
+function selfCameraLabel(): string {
   const cam = CameraMode.getOrNull(engine.CameraEntity)
-  return !!cam && cam.mode === CameraType.CT_THIRD_PERSON
+  if (!cam) return 'camera=unset'
+  if (cam.mode === CameraType.CT_FIRST_PERSON) return 'camera=first'
+  if (cam.mode === CameraType.CT_THIRD_PERSON) return 'camera=third'
+  return `camera=${cam.mode}`
 }
 
-/** Self attach omits avatarId, same pattern as balloons and overdrive. */
+let selfLog = ''
+function logSelf(line: string): void {
+  if (line === selfLog) return
+  selfLog = line
+  console.log(`[UpgradeTags] self ${line}`)
+}
+
 function buildRow(id: string, avatarId: string | null, buffs: Buffs): void {
   const parts: UpgradeKind[] = []
   for (const kind of KIND_ORDER) {
@@ -141,15 +154,15 @@ function buildRow(id: string, avatarId: string | null, buffs: Buffs): void {
       anchorPointId: AvatarAnchorPointType.AAPT_NAME_TAG,
     })
   } else {
-    AvatarAttach.create(anchor, {
-      anchorPointId: AvatarAnchorPointType.AAPT_NAME_TAG,
-    })
+    // No avatar id: the local player. Same attach the balloons use, which
+    // the owner can actually see. AAPT_NAME_TAG does not exist on yourself.
+    AvatarAttach.create(anchor, { anchorPointId: AvatarAnchorPointType.AAPT_POSITION })
   }
 
   const row = engine.addEntity()
   Transform.create(row, {
     parent: anchor,
-    position: Vector3.create(0, ROW_Y_M, 0),
+    position: Vector3.create(0, avatarId ? ROW_Y_M : SELF_ROW_Y_M, 0),
   })
   Billboard.create(row, { billboardMode: BillboardMode.BM_Y })
 
@@ -160,7 +173,8 @@ function buildRow(id: string, avatarId: string | null, buffs: Buffs): void {
     const ent = engine.addEntity()
     Transform.create(ent, {
       parent: row,
-      position: Vector3.create(x0 + i * (ICON_M + GAP_M), 0, 0),
+      // −Z is the face a yaw billboard turns toward the camera.
+      position: Vector3.create(x0 + i * (ICON_M + GAP_M), 0, -0.02),
       scale: Vector3.create(ICON_M, ICON_M, 1),
     })
     MeshRenderer.setPlane(ent)
@@ -181,17 +195,15 @@ function syncLocalLevels(): void {
 }
 
 function applyOne(id: string): void {
-  if (isLobbyLayout()) {
-    destroyRig(id)
-    return
-  }
   const local = isLocalUser(id)
-  if (local && !isThirdPerson()) {
+  if (isLobbyLayout()) {
+    if (local) logSelf(`show=false lobby ${selfCameraLabel()}`)
     destroyRig(id)
     return
   }
   const buffs = levels.get(id)
   if (!buffs || totalOf(buffs) === 0) {
+    if (local) logSelf(`speed=0 paint=0 haste=0 show=false ${selfCameraLabel()}`)
     destroyRig(id)
     return
   }
@@ -202,6 +214,9 @@ function applyOne(id: string): void {
   }
   const attachKey = local ? 'self' : avatarId!
   const existing = rigs.get(id)
+  if (local) {
+    logSelf(`speed=${buffs.speed} paint=${buffs.paint} haste=${buffs.haste} show=true ${selfCameraLabel()}`)
+  }
   if (existing && existing.key === countKey(buffs) && existing.avatarId === attachKey) return
   destroyRig(id)
   buildRow(id, avatarId, buffs)
@@ -240,7 +255,11 @@ export function initUpgradeTags(): void {
   })
   events.on('upgrade:state', (s) => {
     const me = localId()
-    if (!me) return
+    const counts = `speed=${Math.max(0, s.speed | 0)} paint=${Math.max(0, s.paint | 0)} haste=${Math.max(0, s.haste | 0)}`
+    if (!me) {
+      logSelf(`${counts} waiting-for-identity`)
+      return
+    }
     const buffs = {
       speed: Math.max(0, s.speed | 0),
       paint: Math.max(0, s.paint | 0),
@@ -260,15 +279,7 @@ export function initUpgradeTags(): void {
     clearAll()
   })
   let clock = 0
-  let lastThird: boolean | null = null
   engine.addSystem((dt: number) => {
-    const third = isThirdPerson()
-    if (lastThird !== third) {
-      lastThird = third
-      applyPass()
-      clock = 0
-      return
-    }
     clock += dt
     if (clock < PASS_INTERVAL_S) return
     clock = 0

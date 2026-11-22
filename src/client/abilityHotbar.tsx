@@ -9,7 +9,7 @@
  *     constant 4 px border (white, gold while its tooltip is up).
  *   - Gold fill inside the slot = recharge progress (rises from empty after
  *     use, full when ready). Seconds left are shown while cooling down.
- *   - Small E / F hint top-left on desktop only.
+ *   - Ready labels read DASH (E) and BURST (F). No key letter on the button.
  *   - Gold tooltip chip with black text tucked under each slot (inner end
  *     hidden behind the button, `tuck` px) while the ability
  *     is ready: DASH to the left, PAINT BOMB to the right. Tapping it fires
@@ -278,8 +278,8 @@ export function AbilityHotbar() {
       key="ui_pvp_root"
       uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none' }}
     >
-      {lungeTip && <Tooltip id="lunge" side="left" text="DASH" onPress={triggerLunge} g={geo} />}
-      {bombTip && <Tooltip id="burst" side="right" text="BURST" onPress={requestBurst} g={geo} />}
+      {lungeTip && <Tooltip id="lunge" side="left" text="DASH (E)" onPress={triggerLunge} g={geo} />}
+      {bombTip && <Tooltip id="burst" side="right" text="BURST (F)" onPress={requestBurst} g={geo} />}
       <UiEntity
         key="ui_pvp_row"
         uiTransform={{
@@ -297,8 +297,8 @@ export function AbilityHotbar() {
           </UiEntity>
         )}
         <UiEntity key="ui_pvp_slots" uiTransform={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-          {lunge.show && <Slot id="lunge" keyLabel="E" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={geo} />}
-          {bomb.show && <Slot id="burst" keyLabel="F" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={geo} />}
+          {lunge.show && <Slot id="lunge" keyLabel="" hud={lunge} iconSrc="assets/images/lunge_chevron.png" onPress={triggerLunge} g={geo} />}
+          {bomb.show && <Slot id="burst" keyLabel="" hud={bomb} iconSrc="assets/images/burst.png" onPress={requestBurst} g={geo} />}
         </UiEntity>
       </UiEntity>
     </UiEntity>

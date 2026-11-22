@@ -212,9 +212,9 @@ export function initOverdrive() {
   initStarOrbs()
   knockForceEnt = engine.addEntity()
   setOverdriveImmuneCheck(() => isLocalOverdriveActive())
-  events.on('star:spawn', ({ i, x, y, z }) => {
+  events.on('star:spawn', ({ i, x, y, z, fall }) => {
     if (!Number.isFinite(i) || ![x, y, z].every(n => typeof n === 'number' && isFinite(n))) return
-    showStarOrb(i, x, y, z)
+    showStarOrb(i, x, y, z, fall ?? 0)
   })
   events.on('star:despawn', ({ i }) => {
     if (Number.isFinite(i)) hideStarOrb(i)

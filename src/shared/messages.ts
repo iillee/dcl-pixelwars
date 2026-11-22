@@ -74,6 +74,7 @@ export const Messages = {
     charge: Schemas.Int,
     pending: Schemas.Int,
     earned: Schemas.Int,
+    bonus: Schemas.Int,
     speed: Schemas.Int,
     paint: Schemas.Int,
     haste: Schemas.Int,
@@ -94,12 +95,21 @@ export const Messages = {
   }),
 
   // Server → everyone: a star orb appeared or disappeared. i is the orb id.
-  starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fall: Schemas.Int }),
   starDespawn: Schemas.Map({ i: Schemas.Int }),
   // Server → everyone: who is holding the star, and until when (0 = ended).
   starHold: Schemas.Map({ id: Schemas.String, until: Schemas.Number, ms: Schemas.Number }),
   // Server → everyone: accepted star bump. The victim applies overdriveKnock.
   overdriveImpact: Schemas.Map({ attacker: Schemas.String, target: Schemas.String, dx: Schemas.Number, dz: Schemas.Number }),
+  // Server → everyone. kind 1 = team took the sole lead (a is the team name).
+  // kind 2 = a KO (a knocked out b). team / teamB tint those names.
+  feed: Schemas.Map({
+    kind: Schemas.Int,
+    a: Schemas.String,
+    b: Schemas.String,
+    team: Schemas.Int,
+    teamB: Schemas.Int,
+  }),
 
   // Client → Server: request the current authoritative paint state.
   // Sent once after teamAssigned so a reloaded/late-joining client sees

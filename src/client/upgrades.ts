@@ -16,7 +16,7 @@ import { playUiClick, playUpgradeHoverSfx, playUpgradeReadySfx, playUpgradeSelec
 import { setUpgradeSpeedMult } from './speed'
 import { inLobby } from './phase'
 import {
-  CARD_AUTO_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, badgeBobPx, cardPopScale, cardSlidePx,
+  CARD_AUTO_MS, CARD_FLY_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, badgeBobPx, cardFlyMove, cardFlyShrink, cardFlyT, cardPopScale, cardSlidePx,
 } from '../shared/upgradeCards'
 
 export const FLASH_MS = 450
@@ -35,6 +35,21 @@ let hoverKind: UpgradeKind | null = null
 let highlightUntil = 0
 let flashUntil = 0
 let wired = false
+/** First pick stays next to the score. Later kinds append to the right. */
+let iconOrder: UpgradeKind[] = []
+let fly: {
+  kind: UpgradeKind
+  index: number
+  count: number
+  startMs: number
+  level: number
+  slot: number
+  /** True when this pick opened a new slot. A higher level of an existing buff is false. */
+  fresh: boolean
+  /** Cards on screen at the click, so the ones not picked can stay put during the flight. */
+  offer: UpgradeKind[]
+  levels: { speed: number; paint: number; haste: number }
+} | null = null
 
 function beginOpen(now: number, auto: boolean, playClick: boolean): void {
   cardsOpen = true
@@ -59,8 +74,25 @@ function beginClose(now: number, playClick: boolean): void {
 }
 
 function clusterVisible(now: number = Date.now()): boolean {
+  if (fly && now < fly.startMs + CARD_FLY_MS) return true
   if (closing) return now < closeAt + CARD_POP_MS
   return cardsOpen
+}
+
+function syncIconOrder(): void {
+  const kinds: UpgradeKind[] = ['speed', 'paint', 'haste']
+  for (const kind of kinds) {
+    if (state[kind] > 0 && iconOrder.indexOf(kind) < 0) iconOrder.push(kind)
+  }
+  iconOrder = iconOrder.filter(kind => state[kind] > 0 || fly?.kind === kind)
+}
+
+function visibleIcons(): UpgradeKind[] {
+  const out: UpgradeKind[] = []
+  for (const kind of iconOrder) {
+    if (state[kind] > 0 || fly?.kind === kind) out.push(kind)
+  }
+  return out
 }
 
 function applyModifiers(): void {
@@ -80,6 +112,8 @@ function resetLocal(): void {
   highlightUntil = 0
   hoverKind = null
   flashUntil = 0
+  iconOrder = []
+  fly = null
   applyModifiers()
 }
 
@@ -104,30 +138,35 @@ export function setUpgradeCardHover(kind: UpgradeKind | null): void {
 function setState(next: UpgradeState): void {
   const wasPending = state.pending
   const wasEarned = state.earned
+  const wasBonus = state.bonus
   const hadBuffs = state.speed > 0 || state.paint > 0 || state.haste > 0
-  const justPicked = next.earned > wasEarned
-  // A select that immediately unlocks the next threshold also counts as READY.
-  const becameReady = next.pending && (!wasPending || justPicked)
+  const spentPick = next.earned > wasEarned || next.bonus < wasBonus
+  const bonusGrew = next.bonus > wasBonus
+  // A select that leaves another pick waiting, or a new star, counts as READY.
+  const becameReady = next.pending && (!wasPending || spentPick || bonusGrew)
   const stripped = (hadBuffs || wasPending) && next.speed === 0 && next.paint === 0 && next.haste === 0 && !next.pending
   state = next
   applyModifiers()
   if (stripped) {
+    iconOrder = []
+    fly = null
     closeClusterNow()
     flashUntil = 0
     return
   }
+  syncIconOrder()
   if (becameReady) {
     const now = Date.now()
     flashUntil = now + FLASH_MS
     playUpgradeReadySfx()
-    const delay = autoOpenDelayMs(justPicked)
+    const delay = autoOpenDelayMs(spentPick)
     if (delay > 0) {
       reopenAt = now + delay
     } else if (!clusterVisible(now) && !inLobby()) {
       beginOpen(now, true, false)
     }
   }
-  if (justPicked) {
+  if (spentPick) {
     // Confirm SFX is triggered in requestUpgradeSelect so a server echo
     // does not play it twice. Keep the highlight window.
     highlightUntil = Math.max(highlightUntil, Date.now() + HIGHLIGHT_MS)
@@ -142,6 +181,7 @@ export function initUpgrades(): void {
       charge: Math.max(0, Math.floor(s.charge || 0)),
       pending: !!s.pending,
       earned: Math.max(0, Math.floor(s.earned || 0)),
+      bonus: Math.max(0, Math.floor(s.bonus || 0)),
       speed: Math.max(0, Math.floor(s.speed || 0)),
       paint: Math.max(0, Math.floor(s.paint || 0)),
       haste: Math.max(0, Math.floor(s.haste || 0)),
@@ -154,6 +194,14 @@ export function initUpgrades(): void {
     const now = Date.now()
     if (highlightKind && now >= highlightUntil) highlightKind = null
     if (hoverKind && !clusterVisible(now)) hoverKind = null
+    if (fly && now >= fly.startMs + CARD_FLY_MS) {
+      fly = null
+      cardsOpen = false
+      closing = false
+      autoOpen = false
+      autoUntil = 0
+      hoverKind = null
+    }
     if (closing && now >= closeAt + CARD_POP_MS) {
       cardsOpen = false
       closing = false
@@ -166,7 +214,7 @@ export function initUpgrades(): void {
         if (state.pending && !inLobby()) beginOpen(now, true, false)
       }
     }
-    if (cardsOpen && !closing && autoOpen && now >= autoUntil) beginClose(now, false)
+    if (!fly && cardsOpen && !closing && autoOpen && now >= autoUntil) beginClose(now, false)
     if (inLobby() || !clusterVisible(now)) return
     const offer = offeredUpgradeKinds(state)
     if (inputSystem.isTriggered(InputAction.IA_ACTION_3, PointerEventType.PET_DOWN) && offer[0]) requestUpgradeSelect(offer[0])
@@ -219,14 +267,30 @@ export function toggleUpgradeCards(): void {
 }
 
 export function requestUpgradeSelect(kind: UpgradeKind): void {
-  if (!clusterVisible() || !state.pending) return
+  if (fly || !clusterVisible() || !state.pending) return
+  const offer = offeredUpgradeKinds(state)
+  const index = offer.indexOf(kind)
   const preview = trySelectUpgrade(state, kind)
-  if (!preview.ok) return
+  if (!preview.ok || index < 0) return
   const now = Date.now()
+  let slot = iconOrder.indexOf(kind)
+  const fresh = slot < 0
+  if (fresh) {
+    iconOrder = iconOrder.concat(kind)
+    slot = iconOrder.length - 1
+  }
+  fly = {
+    kind, index, count: offer.length, startMs: now, level: preview.state[kind], slot, fresh,
+    offer: offer.slice(),
+    levels: { speed: state.speed, paint: state.paint, haste: state.haste },
+  }
   highlightKind = kind
-  highlightUntil = now + HIGHLIGHT_MS
+  highlightUntil = now + CARD_FLY_MS
+  hoverKind = null
+  autoOpen = false
+  autoUntil = 0
   playUpgradeSelectSfx()
-  beginClose(now, false)
+  setState(preview.state)
   try { room.send('upgradeSelect', { kind: UPGRADE_KIND_ID[kind] }) } catch (err) {
     console.log('[Upgrade] select send failed', err)
   }
@@ -255,6 +319,22 @@ export type UpgradeHud = {
   popSlide: number
   highlight: UpgradeKind | null
   hover: UpgradeKind | null
+  /** First pick on the left, later picks to its right. Includes a pick still flying in. */
+  iconOrder: UpgradeKind[]
+  /** Selected card shrinking into its buff slot. Null when idle. */
+  fly: {
+    kind: UpgradeKind
+    index: number
+    count: number
+    t: number
+    shrink: number
+    move: number
+    level: number
+    slot: number
+    fresh: boolean
+    offer: UpgradeKind[]
+    levels: { speed: number; paint: number; haste: number }
+  } | null
   /** Waiting picks while a selection is pending (0 otherwise). */
   pendingCount: number
   /** Vertical badge offset in UI pixels (0 when nothing is pending). */
@@ -269,6 +349,7 @@ export function getUpgradeHud(): UpgradeHud {
   const progress = upgradeProgress(state)
   const visible = clusterVisible(now)
   const elapsed = closing ? now - closeAt : now - openAt
+  const flyT = fly ? cardFlyT(now - fly.startMs) : 0
   return {
     show: !inLobby(),
     paintedOk: true,
@@ -287,7 +368,9 @@ export function getUpgradeHud(): UpgradeHud {
     popScale: visible ? cardPopScale(elapsed, closing) : 1,
     popSlide: visible ? cardSlidePx(elapsed, closing) : 0,
     highlight: highlightKind && now < highlightUntil ? highlightKind : null,
-    hover: visible && !closing ? hoverKind : null,
+    hover: visible && !closing && !fly ? hoverKind : null,
+    iconOrder: visibleIcons(),
+    fly: fly ? { kind: fly.kind, index: fly.index, count: fly.count, t: flyT, shrink: cardFlyShrink(flyT), move: cardFlyMove(flyT), level: fly.level, slot: fly.slot, fresh: fly.fresh, offer: fly.offer, levels: fly.levels } : null,
     pendingCount: pendingUpgradeCount(state),
     badgeBob: state.pending ? badgeBobPx(now) : 0,
     flash: now < flashUntil,

@@ -655,16 +655,20 @@ export const ANVIL_HITTER_IMMUNE_MS = 400
 export const ANVIL_HIT_REPORT_SLACK = 0.8
 
 // ═══ Star pickup ════════════════════════════════════════════════════
-// One orb on the floor at a time, after a short grace at round start.
-// The first player or bot to touch it gets the star.
+// One orb on the floor at a time. The first appears after a short grace.
+// The next appears a minute after someone picks one up.
 export const STAR_SPAWN_GRACE_MS = 8000
-export const STAR_SPAWN_MIN_MS = 20000
-export const STAR_SPAWN_MAX_MS = 35000
+export const STAR_SPAWN_MIN_MS = 60000
+export const STAR_SPAWN_MAX_MS = 60000
 export const STAR_MAX_ACTIVE = 1
 export const STAR_PICKUP_RADIUS = 1.2
 export const STAR_PICKUP_MAX_DY = 2
 export const STAR_SPAWN_CLEAR_M = 8
 export const STAR_HOVER_Y = 1.1
+/** Metres above the landing height where a new star starts its drop. */
+export const STAR_FALL_HEIGHT = 36
+/** Drop time. The star cannot be picked up until this elapses. */
+export const STAR_FALL_MS = 2800
 export const STAR_ORB_DIAMETER = 0.6
 /** How long the star lasts once picked up (ms). Matches the star theme (~23.01 s). */
 export const STAR_MS = 23000
@@ -676,8 +680,8 @@ export const STAR_COOLDOWN_MULT = 0.5
 export const STAR_THEME_SRC = 'assets/sounds/star-theme.mp3'
 /** Carrier theme + BGM duck. Off for now; flip to re-enable. The unpicked-star idle loop is separate. */
 export const STAR_THEME_ENABLED = false
-/** When false, no star orb, beacon, or idle sound is spawned. Pickup / hold code stays in place. */
-export const STAR_PICKUPS_ENABLED = false
+/** Star orbs, beacons, and the idle loop. Pickup opens a normal upgrade; it does not start the old star buff. */
+export const STAR_PICKUPS_ENABLED = true
 
 // ═══ Round upgrades (paint-earned, last until the round ends) ════════
 // Players spend upgrade charge (from tiles they convert) on up to nine

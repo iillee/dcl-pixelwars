@@ -33,26 +33,30 @@ A fall (`playerFell`) wipes buffs and any pending pick, but keeps charge. `earne
 
 Bots get no upgrades.
 
-During a match, other players' current upgrades show as a small row of black silhouette icons (bolt, drop, stopwatch) just above their nametag, facing the camera. Quantity is the icon repeated, grouped Speed, then Paint, then Haste. The row is a Y-billboarded `AvatarAttach` on `AAPT_NAME_TAG` (`src/client/upgradeTags.ts`). The server broadcasts `upgradeBuffs` when levels change (pick, fall wipe, leave, late-join snapshot, or round clear). The icons clear on a fall, at round end, and in the lobby, same as the top HUD buff tiles. Your own icons show in third person and hide in first person (`CameraMode` on `engine.CameraEntity`). Textures are unlit, alpha-tested `assets/images/world/upgrade-tag-*.png`.
+A star orb still spawns in a paint round, after an 8s grace, then a minute after each pickup, one at a time. It falls from the sky with a particle tail and no beacon. The beacon and idle sound start when it lands, and it cannot be picked up before then. Touching it opens a normal upgrade pick. It does not start the old star buff, sparkles, speed, or theme. That pick does not spend a paint threshold. Bots do not chase or claim it.
+
+During a match the nameplate is the team color with no team word. Each upgrade level adds one ★, so nine stars is every buff maxed. The plate starts at the width of four stars and grows only past that. Stars stay centered. A blank plate is four stars drawn in the plate color. Counts come from `upgradeBuffs` (and `upgrade:state` for you) in `src/client/nametags.ts`. They clear on a fall, at round end, and in the lobby. Balloon Battle still hides the plates.
 
 
 Bonus totals: Speed +15 / +25 / +30% move (jog/run only; Dash distance unchanged). Paint +20 / +35 / +45% area (tile-count approximation). Haste −15 / −25 / −30% Dash and Burst cooldown (future activations only).
 
 ## Card popup and badge
 
-The three cards open centered on screen (auto-open when a threshold is crossed, or tap the gold pill). Desktop target is about 280×427 UI px; they shrink to fit portrait. On hover (desktop pointer only) a card grows to 1.08, gets a white border and a lighter fill; neighbors stay put. Hover SFX is `assets/sounds/Clip_Click_1.wav` (volume 0.32). Select SFX is `assets/sounds/pop.mp3` (0.7), on a dedicated camera-parented source. Close still uses the UI click. Keys 1–3 still pick. Phones have no hover state.
+The three cards open centered on screen (auto-open when a threshold is crossed, or tap the gold pill). Desktop target is about 280×427 UI px; they shrink to fit portrait. On hover (desktop pointer only) a card grows to 1.08, gets a white border and a lighter fill; neighbors stay put. Hover SFX is `assets/sounds/Fantasy_UI_44.wav` (volume 0.32). Select SFX is `assets/sounds/Fantasy_UI_51.wav` (0.7), on a dedicated camera-parented source. Close still uses the UI click. Keys 1–3 still pick. Phones have no hover state.
 
-There is no timer bar and no Close button. The popup auto-tucks after 5 seconds, or immediately when a card is picked. Tapping the pill while the cards are open cancels auto-tuck. There is no Escape binding.
+There is no timer bar and no Close button. The popup auto-tucks after 5 seconds. Picking a card shrinks it and glides it into that buff's slot; the cards not picked stay in place until the flight ends. The first kind sits just right of the score pill; the second and third kinds sit to its right and stay there. A later level of the same kind lands on its existing slot and does not hide that icon. Tapping the pill while the cards are open cancels auto-tuck. There is no Escape binding.
 
 A red bouncing badge (`#E8424A`, white ring, bold white count) sits on the top-right of the gold points pill as soon as a pick is pending — including while the cards are open. The number is waiting picks (`unlocked − earned`, at least 1 while pending). It drops by one per pick and disappears at 0. It sine-bobs 5 px at 1.5 Hz. The pill turns gold when a pick is ready (short color flash, then settled gold) and no longer pulses in size. Click/tap the pill only opens the cards when a pick is pending; a tap with nothing pending does nothing.
+
+Buff tiles use that same corner chip for the level of that one buff: a white circle, dark ring, and a number 1–3. The cards themselves have no level chip. Nametag stars stay the total across all buffs.
 
 Mid-round, clicking the team territory bar opens standings. That must **not** hide the gold pill or the buff icons. (`PaintedHud` stays up while `standingsOpen`; it still hides in the lobby and the round-end summary.)
 
 ## Match and lobby HUD
 
-Match top row: **eye, mute, timer, score pill**, then buff icons after the pill. The score pill is a fixed **144 px** (eye 68 + gap 8 + mute 68) and no longer grows with the digit count; the font shrinks if a large number would overflow (4–5 digits fit at the normal size). The team territory bar under the row is **504 px**, spanning eye through the score pill, not the buff icons. The overview zoom/rotate row still opens to the left of the eye without shifting the HUD.
+Match top row: **eye, mute, timer, score pill**, then buff icons after the pill. The score pill is a fixed **144 px** (eye 68 + gap 8 + mute 68) and no longer grows with the digit count; the font shrinks if a large number would overflow (4–5 digits fit at the normal size). The team territory bar under the row is **504 px**, spanning eye through the score pill, not the buff icons. Short toasts sit under that bar: `GREEN TAKES THE LEAD` when a team becomes the only leader, and `ALICE KO'D BOB` when a player or bot is knocked out. They last about 3 seconds. The overview zoom/rotate row still opens to the left of the eye without shifting the HUD.
 
-Lobby top row: **eye, timer, mute** (no score pill).
+Lobby top row: **eye, mute, timer, star, ?**. The star opens a top-10 wins board and the question mark opens How To Play; both slide down from the top, match that full row, and close when the round begins. Opening one closes the other. A sole team win credits each connected player on that team; Balloon credits the winner. Ties credit nobody. Bots are not listed.
 
 ## Lobby
 
@@ -77,8 +81,7 @@ No client-side latency masking. Flagtag is read-only when porting code from it.
 | Card timing, badge bob | `src/shared/upgradeCards.ts` |
 | Card overlay, pill, badge, buff tiles | `src/client/upgradeUi.tsx` |
 | Client upgrade state and HUD model | `src/client/upgrades.ts` |
-| Nametag upgrade icon row | `src/client/upgradeTags.ts` |
-| Black silhouette icon textures | `assets/images/world/upgrade-tag-*.png` |
+| Nameplate color and ★ strength | `src/client/nametags.ts` |
 | Hover / select SFX | `src/client/audio.ts` |
 | Match / lobby HUD, territory bar, standings | `src/ui.tsx` |
 | Overview eye and left-opening view row | `src/client/overviewUi.tsx` |

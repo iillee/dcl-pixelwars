@@ -22,26 +22,72 @@ import {
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
 import { DesktopUpgradeExtras, MobileUpgradeRow, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
+import { FeedToasts } from "./client/feedUi"
 import { getUpgradeHud } from "./client/upgrades"
 import { OutlinedLabel } from "./client/outlinedLabel"
 import { getPlayer } from "@dcl/sdk/players"
 import { isMobile } from "@dcl/sdk/platform"
 import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputAction, PointerEventType } from "@dcl/sdk/ecs"
 
-// Popup open/close state — module-local, driven by star-button clicks.
-// React-ECS re-renders every frame so a plain variable is enough.
-let leaderboardOpen = false
-function toggleLeaderboard(): void {
+// The star slides the board down from above the HUD. React-ECS re-renders
+// every frame, so the duck is just a clock and a 0–1 progress.
+const LB_SLIDE_MS = 350
+const LB_REST_TOP = 10 + TOP_BTN + 8
+let lbShown = false
+let lbFrom = 0
+let lbTo = 0
+let lbT0 = 0
+const easeOutBack = (t: number) => {
+  const c = 1.70158
+  return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2)
+}
+const easeInBack = (t: number) => {
+  const c = 1.70158
+  return (c + 1) * t * t * t - c * t * t
+}
+function lbMotion(): { p: number; live: boolean } {
+  const t = Math.min(1, (Date.now() - lbT0) / LB_SLIDE_MS)
+  const e = lbShown ? easeOutBack(t) : easeInBack(t)
+  const p = lbFrom + (lbTo - lbFrom) * e
+  return { p, live: lbShown || t < 1 }
+}
+type HudDrop = 'wins' | 'help'
+let drop: HudDrop = 'wins'
+let dropW = 0
+function closeDrop(click = false): void {
+  if (!lbShown) return
+  if (click) playUiClick()
+  const { p } = lbMotion()
+  lbFrom = p
+  lbShown = false
+  lbTo = 0
+  lbT0 = Date.now()
+}
+function showDrop(next: HudDrop): void {
   playUiClick()
-  leaderboardOpen = !leaderboardOpen
-  if (leaderboardOpen) {
+  if (lbShown && drop === next) {
+    closeDrop(false)
+    return
+  }
+  const opening = !lbShown
+  drop = next
+  if (opening) {
+    const { p } = lbMotion()
+    lbFrom = p
+    lbShown = true
+    lbTo = 1
+    lbT0 = Date.now()
+  }
+  if (next === 'wins') {
     // Ask server for the freshest snapshot when opening; response arrives
     // as a CRDT update to LeaderboardState within a frame or two.
-    room.send('requestLeaderboard', {})
+    try { room.send('requestLeaderboard', {}) } catch (err) { console.log('[Leaderboard] request failed', err) }
   }
 }
+function toggleLeaderboard(): void { showDrop('wins') }
+function toggleHowTo(): void { showDrop('help') }
 
-interface LbEntry { userId: string; name: string; cellsPainted: number }
+interface LbEntry { userId: string; name: string; wins: number }
 // Top painters rows: fixed height, rank / name / cells columns shared with the header row.
 // Custom scrollbar drag: grab the thumb, follow PrimaryPointerInfo screen Y (px → UI units via the canvas ratio).
 const LB_BAR_W = 10, LB_THUMB_MIN = 28
@@ -54,7 +100,7 @@ function pointerY(): number | null {
 function startLbDrag(): void { const y = pointerY(); if (y !== null) lbDrag = { y, off: lbOffset } }
 function lbDragSystem(): void {
   if (!lbDrag) return
-  if (!leaderboardOpen || inputSystem.isTriggered(InputAction.IA_POINTER, PointerEventType.PET_UP)) { lbDrag = null; return }
+  if (!lbShown || inputSystem.isTriggered(InputAction.IA_POINTER, PointerEventType.PET_UP)) { lbDrag = null; return }
   const y = pointerY(); if (y === null || lbThumbTravel <= 0) return
   const c = UiCanvasInformation.getOrNull(engine.RootEntity)
   const pxPerUi = c && c.height > 0 ? c.height / 1080 : 1 // virtualHeight 1080
@@ -68,7 +114,16 @@ function readLeaderboard(): LbEntry[] {
   if (!s || !s.json) return []
   try {
     const arr = JSON.parse(s.json)
-    return Array.isArray(arr) ? arr : []
+    if (!Array.isArray(arr)) return []
+    const rows: LbEntry[] = []
+    for (const e of arr) {
+      if (!e || typeof e.userId !== 'string') continue
+      const wins = typeof e.wins === 'number' ? Math.max(0, Math.floor(e.wins)) : 0
+      if (wins <= 0) continue
+      rows.push({ userId: e.userId, name: typeof e.name === 'string' && e.name ? e.name : e.userId.slice(0, 8), wins })
+    }
+    rows.sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
+    return rows.slice(0, 10)
   } catch { return [] }
 }
 
@@ -129,6 +184,19 @@ function onTeamInk(team: number): Color4 {
 const BAR_TOP_PX = 10 + 68 + 6 // the score bar's top edge: the pill grows out of it
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
+const LOBBY_BUTTONS = 4 // eye, mute, star, how-to
+function lobbyPillWidth(mobile: boolean): number {
+  const lobbyFont = mobile ? 16 : 22
+  const full = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 15', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+  if (!mobile) return full
+  const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
+  return Math.min(full, Math.max(MOBILE_TIMER_W, canvasW - 120 - 2 * (TOP_BTN + TOP_GAP)))
+}
+/** Lobby row including the how-to button, or the fixed match row. */
+function topClusterW(): number {
+  if (!inLobby()) return MATCH_TOP_W
+  return lobbyPillWidth(isMobile()) + LOBBY_BUTTONS * (TOP_BTN + TOP_GAP)
+}
 // Style of the LUNGE/BURST hotbar: light-grey rounded pills, thick dark rounded-square outlines, dark caps text.
 const SUMMARY_CARD_BG = PANEL_LIGHT // same light panel as the hotbar
 const SUMMARY_INK = Color4.create(0.13, 0.13, 0.15, 1)        // dark text + thick outlines
@@ -781,6 +849,22 @@ function BasesChargeMeter(props: { team: 1 | 2; progress: number; connected: num
     </UiEntity>
   )
 }
+/** Same framed tile as mute. The ★ is the old top-painters button. */
+function LobbyStarButton() {
+  return (
+    <TileButton id="ui_lobby_star" onPress={toggleLeaderboard}>
+      <Label value="★" fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+    </TileButton>
+  )
+}
+function LobbyHelpButton() {
+  return (
+    <TileButton id="ui_lobby_help" onPress={toggleHowTo}>
+      <Label value={hudBold('?')} fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+    </TileButton>
+  )
+}
+
 function BasesChargeHud() {
   const c = baseCharge()
   const mob = isMobile()
@@ -813,9 +897,10 @@ export const uiMenu = () => (
       const lobby = inLobby()
       const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
       const voteW = Math.max(280, Math.min(canvasW - 24, 760))
-      const lobbyFont = isMobile() ? 16 : 22
-      // One fixed width for both lobby states, snug around the longer line plus a little padding.
-      const lobbyPillW = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 15', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+      const lobbyPillW = lobbyPillWidth(false)
+      const lobbyClusterW = lobbyPillW + LOBBY_BUTTONS * (TOP_BTN + TOP_GAP)
+      const mobileLobbyPillW = lobbyPillWidth(true)
+      const mobileLobbyClusterW = mobileLobbyPillW + LOBBY_BUTTONS * (TOP_BTN + TOP_GAP)
       return (
         <UiEntity
           uiTransform={{
@@ -825,18 +910,24 @@ export const uiMenu = () => (
           }}
         >
           <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
-            {/* Lobby: eye | timer | mute. Match: eye | mute | timer | score.
+            {/* Lobby: eye | mute | timer | star | ?. Match: eye | mute | timer | score.
                 View controls overlay to the left of the eye so the top bar never shifts. */}
             {isMobile() ? (
             lobby ? (
             <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN, margin: { right: TOP_GAP } }}>
-                <OverviewRow />
+                <OverviewRow clusterW={mobileLobbyClusterW} />
                 <OverviewEye />
+              </UiEntity>
+              <UiEntity uiTransform={{ margin: { right: TOP_GAP } }}>
+                <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
               <UiEntity
                 uiTransform={{
-                  width: Math.min(lobbyPillW, Math.max(MOBILE_TIMER_W, canvasW - 120)), height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
+                  width: mobileLobbyPillW, height: TOP_BTN, borderRadius: HOTBAR_RADIUS,
                   // Key-tile frame: light rim, dark ring (padding), light inner panel filling the rest.
                   borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
                 }}
@@ -848,10 +939,10 @@ export const uiMenu = () => (
                 </UiEntity>
               </UiEntity>
               <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
-                <TileButton id="ui_top_mute" onPress={toggleMusic}>
-                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-                </TileButton>
+                <LobbyStarButton />
+              </UiEntity>
+              <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
+                <LobbyHelpButton />
               </UiEntity>
             </UiEntity>
             ) : (
@@ -882,10 +973,16 @@ export const uiMenu = () => (
             </UiEntity>
             )
             ) : lobby ? (
-            <UiEntity uiTransform={{ width: lobbyPillW + 2 * (TOP_BTN + TOP_GAP), height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <UiEntity uiTransform={{ width: lobbyClusterW, height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
               <UiEntity uiTransform={{ width: TOP_BTN, height: TOP_BTN }}>
-                <OverviewRow desktop besideEye />
+                <OverviewRow desktop besideEye clusterW={lobbyClusterW} />
                 <OverviewEye />
+              </UiEntity>
+              <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
+                <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
+                  <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
+                    uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
+                </TileButton>
               </UiEntity>
               <UiEntity
                 uiTransform={{
@@ -901,10 +998,10 @@ export const uiMenu = () => (
                   <Label value={hudBold(hudClockText(secs))} fontSize={22} color={SUMMARY_INK} font="sans-serif" textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: '100%', height: 36 }} />
                 </UiEntity>
               </UiEntity>
-              <TileButton id="ui_lobby_mute" onPress={toggleMusic}>
-                <UiEntity uiTransform={{ width: 28, height: 28, pointerFilter: 'none' }}
-                  uiBackground={{ textureMode: 'stretch', texture: { src: isMusicMuted() ? 'assets/images/muted.png' : 'assets/images/unmute.png' }, color: SUMMARY_INK }} />
-              </TileButton>
+              <LobbyStarButton />
+              <UiEntity uiTransform={{ margin: { left: TOP_GAP } }}>
+                <LobbyHelpButton />
+              </UiEntity>
             </UiEntity>
             ) : (
             <UiEntity uiTransform={{ width: MATCH_TOP_W, height: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
@@ -949,69 +1046,89 @@ export const uiMenu = () => (
                 </UiEntity>
               )
             })()}
+            <FeedToasts />
             <MobileUpgradeRow />
           </UiEntity>
         </UiEntity>
       )
     })()}
 
-    {/* ─── Leaderboard popup: centered modal ────────────────────────
-        Renders when leaderboardOpen is true. The in-match timer no longer
-        has a star button; standings still open from the score bar. */}
-    {leaderboardOpen && (() => {
-      // Mobile: top 10 only (fits without scrolling), no backdrop; tapping the board or its X closes it.
+    {/* ─── Leaderboard: slides down from the top and sits under the HUD.
+        The lobby star opens this. In a match, standings still open from the score bar. */}
+    {(() => {
+      // Keep the last lobby width through the close, so the panel does not jump to the match row.
+      if (inLobby()) dropW = topClusterW()
+      else closeDrop()
+      const motion = lbMotion()
+      if (!motion.live) return null
+      // Same width and edges as the top cluster, including the how-to button. No dimmer. A tap closes it.
       const mob = isMobile()
-      const rows = mob ? readLeaderboard().slice(0, 10) : readLeaderboard()
+      const help = drop === 'help'
+      const rows = help ? [] : readLeaderboard()
+      const h = isMobile() ? 720 : 1080
+      const clusterW = dropW > 0 ? dropW : topClusterW()
+      const total = rows.length * (LB_ROW_H + 3)
+      const view = rows.length === 0 ? 60 : (mob ? total : Math.min(total, Math.max(LB_ROW_H * 3, h * 0.85 - LB_HEAD_H)))
+      const helpH = 48 + 5 * 44 + 8 + 14 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2
+      const panelH = help ? helpH : view + 48 + 24 + 8 + 14 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2
+      const top = -panelH + (LB_REST_TOP + panelH) * motion.p
       return (
         <UiEntity
           uiTransform={{
             width: '100%', height: '100%',
             positionType: 'absolute', position: { top: 0, left: 0 },
-            justifyContent: 'center', alignItems: 'center', pointerFilter: mob ? 'none' : 'block',
+            pointerFilter: mob || !lbShown ? 'none' : 'block',
           }}
-          uiBackground={mob ? undefined : { color: BANNER_BG }}
-          onMouseDown={toggleLeaderboard}
+          onMouseDown={lbShown ? () => closeDrop(true) : undefined}
         >
-          {/* Modal card. Any click anywhere (card, X, backdrop) closes the
-              popup — no stop-propagation, so the outer overlay's onMouseDown
-              handles it uniformly. */}
+          <UiEntity uiTransform={{
+            positionType: 'absolute', position: { top, left: 0 },
+            width: '100%', flexDirection: 'row', justifyContent: 'center', pointerFilter: 'none',
+          }}>
           <UiEntity
             uiTransform={{
-              width: 520, borderRadius: HOTBAR_RADIUS, flexDirection: 'column', alignItems: 'stretch', // height hugs the rows
-              // Key-tile frame like the clock: light rim around a dark ring, PANEL_LIGHT fill.
+              width: clusterW, borderRadius: HOTBAR_RADIUS, flexDirection: 'column', alignItems: 'stretch',
               borderWidth: HOTBAR_BORDER_W, borderColor: HOTBAR_RIM, padding: CLOCK_RING,
             }}
             uiBackground={{ color: HOTBAR_TILE_BG }}
-            onMouseDown={toggleLeaderboard}
+            onMouseDown={() => closeDrop(true)}
           >
             <UiEntity uiTransform={{ width: '100%', borderRadius: HOTBAR_RADIUS - HOTBAR_BORDER_W - CLOCK_RING, padding: { left: 14, right: 14, top: 8, bottom: 14 }, flexDirection: 'column', alignItems: 'stretch' }}
               uiBackground={{ color: PANEL_LIGHT }}>
             {/* Header */}
             <UiEntity uiTransform={{ width: '100%', height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Label value="★ TOP PAINTERS" fontSize={28} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 48 }} />
+              <Label value={help ? '? HOW TO PLAY' : '★ TOP WINS'} fontSize={28} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 48 }} />
               <UiEntity
                 uiTransform={{ width: 32, height: 32, justifyContent: 'center', alignItems: 'center', pointerFilter: 'block' }}
-                onMouseDown={toggleLeaderboard}
+                onMouseDown={() => closeDrop(true)}
               >
                 <Label value="✕" fontSize={22} color={SUMMARY_INK} textAlign="middle-center" />
               </UiEntity>
             </UiEntity>
+            {help ? (
+              <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', alignItems: 'stretch' }}>
+                {['Stand on a color to pick your team.', 'Paint territory with Dash and Burst.', 'The gold pill opens upgrades. Each buff shows 1–3.', 'Nametag stars are total strength.', 'A sole winner gets the win.'].map(line => (
+                  <Label value={line} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="wrap" uiTransform={{ width: '100%', height: 40, margin: { top: 4 } }} />
+                ))}
+              </UiEntity>
+            ) : (
+            <UiEntity uiTransform={{ width: '100%', flexDirection: 'column', alignItems: 'stretch' }}>
             {/* Column headers (summary-table style: dim dark caps) */}
             <UiEntity uiTransform={{ width: '100%', height: 24, flexShrink: 0, flexDirection: 'row', alignItems: 'center', padding: { left: LB_PAD, right: LB_PAD } }}>
               <Label value="#"      fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-center" uiTransform={{ width: LB_RANK_W, height: '100%', margin: { right: LB_GAP } }} />
               <Label value="PLAYER" fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-left"   uiTransform={{ flexGrow: 1, height: '100%' }} />
-              <Label value="CELLS"  fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-right"  uiTransform={{ width: LB_CELLS_W, height: '100%' }} />
+              <Label value="WINS"  fontSize={fnt(SUMMARY_HEAD_FONT, 1)} color={SUMMARY_DIM} textAlign="middle-right"  uiTransform={{ width: LB_CELLS_W, height: '100%' }} />
             </UiEntity>
             {/* Rows */}
             {rows.length === 0 ? (
               <UiEntity uiTransform={{ width: '100%', height: 60, margin: { top: 12 }, justifyContent: 'center', alignItems: 'center' }}>
-                <Label value="No painters yet — be the first!" fontSize={16} color={SUMMARY_DIM} textAlign="middle-center" />
+                <Label value="No wins yet — be the first!" fontSize={16} color={SUMMARY_DIM} textAlign="middle-center" />
               </UiEntity>
             ) : (
             // Rows: clipped viewport + custom pill scrollbar (drag) when the board would be taller than the screen.
             (() => {
             const total = rows.length * (LB_ROW_H + 3)
-            const view = mob ? total : Math.min(total, Math.max(LB_ROW_H * 3, canvasSize().h * 0.85 - LB_HEAD_H))
+            const view = mob ? total : Math.min(total, Math.max(LB_ROW_H * 3, h * 0.85 - LB_HEAD_H))
             const maxOff = Math.max(0, total - view)
             lbMaxOff = maxOff
             lbThumbTravel = view - Math.max(LB_THUMB_MIN, view * view / total)
@@ -1038,7 +1155,7 @@ export const uiMenu = () => (
                     </UiEntity>
                   </UiEntity>
                   <Label value={r.name} fontSize={16} color={SUMMARY_INK} textAlign="middle-left" textWrap="nowrap" uiTransform={{ flexGrow: 1, height: '100%' }} />
-                  <Label value={r.cellsPainted.toLocaleString()} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: LB_CELLS_W, height: '100%', flexShrink: 0 }} />
+                  <Label value={`${r.wins}`} fontSize={16} color={SUMMARY_INK} textAlign="middle-right" textWrap="nowrap" uiTransform={{ width: LB_CELLS_W, height: '100%', flexShrink: 0 }} />
                 </UiEntity>
               )
             })}
@@ -1057,8 +1174,11 @@ export const uiMenu = () => (
             })()
             )}
             </UiEntity>
+            )}
+          </UiEntity>
           </UiEntity>
         </UiEntity>
+      </UiEntity>
       )
     })()}
 
