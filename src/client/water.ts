@@ -47,8 +47,6 @@ function swellClipReady(ent: Entity): boolean {
   const st = GltfContainerLoadingState.getOrNull(ent)
   if (!st) return false
   return st.currentState === LoadingState.FINISHED
-    || st.currentState === LoadingState.FINISHED_WITH_ERROR
-    || st.currentState === LoadingState.NOT_FOUND
 }
 
 /**
@@ -82,7 +80,7 @@ let seaRooted = false
 let seaTracking = false
 
 function seaMark(part: string): void {
-  console.log(`[Water] loaded at t=${Date.now() - WATER_BOOT}ms part=${part}`)
+  console.log(`[Water] requested at t=${Date.now() - WATER_BOOT}ms part=${part}`)
 }
 
 function bootSeaRoot(): void {
@@ -188,10 +186,12 @@ export function initWater(): void {
 }
 
 /**
- * With `LOOK.seaLast`, the sea waits until the burst/lunge clips have
- * finished loading (or 4s). Each mesh is then one frame apart so a single
- * frame does not decode every GLB. The ocean bed is `onAudio`, after the
- * haze. Team assignment is not a gate: the ocean belongs to the lobby too.
+ * With `LOOK.seaLast`, the first swell is requested immediately so it is
+ * already in the loader when other players' avatars arrive. The rest wait
+ * until the burst/lunge clips have finished (or 4s), and until the previous
+ * sea mesh is in, so they are not all decoded on one frame. The ocean bed
+ * is `onAudio`, after the haze. Team assignment is not a gate: the ocean
+ * belongs to the lobby too.
  */
 export function armSea(onAudio: () => void): void {
   if (!LOOK.sea) {
@@ -203,21 +203,127 @@ export function armSea(onAudio: () => void): void {
     onAudio()
     return
   }
-  console.log('[Water] deferred until combat clips are in (or 4s); meshes load one frame apart')
+  console.log('[Water] first mesh now; the rest follow once each one is in, after combat clips (or 4s)')
+  bootSeaRoot()
+  seaPhase = 1
+  stepSea()
   let age = 0
   let stepping = false
   engine.addSystem(function seaLast(dt: number) {
     age += dt
     if (!stepping) {
-      if (!combatVfxReady() && age < 4) return
-      if (!combatVfxReady()) console.log(`[Water] vfx preload not reported after ${age.toFixed(1)}s — loading sea anyway`)
+      let ready = false
+      try { ready = combatVfxReady() } catch { ready = false }
+      if (!ready && age < 4) return
+      if (!ready) console.log(`[Water] vfx preload not reported after ${age.toFixed(1)}s — loading the rest of the sea`)
       stepping = true
-      seaPhase = 1
     }
+    if (seaInFlight()) return
     if (!stepSea()) return
     onAudio()
     engine.removeSystem(seaLast)
   })
+}
+
+type SeaLoad = {
+  ent: Entity
+  src: string
+  tries: number
+  wait: number
+  hold: number
+  done: boolean
+  onReady: () => void
+}
+
+const seaLoads: SeaLoad[] = []
+let seaLoadWatch = false
+let seaRetryGap = 0
+const SEA_TRIES = 8
+
+/**
+ * True while a sea mesh was requested recently and has not finished.
+ * The next mesh waits, so other players' avatars are not competing with
+ * every swell at once. A load left in LOADING is not cancelled: deleting
+ * it sent that mesh to the back of the queue.
+ */
+function seaInFlight(): boolean {
+  for (const item of seaLoads) {
+    if (item.done || item.tries >= SEA_TRIES) continue
+    if (!Transform.getOrNull(item.ent)) continue
+    if (item.wait < 12) return true
+  }
+  return false
+}
+
+/**
+ * Other players' avatars fill the loader. A sea mesh requested in that window
+ * often never starts, and a material applied before the GLB is in does not
+ * stick. Shade only after FINISHED. Ask again if the load errors or never
+ * starts. Leave a LOADING mesh alone.
+ */
+function whenSeaLoaded(ent: Entity, src: string, onReady: () => void): void {
+  seaLoads.push({ ent, src, tries: 0, wait: 0, hold: 0, done: false, onReady })
+  if (seaLoadWatch) return
+  seaLoadWatch = true
+  engine.addSystem(pumpSeaLoads)
+}
+
+function pumpSeaLoads(dt: number): void {
+  seaRetryGap = Math.max(0, seaRetryGap - dt)
+  let pending = false
+  let retried = false
+  for (const item of seaLoads) {
+    if (!Transform.getOrNull(item.ent)) continue
+    if (!GltfContainer.getOrNull(item.ent)) {
+      pending = true
+      continue
+    }
+    if (item.hold > 0) {
+      item.hold = Math.max(0, item.hold - dt)
+      pending = true
+      continue
+    }
+    const state = GltfContainerLoadingState.getOrNull(item.ent)?.currentState
+    if (state === LoadingState.FINISHED) {
+      if (!item.done) {
+        item.done = true
+        const mesh = GltfContainer.getMutable(item.ent)
+        mesh.visibleMeshesCollisionMask = 0
+        mesh.invisibleMeshesCollisionMask = 0
+        item.onReady()
+        console.log(`[Water] mesh in src=${item.src} t=${Date.now() - WATER_BOOT}ms`)
+      }
+      continue
+    }
+    item.wait += dt
+    if (item.tries >= SEA_TRIES) continue
+    pending = true
+    const failed = state === LoadingState.NOT_FOUND || state === LoadingState.FINISHED_WITH_ERROR
+    const never = state === undefined || state === LoadingState.UNKNOWN
+    if (retried || seaRetryGap > 0) continue
+    if (!(failed && item.wait >= 1) && !(never && item.wait >= 3)) continue
+    retried = true
+    seaRetryGap = 0.75
+    item.tries += 1
+    item.wait = 0
+    item.hold = 0.4
+    item.done = false
+    console.log(`[Water] mesh not in, retry ${item.tries} src=${item.src} state=${state ?? 'none'}`)
+    if (item.ent === swellClips[0]) {
+      clipArmed = false
+      clipSeconds = 0
+    }
+    GltfContainer.deleteFrom(item.ent)
+    GltfContainer.create(item.ent, {
+      src: item.src,
+      visibleMeshesCollisionMask: 0,
+      invisibleMeshesCollisionMask: 0,
+    })
+  }
+  if (!pending) {
+    engine.removeSystem(pumpSeaLoads)
+    seaLoadWatch = false
+  }
 }
 
 /** Base-texture scroll. ADR-255 moves the normal map with this offset; the bump's own offset is ignored. */
@@ -316,8 +422,10 @@ function addSwell(root: Entity, src: string, wet: boolean): Entity {
     }],
   })
   swellClips.push(wave)
-  applySeaPbr(wave, swellShade(WATER_COLOR, wet))
-  if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
+  whenSeaLoaded(wave, src, () => {
+    applySeaPbr(wave, swellShade(WATER_COLOR, wet))
+    if (wet && LOOK.softNormal) scrollTexture(wave, LOOK.softNormalDirX, LOOK.softNormalDirZ, LOOK.softNormalSpeed)
+  })
   return wave
 }
 
@@ -366,8 +474,10 @@ function addFoam(root: Entity, src: string): Entity {
       weight: 1,
     }],
   })
-  applySeaPbr(veil, foamShade())
-  scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
+  whenSeaLoaded(veil, src, () => {
+    applySeaPbr(veil, foamShade())
+    scrollTexture(veil, SURFACE.foamDirX, SURFACE.foamDirZ, SURFACE.foamSpeed)
+  })
   return veil
 }
 
@@ -379,18 +489,20 @@ function addFlat(root: Entity, src: string): Entity {
     visibleMeshesCollisionMask: 0,
     invisibleMeshesCollisionMask: 0,
   })
-  applySeaPbr(sea, {
-    texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
-    albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
-    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
-    emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
-    emissiveIntensity: 1,
-    metallic: WATER.metallic,
-    roughness: WATER.roughness,
-    specularIntensity: WATER.specular,
-    reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
-    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
-    castShadows: false,
+  whenSeaLoaded(sea, src, () => {
+    applySeaPbr(sea, {
+      texture: Material.Texture.Common({ src: WATER_FOG.horizonSrc }),
+      albedoColor: Color4.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b, 1),
+      emissiveTexture: Material.Texture.Common({ src: WATER_FOG.horizonGlowSrc }),
+      emissiveColor: Color3.create(RIM_COLOR.r, RIM_COLOR.g, RIM_COLOR.b),
+      emissiveIntensity: 1,
+      metallic: WATER.metallic,
+      roughness: WATER.roughness,
+      specularIntensity: WATER.specular,
+      reflectivityColor: Color3.create(WATER_COLOR.r, WATER_COLOR.g, WATER_COLOR.b),
+      transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+      castShadows: false,
+    })
   })
   return sea
 }
@@ -417,17 +529,19 @@ function placeHazeRing(mid: number, bottom: number, radius: number, height: numb
     invisibleMeshesCollisionMask: 0,
   })
   const c = HAZE_COLOR
-  applySeaPbr(ring, {
-    texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-    albedoColor: Color4.create(c.r, c.g, c.b, c.a),
-    emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
-    emissiveColor: Color3.create(c.r, c.g, c.b),
-    emissiveIntensity: 0.65,
-    roughness: 1,
-    metallic: 0,
-    specularIntensity: 0,
-    transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
-    castShadows: false,
+  whenSeaLoaded(ring, WATER_FOG.hazeSrc, () => {
+    applySeaPbr(ring, {
+      texture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+      albedoColor: Color4.create(c.r, c.g, c.b, c.a),
+      emissiveTexture: Material.Texture.Common({ src: WATER_FOG.hazeMask }),
+      emissiveColor: Color3.create(c.r, c.g, c.b),
+      emissiveIntensity: 0.65,
+      roughness: 1,
+      metallic: 0,
+      specularIntensity: 0,
+      transparencyMode: MaterialTransparencyMode.MTM_ALPHA_BLEND,
+      castShadows: false,
+    })
   })
 }
 
