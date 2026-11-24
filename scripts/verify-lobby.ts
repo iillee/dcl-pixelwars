@@ -931,7 +931,10 @@ if (lobbyFn.includes('rebuildBotGraph') || lobbyFn.includes('anvilsMazeChanged')
   process.exit(1)
 }
 const rippleSrc = readFileSync(new URL('../src/client/burstRipple.ts', import.meta.url), 'utf8')
-if (!rippleSrc.includes('graphLayout') || !rippleSrc.includes('isLobbyLayout()')) {
+const arenaGraphSrc = readFileSync(new URL('../src/client/arenaGraph.ts', import.meta.url), 'utf8')
+// Since 099354e the ripple shares clientArenaGraph, whose cache key includes
+// isLobbyLayout(), so a return to the lobby rebuilds the walkable floor.
+if (!rippleSrc.includes('clientArenaGraph') || !arenaGraphSrc.includes('isLobbyLayout()')) {
   console.error('✗ burst/dash tile effects must rebuild their walkable graph when the lobby floor returns')
   process.exit(1)
 }

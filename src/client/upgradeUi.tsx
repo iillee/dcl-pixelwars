@@ -146,18 +146,29 @@ export function PaintedCountPill(props: { width: number; height: number; font: n
 }
 
 /** Same corner chip as the red pending badge: white fill, dark count, thick ring. */
-function CountChip(props: { n: number; size: number }) {
+function countChipSize(iconSize: number): number {
+  return Math.max(14, Math.round(iconSize * 0.48))
+}
+
+function countChipHang(badge: number): number {
+  return Math.round(badge * 0.35)
+}
+
+function CountChip(props: { n: number; size: number; top?: number; left?: number; right?: number }) {
   const badge = Math.max(14, Math.round(props.size))
-  const hang = Math.round(badge * 0.35)
+  const hang = countChipHang(badge)
+  const top = props.top ?? -hang
+  const position = props.left !== undefined
+    ? { top, left: props.left }
+    : { top, right: props.right ?? -hang }
   return (
     <UiEntity uiTransform={{
       positionType: 'absolute',
-      position: { top: -hang, right: -hang },
+      position,
       width: badge, height: badge, borderRadius: badge / 2,
       borderWidth: 3, borderColor: INK,
       justifyContent: 'center', alignItems: 'center',
       pointerFilter: 'none',
-      zIndex: 4,
     }} uiBackground={{ color: WHITE }}>
       <Label
         value={bold(String(props.n))}
@@ -176,7 +187,7 @@ const ICON_GAP = 6
 const TIMER_W = 200
 const HUD_TOP = 10
 
-function IconBadge(props: { kind: UpgradeKind; level: number; size: number; gap?: number; z?: number }) {
+function IconBadge(props: { kind: UpgradeKind; level: number; size: number; gap?: number; chip?: boolean }) {
   const { kind, level, size } = props
   if (level <= 0) return null
   const frame = (HOTBAR_BORDER_W + TILE_RING) * 2
@@ -186,8 +197,6 @@ function IconBadge(props: { kind: UpgradeKind; level: number; size: number; gap?
     <UiEntity uiTransform={{
       width: size, height: size, margin: { left: props.gap ?? ICON_GAP }, flexShrink: 0,
       overflow: 'visible', pointerFilter: 'none',
-      // The chip hangs onto the next tile. Earlier slots stack above later ones.
-      zIndex: props.z ?? 1,
     }}>
       <UiEntity uiTransform={{
         width: size, height: size,
@@ -202,7 +211,9 @@ function IconBadge(props: { kind: UpgradeKind; level: number; size: number; gap?
             uiBackground={{ textureMode: 'stretch', texture: { src: UPGRADE_CARD_ICON_SRC[kind] } }} />
         </UiEntity>
       </UiEntity>
-      <CountChip n={Math.min(level, UPGRADE_LEVEL_MAX)} size={Math.round(size * 0.48)} />
+      {props.chip === false ? null : (
+        <CountChip n={Math.min(level, UPGRADE_LEVEL_MAX)} size={countChipSize(size)} />
+      )}
     </UiEntity>
   )
 }
@@ -211,12 +222,36 @@ function IconRow(props: { hud: UpgradeHud; size: number }) {
   const { hud, size } = props
   if (hud.iconOrder.length === 0) return null
   const flying = hud.fly?.kind ?? null
-  const n = hud.iconOrder.length
+  const badge = countChipSize(size)
+  const hang = countChipHang(badge)
+  const step = size + ICON_GAP
+  // SDK 7.32.1 draws later siblings over earlier ones and ignores zIndex on
+  // these chips, so the next tile's outline would cover the hanging count.
+  // Icons go down first; every chip is painted afterwards in one overlay.
   return (
     <UiEntity uiTransform={{ flexDirection: 'row', alignItems: 'center', height: size, flexShrink: 0, overflow: 'visible', pointerFilter: 'none' }}>
-      {hud.iconOrder.map((kind, i) => flying === kind && hud.fly?.fresh
+      {hud.iconOrder.map((kind) => flying === kind && hud.fly?.fresh
         ? <UiEntity uiTransform={{ width: size, height: size, margin: { left: ICON_GAP }, flexShrink: 0 }} />
-        : <IconBadge kind={kind} level={hud[kind]} size={size} z={n - i} />)}
+        : <IconBadge kind={kind} level={hud[kind]} size={size} chip={false} />)}
+      <UiEntity uiTransform={{
+        positionType: 'absolute', position: { top: 0, left: 0 },
+        width: hud.iconOrder.length * step, height: size,
+        overflow: 'visible', pointerFilter: 'none',
+      }}>
+        {hud.iconOrder.map((kind, i) => {
+          if (flying === kind && hud.fly?.fresh) return null
+          const level = hud[kind]
+          if (level <= 0) return null
+          return (
+            <CountChip
+              n={Math.min(level, UPGRADE_LEVEL_MAX)}
+              size={badge}
+              top={-hang}
+              left={ICON_GAP + i * step + size - badge + hang}
+            />
+          )
+        })}
+      </UiEntity>
     </UiEntity>
   )
 }
