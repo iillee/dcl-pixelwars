@@ -8,6 +8,7 @@ import { room } from '../shared/messages'
 import { BOT_AIM_REPORT_HZ } from '../shared/pvp'
 import { inLobby } from './phase'
 import { clearStarOrbs, hideStarOrb, initStarOrbs, showStarOrb } from './starOrb'
+import { spawnStarPickupPopFor } from './starPickupPop'
 
 let wired = false
 let feetClock = 0
@@ -20,8 +21,9 @@ export function initOverdrive(): void {
     if (!Number.isFinite(i) || ![x, y, z].every(n => typeof n === 'number' && isFinite(n))) return
     showStarOrb(i, x, y, z, fall ?? 0)
   })
-  events.on('star:despawn', ({ i }) => {
+  events.on('star:despawn', ({ i, who }) => {
     if (Number.isFinite(i)) hideStarOrb(i)
+    if (who) spawnStarPickupPopFor(who)
   })
   events.on('round:reset', () => clearStarOrbs())
   events.on('lobby:floor', () => clearStarOrbs())

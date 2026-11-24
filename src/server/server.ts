@@ -144,7 +144,7 @@ export async function setupServer(): Promise<void> {
       : 0
   }
   const clearStars = (): void => {
-    for (const o of overdrive.clearRound()) room.send('starDespawn', { i: o.i })
+    for (const o of overdrive.clearRound()) room.send('starDespawn', { i: o.i, who: '' })
     starRoundStart = 0
     starNextAt = 0
     starLandAt.clear()
@@ -175,7 +175,7 @@ export async function setupServer(): Promise<void> {
       if (!winner) continue
       if (!overdrive.removeOrb(orb.i)) continue
       starLandAt.delete(orb.i)
-      room.send('starDespawn', { i: orb.i })
+      room.send('starDespawn', { i: orb.i, who: winner })
       scheduleNextStar(now)
       const granted = upgrades.grantBonus(winner)
       if (granted) sendUpgradeTo(winner)

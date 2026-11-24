@@ -536,8 +536,8 @@ export const STAR_SPAWN_CLEAR_M = 8
 export const STAR_HOVER_Y = 1.1
 /** Metres above the landing height where a new star starts its drop. */
 export const STAR_FALL_HEIGHT = 36
-/** Drop time. The star cannot be picked up until this elapses. */
-export const STAR_FALL_MS = 2800
+/** Drop time. Half the old 2.8 s speed. The star cannot be picked up until this elapses. */
+export const STAR_FALL_MS = 5600
 export const STAR_ORB_DIAMETER = 0.6
 /** Star orbs, beacons, and the idle loop. Pickup opens a normal upgrade. */
 export const STAR_PICKUPS_ENABLED = true

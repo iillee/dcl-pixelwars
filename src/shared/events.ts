@@ -58,7 +58,7 @@ export type Events = {
   'upgrade:buffs': { reset: boolean; entries: Array<{ id: string; speed: number; paint: number; haste: number }> }
 
   'star:spawn': { i: number; x: number; y: number; z: number; fall: number }
-  'star:despawn': { i: number }
+  'star:despawn': { i: number; who: string }
   'feed:line': { kind: number; a: string; b: string; team: number; teamB: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.

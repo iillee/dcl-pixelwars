@@ -18,6 +18,7 @@ import {
   CARD_REOPEN_MS, CARD_TARGET_W, autoOpenDelayMs, autoTimerFrac, badgeBobPx,
   cardFlyMove, cardFlyShrink, cardPopScale, cardSlidePx,
 } from '../src/shared/upgradeCards'
+import { STAR_POP_MS, STAR_POP_OPEN_PAD_MS, starPickupOpenDelayMs } from '../src/shared/starPop'
 import {
   BURST_PAINT_RADIUS_CELLS, STAR_PICKUPS_ENABLED,
   UPGRADE_CHARGE_ENEMY, UPGRADE_CHARGE_NEUTRAL, UPGRADE_CHARGE_STEP,
@@ -250,6 +251,7 @@ check('desktop cards target about twice the old compact width', CARD_TARGET_W ==
 check('auto-open lasts 5 seconds and the pop lasts 0.25 seconds', CARD_AUTO_MS === 5000 && CARD_POP_MS === 250)
 check('a pick that unlocks another upgrade waits 0.5 s before reopening', autoOpenDelayMs(true) === CARD_REOPEN_MS && CARD_REOPEN_MS === 500)
 check('the first pending upgrade opens immediately', autoOpenDelayMs(false) === 0)
+check('a star pickup waits for the head bounce plus 0.1 s before the cards open', starPickupOpenDelayMs() === 700 && STAR_POP_MS === 600 && STAR_POP_OPEN_PAD_MS === 100)
 check('the auto timer is full at the start and empty at the end', autoTimerFrac(0, 5000) === 1 && autoTimerFrac(5000, 5000) === 0)
 check('the auto timer is halfway at 2.5 s', Math.abs(autoTimerFrac(2500, 5000) - 0.5) < 1e-12)
 check('the pop-in starts undersized and finishes at 1', cardPopScale(0, false) < 0.9 && Math.abs(cardPopScale(CARD_POP_MS, false) - 1) < 1e-12)

@@ -87,8 +87,9 @@ export const Messages = {
   }),
 
   // Server → everyone: a star orb appeared or disappeared. i is the orb id.
+  // who on despawn is the picker (empty when the round just clears the orb).
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fall: Schemas.Int }),
-  starDespawn: Schemas.Map({ i: Schemas.Int }),
+  starDespawn: Schemas.Map({ i: Schemas.Int, who: Schemas.String }),
   // Server → everyone. kind 1 = team took the sole lead (a is the team name).
   // kind 2 = a KO (a knocked out b). team / teamB tint those names.
   feed: Schemas.Map({

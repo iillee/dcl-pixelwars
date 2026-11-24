@@ -25,9 +25,11 @@ const IDLE_ROT_SPEED_DEG_PER_SEC = 25
 const GOLD = Color3.create(1, 0.78, 0.2)
 const GOLD4 = Color4.create(1, 0.82, 0.25, 1)
 // Small short yellow beacon, same textures as the Base Charge pillar, tinted #FFE04A.
+// The alpha/gradient textures fade at both ends. Height is 25% taller than 5.4 m.
 const BEACON_COLOR = { r: 255 / 255, g: 224 / 255, b: 74 / 255 }
-const BEACON_H = 5.4
-const BEACON_Y = 0.25 + BEACON_H / 2
+const BEACON_H = 6.75
+const BEACON_BASE_Y = 0.25
+const BEACON_Y = BEACON_BASE_Y + BEACON_H / 2
 const BEACON_INNER_W = 0.28
 const BEACON_OUTER_W = 0.95
 const BEACON_INNER_A = 0.7
@@ -122,7 +124,9 @@ function makeBeacon(parent: Entity, inner: boolean): Entity {
 function fallHeight(elapsed: number, dur: number): number {
   if (dur <= 0) return 0
   const u = Math.max(0, Math.min(1, elapsed / dur))
-  return STAR_FALL_HEIGHT * (1 - u * u)
+  // Ease-out quad: starts moving, then settles onto the tile. Paired with STAR_FALL_MS.
+  const remain = 1 - u
+  return STAR_FALL_HEIGHT * remain * remain
 }
 
 function makeTail(parent: Entity): Entity {

@@ -116,8 +116,8 @@ function wireInbound(): void {
   room.onMessage('starSpawn', ({ i, x, y, z, fall }) => {
     events.emit('star:spawn', { i: i ?? 0, x: x ?? 0, y: y ?? 0, z: z ?? 0, fall: fall ?? 0 })
   })
-  room.onMessage('starDespawn', ({ i }) => {
-    events.emit('star:despawn', { i: i ?? 0 })
+  room.onMessage('starDespawn', ({ i, who }) => {
+    events.emit('star:despawn', { i: i ?? 0, who: who ?? '' })
   })
   room.onMessage('feed', ({ kind, a, b, team, teamB }) => {
     events.emit('feed:line', { kind: kind ?? 0, a: a ?? '', b: b ?? '', team: team ?? 0, teamB: teamB ?? 0 })

@@ -18,6 +18,7 @@ import { inLobby } from './phase'
 import {
   CARD_AUTO_MS, CARD_FLY_MS, CARD_POP_MS, autoOpenDelayMs, autoTimerFrac, badgeBobPx, cardFlyMove, cardFlyShrink, cardFlyT, cardPopScale, cardSlidePx,
 } from '../shared/upgradeCards'
+import { starPickupOpenDelayMs } from '../shared/starPop'
 
 export const FLASH_MS = 450
 const HIGHLIGHT_MS = 380
@@ -158,8 +159,11 @@ function setState(next: UpgradeState): void {
   if (becameReady) {
     const now = Date.now()
     flashUntil = now + FLASH_MS
-    playUpgradeReadySfx()
-    const delay = autoOpenDelayMs(spentPick)
+    // A star grant already plays the pickup sound with the head bounce.
+    if (!bonusGrew) playUpgradeReadySfx()
+    // Pending (and the red badge) update with state immediately. The card
+    // cluster and its auto-tuck wait until the head bounce finishes.
+    const delay = bonusGrew ? starPickupOpenDelayMs() : autoOpenDelayMs(spentPick)
     if (delay > 0) {
       reopenAt = now + delay
     } else if (!clusterVisible(now) && !inLobby()) {
