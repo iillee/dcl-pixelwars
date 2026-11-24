@@ -9,8 +9,6 @@
  * 0..3 quarter-turn count applied clockwise (viewed from above).
  */
 
-import { BRIDGE_STYLE } from './level'
-
 export type Dir = 0 | 1 | 2 | 3
 export const N: Dir = 0
 export const E: Dir = 1
@@ -72,18 +70,13 @@ export const highDirAt = (t: TileType, r: number): Dir | null => {
     : null
 }
 
-/** Visual GLB for a placed tile. Bridge swaps are cosmetic: type stays straight/ramp. */
+/** Visual GLB for a placed tile. Bridge swaps are cosmetic: the upper type
+ *  may shrink to an end when a climb-in ramp is converted into a lower door,
+ *  but the simple slab is still used so no pillar cuts the lower path.
+ *  Arched GLBs still have ~200 m legs and are not used over a corridor. */
 export function tileModel(p: { type: TileType; bridge?: boolean }): string {
-  if (p.bridge && p.type === 'straight') {
-    return BRIDGE_STYLE === 'arch'
-      ? 'assets/models/tile-straight_bridgearch.glb'
-      : 'assets/models/tile-straight_bridgesimple.glb'
-  }
-  if (p.bridge && p.type === 'ramp') {
-    return BRIDGE_STYLE === 'arch'
-      ? 'assets/models/tile-ramp_bridgearch.glb'
-      : 'assets/models/tile-ramp_bridgesimple.glb'
-  }
+  if (p.bridge && p.type === 'ramp') return 'assets/models/tile-ramp_bridgesimple.glb'
+  if (p.bridge) return 'assets/models/tile-straight_bridgesimple.glb'
   return TILES[p.type].model
 }
 

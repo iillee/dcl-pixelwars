@@ -109,14 +109,17 @@ export const TELEPORT_ORBS = false
  *  With the sea on, the live swell surface is the trigger, not this line. */
 export const FALL_RESPAWN_DROP = 66
 
-// ─── No-base bridges (visual only) ──────────────────────────────────
-// Raised straight / ramp tiles can swap to a no-pillar GLB so a lower
-// path (or an open drop) can pass underneath. Topology, paint masks,
-// mazeGraph and bot pathing stay on the normal straight / ramp type.
+// ─── No-base bridges (stacked underpasses) ──────────────────────────
+// A raised straight / ramp becomes a no-pillar slab only when a lower
+// walkable tile is placed in the same (x, z) cell, at least one STEP
+// below, so a path actually loops underneath. Adjacent lower tiles or
+// an open drop are not enough. The lower tile is real (paint, graph,
+// bots); the upper type stays straight / ramp and only the GLB changes.
 //
-//   BRIDGE_STYLE  'simple' = plain slab (default, fully open underpass)
-//                 'arch'   = slab with arched legs (still a long shaft)
-//   BRIDGE_CHANCE probability a qualified tile is swapped (seeded)
+//   BRIDGE_STYLE  kept for the two exported looks, but stacked
+//                 underpasses always use 'simple'. The 'arch' GLBs
+//                 still have ~200 m legs that would cut the lower path.
+//   BRIDGE_CHANCE probability a qualified underpass slot is realised
 //   BRIDGE_MAX    cap per maze (2–3)
 //   BRIDGE_Y_NUDGE  metres added to the entity Y so the 0.50 m deck top
 //                   meets the mass01 0.546 m walking surface

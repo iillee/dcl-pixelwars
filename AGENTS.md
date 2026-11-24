@@ -15,11 +15,12 @@ Short rules:
 
 The live match is Classic Pixelwars: four teams, lobby, Dash (E), Burst (F), upgrades, a falling star, bots, and the sea. Old mode names still sit in an unused lobby list. They do not start a round.
 
-No-base bridges (visual only) live in `src/maze/level.ts`:
+No-base bridges live in `src/maze/level.ts`:
 
-- `BRIDGE_STYLE`: `'simple'` (default, plain slab) or `'arch'` (slab with arched legs). Flip this to test the two exports.
-- `BRIDGE_CHANCE` (0.12) and `BRIDGE_MAX` (3): how often a qualified raised straight or ramp swaps to the bridge GLB. Picks are seeded, so every client and the server agree.
+- A bridge is placed only when a lower walkable tile occupies the same `(x, z)` cell, at least one `STEP` below (a path looping underneath). Being beside a lower tile or an open drop is not enough.
+- `BRIDGE_CHANCE` (0.12) and `BRIDGE_MAX` (3): how often a qualified underpass slot is realised. Picks are seeded, so every client and the server agree. If the roll gives none, one true underpass is still placed when a valid slot exists.
 - `BRIDGE_Y_NUDGE` (0.046 m): lifts the slightly thinner bridge deck to the mass01 walking height.
-- A tile is only swapped when it sits on L0 or L+1, has a lower neighbour or open drop, both ends attach to supported tiles, is not a base, and is not in a bridge chain longer than 2. Paint, mazeGraph and bots still treat it as a normal straight or ramp.
+- `BRIDGE_STYLE` is kept, but stacked underpasses always use the simple slab. The arched GLBs still have ~200 m legs that would cut through the lower corridor.
+- Paint, mazeGraph and bots treat both floors as real tiles (`cellId` includes `ty`). The upper may shrink to an end (a lookout) when a climb-in ramp is converted into a lower door; the simple-slab GLB is still used so no pillar cuts the path below.
 
 `CLAUDE.md` and `.cursor/rules/rules.md` only point at SDK context folders; they are not the game design.

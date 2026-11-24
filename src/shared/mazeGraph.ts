@@ -323,6 +323,10 @@ function linkAir(
           if (cand === id || !landings.has(cand)) continue
           const q = worldPos.get(cand)
           if (!q) continue
+          // Same (x,z) cell at another height is under/over this deck, not a lip.
+          const a = id.split(':')[0].split(',')
+          const b = cand.split(':')[0].split(',')
+          if (a[0] === b[0] && a[1] === b[1]) continue
           const dist = Math.hypot(q[0] - p[0], q[2] - p[2])
           if (dist < 4 || dist > reach) continue
           const down = p[1] - q[1]
