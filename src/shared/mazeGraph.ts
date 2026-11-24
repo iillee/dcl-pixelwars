@@ -213,6 +213,7 @@ export interface WalkableGraph {
    * level off a ledge, or hop up a rise the ground jump can clear. Not in
    * `adj` — wall distance and the walk stepper stay on the floor. findPath
    * prices them at BOT_LEAP_COST. The body flies them (shared/botBody.ts).
+   * Built on first read (~1.4 s); the floor graph itself does not wait.
    */
   air: Map<string, AirEdge[]>
   deepAir: Map<string, AirEdge[]>
@@ -751,14 +752,24 @@ export function buildWalkableGraph(placed: Placed[]): WalkableGraph {
   const histStr = [...hist.entries()].sort((a, b) => a[0] - b[0])
     .map(([d, n]) => `${d}:${n}`).join(' ')
   const pct = nodes.size === 0 ? 0 : Math.round(100 * deepNodes.size / nodes.size)
-  // Deep bots can aim a drop at any floor cell; they reseat on the landing.
-  const air = linkAir(nodes, nodes, worldPos)
-  const deepAir = linkAir(deepNodes, nodes, worldPos)
-  let drops = 0, jumps = 0
-  for (const list of deepAir.values()) for (const e of list) { if (e.kind === 'drop') drops++; else jumps++ }
-  console.log(`[Bots] distToWall hist: ${histStr} | maxDist=${maxDist} | deep(≥${DEEP_MARGIN})=${deepNodes.size}/${nodes.size} (${pct}%) reachable=${deepReachable} | air drop=${drops} jump=${jumps}`)
+  console.log(`[Bots] distToWall hist: ${histStr} | maxDist=${maxDist} | deep(≥${DEEP_MARGIN})=${deepNodes.size}/${nodes.size} (${pct}%) reachable=${deepReachable}`)
 
-  return { nodes, adj, worldPos, distToWall, deepNodes, deepAdj, air, deepAir }
+  // Air links take ~1.4 s on a sky maze (two neighbourhood scans). The floor
+  // graph is ~30 ms, and that is all burst ripples and local knock prediction
+  // need. Compute air on first read so a first Burst does not stall the client.
+  let airMap: Map<string, AirEdge[]> | null = null
+  let deepAirMap: Map<string, AirEdge[]> | null = null
+  return {
+    nodes, adj, worldPos, distToWall, deepNodes, deepAdj,
+    get air(): Map<string, AirEdge[]> {
+      if (!airMap) airMap = linkAir(nodes, nodes, worldPos)
+      return airMap
+    },
+    get deepAir(): Map<string, AirEdge[]> {
+      if (!deepAirMap) deepAirMap = linkAir(deepNodes, nodes, worldPos)
+      return deepAirMap
+    },
+  }
 }
 
 /**

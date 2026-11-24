@@ -20,7 +20,9 @@ const fail = (m: string) => { console.error('✗ ' + m); failed = true }
 
 generateWithRetry(1)
 const tiles = getPlacedTilesInOrder()
+const floorAt = Date.now()
 const graph = buildWalkableGraph(tiles)
+const floorMs = Date.now() - floorAt
 const rampTiles = tiles.filter(t => TILES[t.type].isRamp)
 const world = { graph, rampTiles, tiles, base: { x: 0, y: 0, z: 0 } }
 
@@ -186,10 +188,24 @@ if (rampTiles.length === 0) {
 }
 
 const visualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
-if (!visualSrc.includes('resolveSupport') || !visualSrc.includes('stepLocalKnock') || !visualSrc.includes('buildWalkableGraph')) {
+const arenaSrc = readFileSync(new URL('../src/client/arenaGraph.ts', import.meta.url), 'utf8')
+const graphSrc = readFileSync(new URL('../src/shared/mazeGraph.ts', import.meta.url), 'utf8')
+if (!visualSrc.includes('resolveSupport') || !visualSrc.includes('stepLocalKnock') || !visualSrc.includes('clientArenaGraph')) {
   fail('the client local knock should follow the same ramp support as the server, not a flat floorY')
 } else {
   console.log('✓ client local knock uses resolveSupport on the walkable graph')
+}
+if (!arenaSrc.includes('buildWalkableGraph(') || !arenaSrc.includes('clientArenaGraph')) {
+  fail('burst ripples and local knocks should share one client floor graph')
+} else {
+  console.log('✓ burst ripples and local knocks share one client floor graph')
+}
+if (!graphSrc.includes('get air()') || !graphSrc.includes('get deepAir()') || graphSrc.includes('const air = linkAir(')) {
+  fail('air links should be computed on first read, not during the floor graph build')
+} else if (floorMs > 250) {
+  fail('the floor graph should build in well under 250 ms without air links (took ' + floorMs + ' ms)')
+} else {
+  console.log('✓ floor graph built in ' + floorMs + ' ms; air links stay lazy until a path needs them')
 }
 
 if (failed) {

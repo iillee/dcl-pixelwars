@@ -62,9 +62,9 @@ import { Team, TEAM_RGB } from '../shared/team'
 import { applyBotBodyForTeam, clearBotBodyColor, onBotBodyThemeChange } from './botBody'
 import { teamPlatesHidden } from './nametags'
 import { resolveSupport } from '../shared/anvilSim'
-import { buildWalkableGraph, type WalkableGraph } from '../shared/mazeGraph'
-import { getPlacedTilesInOrder, type Placed } from '../maze/generator'
-import { TILES } from '../maze/tiles'
+import { type WalkableGraph } from '../shared/mazeGraph'
+import { type Placed } from '../maze/generator'
+import { clearClientArenaGraph, clientArenaGraph } from './arenaGraph'
 
 const BODY = 'urn:decentraland:off-chain:base-avatars:BaseMale'
 const FACE = [
@@ -461,21 +461,12 @@ function syncGlider(rec: BotVisual, want: boolean, dt: number): void {
   }
 }
 
-let knockMaze: { key: string; graph: WalkableGraph; rampTiles: Placed[]; tiles: Placed[] } | null = null
-
 /** Walkable graph for the local knock arc, so the predicted path rides ramps like the server. */
 function knockMazeWorld(): { graph: WalkableGraph; rampTiles: Placed[]; tiles: Placed[] } | null {
-  const tiles = getPlacedTilesInOrder()
-  if (!tiles.length) return null
-  const first = tiles[0], last = tiles[tiles.length - 1]
-  const key = tiles.length + ':' + first.x + ',' + first.z + ',' + first.y + ':' + last.x + ',' + last.z + ',' + last.y
-  if (knockMaze && knockMaze.key === key) return knockMaze
-  const graph = buildWalkableGraph(tiles)
-  knockMaze = { key, graph, rampTiles: tiles.filter(t => TILES[t.type].isRamp), tiles }
-  return knockMaze
+  return clientArenaGraph()
 }
 
-function clearKnockMaze(): void { knockMaze = null }
+function clearKnockMaze(): void { clearClientArenaGraph() }
 
 function stepLocalKnock(rec: BotVisual, dt: number): void {
   const k = rec.localKnock

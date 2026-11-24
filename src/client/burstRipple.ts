@@ -27,19 +27,16 @@ import {
 } from '../shared/pvp'
 import { burstFootprint, burstCentre, V3 } from '../shared/burst'
 import { localBurstPaintRadiusCells } from './upgrades'
-import { buildWalkableGraph, WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
+import { WalkableGraph, rampSurfaceY } from '../shared/mazeGraph'
 import { getPlacedTilesInOrder, Placed } from '../maze/generator'
 import { TILES } from '../maze/tiles'
-import { getCurrentSeed, isLobbyLayout, isRebuilding } from '../maze/rebuild'
+import { clientArenaGraph } from './arenaGraph'
 
 const HIDDEN = Vector3.create(8, -60, 8)
 const CELL_M = 2
 type Slab = { ent: Entity; busy: boolean; t: number; delay: number; x: number; y: number; z: number; team: Team; rot: Quaternion; lift: number; up: number; down: number; dash: boolean }
 const pool: Slab[] = []
 let graph: WalkableGraph | null = null
-let graphSeed = -1
-let graphLayout = ''
-let graphTiles = 0
 const FLAT = Quaternion.Identity()
 
 /** Ramp cells: tilt the slab to the slope under it (pitch from rampSurfaceY along the ramp's
@@ -55,15 +52,8 @@ function cellPose(id: string, c: [number, number, number]): { y: number; rot: Qu
 }
 
 function ensureGraph(): WalkableGraph | null {
-  const seed = getCurrentSeed()
-  const layout = isLobbyLayout() ? 'lobby' : 'arena'
-  const tiles = getPlacedTilesInOrder()
-  if (!isRebuilding() && tiles.length > 0 && (seed !== graphSeed || layout !== graphLayout || tiles.length !== graphTiles)) {
-    graph = buildWalkableGraph(tiles)
-    graphSeed = seed
-    graphLayout = layout
-    graphTiles = tiles.length
-  }
+  const world = clientArenaGraph()
+  if (world) graph = world.graph
   return graph
 }
 
