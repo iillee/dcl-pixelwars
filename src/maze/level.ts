@@ -108,3 +108,20 @@ export const TELEPORT_ORBS = false
 /** Pre-water fallback and the "rescue is enabled" check (MIN_Y must stay above this).
  *  With the sea on, the live swell surface is the trigger, not this line. */
 export const FALL_RESPAWN_DROP = 66
+
+// ─── No-base bridges (visual only) ──────────────────────────────────
+// Raised straight / ramp tiles can swap to a no-pillar GLB so a lower
+// path (or an open drop) can pass underneath. Topology, paint masks,
+// mazeGraph and bot pathing stay on the normal straight / ramp type.
+//
+//   BRIDGE_STYLE  'simple' = plain slab (default, fully open underpass)
+//                 'arch'   = slab with arched legs (still a long shaft)
+//   BRIDGE_CHANCE probability a qualified tile is swapped (seeded)
+//   BRIDGE_MAX    cap per maze (2–3)
+//   BRIDGE_Y_NUDGE  metres added to the entity Y so the 0.50 m deck top
+//                   meets the mass01 0.546 m walking surface
+export type BridgeStyle = 'simple' | 'arch'
+export const BRIDGE_STYLE: BridgeStyle = 'simple'
+export const BRIDGE_CHANCE = 0.12
+export const BRIDGE_MAX = 3
+export const BRIDGE_Y_NUDGE = 0.046

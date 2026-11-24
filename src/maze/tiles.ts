@@ -9,6 +9,8 @@
  * 0..3 quarter-turn count applied clockwise (viewed from above).
  */
 
+import { BRIDGE_STYLE } from './level'
+
 export type Dir = 0 | 1 | 2 | 3
 export const N: Dir = 0
 export const E: Dir = 1
@@ -69,3 +71,19 @@ export const highDirAt = (t: TileType, r: number): Dir | null => {
     ? rotDir(def.rampHighDir, r)
     : null
 }
+
+/** Visual GLB for a placed tile. Bridge swaps are cosmetic: type stays straight/ramp. */
+export function tileModel(p: { type: TileType; bridge?: boolean }): string {
+  if (p.bridge && p.type === 'straight') {
+    return BRIDGE_STYLE === 'arch'
+      ? 'assets/models/tile-straight_bridgearch.glb'
+      : 'assets/models/tile-straight_bridgesimple.glb'
+  }
+  if (p.bridge && p.type === 'ramp') {
+    return BRIDGE_STYLE === 'arch'
+      ? 'assets/models/tile-ramp_bridgearch.glb'
+      : 'assets/models/tile-ramp_bridgesimple.glb'
+  }
+  return TILES[p.type].model
+}
+

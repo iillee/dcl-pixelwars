@@ -15,4 +15,11 @@ Short rules:
 
 The live match is Classic Pixelwars: four teams, lobby, Dash (E), Burst (F), upgrades, a falling star, bots, and the sea. Old mode names still sit in an unused lobby list. They do not start a round.
 
+No-base bridges (visual only) live in `src/maze/level.ts`:
+
+- `BRIDGE_STYLE`: `'simple'` (default, plain slab) or `'arch'` (slab with arched legs). Flip this to test the two exports.
+- `BRIDGE_CHANCE` (0.12) and `BRIDGE_MAX` (3): how often a qualified raised straight or ramp swaps to the bridge GLB. Picks are seeded, so every client and the server agree.
+- `BRIDGE_Y_NUDGE` (0.046 m): lifts the slightly thinner bridge deck to the mass01 walking height.
+- A tile is only swapped when it sits on L0 or L+1, has a lower neighbour or open drop, both ends attach to supported tiles, is not a base, and is not in a bridge chain longer than 2. Paint, mazeGraph and bots still treat it as a normal straight or ramp.
+
 `CLAUDE.md` and `.cursor/rules/rules.md` only point at SDK context folders; they are not the game design.

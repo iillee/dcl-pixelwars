@@ -24,6 +24,7 @@ import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
   SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, SKY_SYMMETRIC,
+  BRIDGE_CHANCE, BRIDGE_MAX,
 } from './level'
 
 // ─── World-scale constants ──────────────────────────────────────────
@@ -68,6 +69,8 @@ export interface Placed {
   y: number
   /** BFS order (seed=0, seed's neighbors=1..N, etc.). Used for reveal cascade. */
   order: number
+  /** Visual-only: this straight/ramp uses a no-base bridge GLB. */
+  bridge?: boolean
 }
 
 // ─── Private grid state ─────────────────────────────────────────────
@@ -385,7 +388,7 @@ function frontierFrom(
  * so each floor fills horizontally before ramps climb.
  */
 export function generate(): void {
-  if (IS_SKY) { generateSky(); return }
+  if (IS_SKY) { generateSky(); assignBridges(); return }
   const frontier: { x: number; z: number; y: number }[] = []
 
   // Fixed center seed: place a `cross` tile (4 openings) at the exact
@@ -428,6 +431,7 @@ export function generate(): void {
     }
     // If nothing fits, leave the cell empty (rare with 6 types × 4 rotations).
   }
+  assignBridges()
 }
 
 /**
@@ -1029,7 +1033,9 @@ function netScore(n: Net): number {
     if (deg >= 3) junctions++
   }
   const v = verticality(n)
-  return junctions + n.ramp.size * 1.5 + n.level.size * 0.3 + (SKY_SYMMETRIC ? 0 : 12 * v.share)
+  // Gentle bias: layouts with more raised straights/ramps beside a lower
+  // tile win more often, so bridge swap-ins have a real underpass to use.
+  return junctions + n.ramp.size * 1.5 + n.level.size * 0.3 + (SKY_SYMMETRIC ? 0 : 12 * v.share) + 2 * underpassSlots(n)
 }
 
 /** Asymmetric verticality targets (see layBaseLine / verify-graph). */
@@ -1056,6 +1062,26 @@ function verticalOk(n: Net): boolean {
   if (SKY_SYMMETRIC) return true
   const v = verticality(n)
   return v.share >= VERT_MIN_SHARE && v.hi >= VERT_MIN_EACH && v.lo >= VERT_MIN_EACH && v.ramps >= VERT_MIN_RAMPS
+}
+
+/** Raised (L0 / L+1) straights and ramps that sit beside a lower tile. */
+function underpassSlots(n: Net): number {
+  let count = 0
+  for (const [c, l] of n.level) {
+    if (l < 0) continue
+    const [x, z] = c.split(',').map(Number)
+    const isRamp = n.ramp.has(c)
+    const dirs = ALL_DIRS.filter(d => n.edges.has(ek(c, ck(x + DX[d], z + DZ[d]))))
+    const isStraight = !isRamp && dirs.length === 2 && dirs[0] === OPP[dirs[1]]
+    if (!isRamp && !isStraight) continue
+    let lower = false
+    for (const d of ALL_DIRS) {
+      const nl = n.level.get(ck(x + DX[d], z + DZ[d]))
+      if (nl !== undefined && nl <= l - 1) { lower = true; break }
+    }
+    if (lower) count++
+  }
+  return count
 }
 
 /** Off-base fork/cross count of a network. */
@@ -1136,6 +1162,120 @@ export function dumpNet(): string {
 
 /** True if the last generate() used the frozen fallback (verify scripts). */
 export function lastLayoutUsedFallback(): boolean { return usedFallback }
+
+/**
+ * Swap a few raised straight/ramp tiles to no-base bridge GLBs.
+ * Deterministic: continues the same seeded rand() stream the generator
+ * already used, so client and server pick the same tiles. Type (and so
+ * paint, mazeGraph, bots) is unchanged; only Placed.bridge is set.
+ */
+function assignBridges(): void {
+  if (BRIDGE_CHANCE <= 0 || BRIDGE_MAX <= 0) return
+  const tiles = [...grid.values()]
+  const isBaseCell = (x: number, z: number): boolean => {
+    for (const team of [1, 2, 3, 4]) {
+      for (const [bx, bz] of baseCells(team)) if (bx === x && bz === z) return true
+    }
+    return false
+  }
+  const levelOf = (p: Placed) => Math.round((p.y - BASE_Y) / STEP)
+  const endAt = (p: Placed, d: Dir): Placed | undefined => {
+    const ny = highDirAt(p.type, p.r) === d ? p.y + STEP : p.y
+    const nx = p.x + DX[d], nz = p.z + DZ[d]
+    const same = grid.get(key(nx, nz, ny))
+    if (same) return same
+    // A ramp one level below can meet this opening on its high deck
+    // (same rule validate() uses). Those are the usual underpass edges.
+    if (ny >= MIN_Y + STEP - 0.001) {
+      const under = grid.get(key(nx, nz, ny - STEP))
+      if (under?.type === 'ramp' && highDirAt(under.type, under.r) === OPP[d]) return under
+    }
+    return undefined
+  }
+  const endsSupported = (p: Placed): boolean => {
+    const opens = openingsAt(p.type, p.r)
+    if (opens.size < 2) return false
+    for (const d of opens) if (!endAt(p, d)) return false
+    return true
+  }
+  /** True underpass (lower tile beside or beneath) vs a mere void drop. */
+  const underpassKind = (p: Placed): 0 | 1 | 2 => {
+    let voidDrop = false
+    let lowerTile = false
+    for (const q of tiles) {
+      if (q !== p && q.x === p.x && q.z === p.z && q.y <= p.y - STEP + 0.01) lowerTile = true
+    }
+    for (const d of ALL_DIRS) {
+      const nx = p.x + DX[d], nz = p.z + DZ[d]
+      if (!inBounds(nx, nz)) { voidDrop = true; continue }
+      let hi: number | null = null
+      for (const q of tiles) {
+        if (q.x === nx && q.z === nz) hi = hi == null ? q.y : Math.max(hi, q.y)
+      }
+      if (hi == null) voidDrop = true
+      else if (hi <= p.y - STEP + 0.01) lowerTile = true
+    }
+    return lowerTile ? 2 : voidDrop ? 1 : 0
+  }
+  const connected = (a: Placed, b: Placed): boolean => {
+    for (const d of openingsAt(a.type, a.r)) if (endAt(a, d) === b) return true
+    return false
+  }
+  const chainIfAdd = (p: Placed, chosen: Placed[]): number => {
+    const set = [...chosen, p]
+    const seen = new Set<Placed>()
+    const walk = (cur: Placed): number => {
+      seen.add(cur)
+      let n = 1
+      for (const q of set) if (!seen.has(q) && connected(cur, q)) n += walk(q)
+      return n
+    }
+    return walk(p)
+  }
+
+  const candidates = tiles.filter(p =>
+    (p.type === 'straight' || p.type === 'ramp')
+    && !p.bridge
+    && !isBaseCell(p.x, p.z)
+    && (levelOf(p) === 0 || levelOf(p) === 1)
+    && endsSupported(p)
+    && underpassKind(p) > 0
+  )
+  // Prefer real underpasses (kind 2) over open drops; then stable order.
+  candidates.sort((a, b) => {
+    const k = underpassKind(b) - underpassKind(a)
+    if (k) return k
+    if (a.order !== b.order) return a.order - b.order
+    return a.x - b.x || a.z - b.z || a.y - b.y
+  })
+
+  const under = candidates.filter(p => underpassKind(p) === 2)
+  const drops = candidates.filter(p => underpassKind(p) === 1)
+  const chosen: Placed[] = []
+  const consider = (pool: Placed[], forceMin: number) => {
+    for (const p of pool) {
+      if (chosen.length >= BRIDGE_MAX) return
+      if (chainIfAdd(p, chosen) > 2) continue
+      if (rand() >= BRIDGE_CHANCE) continue
+      p.bridge = true
+      chosen.push(p)
+    }
+    // Chance is low (~12%), so guarantee at least forceMin from this pool
+    // when any valid tile remains.
+    for (const p of pool) {
+      if (chosen.length >= forceMin || chosen.length >= BRIDGE_MAX) return
+      if (p.bridge) continue
+      if (chainIfAdd(p, chosen) > 2) continue
+      p.bridge = true
+      chosen.push(p)
+    }
+  }
+  // Prefer a real underpass (lower tile beside or beneath). Only use an
+  // open-drop edge if the maze has no underpass slot at all.
+  consider(under, Math.min(1, under.length))
+  if (chosen.length === 0) consider(drops, Math.min(1, drops.length))
+}
+
 
 function gridIsSymmetric(): boolean {
   for (const p of grid.values()) {

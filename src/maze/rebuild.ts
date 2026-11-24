@@ -27,7 +27,8 @@ import {
   isPersistentTile,
   generateWithRetry, getPlacedTilesInOrder, gridSize, placeLobbyLayout,
 } from './generator'
-import { TILES } from './tiles'
+import { tileModel } from './tiles'
+import { BRIDGE_Y_NUDGE } from './level'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { events } from '../shared/events'
 import { LOBBY_TEAMS } from '../shared/lobby'
@@ -239,13 +240,14 @@ function spawnTile(p: Placed, full: boolean): Entity {
     persistentSet.add(e)
   }
   const scale = full ? TILE_SCALE : 0.001
+  const y = p.y + (p.bridge ? BRIDGE_Y_NUDGE : 0)
   Transform.create(e, {
-    position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, p.y, p.z * CELL + dz + MAZE_ORIGIN),
+    position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, y, p.z * CELL + dz + MAZE_ORIGIN),
     rotation: Quaternion.fromEulerDegrees(0, p.r * 90, 0),
     scale: Vector3.create(scale, scale, scale),
   })
   GltfContainer.create(e, {
-    src: TILES[p.type].model,
+    src: tileModel(p),
     // PHYSICS + POINTER on the same (visible) geometry: the Explorer's 3rd-person camera is only
     // blocked when both layers sit on one mesh (docs: Colliders → Cameras and colliders). No scene
     // pointer events or CL_POINTER raycasts use these tiles; gameplay raycasts stay CL_PHYSICS.
