@@ -28,9 +28,12 @@
  * is already up. The stand-in and the hide come off on the same frame the
  * camera returns.
  *
- * If they drift more than a few meters off the panel, one teleport sends
- * them to base (snap fallback). No rehold loop. Desktop does not use a
- * camera fly-along.
+ * Slip is measured against the pad's live transform, not the planned leg.
+ * A tween that has not moved yet used to count as leaving the pad, and the
+ * rescue teleported her up to the platform while the cloud was still at the
+ * catch. If the live pad does leave her body, the camera ride takes the
+ * rest of the trip from where she is. A teleport remains only for a short
+ * miss at the end of a carry that actually arrived.
  *
  * Beat (Luke: tweak FALL_RESCUE):
  *   trip (t=0)     lock movement + paint / Lunge / Burst, send playerFell, soft swoosh,
@@ -177,6 +180,8 @@ let sample: { p: Vec; at: number } | null = null
 let localCatch: Vec | null = null
 /** Server-chosen landing (nearest team paint, or the fallback spawn). Kept until the trip ends so a slip-off teleport uses it. */
 let assignedHome: Vec | null = null
+/** Times the grab pad was moved back under a body that had already fallen through it. */
+let padReseats = 0
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
 /** Visible sea at these feet, or the pre-water line when the sea is off. */
@@ -275,6 +280,19 @@ function surfaceNow(): Vec | null {
   return { x: c.x, y: c.y + FALL_RESCUE.PAD_THICK / 2, z: c.z }
 }
 
+/** Top of the physics box, from its transform only. Slip uses this so a leg
+ *  the tween has not played yet cannot count as the body having fallen off. */
+function liveSurface(): Vec | null {
+  if (!pad) return null
+  const live = Transform.getOrNull(pad)
+  if (!live) return null
+  return {
+    x: live.position.x,
+    y: live.position.y + FALL_RESCUE.PAD_THICK / 2,
+    z: live.position.z,
+  }
+}
+
 /** Past the edge of the footprint, or more than a few meters off the surface. */
 function offPanel(player: Vec, surface: Vec): boolean {
   const half = FALL_RESCUE.PAD_SIZE / 2
@@ -327,6 +345,26 @@ function despawnPad(): void {
  * Physics box is the tweened root (center at the transform, top at +scale.y/2).
  * The anchor cancels that scale so the floater stays metre-sized and rides along.
  */
+/**
+ * The first trip decodes the cloud while the body is still falling. The pad
+ * is spawned at the crossing, then that hitch carries the body through the
+ * box. Move the box back under the feet, once or twice, and give the grab
+ * its full window again. After that the pad stays put so the rise is clean.
+ */
+function seatIfMissed(p: Vec): void {
+  if (padReseats >= 2 || phase !== 'grab' || !pad) return
+  const surface = surfaceNow()
+  if (!surface) return
+  if (p.y >= surface.y - FALL_RESCUE.PAD_THICK) return
+  padReseats++
+  const top = p.y - FALL_RESCUE.CATCH_MIN_DROP
+  const tf = Transform.getMutable(pad)
+  tf.position = Vector3.create(p.x, top - FALL_RESCUE.PAD_THICK / 2, p.z)
+  trippedAt = Date.now()
+  phaseLeft = FALL_RESCUE.GRAB_S
+  console.log(`[FallRescue] pad was below the body, reseated under y=${p.y.toFixed(1)} (${padReseats})`)
+}
+
 function spawnPad(hold: Vec): void {
   despawnPad()
   const size = FALL_RESCUE.PAD_SIZE
@@ -738,6 +776,37 @@ function clearCarryDisguise(): void {
   hideAreas = []
 }
 
+/** Cloud in world space, just over her feet, before the pad is removed. */
+function placeCloudOver(feet: Vec): void {
+  if (!floater) return
+  if (Tween.has(floater.root)) Tween.deleteFrom(floater.root)
+  Transform.createOrReplace(floater.root, {
+    position: Vector3.create(feet.x, feet.y + FALL_RESCUE.HANG_Y, feet.z),
+    scale: Vector3.One(),
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+  })
+  floater.mode = 'hang'
+}
+
+/**
+ * The pad is not carrying her. Ride the cloud from where she is instead of
+ * teleporting to the platform. Observers are told to play that same path.
+ */
+function rideInstead(why: string): void {
+  if (cameraRide) return
+  const feet = playerPos()
+  if (!floater || !feet) { finish('snap', why); return }
+  console.log(`[FallRescue] body is not on the pad (${why}) — cloud ride, no teleport`)
+  stopMotion()
+  carry = null
+  cameraRide = true
+  placeCloudOver(feet)
+  despawnPad()
+  phase = 'carry'
+  startCameraRide()
+  sendRescueStart(feet, true)
+}
+
 /**
  * Mobile path. The pad never moves, so physics-tick platform follow has
  * nothing to step. The cloud (a render-tick tween) carries the camera and
@@ -814,15 +883,15 @@ function atDestination(player: Vec): boolean {
 
 function tickCarry(dt: number): void {
   if (!carry || !pad) { finish('snap', 'carry missing'); return }
-  // beganAt is the trip. Landing on the pad gets the grab plus the usual grace.
-  const graceOver = (Date.now() - carry.beganAt) / 1000 >= FALL_RESCUE.GRAB_S + FALL_RESCUE.SLIP_GRACE_S
+  // Live pad only. The planned leg runs ahead of a late tween and used to
+  // count as a fall, which teleported her up while the cloud was still here.
   const p = playerPos()
-  const surface = surfaceNow()
-  if (graceOver && p && surface) {
+  const surface = liveSurface()
+  if (p && surface) {
     if (offPanel(p, surface)) slipAccum += dt
     else slipAccum = 0
-    if (slipAccum >= FALL_RESCUE.SLIP_SUSTAIN_S) {
-      finish('snap', 'drifted off the panel')
+    if (slipAccum >= 0.15) {
+      rideInstead('left the live pad')
       return
     }
   }
@@ -838,7 +907,11 @@ function tickCarry(dt: number): void {
   // Clock is done. Drop only once they're actually over the base; a renderer
   // still finishing the last meters gets a short slack, then one teleport.
   if (p && atDestination(p)) { finish('carry', 'panel at base'); return }
-  if ((elapsed - leg.ms) / 1000 >= FALL_RESCUE.ARRIVE_SLACK_S) finish('snap', 'not over the base when the carry ended')
+  if ((elapsed - leg.ms) / 1000 < FALL_RESCUE.ARRIVE_SLACK_S) return
+  const end = carry.legs[carry.legs.length - 1].to
+  const far = p !== null && Math.hypot(p.x - end.x, p.z - end.z) > FALL_RESCUE.PAD_SIZE
+  if (far) { rideInstead('carry ended far from the base'); return }
+  finish('snap', 'not over the base when the carry ended')
 }
 
 /** Shared ending. Walk lock is set before player:respawned so the lunge listener keeps walk-only. */
@@ -903,6 +976,9 @@ function begin(p: Vec): void {
   spawnPad(hold)
   spawnFloater()
   trippedAt = Date.now()
+  padReseats = 0
+  const landed = playerPos()
+  if (landed) seatIfMissed(landed)
   // isMobile() stays false until the explorer answers. A fall in that window
   // uses the desktop pad ride. By a real trip it has resolved.
   cameraRide = isMobile()
@@ -919,6 +995,8 @@ function begin(p: Vec): void {
 
 function tickPhase(dt: number): void {
   if (phase === 'grab') {
+    const falling = playerPos()
+    if (falling) seatIfMissed(falling)
     // Wall clock, same as the slip grace, so a hitch doesn't shorten the swoop.
     phaseLeft = Math.max(0, FALL_RESCUE.GRAB_S - (Date.now() - trippedAt) / 1000)
     if (phaseLeft <= 0) {
@@ -932,6 +1010,12 @@ function tickPhase(dt: number): void {
       }
       logGrabAlignment()
       if (cameraRide) { startCameraRide(); return }
+      const feet = playerPos()
+      const surface = liveSurface()
+      if (feet && surface && feet.y < surface.y - FALL_RESCUE.PAD_THICK) {
+        rideInstead('below the pad when the rise started')
+        return
+      }
       const live = pad ? Transform.getOrNull(pad) : null
       if (!live) { finish('snap', 'no panel'); return }
       startPath({ x: live.position.x, y: live.position.y, z: live.position.z }, trippedAt)
@@ -1174,6 +1258,7 @@ export function cancelFallRescue(why: string): void {
   cameraRide = false
   trippedAt = 0
   slipAccum = 0
+  padReseats = 0
   despawnFloater()
   despawnPad()
   setFallMoveLock('open')

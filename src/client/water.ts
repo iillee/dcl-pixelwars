@@ -78,6 +78,8 @@ let seaDesktop: Entity[] = []
 let seaPhase = 0
 let seaRooted = false
 let seaTracking = false
+/** Flat sea shown before the swell files arrive. No download, so a cold join still has an ocean. */
+let seaHold: Entity | null = null
 
 function seaMark(part: string): void {
   console.log(`[Water] requested at t=${Date.now() - WATER_BOOT}ms part=${part}`)
@@ -122,6 +124,43 @@ function bootSeaRoot(): void {
   console.log('[Water] collision masks 0 on swell, rim, haze, and foam')
   const spec = liveSwell()
   console.log(`[Water] variant=${SWELL_VARIANT} y=${seaY.toFixed(2)} rescue=${rescueY.toFixed(2)} scene=${SCENE_SIZE}m gloss=${LOOK.gloss} seaLast=${LOOK.seaLast} trains=${spec.parts.length}`)
+  addSeaHold()
+}
+
+/** Water-colored plane at the mean surface. Removed once the flat rim is in. */
+function addSeaHold(): void {
+  const hold = engine.addEntity()
+  Transform.create(hold, {
+    parent: seaRoot,
+    position: Vector3.Zero(),
+    rotation: Quaternion.fromEulerDegrees(90, 0, 0),
+    scale: Vector3.create(seaSize, seaSize, 1),
+  })
+  MeshRenderer.setPlane(hold)
+  const c = WATER_COLOR
+  Material.setPbrMaterial(hold, {
+    albedoColor: Color4.create(c.r, c.g, c.b, 1),
+    roughness: 1,
+    metallic: 0,
+    specularIntensity: 0,
+    transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
+    castShadows: false,
+  })
+  seaHold = hold
+  console.log(`[Water] hold plane up ${seaSize.toFixed(0)}m`)
+}
+
+/** Drop the stand-in under the troughs once a real swell is on screen. */
+function sinkSeaHold(): void {
+  if (seaHold === null || !Transform.getOrNull(seaHold)) return
+  const y = -(liveSwell().amplitudeM + 4)
+  Transform.getMutable(seaHold).position = Vector3.create(0, y, 0)
+}
+
+function clearSeaHold(): void {
+  if (seaHold === null) return
+  engine.removeEntity(seaHold)
+  seaHold = null
 }
 
 /** One ocean piece. Returns true when the meshes and the haze are in. */
@@ -291,6 +330,7 @@ function pumpSeaLoads(dt: number): void {
         mesh.visibleMeshesCollisionMask = 0
         mesh.invisibleMeshesCollisionMask = 0
         item.onReady()
+        if (swellClips.length > 0 && item.ent === swellClips[0]) sinkSeaHold()
         console.log(`[Water] mesh in src=${item.src} t=${Date.now() - WATER_BOOT}ms`)
       }
       continue
@@ -503,6 +543,7 @@ function addFlat(root: Entity, src: string): Entity {
       transparencyMode: MaterialTransparencyMode.MTM_OPAQUE,
       castShadows: false,
     })
+    clearSeaHold()
   })
   return sea
 }
