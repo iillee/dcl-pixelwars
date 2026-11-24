@@ -131,9 +131,9 @@ function teleportHome(why: string): void {
   exitOverview()
   const moved = movePlayerTo({ newRelativePosition: pos, cameraTarget: look })
   // Returning to the lobby: drop the held arena shells once the teleport
-  // has landed. Leaving the lobby, rebuild.ts releases the held cross when
-  // the arena spawn floors report a loaded physics collider.
-  if (why === 'lobby' || why === 'lobby-drop') {
+  // has landed. Leaving the lobby no longer holds those meshes (primitive
+  // pads cover the gap), but still release in case any shells remain.
+  if (why === 'lobby' || why === 'lobby-drop' || why === 'match' || why === 'round reset' || why === 'team assigned') {
     moved.then(() => releaseHeldFloorAfter(40), () => releaseHeldFloorAfter(40))
   } else {
     moved.catch(() => {})

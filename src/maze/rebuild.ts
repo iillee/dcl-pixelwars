@@ -32,6 +32,7 @@ import { BRIDGE_Y_NUDGE } from './level'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { events } from '../shared/events'
 import { LOBBY_TEAMS } from '../shared/lobby'
+import { installLobbyHoldFloor } from '../lobbyHoldFloor'
 import { SeedHolder, seedHolder } from '../shared/components'
 import { ServerWorld, isStaleWorld, parseWorldLayout, shouldRebuildWorld } from '../shared/worldState'
 
@@ -108,16 +109,20 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     if (early.length) events.emit('lobby:floor', { ready: true })
   }
 
-  // Keep the outgoing floor until the teleport has landed and the incoming
-  // spawn tiles can hold the player. Flushing in this same turn drops them
-  // through empty space (lobby shells going into a match, or arena shells
-  // coming back to the lobby).
+  // Returning to the lobby: keep the arena shells until the teleport has
+  // landed. Deleting them in this same turn drops the camera through the
+  // hollow blocks for a frame.
+  // Leaving the lobby: do not keep the voting floor. Those 5 tiles sit on
+  // the same cells as the new maze, so holding them until spawn-floor
+  // colliders load left two layouts overlapping for seconds. The primitive
+  // hold pads (already under the cross, and reinstalled at the bases when
+  // the player teleports) cover that gap without a visible second maze.
   const returning = nextLobby && layoutChanged
   const leavingLobby = !nextLobby && layoutChanged
-  const holdPrevious = returning || leavingLobby
+  if (leavingLobby) installLobbyHoldFloor()
   for (const e of previous) {
     if (!dropLatched && persistentSet.has(e)) resetPaintForTile(e)
-    else if (holdPrevious) heldFloor.push(e)
+    else if (returning) heldFloor.push(e)
     else teardownQueue.push(e)
   }
   if (dropLatched) {
@@ -125,13 +130,10 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     persistentSet.clear()
   }
   // Layout switches must not leave the previous floor's GLBs mixed with the
-  // new paint grid (mode changes, a return to the lobby, or a late joiner)
-  // unless we are deliberately holding them for the teleport.
-  if (layoutChanged && !holdPrevious) flushTeardown()
+  // new paint grid (mode changes, a return to the lobby, a late joiner, or
+  // leaving the lobby). Returning still holds the arena for the teleport.
+  if (layoutChanged && !returning) flushTeardown()
   if (returning) releaseHeldAt = Date.now() + 250
-  // Leaving the lobby: keep the cross until the arena spawn floors are ready,
-  // with a long cap if the GLB load stalls.
-  if (leavingLobby) releaseHeldAt = Date.now() + 8000
   spawnedEntities.length = 0
   for (const e of early) spawnedEntities.push(e)
   if (!dropLatched) for (const e of persistentSet) spawnedEntities.push(e)
@@ -363,8 +365,10 @@ function spawnTile(p: Placed, full: boolean): Entity {
 // hanging in the air. Draining 25 tiles per frame spreads the ~30k-entity
 // cost of a full maze over ~5-10 frames.
 engine.addSystem(() => {
-  if (heldFloor.length && layoutKind === 'arena' && isSpawnFloorReady()) releaseHeldFloor()
-  else if (releaseHeldAt > 0 && Date.now() >= releaseHeldAt) releaseHeldFloor()
+  // Held shells are only the outgoing arena when returning to the lobby.
+  // Release on the short cap or when the lobby teleport lands. Do not wait
+  // for arena GLB colliders — that kept two floors on screen for seconds.
+  if (releaseHeldAt > 0 && Date.now() >= releaseHeldAt) releaseHeldFloor()
   if (teardownQueue.length === 0) return
   const n = Math.min(TILE_TEARDOWN_PER_FRAME, teardownQueue.length)
   for (let i = 0; i < n; i++) {
