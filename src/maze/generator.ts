@@ -1124,8 +1124,10 @@ const NET_MIN_JUNCTIONS = Math.round(12 * NET_SCALE) // 8×8: 12, 6×6: 7
 function layBaseLine(): void {
   if (!baseLineFits()) return
   usedFallback = false
-  let best: Net | null = null, bestScore = -1, found = 0
-  for (let i = 0; i < NET_ATTEMPTS && found < NET_CANDIDATES; i++) {
+  let best: Net | null = null, bestScore = -1, found = 0, bestSlots = 0
+  // Keep searching past NET_CANDIDATES when none of the first valid
+  // nets has a realisable underpass slot (capped by NET_ATTEMPTS).
+  for (let i = 0; i < NET_ATTEMPTS && (found < NET_CANDIDATES || bestSlots === 0); i++) {
     const n = netAttempt()
     if (!n || !layNet(n)) continue
     const lv = new Set(n.level.values())
@@ -1136,8 +1138,9 @@ function layBaseLine(): void {
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
     if (!SKY_SYMMETRIC && !fairnessOk()) { fairMisses++; continue } // asymmetric: RED/BLUE must be on equal footing
     found++
-    const sc = netScore(n) + rand() * NET_SCORE_JITTER
-    if (sc > bestScore) { best = n; bestScore = sc }
+    const slots = hasRealisableUnderpass() ? 1 : 0
+    const sc = netScore(n) + rand() * NET_SCORE_JITTER + (slots > 0 ? 10000 : 0)
+    if (sc > bestScore) { best = n; bestScore = sc; bestSlots = slots }
   }
   if (best && layNet(best)) return
   layFallback()
@@ -1205,16 +1208,28 @@ function gridVertOk(): boolean {
 }
 
 /**
- * Place a lower walkable tile under a raised straight/ramp, and swap the
- * upper deck to a no-base slab, only when a path can actually loop
- * underneath the same (x, z) cell. Adjacent lower tiles or an open drop
- * are not enough. Doors are existing lower flats, climb-in ramps converted
- * to flats, or a new flat grown into an empty neighbour that already
- * touches the lower network. Deterministic.
+ * Raised tiles that can host a true stacked underpass: a walkable lower
+ * tile in the same (x, z), one STEP below, with at least two doors so a
+ * path actually loops underneath. Doors are existing lower flats, climb-in
+ * ramps converted to flats, a new flat grown into an empty neighbour that
+ * already touches the lower network, or a 1–2 cell spur out to that
+ * network. No base or spawn cell is a slot.
  */
-function assignBridges(): void {
-  if (BRIDGE_CHANCE <= 0 || BRIDGE_MAX <= 0) return
+type Attach = { p: Placed; back: Dir; add: boolean }
+type Door =
+  | { kind: 'flat'; d: Dir; nb: Placed; back: Dir; add: boolean }
+  | { kind: 'rampIn'; d: Dir; nb: Placed; back: Dir }
+  | { kind: 'build'; d: Dir; x: number; z: number; need: Set<Dir>; attach: Attach[] }
+  | { kind: 'chain'; d: Dir; cells: Array<{ x: number; z: number; need: Set<Dir> }>; attach: Attach[] }
+type Slot = { upper: Placed; lowY: number; doors: Door[]; lower: { t: TileType; r: number }; across: boolean }
 
+function occupiedXZ(x: number, z: number): boolean {
+  for (const p of grid.values()) if (p.x === x && p.z === z) return true
+  return false
+}
+
+
+function findBridgeSlots(): Slot[] {
   const isBaseCell = (x: number, z: number): boolean => {
     for (const team of [1, 2, 3, 4]) {
       for (const [bx, bz] of baseCells(team)) if (bx === x && bz === z) return true
@@ -1222,20 +1237,10 @@ function assignBridges(): void {
     return false
   }
   const levelOf = (p: Placed) => Math.round((p.y - BASE_Y) / STEP)
-  const occupiedXZ = (x: number, z: number): boolean => {
-    for (const p of grid.values()) if (p.x === x && p.z === z) return true
-    return false
-  }
-
-  type Door =
-    | { kind: 'flat'; d: Dir; nb: Placed; back: Dir; add: boolean }
-    | { kind: 'rampIn'; d: Dir; nb: Placed; back: Dir }
-    | { kind: 'build'; d: Dir; x: number; z: number; need: Set<Dir>; attach: Array<{ p: Placed; back: Dir; add: boolean }> }
-  type Slot = { upper: Placed; lowY: number; doors: Door[]; lower: { t: TileType; r: number }; across: boolean }
-
   const slots: Slot[] = []
   for (const upper of grid.values()) {
-    if (upper.type !== 'straight' && upper.type !== 'ramp') continue
+    // Straights, ramps, and junctions; an end can sit over a through-path.
+    if (!['straight', 'ramp', 'turn', 'fork', 'cross', 'end'].includes(upper.type)) continue
     if (upper.bridge) continue
     if (isBaseCell(upper.x, upper.z)) continue
     const lv = levelOf(upper)
@@ -1284,6 +1289,52 @@ function assignBridges(): void {
       }
       if (attach.length && tileFor(need)) doors.push({ kind: 'build', d, x: nx, z: nz, need, attach })
     }
+    // If this raised cell still has fewer than two lower doors, grow a
+    // 1–2 cell spur from an empty neighbour out to the lower network.
+    const usedDirs = new Set(doors.map(o => o.d))
+    const emptyAt = (x: number, z: number): boolean =>
+      inBounds(x, z) && !isBaseCell(x, z) && !occupiedXZ(x, z) && !grid.has(key(x, z, lowY))
+    const lowerAttach = (x: number, z: number, skip: Dir | null): Attach[] => {
+      const out: Attach[] = []
+      for (const ed of ALL_DIRS) {
+        if (ed === skip) continue
+        const ex = x + DX[ed], ez = z + DZ[ed]
+        if (!inBounds(ex, ez) || isBaseCell(ex, ez)) continue
+        const ep = grid.get(key(ex, ez, lowY))
+        if (!ep || TILES[ep.type].isRamp) continue
+        const eBack = OPP[ed]
+        const eOpens = openingsAt(ep.type, ep.r)
+        if (eOpens.has(eBack) || tileFor(new Set([...eOpens, eBack]))) {
+          out.push({ p: ep, back: eBack, add: !eOpens.has(eBack) })
+        }
+      }
+      return out
+    }
+    if (doors.length < 2) {
+      for (const d of ALL_DIRS) {
+        if (usedDirs.has(d) || doors.length >= 2) continue
+        const ax = upper.x + DX[d], az = upper.z + DZ[d]
+        const back = OPP[d]
+        if (!emptyAt(ax, az)) continue
+        for (const ed of ALL_DIRS) {
+          if (ed === back || doors.length >= 2) continue
+          const bx = ax + DX[ed], bz = az + DZ[ed]
+          if (!emptyAt(bx, bz)) continue
+          const attach = lowerAttach(bx, bz, OPP[ed])
+          if (!attach.length) continue
+          const needA = new Set<Dir>([back, ed])
+          const needB = new Set<Dir>([OPP[ed], ...attach.map(a => OPP[a.back])])
+          if (!tileFor(needA) || !tileFor(needB)) continue
+          doors.push({
+            kind: 'chain', d,
+            cells: [{ x: ax, z: az, need: needA }, { x: bx, z: bz, need: needB }],
+            attach,
+          })
+          usedDirs.add(d)
+          break
+        }
+      }
+    }
     if (doors.length < 2) continue
     const lower = tileFor(new Set(doors.map(o => o.d)))
     if (!lower) continue
@@ -1291,12 +1342,102 @@ function assignBridges(): void {
     const overlap = doors.some(o => upperOpens.has(o.d))
     slots.push({ upper, lowY, doors, lower, across: !overlap })
   }
+  return slots
+}
 
-slots.sort((a, b) => {
+function realiseSlot(s: Slot, preview = false): boolean {
+  if (s.upper.bridge) return false
+  if (grid.has(key(s.upper.x, s.upper.z, s.lowY))) return false
+  const saved: Array<{ p: Placed; type: TileType; r: number }> = []
+  const added: string[] = []
+  const remember = (p: Placed) => {
+    if (!saved.some(u => u.p === p)) saved.push({ p, type: p.type, r: p.r })
+  }
+  const undo = () => {
+    for (const u of saved) { u.p.type = u.type; u.p.r = u.r }
+    for (const k of added) grid.delete(k)
+    s.upper.bridge = false
+  }
+  const morph = (p: Placed, need: Set<Dir>): boolean => {
+    const next = tileFor(need)
+    if (!next) return false
+    remember(p)
+    p.type = next.t
+    p.r = next.r
+    return true
+  }
+
+  for (const o of s.doors) {
+    if (o.kind === 'flat') {
+      if (!o.add) continue
+      if (!morph(o.nb, new Set([...openingsAt(o.nb.type, o.nb.r), o.back]))) { undo(); return false }
+    } else if (o.kind === 'rampIn') {
+      if (!morph(o.nb, new Set([o.back, o.d]))) { undo(); return false }
+    } else if (o.kind === 'build') {
+      for (const a of o.attach) {
+        if (!a.add) continue
+        if (!morph(a.p, new Set([...openingsAt(a.p.type, a.p.r), a.back]))) { undo(); return false }
+      }
+      // Door cells must stay off any other (x, z) already in the grid so
+      // two underpasses cannot stack a side corridor under a non-bridge.
+      if (occupiedXZ(o.x, o.z)) { undo(); return false }
+      const built = tileFor(o.need)
+      if (!built || !canPlace(built.t, built.r, o.x, o.z, s.lowY, true)) { undo(); return false }
+      placeTile(built.t, built.r, o.x, o.z, s.lowY)
+      added.push(key(o.x, o.z, s.lowY))
+    } else {
+      for (const a of o.attach) {
+        if (!a.add) continue
+        if (!morph(a.p, new Set([...openingsAt(a.p.type, a.p.r), a.back]))) { undo(); return false }
+      }
+      for (const c of o.cells) {
+        if (occupiedXZ(c.x, c.z)) { undo(); return false }
+        const built = tileFor(c.need)
+        if (!built || !canPlace(built.t, built.r, c.x, c.z, s.lowY, true)) { undo(); return false }
+        placeTile(built.t, built.r, c.x, c.z, s.lowY)
+        added.push(key(c.x, c.z, s.lowY))
+      }
+    }
+  }
+  // Climb-in ramps used as doors no longer meet the upper deck, so
+  // close those openings on the upper tile (a straight may shrink to an end).
+  const close = new Set(s.doors.filter(o => o.kind === 'rampIn').map(o => o.d))
+  if (close.size) {
+    const keep = new Set([...openingsAt(s.upper.type, s.upper.r)].filter(d => !close.has(d)))
+    if (keep.size < 1 || TILES[s.upper.type].isRamp || !morph(s.upper, keep)) { undo(); return false }
+  }
+  if (!canPlace(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY, true)) { undo(); return false }
+  placeTile(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY)
+  added.push(key(s.upper.x, s.upper.z, s.lowY))
+  s.upper.bridge = true
+  if (!validate() || !allTilesConnected()) { undo(); return false }
+  if (IS_SKY && teleportPairs().length !== 1) { undo(); return false }
+  if (IS_SKY && !SKY_SYMMETRIC && !fairnessOk()) { undo(); return false }
+  if (IS_SKY && !gridVertOk()) { undo(); return false }
+  if (preview) undo()
+  return true
+}
+
+function hasRealisableUnderpass(): boolean {
+  for (const s of findBridgeSlots()) if (realiseSlot(s, true)) return true
+  return false
+}
+
+/**
+ * Realise underpass slots: place the lower tile and swap the upper deck
+ * to a no-base slab. Deterministic given the seeded RNG. If the chance
+ * roll gives none, one true underpass is still placed when a valid slot
+ * realises. Realise still has to pass fairnessOk, so the search prefers
+ * a 2D net where at least one stacked loop stays within FAIR_TOL.
+ */
+function assignBridges(): void {
+  if (BRIDGE_CHANCE <= 0 || BRIDGE_MAX <= 0) return
+  const slots = findBridgeSlots()
+  slots.sort((a, b) => {
     const score = (s: Slot) =>
       s.doors.filter(o => o.kind === 'flat').length * 3
       + s.doors.filter(o => o.kind === 'rampIn').length * 2
-      + s.doors.filter(o => o.kind === 'build').length
+      + s.doors.filter(o => o.kind === 'build' || o.kind === 'chain').length
     const da = score(a), db = score(b)
     if (da !== db) return db - da
     if (a.across !== b.across) return a.across ? -1 : 1
@@ -1305,75 +1446,18 @@ slots.sort((a, b) => {
     return a.upper.x - b.upper.x || a.upper.z - b.upper.z || a.upper.y - b.upper.y
   })
 
-  const realise = (s: Slot): boolean => {
-    if (s.upper.bridge) return false
-    if (grid.has(key(s.upper.x, s.upper.z, s.lowY))) return false
-    const saved: Array<{ p: Placed; type: TileType; r: number }> = []
-    const added: string[] = []
-    const remember = (p: Placed) => {
-      if (!saved.some(u => u.p === p)) saved.push({ p, type: p.type, r: p.r })
-    }
-    const undo = () => {
-      for (const u of saved) { u.p.type = u.type; u.p.r = u.r }
-      for (const k of added) grid.delete(k)
-      s.upper.bridge = false
-    }
-    const morph = (p: Placed, need: Set<Dir>): boolean => {
-      const next = tileFor(need)
-      if (!next) return false
-      remember(p)
-      p.type = next.t
-      p.r = next.r
-      return true
-    }
-
-    for (const o of s.doors) {
-      if (o.kind === 'flat') {
-        if (!o.add) continue
-        if (!morph(o.nb, new Set([...openingsAt(o.nb.type, o.nb.r), o.back]))) { undo(); return false }
-      } else if (o.kind === 'rampIn') {
-        if (!morph(o.nb, new Set([o.back, o.d]))) { undo(); return false }
-      } else {
-        for (const a of o.attach) {
-          if (!a.add) continue
-          if (!morph(a.p, new Set([...openingsAt(a.p.type, a.p.r), a.back]))) { undo(); return false }
-        }
-        const built = tileFor(o.need)
-        if (!built || !canPlace(built.t, built.r, o.x, o.z, s.lowY, true)) { undo(); return false }
-        placeTile(built.t, built.r, o.x, o.z, s.lowY)
-        added.push(key(o.x, o.z, s.lowY))
-      }
-    }
-    // Climb-in ramps used as doors no longer meet the upper deck, so
-    // close those openings on the upper tile (a straight may shrink to an end).
-    const close = new Set(s.doors.filter(o => o.kind === 'rampIn').map(o => o.d))
-    if (close.size) {
-      const keep = new Set([...openingsAt(s.upper.type, s.upper.r)].filter(d => !close.has(d)))
-      if (keep.size < 1 || TILES[s.upper.type].isRamp || !morph(s.upper, keep)) { undo(); return false }
-    }
-    if (!canPlace(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY, true)) { undo(); return false }
-    placeTile(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY)
-    added.push(key(s.upper.x, s.upper.z, s.lowY))
-    s.upper.bridge = true
-    if (!validate() || !allTilesConnected()) { undo(); return false }
-    if (IS_SKY && teleportPairs().length !== 1) { undo(); return false }
-    if (IS_SKY && !SKY_SYMMETRIC && !fairnessOk()) { undo(); return false }
-    if (IS_SKY && !gridVertOk()) { undo(); return false }
-    return true
-  }
-
   const chosen: Slot[] = []
   for (const s of slots) {
     if (chosen.length >= BRIDGE_MAX) break
     if (rand() >= BRIDGE_CHANCE) continue
-    if (!realise(s)) continue
+    if (!realiseSlot(s)) continue
     chosen.push(s)
   }
   // Force one true stacked underpass if chance rolled none and a slot works.
   // Never force a decorative span over a drop or a side-by-side lower tile.
   if (chosen.length === 0) {
     for (const s of slots) {
-      if (realise(s)) { chosen.push(s); break }
+      if (realiseSlot(s)) { chosen.push(s); break }
     }
   }
 }

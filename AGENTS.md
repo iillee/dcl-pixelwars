@@ -18,7 +18,8 @@ The live match is Classic Pixelwars: four teams, lobby, Dash (E), Burst (F), upg
 No-base bridges live in `src/maze/level.ts`:
 
 - A bridge is placed only when a lower walkable tile occupies the same `(x, z)` cell, at least one `STEP` below (a path looping underneath). Being beside a lower tile or an open drop is not enough.
-- `BRIDGE_CHANCE` (0.12) and `BRIDGE_MAX` (3): how often a qualified underpass slot is realised. Picks are seeded, so every client and the server agree. If the roll gives none, one true underpass is still placed when a valid slot exists.
+- `BRIDGE_CHANCE` (0.75) and `BRIDGE_MAX` (3): how often a qualified underpass slot is realised. High enough that a map with several slots usually gets more than one. Picks are seeded, so every client and the server agree. If the roll gives none, one true underpass is still placed when a valid slot exists.
+- The 2D net search prefers layouts that already have an underpass slot, and can grow a 1–2 cell lower spur to reach the lower network. Most seeds get at least one true underpass; the play grid stays 5×5.
 - `BRIDGE_Y_NUDGE` (0.046 m): lifts the slightly thinner bridge deck to the mass01 walking height.
 - `BRIDGE_STYLE` is kept, but stacked underpasses always use the simple slab. The arched GLBs still have ~200 m legs that would cut through the lower corridor.
 - Paint, mazeGraph and bots treat both floors as real tiles (`cellId` includes `ty`). The upper may shrink to an end (a lookout) when a climb-in ramp is converted into a lower door; the simple-slab GLB is still used so no pillar cuts the path below.

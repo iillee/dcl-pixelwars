@@ -119,12 +119,12 @@ export const FALL_RESPAWN_DROP = 66
 //   BRIDGE_STYLE  kept for the two exported looks, but stacked
 //                 underpasses always use 'simple'. The 'arch' GLBs
 //                 still have ~200 m legs that would cut the lower path.
-//   BRIDGE_CHANCE probability a qualified underpass slot is realised
+//   BRIDGE_CHANCE probability a qualified underpass slot is realised (high so maps with several slots get more than one)
 //   BRIDGE_MAX    cap per maze (2–3)
 //   BRIDGE_Y_NUDGE  metres added to the entity Y so the 0.50 m deck top
 //                   meets the mass01 0.546 m walking surface
 export type BridgeStyle = 'simple' | 'arch'
 export const BRIDGE_STYLE: BridgeStyle = 'simple'
-export const BRIDGE_CHANCE = 0.12
+export const BRIDGE_CHANCE = 0.75
 export const BRIDGE_MAX = 3
 export const BRIDGE_Y_NUDGE = 0.046
