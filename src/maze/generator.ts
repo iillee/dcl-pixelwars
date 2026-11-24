@@ -563,21 +563,23 @@ function pickSpawnTile(tiles: Placed[], mid: number): Placed {
   return best
 }
 
-/** World-space spawn (feet) on a team's base, plus a camera target at the
- *  scene centre. Uses one solid tile — the team anchor if it has a floor at
- *  any level, otherwise the nearest placed floor. Height follows that tile
- *  (green/yellow corners are often above or below L0). Never averages two
- *  cells, which can land in the hole between them. */
-export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
-  const mid = (GRID_W - 1) / 2
-  const placed = getPlacedTilesInOrder()
+function lookAtSpawn(pos: { x: number; y: number; z: number }): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
+  return { pos, look: { x: SCENE_SIZE / 2, y: pos.y, z: SCENE_SIZE / 2 } }
+}
+
+function fallbackSpawnPos(team: number): { x: number; y: number; z: number } {
   const anchors = baseCells(team)
   const [ax, az] = spawnAnchor(team)
-  const lookAt = (pos: { x: number; y: number; z: number }) => ({ pos, look: { x: SCENE_SIZE / 2, y: pos.y, z: SCENE_SIZE / 2 } })
-  if (placed.length === 0) {
-    const [x, z] = anchors[0] ?? [ax, az]
-    return lookAt({ x: (x + 0.5) * CELL + MAZE_ORIGIN, y: BASE_Y + SPAWN_FEET, z: (z + 0.5) * CELL + MAZE_ORIGIN })
-  }
+  const [x, z] = anchors[0] ?? [ax, az]
+  return { x: (x + 0.5) * CELL + MAZE_ORIGIN, y: BASE_Y + SPAWN_FEET, z: (z + 0.5) * CELL + MAZE_ORIGIN }
+}
+
+/** The solid tile a team stands on, if the current layout has one. */
+export function baseSpawnTile(team: number, placed = getPlacedTilesInOrder()): Placed | undefined {
+  const mid = (GRID_W - 1) / 2
+  const anchors = baseCells(team)
+  const [ax, az] = spawnAnchor(team)
+  if (placed.length === 0) return undefined
   const onAnchor = anchors.map(([x, z]) => tileAtCell(placed, x, z)).filter((p): p is Placed => !!p)
   let tile: Placed | undefined = onAnchor.length ? pickSpawnTile(onAnchor, mid) : undefined
   if (!tile) {
@@ -590,10 +592,27 @@ export function baseSpawn(team: number): { pos: { x: number; y: number; z: numbe
     }
     tile = near.length ? pickSpawnTile(near, mid) : undefined
   }
-  if (!tile) {
-    return lookAt({ x: (ax + 0.5) * CELL + MAZE_ORIGIN, y: BASE_Y + SPAWN_FEET, z: (az + 0.5) * CELL + MAZE_ORIGIN })
-  }
-  return lookAt(spawnOnTile(tile))
+  return tile
+}
+
+/** Tiles a player can be teleported onto at match start (latched bases + each team's spawn floor). */
+export function spawnFloorPlaced(placed = getPlacedTilesInOrder()): Placed[] {
+  const out: Placed[] = []
+  const add = (p?: Placed) => { if (p && !out.includes(p)) out.push(p) }
+  for (const p of placed) if (isPersistentTile(p)) add(p)
+  for (const team of [1, 2, 3, 4]) add(baseSpawnTile(team, placed))
+  return out
+}
+
+/** World-space spawn (feet) on a team's base, plus a camera target at the
+ *  scene centre. Uses one solid tile — the team anchor if it has a floor at
+ *  any level, otherwise the nearest placed floor. Height follows that tile
+ *  (green/yellow corners are often above or below L0). Never averages two
+ *  cells, which can land in the hole between them. */
+export function baseSpawn(team: number): { pos: { x: number; y: number; z: number }; look: { x: number; y: number; z: number } } {
+  const tile = baseSpawnTile(team)
+  if (!tile) return lookAtSpawn(fallbackSpawnPos(team))
+  return lookAtSpawn(spawnOnTile(tile))
 }
 
 /** Tiles kept alive across round rebuilds (players stand on them at reset). */

@@ -17,14 +17,14 @@
  */
 
 import {
-  engine, Transform, GltfContainer, ColliderLayer,
+  engine, Transform, GltfContainer, GltfContainerLoadingState, LoadingState, ColliderLayer,
   Tween, EasingFunction, AudioSource, Entity,
 } from '@dcl/sdk/ecs'
 import { Vector3, Quaternion } from '@dcl/sdk/math'
 
 import {
   Placed, TILE_SCALE, CELL, STEP, ROT_OFFSET, MAZE_ORIGIN,
-  isPersistentTile,
+  isPersistentTile, spawnFloorPlaced,
   generateWithRetry, getPlacedTilesInOrder, gridSize, placeLobbyLayout,
 } from './generator'
 import { tileModel } from './tiles'
@@ -42,6 +42,13 @@ let spawnQueue: SpawnStep[] = []
 let spawnClock = 0
 let currentSeed = 0
 const teardownQueue: Entity[] = []
+/** Previous layout's shells kept until the player has landed on the next floor.
+ *  Deleting them in the same turn as a lobby↔arena swap drops the avatar
+ *  through empty space before movePlayerTo and the new GLB colliders are in. */
+const heldFloor: Entity[] = []
+let releaseHeldAt = 0
+/** Team spawn / base tiles placed at full scale as soon as the arena is laid. */
+const spawnFloorEntities: Entity[] = []
 
 // ─── Persistent tiles ───────────────────────────────────────────────
 // Classic: the centre cross. Sky: both team bases. These are at the same
@@ -82,6 +89,11 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   // so the next arena can place its own bases instead of keeping the cross.
   const dropLatched = nextLobby || layoutKind === 'lobby'
   const previous = spawnedEntities.slice()
+  if (heldFloor.length) {
+    previous.push(...heldFloor)
+    heldFloor.length = 0
+    releaseHeldAt = 0
+  }
 
   const early: Entity[] = []
   if (nextLobby) {
@@ -96,8 +108,16 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     if (early.length) events.emit('lobby:floor', { ready: true })
   }
 
+  // Keep the outgoing floor until the teleport has landed and the incoming
+  // spawn tiles can hold the player. Flushing in this same turn drops them
+  // through empty space (lobby shells going into a match, or arena shells
+  // coming back to the lobby).
+  const returning = nextLobby && layoutChanged
+  const leavingLobby = !nextLobby && layoutChanged
+  const holdPrevious = returning || leavingLobby
   for (const e of previous) {
     if (!dropLatched && persistentSet.has(e)) resetPaintForTile(e)
+    else if (holdPrevious) heldFloor.push(e)
     else teardownQueue.push(e)
   }
   if (dropLatched) {
@@ -105,8 +125,13 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     persistentSet.clear()
   }
   // Layout switches must not leave the previous floor's GLBs mixed with the
-  // new paint grid (mode changes, a return to the lobby, or a late joiner).
-  if (layoutChanged) flushTeardown()
+  // new paint grid (mode changes, a return to the lobby, or a late joiner)
+  // unless we are deliberately holding them for the teleport.
+  if (layoutChanged && !holdPrevious) flushTeardown()
+  if (returning) releaseHeldAt = Date.now() + 250
+  // Leaving the lobby: keep the cross until the arena spawn floors are ready,
+  // with a long cap if the GLB load stalls.
+  if (leavingLobby) releaseHeldAt = Date.now() + 8000
   spawnedEntities.length = 0
   for (const e of early) spawnedEntities.push(e)
   if (!dropLatched) for (const e of persistentSet) spawnedEntities.push(e)
@@ -114,6 +139,7 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   spawnClock = 0
 
   if (nextLobby) {
+    spawnFloorEntities.length = 0
     currentSeed = seed
     const earlyEnd = (x: number, z: number) => LOBBY_TEAMS.some(m => m.cell.x === x && m.cell.z === z)
     const arms = getPlacedTilesInOrder().filter(p =>
@@ -134,10 +160,20 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   console.log(`Maze rebuilt from seed ${seed} → winning seed ${winningSeed}, ${gridSize()} tiles`)
 
   const tiles = getPlacedTilesInOrder()
-  // Skip persistent tiles that already exist. On the very first rebuild
-  // they spawn like any other tile; spawnTile() latches onto them.
+  // Place every team spawn / base tile at full scale now, before the reveal
+  // cascade. The match-start teleport lands on these, and delayed GLB
+  // colliders on a tweening shell are what let the avatar fall through.
+  spawnFloorEntities.length = 0
+  const floorTiles = spawnFloorPlaced(tiles)
+  const floorKeys = new Set(floorTiles.map(tileKey))
+  for (const p of floorTiles) {
+    const existing = persistentEntities.get(tileKey(p))
+    if (existing) spawnFloorEntities.push(existing)
+    else spawnFloorEntities.push(spawnTile(p, true))
+  }
+  // Skip spawn floors (already out) and persistent tiles that already exist.
   spawnQueue = tiles
-    .filter(p => !(isPersistentTile(p) && persistentEntities.has(tileKey(p))))
+    .filter(p => !floorKeys.has(tileKey(p)) && !(isPersistentTile(p) && persistentEntities.has(tileKey(p))))
     .map((p, i) => ({ p, delay: i * STAGGER }))
 }
 
@@ -158,6 +194,46 @@ function flushTeardown(): void {
     engine.removeEntity(e)
   }
 }
+
+/** Push the swap-floor removal later. A late teleport waits; an early one does not cut the hold short. */
+export function releaseHeldFloorAfter(ms: number): void {
+  if (!heldFloor.length) return
+  const at = Date.now() + ms
+  releaseHeldAt = Math.max(releaseHeldAt, at)
+}
+
+function releaseHeldFloor(): void {
+  if (!heldFloor.length) {
+    releaseHeldAt = 0
+    return
+  }
+  for (const e of heldFloor) teardownQueue.push(e)
+  heldFloor.length = 0
+  releaseHeldAt = 0
+  flushTeardown()
+}
+
+/**
+ * True when every team spawn / base tile exists at full scale, its GLB has
+ * finished loading, and its visible mesh has a physics collider. isMazeReady()
+ * only means the reveal cascade finished, which is too early on a load that
+ * still has no mesh collider under the avatar.
+ */
+export function isSpawnFloorReady(): boolean {
+  if (layoutKind !== 'arena' || spawnFloorEntities.length === 0) return false
+  for (const e of spawnFloorEntities) {
+    const tr = Transform.getOrNull(e)
+    if (!tr || tr.scale.y < TILE_SCALE * 0.99) return false
+    const gltf = GltfContainer.getOrNull(e)
+    if (!gltf) return false
+    const mask = gltf.visibleMeshesCollisionMask ?? 0
+    if ((mask & ColliderLayer.CL_PHYSICS) === 0) return false
+    const st = GltfContainerLoadingState.getOrNull(e)?.currentState
+    if (st !== LoadingState.FINISHED) return false
+  }
+  return true
+}
+
 
 /**
  * Build the floor the server is on. A lower seq is ignored so a stale match
@@ -287,6 +363,8 @@ function spawnTile(p: Placed, full: boolean): Entity {
 // hanging in the air. Draining 25 tiles per frame spreads the ~30k-entity
 // cost of a full maze over ~5-10 frames.
 engine.addSystem(() => {
+  if (heldFloor.length && layoutKind === 'arena' && isSpawnFloorReady()) releaseHeldFloor()
+  else if (releaseHeldAt > 0 && Date.now() >= releaseHeldAt) releaseHeldFloor()
   if (teardownQueue.length === 0) return
   const n = Math.min(TILE_TEARDOWN_PER_FRAME, teardownQueue.length)
   for (let i = 0; i < n; i++) {

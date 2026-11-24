@@ -33,8 +33,10 @@ function thickFrom(p: SpawnPad): { pos: Vector3; scale: Vector3; rot: Quaternion
   }
 }
 
-export function installLobbyHoldFloor(): void {
-  if (!IS_SKY || floors.length) return
+export function installLobbyHoldFloor(force = false): void {
+  if (!IS_SKY) return
+  if (floors.length && !force) return
+  if (floors.length) clearLobbyHoldFloor()
   pads = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))
   for (const p of pads) {
     const e = engine.addEntity()

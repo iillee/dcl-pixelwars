@@ -19,7 +19,7 @@
 
 import { engine, Transform, MeshCollider, ColliderLayer, Entity } from '@dcl/sdk/ecs'
 import { Quaternion, Vector3 } from '@dcl/sdk/math'
-import { isLobbyLayout, isMazeReady } from '../maze/rebuild'
+import { isLobbyLayout, isMazeReady, isSpawnFloorReady, releaseHeldFloorAfter } from '../maze/rebuild'
 import { movePlayerTo } from '~system/RestrictedActions'
 import { exitOverview } from './overviewCamera'
 import { events } from '../shared/events'
@@ -55,7 +55,7 @@ const MATCH_HOLD_MAX_SNAPS = 2
 let matchHoldSnaps = 0
 
 function armMatchHold(): void {
-  installLobbyHoldFloor()
+  installLobbyHoldFloor(true)
   clearSpawnPads()
   ensureSpawnPads()
   matchHoldPads = earlySpawnPads(MAZE_ORIGIN, CELL, BASE_Y, [1, 2, 3, 4].map(t => baseSpawn(t).pos))
@@ -129,7 +129,15 @@ function teleportHome(why: string): void {
   // Fire-and-forget: movePlayerTo can reject if the player has left the scene.
   // Leave overview first so the cameraTarget look lands (as in snowdrift).
   exitOverview()
-  movePlayerTo({ newRelativePosition: pos, cameraTarget: look }).catch(() => {})
+  const moved = movePlayerTo({ newRelativePosition: pos, cameraTarget: look })
+  // Returning to the lobby: drop the held arena shells once the teleport
+  // has landed. Leaving the lobby, rebuild.ts releases the held cross when
+  // the arena spawn floors report a loaded physics collider.
+  if (why === 'lobby' || why === 'lobby-drop') {
+    moved.then(() => releaseHeldFloorAfter(40), () => releaseHeldFloorAfter(40))
+  } else {
+    moved.catch(() => {})
+  }
   events.emit('player:respawned', { why })
 }
 
@@ -187,9 +195,16 @@ export function initPlayerNet(): void {
     engine.addSystem(() => {
       if (isLobbyLayout() || !isMazeReady()) return
       if (Date.now() < matchHoldUntil) return
+      // isMazeReady only means the reveal cascade finished. Keep the primitive
+      // holds until the spawn-floor GLB colliders actually exist, or until a
+      // long stall timeout so a never-loading mesh cannot pin the pads forever.
+      const stall = Date.now() >= matchHoldUntil + 9000
+      if (!isSpawnFloorReady() && !stall) return
       if (spawnPads.length) {
         clearSpawnPads()
-        console.log('[Player] maze ready → spawn pads removed')
+        console.log(isSpawnFloorReady()
+          ? '[Player] spawn floor ready → spawn pads removed'
+          : '[Player] spawn floor stall → spawn pads removed')
       }
       if (matchHoldUntil) matchHoldUntil = 0
       clearLobbyHoldFloor()
@@ -212,7 +227,10 @@ export function initPlayerNet(): void {
       }
       // Match-start only: if they tunneled the team floor before GLB
       // colliders arrived, snap back. Off the island, rescue is unchanged.
-      if (Date.now() >= matchHoldUntil) return
+      // Keep this armed while the primitive holds are still up, not only
+      // for the first MATCH_HOLD_MS (spawn colliders can land later).
+      const holdLive = Date.now() < matchHoldUntil || (!!matchHoldUntil && !isSpawnFloorReady() && Date.now() < matchHoldUntil + 9000)
+      if (!holdLive) return
       if (matchHoldSnaps >= MATCH_HOLD_MAX_SNAPS) return
       // Well below the spawn they were sent to, not merely below BASE_Y.
       if (p.y >= Math.min(BASE_Y, matchHoldSpawnY) - 3) return
