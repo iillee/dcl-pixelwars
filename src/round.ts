@@ -21,6 +21,7 @@ export {
 } from './shared/roundTiming'
 
 import { getRoundEndMs, SUMMARY_GROW_S, SUMMARY_HOLD_S, SUMMARY_SHRINK_S, summaryProgressAt } from './shared/roundTiming'
+import { isCurtainBlockingDismiss, isCurtainIdle, startRoundCurtain } from './shared/roundCurtain'
 import { type RoundFormat } from './shared/pvp'
 import { loadSplashCovering } from './client/splash'
 
@@ -48,6 +49,8 @@ let dismissedAtMs = 0
 /** Click on the summary: shrink it away now. Does nothing if it is not up. */
 export function dismissSummary(nowMs: number = Date.now()): void {
   if (banner.shownAtMs === 0 || dismissedAtMs > 0) return
+  // Don't shrink the summary away while the world swap is still hidden.
+  if (isCurtainBlockingDismiss()) return
   dismissedAtMs = nowMs
 }
 
@@ -57,7 +60,10 @@ export function summarySecondsLeft(_nowMs: number = Date.now()): number {
 }
 
 export function getSummaryProgress(nowMs: number = Date.now()): number {
-  return summaryProgressAt(nowMs, banner.shownAtMs, dismissedAtMs)
+  const p = summaryProgressAt(nowMs, banner.shownAtMs, dismissedAtMs)
+  // Ride down fully formed with the curtain; don't also grow from the score bar.
+  if (p >= 0 && !isCurtainIdle() && dismissedAtMs === 0) return 1
+  return p
 }
 
 /** Drop the overlay immediately. Next-round start uses this; the lobby swap must not. */
@@ -69,7 +75,8 @@ export function clearSummary(): void {
 
 function openBannerClock(): void {
   banner.visible = true
-  banner.shownAtMs = Date.now()
+  // The summary is already full-size when it rides down with the curtain.
+  banner.shownAtMs = Date.now() - SUMMARY_GROW_S * 1000
   dismissedAtMs = 0
 }
 
@@ -156,6 +163,7 @@ export function showRoundEndBanner(red: number, blue: number, total: number, gre
   banner.winner = headline.endsWith(' WINS!') ? headline.slice(0, -6) : 'TIE'
   banner.victorName = ''
   banner.kind = 'paint'
+  startRoundCurtain()
   openBannerClock()
   // Only use a result from this boundary (guards against a stale one).
   banner.personal = pendingPersonal && Date.now() - pendingAtMs < 10000 ? pendingPersonal : ''

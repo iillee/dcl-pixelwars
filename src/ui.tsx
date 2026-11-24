@@ -1,4 +1,5 @@
 import { SplashScreen } from "./client/splash"
+import { RoundCurtainMask, summarySlideY } from './client/roundCurtainUi'
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
@@ -1086,8 +1087,23 @@ export const uiMenu = () => (
 
     <StandingsPopup />
 
-    {/* ─── Round-end summary: the score bar grows into a red|blue square, holds, shrinks back. */}
-    {(() => { const p = getSummaryProgress(); return p >= 0 ? RoundSummary(p) : null })()}
+    {/* ─── Round-end: curtain covers the lobby swap; the summary rides down with it and stays. */}
+    {(() => {
+      const p = getSummaryProgress()
+      const cv = canvasSize()
+      const slide = summarySlideY(cv.h)
+      if (p < 0 && slide === 0) return null
+      return (
+        <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none', overflow: 'visible' }}>
+          <RoundCurtainMask />
+          {p >= 0 ? (
+            <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: slide, left: 0 }, pointerFilter: 'none' }}>
+              {RoundSummary(p)}
+            </UiEntity>
+          ) : null}
+        </UiEntity>
+      )
+    })()}
     {lagHudOn() ? (
       <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 16, bottom: 16 }, pointerFilter: 'none' }}>
         <Label value={lagHudLine()} fontSize={16} color={Color4.White()} textAlign="middle-left" textWrap="nowrap" uiTransform={{ height: 22 }} />

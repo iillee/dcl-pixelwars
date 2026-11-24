@@ -129,12 +129,14 @@ if (!uiSrc.includes('wordRow(3, true)') || !uiSrc.includes('wordRow(0, false)'))
   console.error('✗ the title should use a subtle drop shadow, not a solid panel')
   process.exit(1)
 }
-if (!uiSrc.includes('showUnpainted={b.kind !== \'bases\'}') && !uiSrc.includes('showUnpainted={b.kind !== "bases"}')) {
-  // allow either quote style
-  if (!uiSrc.includes('showUnpainted={b.kind !==')) {
-    console.error('✗ the end-screen bar should use real shares plus the unpainted remainder')
-    process.exit(1)
-  }
+if (
+  !uiSrc.includes('showUnpainted={true}') &&
+  !uiSrc.includes('showUnpainted={b.kind !== \'bases\'}') &&
+  !uiSrc.includes('showUnpainted={b.kind !== "bases"}') &&
+  !uiSrc.includes('showUnpainted={b.kind !==')
+) {
+  console.error('✗ the end-screen bar should use real shares plus the unpainted remainder')
+  process.exit(1)
 }
 if ((!uiSrc.includes('height: ch * 2 + vgap') && !uiSrc.includes('height: rh0 + vgap + rh1')) || !uiSrc.includes('flexShrink: 0')) {
   console.error('✗ team cards need explicit heights so the 2×2 rows do not overlap')

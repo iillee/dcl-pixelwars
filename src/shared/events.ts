@@ -73,7 +73,7 @@ export type Events = {
     total: number
   }
 
-  // Round ended (scores only). Subscriber: round.ts banner. Maze stays until round:reset.
+  // Round ended (scores only). Subscriber: round.ts banner + curtain. The server already opened the lobby.
   'round:ended': {
     finalRed: number
     finalBlue: number

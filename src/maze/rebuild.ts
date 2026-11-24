@@ -35,6 +35,7 @@ import { LOBBY_TEAMS } from '../shared/lobby'
 import { installLobbyHoldFloor } from '../lobbyHoldFloor'
 import { SeedHolder, seedHolder } from '../shared/components'
 import { ServerWorld, isStaleWorld, parseWorldLayout, shouldRebuildWorld } from '../shared/worldState'
+import { abortRoundCurtain, isCurtainCovering, startRoundCurtain } from '../shared/roundCurtain'
 
 // ─── Pipeline state ─────────────────────────────────────────────────
 const spawnedEntities: Entity[] = []
@@ -50,6 +51,8 @@ const heldFloor: Entity[] = []
 let releaseHeldAt = 0
 /** Team spawn / base tiles placed at full scale as soon as the arena is laid. */
 const spawnFloorEntities: Entity[] = []
+/** Early lobby tiles (cross + solid ends) placed at full scale before teleport. */
+const lobbyFloorEntities: Entity[] = []
 
 // ─── Persistent tiles ───────────────────────────────────────────────
 // Classic: the centre cross. Sky: both team bases. These are at the same
@@ -105,7 +108,9 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
     // anyone is moved onto them. Team Fight and Bot Fight ends still grow in.
     const solid = getPlacedTilesInOrder().filter(p =>
       p.type !== 'end' || earlyEnd(p.x, p.z))
+    lobbyFloorEntities.length = 0
     for (const p of solid) early.push(spawnTile(p, true))
+    for (const e of early) lobbyFloorEntities.push(e)
     if (early.length) events.emit('lobby:floor', { ready: true })
   }
 
@@ -119,10 +124,13 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   // the player teleports) cover that gap without a visible second maze.
   const returning = nextLobby && layoutChanged
   const leavingLobby = !nextLobby && layoutChanged
+  // Behind the opaque curtain the hollow arena shells can come down immediately.
+  // Holding them while the lobby grows in is what let the camera look inside a tile.
+  const holdOutgoing = returning && !isCurtainCovering()
   if (leavingLobby) installLobbyHoldFloor()
   for (const e of previous) {
     if (!dropLatched && persistentSet.has(e)) resetPaintForTile(e)
-    else if (returning) heldFloor.push(e)
+    else if (holdOutgoing) heldFloor.push(e)
     else teardownQueue.push(e)
   }
   if (dropLatched) {
@@ -131,9 +139,10 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   }
   // Layout switches must not leave the previous floor's GLBs mixed with the
   // new paint grid (mode changes, a return to the lobby, a late joiner, or
-  // leaving the lobby). Returning still holds the arena for the teleport.
-  if (layoutChanged && !returning) flushTeardown()
-  if (returning) releaseHeldAt = Date.now() + 250
+  // leaving the lobby). Returning still holds the arena for the teleport
+  // unless the curtain is already covering the swap.
+  if (layoutChanged && !holdOutgoing) flushTeardown()
+  if (holdOutgoing) releaseHeldAt = Date.now() + 250
   spawnedEntities.length = 0
   for (const e of early) spawnedEntities.push(e)
   if (!dropLatched) for (const e of persistentSet) spawnedEntities.push(e)
@@ -152,6 +161,7 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   }
 
   layoutKind = 'arena'
+  lobbyFloorEntities.length = 0
   requestedSeed = seed
   const winningSeed = generateWithRetry(seed)
   if (winningSeed === null) {
@@ -223,7 +233,21 @@ function releaseHeldFloor(): void {
  */
 export function isSpawnFloorReady(): boolean {
   if (layoutKind !== 'arena' || spawnFloorEntities.length === 0) return false
-  for (const e of spawnFloorEntities) {
+  return floorEntitiesReady(spawnFloorEntities)
+}
+
+/**
+ * True when every early lobby tile exists at full scale, its GLB has finished
+ * loading, and its visible mesh has a physics collider. Compatible with a
+ * delayed mask write: ready is false while the mask is still 0.
+ */
+export function isLobbyFloorReady(): boolean {
+  if (layoutKind !== 'lobby' || lobbyFloorEntities.length === 0) return false
+  return floorEntitiesReady(lobbyFloorEntities)
+}
+
+function floorEntitiesReady(list: Entity[]): boolean {
+  for (const e of list) {
     const tr = Transform.getOrNull(e)
     if (!tr || tr.scale.y < TILE_SCALE * 0.99) return false
     const gltf = GltfContainer.getOrNull(e)
@@ -233,6 +257,30 @@ export function isSpawnFloorReady(): boolean {
     const st = GltfContainerLoadingState.getOrNull(e)?.currentState
     if (st !== LoadingState.FINISHED) return false
   }
+  return true
+}
+
+/** When armed, arena→lobby rebuilds wait until the curtain is opaque. */
+let lobbySwapDeferral = false
+export function armLobbySwapDeferral(): void {
+  lobbySwapDeferral = true
+}
+
+let pendingLobbyWorld: ServerWorld | null = null
+let pendingLobbyWhy = ''
+
+export function hasPendingLobbyWorld(): boolean {
+  return pendingLobbyWorld !== null
+}
+
+/** Run a deferred lobby rebuild. No-op when nothing is waiting. */
+export function flushPendingLobbyWorld(): boolean {
+  if (!pendingLobbyWorld) return false
+  const next = pendingLobbyWorld
+  const why = pendingLobbyWhy || 'curtain'
+  pendingLobbyWorld = null
+  pendingLobbyWhy = ''
+  rebuildMaze(next.seed, 'lobby', why)
   return true
 }
 
@@ -251,6 +299,19 @@ export function applyServerWorld(next: ServerWorld, why: string): boolean {
   setHoldMazeSeed(next.layout === 'lobby')
   if (next.layout === 'arena' && next.seed) SeedHolder.createOrReplace(seedHolder, { seed: next.seed })
   else SeedHolder.createOrReplace(seedHolder, { seed: 0 })
+  // A new match must never stay hidden behind the win curtain.
+  if (next.layout === 'arena') {
+    pendingLobbyWorld = null
+    pendingLobbyWhy = ''
+    abortRoundCurtain()
+  }
+  // Keep the arena on screen until the mask is opaque, then rebuild behind it.
+  if (rebuild && next.layout === 'lobby' && layoutKind === 'arena' && lobbySwapDeferral) {
+    startRoundCurtain()
+    pendingLobbyWorld = next
+    pendingLobbyWhy = why
+    return true
+  }
   if (rebuild) rebuildMaze(next.seed, next.layout, why)
   return true
 }

@@ -29,6 +29,7 @@ import { setupUi } from '../ui'
 import { setupOverviewCamera } from './overviewCamera'
 import { initPaintingSystem, initPaintNet } from '../paint'
 import { getRoundIndex, initRoundNet } from '../round'
+import { initRoundCurtain } from './roundCurtain'
 import { initClientHandler } from './clientHandler'
 import { initFeed } from './feed'
 import { initAudio, startOceanAmbience } from './audio'
@@ -129,6 +130,7 @@ export async function setupClient(): Promise<void> {
   initPaintNet()
   initMazeNet()
   initRoundNet()
+  initRoundCurtain()
   initPlayerNet()
   initNametags()
   initSpeedBonus()
