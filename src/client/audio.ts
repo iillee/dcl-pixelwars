@@ -374,16 +374,32 @@ export function playTrumpetSfx(): void {
 const RESCUE_SRC = DASH_SRC
 const RESCUE_VOL = 0.45
 let rescueSfxEnt: Entity | null = null
+const RESCUE_CARRY_SRC = 'assets/sounds/rescue-carry.mp3'
+const RESCUE_CARRY_VOL = 0.55
+let rescueCarryEnt: Entity | null = null
 function initRescueSfx(): void {
   const pre = engine.addEntity()
-  AssetLoad.create(pre, { assets: [RESCUE_SRC] })
+  AssetLoad.create(pre, { assets: [RESCUE_SRC, RESCUE_CARRY_SRC] })
   rescueSfxEnt = engine.addEntity()
   Transform.create(rescueSfxEnt, { parent: engine.CameraEntity })
   AudioSource.create(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: false, loop: false, volume: RESCUE_VOL, global: true })
+  rescueCarryEnt = engine.addEntity()
+  Transform.create(rescueCarryEnt, { parent: engine.CameraEntity })
+  AudioSource.create(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: false, loop: true, volume: RESCUE_CARRY_VOL, global: true })
 }
 export function playFallRescueSfx(): void {
   if (!rescueSfxEnt) return
   AudioSource.createOrReplace(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: true, loop: false, volume: RESCUE_VOL, global: true, currentTime: 0 })
+}
+/** Loop while the local player is on the rescue cloud. Camera-parented, local only. */
+export function startRescueCarryLoop(): void {
+  if (!rescueCarryEnt) return
+  AudioSource.createOrReplace(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: true, loop: true, volume: RESCUE_CARRY_VOL, global: true, currentTime: 0 })
+}
+export function stopRescueCarryLoop(): void {
+  if (!rescueCarryEnt) return
+  const src = AudioSource.getMutableOrNull(rescueCarryEnt)
+  if (src) src.playing = false
 }
 
 /** Optional fall-in splash clip. Missing file: preload never finishes, play stays silent. */

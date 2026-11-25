@@ -85,7 +85,7 @@ import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
 import { LOOK, resolvedWaterY } from '../shared/waterLook'
 import { waterClipArmed, waterVisualSeconds } from './water'
 import { Team, isPlayingTeam } from '../shared/team'
-import { playFallRescueSfx } from './audio'
+import { playFallRescueSfx, startRescueCarryLoop, stopRescueCarryLoop } from './audio'
 import { playWaterSplash } from './waterSplash'
 import { localTeam, myAddress } from './knockback'
 import { interruptLocalLunge, setFallMoveLock } from './lunge'
@@ -904,6 +904,7 @@ function tickCarry(dt: number): void {
 /** Shared ending. Walk lock is set before player:respawned so the lunge listener keeps walk-only. */
 function finish(how: FallRescueEnd, why: string): void {
   if (phase !== 'grab' && phase !== 'carry') return
+  stopRescueCarryLoop()
   const rode = cameraRide
   // Camera cut, stand-in, and unhide land on the same frame.
   releaseRideCamera()
@@ -995,6 +996,7 @@ function tickPhase(dt: number): void {
       // Lock the cloud over where they stand, then rise. Chasing XZ during the
       // carry copied pad-vs-avatar noise onto the cloud every frame.
       phase = 'carry'
+      startRescueCarryLoop()
       if (floater) {
         floater.mode = 'hang'
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
@@ -1238,6 +1240,7 @@ export function holdFallLine(): void {
 
 /** Round reset / team / initial spawn: drop the pickup, the panel, and the tween. Idempotent. */
 export function cancelFallRescue(why: string): void {
+  stopRescueCarryLoop()
   if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
   sendRescueEnd()
