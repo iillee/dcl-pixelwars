@@ -7,7 +7,7 @@ import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
-import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, LOBBY_STATUS_STARTING, lobbyFeet, signBadgeY, signFaceZ, signTitlePlane, teamTitle, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
+import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, LOBBY_STATUS_STARTING, lobbyFeet, signBadgeY, signFaceZ, signTitlePlane, teamTitle, isStandingOnLobbyFloor, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
 import { gamePhase, inLobby, isLobbyStarting, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
@@ -23,6 +23,8 @@ let sent = 0
 let sendFail = 0
 let noTransform = 0
 let lastFeet = { x: NaN, y: NaN, z: NaN }
+let lastSentGrounded = false
+let lastSentZone: TeamId | '' = ''
 
 const spawned: Entity[] = []
 const signRoots: Entity[] = []
@@ -409,11 +411,17 @@ export function initLobby(): void {
     const p = t.position
     lastFeet = { x: p.x, y: p.y, z: p.z }
     const sceneNow = toSceneFeet(p.x, p.z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
-    tickTints(dt, voteTeamIdAt(sceneNow.x, sceneNow.z, MAZE_ORIGIN, CELL))
+    const onFloor = isStandingOnLobbyFloor(p.y, BASE_Y)
+    // Tint follows the live stand, not the 2 Hz sample, so a jump clears it immediately.
+    const zoneNow = onFloor ? voteTeamIdAt(sceneNow.x, sceneNow.z, MAZE_ORIGIN, CELL) : ''
+    tickTints(dt, zoneNow)
     refreshSigns()
     posClock += dt
-    if (posClock < 0.5) return
+    const standChanged = onFloor !== lastSentGrounded || zoneNow !== lastSentZone
+    if (posClock < 0.5 && !standChanged) return
     posClock = 0
+    lastSentGrounded = onFloor
+    lastSentZone = zoneNow
     try { sendLobbyPos(p.x, p.y, p.z); sent++ } catch (err) { sendFail++; console.log('[Lobby] pos send failed', err) }
   })
 }
@@ -428,7 +436,9 @@ export function hudLobbyDebug(): string {
   const scene = toSceneFeet(lastFeet.x, lastFeet.z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
   const c = cellAt(scene.x, scene.z, MAZE_ORIGIN, CELL)
   const named = LOBBY_TEAMS.find(m => c && m.cell.x === c.x && m.cell.z === c.z)
-  const zone = named ? named.id : (voteTeamIdAt(scene.x, scene.z, MAZE_ORIGIN, CELL) || (c ? 'abstain' : 'out'))
+  const onFloor = isStandingOnLobbyFloor(lastFeet.y, BASE_Y)
+  const standing = onFloor ? voteTeamIdAt(scene.x, scene.z, MAZE_ORIGIN, CELL) : ''
+  const zone = standing || (named && onFloor ? named.id : (c ? 'abstain' : 'out'))
   const wire = serverLobbyCounts()
   return `DBG ${isLobbyLayout() ? 'layout' : 'NO-LAYOUT'} raw ${fmt(lastFeet.x)},${fmt(lastFeet.y)},${fmt(lastFeet.z)} scene ${fmt(scene.x)},${fmt(scene.z)} ${scene.frame} cell ${c ? `${c.x},${c.z}` : 'out'} zone ${zone} sent ${sent} fail ${sendFail} noTf ${noTransform} srv ${gamePhase()} clocks ${wire.clocks} present ${wire.present} feet ${wire.feet} red ${voteCount('red')} blue ${voteCount('blue')} srvZone ${wire.zone} why=${wire.why}`
 }

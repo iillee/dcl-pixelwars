@@ -2,13 +2,13 @@
  * Lobby layout and vote rules. Run: npx tsx scripts/verify-lobby.ts
  */
 import { readFileSync } from 'node:fs'
-import { clearLobbyVotes, countedTeam, everyoneStandingReady, lobbyVerdict, noteLobbyPos, occupancyTeams, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
+import { clearLobbyVotes, countedTeam, countdownTeam, everyoneStandingReady, lobbyVerdict, noteLobbyPos, occupancyTeams, snapshotLobbyChoices, standingTeam, stepLobby, tallyTeams, tallyVotes } from '../src/server/lobbyVote'
 import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPlacedTilesInOrder } from '../src/maze/generator'
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
   LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
-  billboardAnchor, earlySpawnPads, hudRoundStartsLine, hudVoteHeadline, leadingModes, lobbyFeet, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamIdAt, voteTintPose, voteZoneLocal,
+  LOBBY_AIR_GRACE_MS, LOBBY_SLAB_TOP, LOBBY_STAND_SLACK_M, billboardAnchor, earlySpawnPads, hudRoundStartsLine, hudVoteHeadline, isStandingOnLobbyFloor, leadingModes, lobbyFeet, lobbySlabY, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamAtStanding, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
 import { OUTLINE_COPIES, outlineOffsets } from '../src/shared/outlineOffsets'
@@ -1010,6 +1010,151 @@ if (!nametags.includes('isPlayingTeam(team)') || nametags.includes('team !== Tea
 const botVisualSrc = readFileSync(new URL('../src/client/botVisual.ts', import.meta.url), 'utf8')
 if (botVisualSrc.includes('paintGhostPlate') || botVisualSrc.includes('paintPlate') || botVisualSrc.includes('AvatarNametag') || botVisualSrc.includes('clearGhostPlate') || /\bplate:/.test(botVisualSrc)) {
   console.error('✗ bots should not spawn nametag or team-plate entities')
+  process.exit(1)
+}
+
+
+// Jump / glide: a tile is only live while feet are in the stand band of the slab.
+const slabY = lobbySlabY(BASE_Y)
+if (Math.abs(slabY - (BASE_Y + LOBBY_SLAB_TOP)) > 1e-9) {
+  console.error('✗ lobbySlabY should be the walkable slab top')
+  process.exit(1)
+}
+if (!isStandingOnLobbyFloor(190, BASE_Y) || !isStandingOnLobbyFloor(slabY, BASE_Y) || !isStandingOnLobbyFloor(slabY + LOBBY_STAND_SLACK_M, BASE_Y)) {
+  console.error('✗ a stand on or just above the slab, including the y=190 test samples, should count')
+  process.exit(1)
+}
+if (isStandingOnLobbyFloor(slabY + 1, BASE_Y) || isStandingOnLobbyFloor(slabY + 3, BASE_Y)) {
+  console.error('✗ a 1 m jump or a glide above the slab should not count as standing')
+  process.exit(1)
+}
+if (voteTeamAtStanding(lukeX, 190, lukeZ, MAZE_ORIGIN, CELL, BASE_Y) !== 1) {
+  console.error('✗ a standing sample on red should still pick red')
+  process.exit(1)
+}
+if (voteTeamAtStanding(lukeX, slabY + 1, lukeZ, MAZE_ORIGIN, CELL, BASE_Y) !== 0) {
+  console.error('✗ a jump over red should not pick red')
+  process.exit(1)
+}
+
+clearLobbyVotes()
+const hopAt = aged + 80_000
+const jumpY = slabY + 1
+const glideY = slabY + 3
+if (!noteLobbyPos('hopper', lukeX, 190, lukeZ, hopAt)) {
+  console.error('✗ server rejected the standing hopper sample')
+  process.exit(1)
+}
+if (standingTeam('hopper', hopAt) !== 1 || occupancyTeams(['hopper'], hopAt).red !== 1 || countedTeam('hopper') !== 1) {
+  console.error('✗ standing on red should occupy it and set the sticky pick')
+  process.exit(1)
+}
+// Leaving the floor must be accepted inside the 2 Hz cap so occupancy drops immediately.
+if (!noteLobbyPos('hopper', lukeX, jumpY, lukeZ, hopAt + 100)) {
+  console.error('✗ a jump should bypass the lobbyPos rate cap')
+  process.exit(1)
+}
+if (standingTeam('hopper', hopAt + 100) !== 0 || occupancyTeams(['hopper'], hopAt + 100).red !== 0) {
+  console.error('✗ jumping over red should clear the highlight and the sign count')
+  process.exit(1)
+}
+if (countedTeam('hopper') !== 1) {
+  console.error('✗ a jump off red should keep the last grounded pick for assignment')
+  process.exit(1)
+}
+if (!noteLobbyPos('hopper', blueX, jumpY, blueZ, hopAt + 600)) {
+  console.error('✗ server rejected a jump over blue')
+  process.exit(1)
+}
+if (occupancyTeams(['hopper'], hopAt + 600).blue !== 0 || countedTeam('hopper') !== 1) {
+  console.error('✗ gliding over blue should not occupy it or steal the red pick')
+  process.exit(1)
+}
+if (!noteLobbyPos('hopper', blueX, 190, blueZ, hopAt + 1_200)) {
+  console.error('✗ server rejected landing on blue')
+  process.exit(1)
+}
+if (standingTeam('hopper', hopAt + 1_200) !== 2 || countedTeam('hopper') !== 2) {
+  console.error('✗ landing on blue should occupy it and switch the sticky pick')
+  process.exit(1)
+}
+
+// Countdown: a short jump keeps the timer; a long glide cancels it like walking off.
+clearLobbyVotes()
+const airAt = hopAt + 5_000
+if (!noteLobbyPos('hopper', blueX, 190, blueZ, airAt)) {
+  console.error('✗ server rejected the standing sample for the jump-countdown case')
+  process.exit(1)
+}
+const airClock = { wantFull: false, countdownEnds: 0, hadVotes: false, readyAt: airAt, emptySince: 0 }
+const airStart = stepLobby(airClock, ['hopper'], airAt)
+if (airStart.log !== 'start') {
+  console.error(`✗ standing on blue should start the countdown, got ${airStart.log}`)
+  process.exit(1)
+}
+if (!noteLobbyPos('hopper', blueX, jumpY, blueZ, airAt + 100)) {
+  console.error('✗ server rejected the mid-jump sample during the countdown')
+  process.exit(1)
+}
+if (occupancyTeams(['hopper'], airAt + 100).blue !== 0) {
+  console.error('✗ the blue sign should read 0 while the player is in the air')
+  process.exit(1)
+}
+if (countdownTeam('hopper', airAt + 100) !== 2) {
+  console.error('✗ a short jump should still count for the countdown grace')
+  process.exit(1)
+}
+const stillGoing = stepLobby(airStart.next, ['hopper'], airAt + 100)
+if (stillGoing.log === 'close' || stillGoing.next.countdownEnds === 0) {
+  console.error('✗ a short jump must not cancel the lobby countdown')
+  process.exit(1)
+}
+const midResolve = airAt + 100
+if (snapshotLobbyChoices().get('hopper') !== 2) {
+  console.error('✗ match start mid-jump should still assign the last grounded tile')
+  process.exit(1)
+}
+const jumped = assignLobbyTeams(['hopper'], snapshotLobbyChoices())
+if (jumped.length !== 1 || jumped[0].team !== 2) {
+  console.error('✗ a player mid-jump when the timer ends should keep their last grounded team')
+  process.exit(1)
+}
+if (!noteLobbyPos('hopper', blueX, glideY, blueZ, airAt + 100 + LOBBY_AIR_GRACE_MS + 20)) {
+  console.error('✗ server rejected the long-glide sample')
+  process.exit(1)
+}
+const glideNow = airAt + 100 + LOBBY_AIR_GRACE_MS + 20
+if (countdownTeam('hopper', glideNow) !== 0 || occupancyTeams(['hopper'], glideNow).blue !== 0) {
+  console.error('✗ a glide past the grace should leave the tile')
+  process.exit(1)
+}
+const glided = stepLobby(stillGoing.next, ['hopper'], glideNow)
+if (glided.log !== 'close' || glided.next.countdownEnds !== 0) {
+  console.error(`✗ a long glide should cancel the countdown the way walking off does (${glided.log})`)
+  process.exit(1)
+}
+if (countedTeam('hopper') !== 2) {
+  console.error('✗ a long glide should still keep the last grounded pick')
+  process.exit(1)
+}
+
+
+const lobbyVoteSrc = readFileSync(new URL('../src/server/lobbyVote.ts', import.meta.url), 'utf8')
+if (!lobbyVoteSrc.includes('isStandingOnLobbyFloor') || !lobbyVoteSrc.includes('countdownTeam') || !lobbyVoteSrc.includes('LOBBY_AIR_GRACE_MS')) {
+  console.error('✗ lobby votes must require a standing height and keep a mid-jump assignment grace')
+  process.exit(1)
+}
+if (!lobbyVoteSrc.includes('if (grounded && team) chosen.set')) {
+  console.error('✗ only a standing sample on a team tile should set the sticky pick')
+  process.exit(1)
+}
+const lobbyCli = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')
+if (!lobbyCli.includes('isStandingOnLobbyFloor') || !lobbyCli.includes('standChanged')) {
+  console.error('✗ the local tint and lobbyPos send should follow the live stand, including a jump')
+  process.exit(1)
+}
+if (server.includes('noteLobbyPos(bot') || server.includes("noteLobbyPos(`bot")) {
+  console.error('✗ bots should not send lobby feet')
   process.exit(1)
 }
 

@@ -1,14 +1,19 @@
 /**
  * Feet samples for the lobby. The server names the zone. A client never
- * sends a team id. Standing on a team tile sets a sticky choice used at
- * round start; walking off or standing still does not drop it. Leaving
- * the scene does. Sign counts follow live occupancy, not the sticky pick.
+ * sends a team id. A tile counts only while the player is standing on it
+ * (feet in the stand band of the slab). Jumping, double-jumping, or gliding
+ * above a tile does not highlight it, does not add to the sign count, and
+ * does not set a team pick. Standing on a team tile sets a sticky choice
+ * used at round start; walking off or standing still does not drop it.
+ * Leaving the scene does. Sign counts follow live occupancy, not the sticky
+ * pick. If the countdown ends while someone is mid-jump, assignment still
+ * uses their last grounded tile.
  */
-import { CELL, MAZE_ORIGIN, SCENE_SIZE } from '../maze/generator'
+import { BASE_Y, CELL, MAZE_ORIGIN, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import {
-  LOBBY_AFK_MS, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_SAMPLE_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, cellAt,
-  emptyCounts, emptyTeamCounts, everyPresentInZone, teamIdOf,
+  LOBBY_AFK_MS, LOBBY_AIR_GRACE_MS, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_SAMPLE_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, cellAt,
+  emptyCounts, emptyTeamCounts, everyPresentInZone, isStandingOnLobbyFloor, teamIdOf,
   toSceneFeet, type ModeId, type TeamChoice, type TeamCounts, type VoteCounts,
   voteModeAt, voteTeamAt,
 } from '../shared/lobby'
@@ -21,7 +26,15 @@ type Sample = {
   frame: 'scene' | 'world'
   at: number
   movedAt: number
+  /** True when this sample's feet were in the stand band of the lobby slab. */
+  grounded: boolean
+  /** Last team zone the player was standing in, or 0 if they last stood off every zone. */
+  groundedTeam: TeamChoice | 0
+  /** When groundedTeam was last observed from a standing sample. */
+  groundedAt: number
 }
+
+const LOBBY_POS_MIN_MS = 400
 
 const samples = new Map<string, Sample>()
 const lastAt = new Map<string, number>()
@@ -29,20 +42,31 @@ const chosen = new Map<string, TeamChoice>()
 
 const keyOf = (id: string) => id.toLowerCase()
 
-/** False when the sample was inside the 2 Hz cap. */
+/** False when the sample was inside the 2 Hz cap and the stand state did not change. */
 export function noteLobbyPos(id: string, x: number, y: number, z: number, now: number): boolean {
   if (![x, y, z].every(Number.isFinite)) return false
   const key = keyOf(id)
-  const prev = lastAt.get(key) ?? 0
-  if (now - prev < 400) return false
-  lastAt.set(key, now)
   const scene = toSceneFeet(x, z, SCENE_SIZE, MAZE_ORIGIN, CELL, BASE_METERS)
+  const grounded = isStandingOnLobbyFloor(y, BASE_Y)
+  const team = grounded ? voteTeamAt(scene.x, scene.z, MAZE_ORIGIN, CELL) : 0
   const cur = samples.get(key)
+  const standChanged = !cur || cur.grounded !== grounded || (grounded && cur.groundedTeam !== team)
+  const prev = lastAt.get(key) ?? 0
+  if (now - prev < LOBBY_POS_MIN_MS && !standChanged) return false
+  lastAt.set(key, now)
   let movedAt = cur?.movedAt ?? now
   if (!cur || Math.hypot(scene.x - cur.x, scene.z - cur.z) >= LOBBY_MOVE_M) movedAt = now
-  samples.set(key, { x: scene.x, z: scene.z, y, rawX: x, rawZ: z, frame: scene.frame, at: now, movedAt })
-  const team = voteTeamAt(scene.x, scene.z, MAZE_ORIGIN, CELL)
-  if (team) chosen.set(key, team)
+  const groundedTeam = grounded ? team : (cur?.groundedTeam ?? 0)
+  // Grace starts when we first see the player leave the floor, not from the
+  // previous standing heartbeat (up to 0.5 s earlier).
+  const groundedAt = grounded ? now : (cur?.grounded ? now : (cur?.groundedAt ?? 0))
+  samples.set(key, {
+    x: scene.x, z: scene.z, y, rawX: x, rawZ: z, frame: scene.frame,
+    at: now, movedAt, grounded, groundedTeam, groundedAt,
+  })
+  // Only a standing sample on a team tile sets the sticky pick. Flying over
+  // one does not. Walking off keeps the last standing pick for assignment.
+  if (grounded && team) chosen.set(key, team)
   return true
 }
 
@@ -71,16 +95,16 @@ export function lobbyWho(ids: string[], now: number): LobbyWho[] {
       continue
     }
     const c = cellAt(s.x, s.z, MAZE_ORIGIN, CELL)
-    const standing = voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL)
+    const standing = s.grounded ? voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL) : 0
     const pick = countedTeam(id)
     const named = LOBBY_TEAMS.find(t => c && t.cell.x === c.x && t.cell.z === c.z)
     const fresh = now - s.at <= LOBBY_SAMPLE_MS
     const afk = now - s.movedAt >= LOBBY_AFK_MS
     const zone = !fresh
       ? (pick ? teamIdOf(pick) : 'stale')
-      : named
-        ? named.id
-        : (standing ? teamIdOf(standing) : (pick ? teamIdOf(pick) : (c ? 'abstain' : 'out')))
+      : standing
+        ? teamIdOf(standing)
+        : (named && s.grounded ? named.id : (pick ? teamIdOf(pick) : (c ? 'abstain' : 'out')))
     out.push({
       id, rawX: s.rawX, rawZ: s.rawZ, y: s.y, x: s.x, z: s.z, frame: s.frame,
       cell: c ? `${c.x},${c.z}` : 'out',
@@ -109,7 +133,7 @@ export function lobbySampleIds(): string[] {
 
 function liveVote(id: string, now: number): ModeId | '' {
   const s = samples.get(keyOf(id))
-  if (!s || now - s.at > LOBBY_SAMPLE_MS) return ''
+  if (!s || now - s.at > LOBBY_SAMPLE_MS || !s.grounded) return ''
   return voteModeAt(s.x, s.z, MAZE_ORIGIN, CELL)
 }
 
@@ -197,8 +221,8 @@ export function lobbyVerdict(present: string[], now: number): { counts: VoteCoun
   if (!s) return { counts, zone: pick ? teamIdOf(pick) : 'none', why: pick ? 'ok' : (sampleIds.length ? 'id-mismatch' : 'no-sample') }
   const c = cellAt(s.x, s.z, MAZE_ORIGIN, CELL)
   const named = LOBBY_TEAMS.find(t => c && t.cell.x === c.x && t.cell.z === c.z)
-  const standing = voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL)
-  const zone = named ? named.id : (standing ? teamIdOf(standing) : (pick ? teamIdOf(pick) : (c ? 'abstain' : 'out')))
+  const standing = s.grounded ? voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL) : 0
+  const zone = standing ? teamIdOf(standing) : (named && s.grounded ? named.id : (pick ? teamIdOf(pick) : (c ? 'abstain' : 'out')))
   if (now - s.at > LOBBY_SAMPLE_MS) return { counts, zone: pick ? teamIdOf(pick) : zone, why: pick ? 'ok' : 'stale' }
   if (!presentNorm.has(id) && present.length > 0) {
     return { counts, zone, why: pick || standing ? 'ok-id' : zone }
@@ -208,17 +232,32 @@ export function lobbyVerdict(present: string[], now: number): { counts: VoteCoun
   return { counts, zone: 'abstain', why: 'abstain' }
 }
 
-/** Fresh sample currently standing in a team zone, or 0 if they are off every zone. */
+/** Fresh sample currently standing in a team zone, or 0 if they are off the floor or every zone. */
 export function standingTeam(id: string, now: number): TeamChoice | 0 {
   const s = samples.get(keyOf(id))
-  if (!s || now - s.at > LOBBY_SAMPLE_MS) return 0
+  if (!s || now - s.at > LOBBY_SAMPLE_MS || !s.grounded) return 0
   return voteTeamAt(s.x, s.z, MAZE_ORIGIN, CELL)
+}
+
+/**
+ * Live occupancy, or the last grounded team tile within LOBBY_AIR_GRACE_MS.
+ * Used only to keep the countdown running through a short jump. Sign counts
+ * and team picks use standingTeam / chosen instead.
+ */
+export function countdownTeam(id: string, now: number): TeamChoice | 0 {
+  const live = standingTeam(id, now)
+  if (live) return live
+  const s = samples.get(keyOf(id))
+  if (!s || s.groundedTeam === 0) return 0
+  if (now - s.groundedAt > LOBBY_AIR_GRACE_MS) return 0
+  if (now - s.at > LOBBY_SAMPLE_MS) return 0
+  return s.groundedTeam
 }
 
 /** True when at least one counted id is physically in a team zone right now. Sticky picks do not count. */
 export function anyoneStandingInTeamZone(present: string[], now: number): boolean {
   for (const id of voterIds(present)) {
-    if (standingTeam(id, now)) return true
+    if (countdownTeam(id, now)) return true
   }
   return false
 }
@@ -232,7 +271,7 @@ function isLobbyAfk(id: string, now: number): boolean {
 export function everyoneStandingReady(present: string[], now: number): boolean {
   const ids = present.filter((id) => !isLobbyAfk(id, now))
   if (ids.length === 0) return false
-  return ids.every((id) => standingTeam(id, now) !== 0)
+  return ids.every((id) => countdownTeam(id, now) !== 0)
 }
 
 function remainingCap(now: number, ends: number): number {

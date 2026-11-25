@@ -1,10 +1,11 @@
 /**
  * Lobby layout and team-choice rules. Pure. The generator places these cells;
- * the server decides a zone from a player's feet. No engine imports.
+ * the server decides a zone from a player's feet, only while those feet
+ * are standing on the tile. No engine imports.
  *
  * The built floor is the four-arm cross through the lobby hub: RED west,
- * BLUE east, YELLOW north, and GREEN south. Standing on a team tile
- * chooses that side for the next Classic Pixelwars round.
+ * BLUE east, YELLOW north, and GREEN south. Standing on a team tile chooses that side for the next Classic
+ * Pixelwars round. Jumping or gliding over a tile does not.
  * Alternate modes stay in the registry, unplaced, so their code remains
  * reachable later. Bot Invasion, Color Garden, and Pot Hunt stay parked too.
  */
@@ -247,6 +248,46 @@ export const LOBBY_AFK_MS = 60_000
 export const LOBBY_SAMPLE_MS = 15_000
 /** Metres of movement that refresh the AFK timer. */
 export const LOBBY_MOVE_M = 0.75
+
+/** Walkable top of a flat lobby tile, metres above the tile origin. Same as the paint slab. */
+export const LOBBY_SLAB_TOP = 0.5
+/**
+ * Metres above the slab that still count as standing on the tile.
+ * Covers a mobile bob and the usual 0.2–0.3 m of pose noise, and stays
+ * clearly under a 1 m standing jump so a hop deactivates the tile.
+ */
+export const LOBBY_STAND_SLACK_M = 0.6
+/** Metres below the slab still accepted (feet slightly in the mesh). */
+export const LOBBY_STAND_SINK_M = 0.35
+/**
+ * After leaving the floor, the countdown still treats the last grounded
+ * team tile as occupied for this long. Assignment at match start always
+ * uses that last grounded pick (the sticky choice), even after the grace
+ * ends — so a player mid-jump when the timer hits 0 keeps their team.
+ * A glide or hang longer than this drops out of the countdown the same
+ * way walking off the tile does. Sign counts and the local tint do not
+ * use this grace: they clear as soon as the feet leave the stand band.
+ */
+export const LOBBY_AIR_GRACE_MS = 1_250
+
+export function lobbySlabY(tileY: number): number {
+  return tileY + LOBBY_SLAB_TOP
+}
+
+/** True when feet sit in the stand band of a flat lobby tile at `tileY`. */
+export function isStandingOnLobbyFloor(feetY: number, tileY: number): boolean {
+  if (!Number.isFinite(feetY) || !Number.isFinite(tileY)) return false
+  const top = lobbySlabY(tileY)
+  return feetY >= top - LOBBY_STAND_SINK_M && feetY <= top + LOBBY_STAND_SLACK_M
+}
+
+/** Team whose tint contains this point only while the player is standing on the floor. */
+export function voteTeamAtStanding(
+  worldX: number, worldY: number, worldZ: number, origin: number, cell: number, tileY: number,
+): TeamChoice | 0 {
+  if (!isStandingOnLobbyFloor(worldY, tileY)) return 0
+  return voteTeamAt(worldX, worldZ, origin, cell)
+}
 
 export function modeById(id: string): ModeDef | null {
   return LOBBY_MODES.find(m => m.id === id) ?? null
