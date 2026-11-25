@@ -20,6 +20,7 @@
 
 import { Storage } from '@dcl/sdk/server'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
+import { hiddenLeaderboardName } from '../shared/leaderboardHide'
 
 // ─── State ──────────────────────────────────────────────────────────
 export interface LeaderboardEntry {
@@ -32,6 +33,11 @@ export interface LeaderboardEntry {
 // Lowercased userId → entry. Lowercase avoids duplicate rows when the
 // same address arrives with mixed casing (e.g. checksummed vs not).
 const entries = new Map<string, LeaderboardEntry>()
+/** In-memory names for the live and end-of-round scoreboards (and Discord).
+ *  Kept even when that name is left off the persisted wins board. */
+const displayNames = new Map<string, string>()
+/** User ids that joined under a hidden display name. Wins must not recreate the row. */
+const hiddenIds = new Set<string>()
 
 const STORAGE_KEY = 'leaderboard-v1'
 const TOP_N = 10
@@ -55,18 +61,31 @@ export async function loadFromStorage(): Promise<void> {
     const parsed: LeaderboardEntry[] = JSON.parse(raw)
     if (!Array.isArray(parsed)) throw new Error('not an array')
     entries.clear()
+    let dropped = 0
     for (const e of parsed) {
       if (typeof e?.userId !== 'string') continue
       if (typeof e?.cellsPainted !== 'number' && typeof e?.wins !== 'number') continue
       if (isBotId(e.userId)) continue
-      entries.set(e.userId.toLowerCase(), {
-        userId: e.userId.toLowerCase(),
-        name: typeof e.name === 'string' ? e.name : e.userId.slice(0, 8),
+      const key = e.userId.toLowerCase()
+      const name = typeof e.name === 'string' ? e.name : e.userId.slice(0, 8)
+      if (name) displayNames.set(key, name)
+      if (hiddenLeaderboardName(name)) {
+        hiddenIds.add(key)
+        dropped++
+        continue
+      }
+      entries.set(key, {
+        userId: key,
+        name,
         cellsPainted: typeof e.cellsPainted === 'number' ? Math.max(0, Math.floor(e.cellsPainted)) : 0,
         wins: typeof e.wins === 'number' ? Math.max(0, Math.floor(e.wins)) : 0,
       })
     }
     console.log(`[Leaderboard] loaded ${entries.size} entries from storage`)
+    if (dropped > 0) {
+      console.log(`[Leaderboard] dropped ${dropped} hidden name(s)`)
+      await saveToStorage()
+    }
     publish()
   } catch (err) {
     console.log(`[Leaderboard] load failed (${err}) — starting fresh`)
@@ -97,7 +116,13 @@ export async function saveToStorage(): Promise<void> {
 export function incrementPaint(userId: string, count: number): void {
   if (count <= 0 || isBotId(userId)) return
   const key = userId.toLowerCase()
+  if (hiddenIds.has(key)) return
   const e = entries.get(key)
+  if (e && hiddenLeaderboardName(e.name)) {
+    hiddenIds.add(key)
+    entries.delete(key)
+    return
+  }
   if (e) {
     e.cellsPainted += count
   } else {
@@ -111,15 +136,22 @@ export function incrementPaint(userId: string, count: number): void {
 }
 
 /**
- * Update a player's display name. Client sends this once on join with
- * their PlayerIdentityData.name (or falls back to short address).
- * Creates an empty row if the player hasn't painted anything yet so
- * name capture always succeeds regardless of ordering.
+ * Capture a player's display name. Client sends this once on join with
+ * their avatar name (or falls back to a short address). The name is
+ * always kept for the live and end-of-round scoreboards. A hidden name
+ * is left off the persisted wins board and is not recreated later.
  */
 export function updateName(userId: string, name: string): void {
   if (!name || typeof name !== 'string' || isBotId(userId)) return
   const key = userId.toLowerCase()
   const trimmed = name.slice(0, 32)  // display cap
+  displayNames.set(key, trimmed)
+  if (hiddenLeaderboardName(trimmed)) {
+    hiddenIds.add(key)
+    if (entries.delete(key)) publish()
+    return
+  }
+  if (hiddenIds.has(key)) return
   const e = entries.get(key)
   if (e) {
     if (e.name !== trimmed) {
@@ -134,23 +166,30 @@ export function updateName(userId: string, name: string): void {
 export function recordWin(userId: string): void {
   if (!userId || isBotId(userId)) return
   const key = userId.toLowerCase()
+  if (hiddenIds.has(key)) return
   const e = entries.get(key)
+  if (e && hiddenLeaderboardName(e.name)) {
+    hiddenIds.add(key)
+    entries.delete(key)
+    return
+  }
   if (e) e.wins += 1
   else entries.set(key, { userId: key, name: shortAddress(key), cellsPainted: 0, wins: 1 })
 }
 
 // ─── Queries ────────────────────────────────────────────────────────
 
-/** Lookup a player's display name, or null if unknown / unset. Shared with the Discord notifier. */
+/** Display name for live/round scoreboards and Discord, or null if unknown. */
 export function getName(userId: string): string | null {
-  const e = entries.get(userId.toLowerCase())
-  return e && e.name && !e.name.startsWith('0x') && !e.name.includes('…') ? e.name : null
+  const key = userId.toLowerCase()
+  const n = displayNames.get(key) ?? entries.get(key)?.name ?? null
+  return n && !n.startsWith('0x') && !n.includes('…') ? n : null
 }
 
-/** Top players who have at least one win, highest first. */
+/** Top players who have at least one win, highest first. Hidden names stay off this board. */
 export function getTopN(n: number = TOP_N): LeaderboardEntry[] {
   return [...entries.values()]
-    .filter(e => !isBotId(e.userId) && e.wins > 0)
+    .filter(e => !isBotId(e.userId) && e.wins > 0 && !hiddenIds.has(e.userId) && !hiddenLeaderboardName(e.name))
     .sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
     .slice(0, n)
 }
