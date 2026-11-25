@@ -853,11 +853,62 @@ interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<s
 
 
 
-function netAttempt(): Net | null {
+function planCrossover(base: Set<string>): { levels: Map<string, number>; ramps: Map<string, Dir>; edges: string[]; lock: Set<string>; must: Set<string> } | null {
+  // A single central L+1 straight whose two ends are ramps that step
+  // down onto an L0 behind-cell chained to a protected base exit.
+  // Only those five cells are locked, so the rest of the net can vary.
+  const cx = Math.floor(GRID_W / 2), cz = Math.floor(GRID_H / 2)
+  if (base.has(ck(cx, cz))) return null
+  const freeCell = (x: number, z: number) => inBounds(x, z) && !base.has(ck(x, z))
+  type Ramp = { rx: number; rz: number; hd: Dir; bx: number; bz: number; ex: number; ez: number }
+  const axes: Array<{ axis: 0 | 1; ramps: Ramp[] }> = [
+    {
+      axis: 0,
+      ramps: [
+        { rx: cx, rz: cz - 1, hd: 0 as Dir, bx: cx, bz: cz - 2, ex: cx - 1, ez: cz - 2 },
+        { rx: cx, rz: cz + 1, hd: 2 as Dir, bx: cx, bz: cz + 2, ex: cx + 1, ez: cz + 2 },
+      ],
+    },
+    {
+      axis: 1,
+      ramps: [
+        { rx: cx - 1, rz: cz, hd: 1 as Dir, bx: cx - 2, bz: cz, ex: cx - 2, ez: cz - 1 },
+        { rx: cx + 1, rz: cz, hd: 3 as Dir, bx: cx + 2, bz: cz, ex: cx + 2, ez: cz + 1 },
+      ],
+    },
+  ]
+  const plans = axes.filter(p =>
+    p.ramps.every(r => [ [r.rx, r.rz], [r.bx, r.bz], [r.ex, r.ez] ].every(([a, b]) => freeCell(a, b)))
+  )
+  if (!plans.length) return null
+  const p = plans[Math.floor(rand() * plans.length)]
+  const levels = new Map<string, number>()
+  const ramps = new Map<string, Dir>()
+  const edges: string[] = []
+  const lock = new Set<string>()
+  const must = new Set<string>()
+  const setLv = (a: number, b: number, l: number, keep = true) => { const c = ck(a, b); levels.set(c, l); lock.add(c); if (keep) must.add(c) }
+  setLv(cx, cz, 1)
+  for (const r of p.ramps) {
+    setLv(r.rx, r.rz, 0)
+    setLv(r.bx, r.bz, 0)
+    setLv(r.ex, r.ez, 0)
+    ramps.set(ck(r.rx, r.rz), r.hd)
+    edges.push(ek(ck(cx, cz), ck(r.rx, r.rz)))
+    edges.push(ek(ck(r.rx, r.rz), ck(r.bx, r.bz)))
+    edges.push(ek(ck(r.bx, r.bz), ck(r.ex, r.ez)))
+  }
+  return { levels, ramps, edges, lock, must }
+}
+
+function netAttempt(forceCrossover = false): Net | null {
   const base = new Set<string>(baseCells(1).concat(baseCells(2)).map(([x, z]) => ck(x, z)))
+  const xover = forceCrossover ? planCrossover(base) : null
+  if (forceCrossover && !xover) return null
   const fixed = fixedEdges()
   const protectedCells = new Set<string>(base)
   for (const [a, b] of fixed) { protectedCells.add(a); protectedCells.add(b) }
+  if (xover) for (const c of xover.must) protectedCells.add(c)
   // Flat L0 apron: cells within NET_APRON steps of a base never rise or sink
   // (1 = the base's exit cells). 2 was tried on 6×6: fewer failed attempts but
   // fewer distinct layouts (183 vs 195 of 250).
@@ -865,13 +916,15 @@ function netAttempt(): Net | null {
   // 1. Height field.
   const level = new Map<string, number>()
   for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) level.set(ck(x, z), 0)
+  if (xover) for (const [c, l] of xover.levels) level.set(c, l)
+  const locked = xover ? xover.lock : new Set<string>()
   const blobLevels: number[] = []
   for (const l of [1, -1]) { const k = 2 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) blobLevels.push(l) }
   if (!SKY_SYMMETRIC) {
     // Asymmetric: grow 1–2 raised and 1–2 sunk regions of VERT_REGION_MIN..MAX
     // cells each by random flood from a free cell, so most of the grid leaves
     // L0 and only the base aprons + a connective spine stay flat.
-    const free = (c: string) => { const [x, z] = c.split(',').map(Number); return level.get(c) === 0 && !protectedCells.has(c) && !nearBase(x, z) }
+    const free = (c: string) => { const [x, z] = c.split(',').map(Number); return level.get(c) === 0 && !protectedCells.has(c) && !locked.has(c) && !nearBase(x, z) }
     const regions: number[] = []
     for (const l of [1, -1]) { const k = 1 + Math.floor(rand() * 2); for (let b = 0; b < k; b++) regions.push(l) }
     for (const l of shuffle(regions)) {
@@ -897,7 +950,7 @@ function netAttempt(): Net | null {
       const x0 = Math.floor(rand() * (GRID_W - w + 1)), z0 = Math.floor(rand() * (GRID_H - h + 1))
       for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + h; z++) {
         const c = ck(x, z)
-        if (protectedCells.has(c) || nearBase(x, z)) continue
+        if (protectedCells.has(c) || locked.has(c) || nearBase(x, z)) continue
         level.set(c, l); level.set(mk(c), l)
       }
     }
@@ -908,7 +961,7 @@ function netAttempt(): Net | null {
     : 5 + Math.floor(rand() * 4) // asymmetric: 5–8 (each level region needs ≥2 to avoid dead ends)
   const cands: Array<[string, Dir]> = []
   for (const [c, l] of level) {
-    if (protectedCells.has(c)) continue
+    if (protectedCells.has(c) || locked.has(c) || (xover && xover.ramps.has(c))) continue
     const [x, z] = c.split(',').map(Number)
     for (const d of ALL_DIRS) {
       const hx = x + DX[d], hz = z + DZ[d], lx = x - DX[d], lz = z - DZ[d]
@@ -934,6 +987,14 @@ function netAttempt(): Net | null {
     if (ramp.has(ck(x + DX[d], z + DZ[d])) || ramp.has(ck(x - DX[d], z - DZ[d]))) continue
     ramp.set(c, d); if (m !== c) ramp.set(m, ((d + 2) % 4) as Dir)
   }
+  if (xover) {
+    for (const [c, d] of xover.ramps) {
+      const [x, z] = c.split(',').map(Number)
+      for (const ad of ALL_DIRS) ramp.delete(ck(x + DX[ad], z + DZ[ad]))
+      ramp.delete(ck(x + DX[d], z + DZ[d])); ramp.delete(ck(x - DX[d], z - DZ[d]))
+      ramp.set(c, d)
+    }
+  }
   // 3. Edges.
   const edges = new Set<string>()
   const fixedSet = new Set<string>(fixed.map(([a, b]) => ek(a, b)))
@@ -956,6 +1017,7 @@ function netAttempt(): Net | null {
       }
     }
   }
+  if (xover) for (const e of xover.edges) edges.add(e)
   // Ramp end levels must match (low end = l, high end = l+1) — re-check.
   for (const [c, d] of ramp) {
     const [x, z] = c.split(',').map(Number)
@@ -1127,10 +1189,14 @@ function layBaseLine(): void {
   if (!baseLineFits()) return
   usedFallback = false
   let best: Net | null = null, bestScore = -1, found = 0, bestSlots = 0
-  // Keep searching past NET_CANDIDATES when none of the first valid
-  // nets has a realisable underpass slot (capped by NET_ATTEMPTS).
+  // Prefer a planted central crossover, then fall back to the ordinary
+  // net search. Keep searching past NET_CANDIDATES until one realisable
+  // underpass slot is found (capped by NET_ATTEMPTS).
+  const XOVER_TRIES = Math.floor(NET_ATTEMPTS * 0.85)
   for (let i = 0; i < NET_ATTEMPTS && (found < NET_CANDIDATES || bestSlots === 0); i++) {
-    const n = netAttempt()
+    const forced = i < XOVER_TRIES
+    let n = netAttempt(forced)
+    if (!n && forced) n = netAttempt(false)
     if (!n || !layNet(n)) continue
     const lv = new Set(n.level.values())
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
@@ -1143,6 +1209,9 @@ function layBaseLine(): void {
     const slots = countRealisableUnderpasses(2)
     const sc = netScore(n) + rand() * NET_SCORE_JITTER + (slots > 0 ? 10000 : 0) + (slots >= 2 ? 2000 : 0)
     if (sc > bestScore) { best = n; bestScore = sc; bestSlots = slots }
+    // Take the first realisable crossover so layouts follow the seed
+    // instead of converging on one high-scoring planted motif.
+    if (bestSlots > 0) break
   }
   if (best && layNet(best)) return
   layFallback()

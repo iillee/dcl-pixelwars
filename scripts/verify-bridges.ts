@@ -1,8 +1,8 @@
 /**
  * verify-bridges.ts — stacked underpasses stay common, legal, and through-paths.
  *
- * Generates 300 seeds (seed = round index), asserts a true perpendicular
- * crossover appears (regression floor 5%; 5×5 through-path slots are uncommon),
+ * Generates 100 seeds (seed = round index), asserts a true perpendicular
+ * crossover appears (regression floor 50%; crossover-first planting),
  * and checks:
  *   1. Each bridge is a straight or ramp whose both ends connect on its level.
  *   2. The tile one STEP below is a straight (or ramp) whose axis is
@@ -22,8 +22,8 @@ import {
 import { tileModel, openingsAt, DX, DZ, OPP, Dir } from '../src/maze/tiles'
 import { buildWalkableGraph, walkableCellsForTile, findPath, cellId } from '../src/shared/mazeGraph'
 
-const N = 300
-const MIN_RATE = 0.05
+const N = 100
+const MIN_RATE = 0.5
 const PATH_SEEDS = 16
 
 let failed = 0

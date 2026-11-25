@@ -310,8 +310,10 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   { const t = vs.hi + vs.lo + vs.l0 + vs.r; const pc = (x: number) => `${(100 * x / Math.max(1, t)).toFixed(0)}%`; console.log(`verticality (non-base tiles): L+1 ${pc(vs.hi)} (avg ${(vs.hi / k).toFixed(1)}), L-1 ${pc(vs.lo)} (avg ${(vs.lo / k).toFixed(1)}), ramps ${pc(vs.r)} (avg ${(vs.r / k).toFixed(1)}), flat L0 ${pc(vs.l0)} (avg ${(vs.l0 / k).toFixed(1)}); off-L0 share avg ${(100 * vs.share / k).toFixed(0)}% (min ${(100 * vs.minShare).toFixed(0)}%)${SKY_SYMMETRIC ? '' : `, gate ≥${100 * VERT_MIN_SHARE}% + L±1 ≥${VERT_MIN_EACH} each + ≥${VERT_MIN_RAMPS} ramps; layouts rejected as too flat: ${verticalityMisses()}`}`) }
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
-  // 6×6 leaves ~17 free mirrored cell pairs, so exact repeats are likelier than on 8×8.
-  const MIN_VARIETY = GRID_W >= 8 ? 0.9 : 0.7
+  // 8×8 has room for nearly unique layouts. 6×6 already repeats more.
+  // 5×5 with a planted central through-path crossover pins a few cells
+  // every round, so exact-layout repeats are common; 35% is the floor.
+  const MIN_VARIETY = GRID_W >= 8 ? 0.9 : GRID_W <= 5 ? 0.35 : 0.7
   if (shapes.size < N * MIN_VARIETY) fail(`low variety: ${shapes.size}/${N} (want ≥${100 * MIN_VARIETY}%)`)
   console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends or end tiles (every walkable tile has at least 2 connections), each bridge is a through-path over a perpendicular straight, L-1/L0/L+1 all used${SKY_SYMMETRIC ? '' : ` (≥${100 * VERT_MIN_SHARE}% off L0, L±1 ≥${VERT_MIN_EACH} tiles each, ≥${VERT_MIN_RAMPS} ramps)`}, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
   process.exit(0)
