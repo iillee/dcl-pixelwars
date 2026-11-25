@@ -11,9 +11,6 @@ import { Color4 } from '@dcl/sdk/math'
 import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
 import { CURTAIN_BLEED, curtainDrop, curtainFillRgbs, curtainPhase } from '../shared/roundCurtain'
 
-/** Light lip at the leading edge — same family as the hotbar / summary panels. */
-const CURTAIN_LIP = Color4.White()
-const LIP_H = 10
 
 function rgb4(c: { r: number; g: number; b: number }): Color4 {
   return Color4.create(c.r, c.g, c.b, 1)
@@ -79,16 +76,6 @@ export function RoundCurtainMask(props: { teams?: readonly number[] } = {}) {
             ))
           : null}
       </UiEntity>
-      <UiEntity
-        uiTransform={{
-          positionType: 'absolute',
-          position: { top: (drop - 1) * cv.h + cv.h - LIP_H, left: -CURTAIN_BLEED },
-          width,
-          height: LIP_H,
-          pointerFilter: 'none',
-        }}
-        uiBackground={{ color: CURTAIN_LIP }}
-      />
     </UiEntity>
   )
 }
