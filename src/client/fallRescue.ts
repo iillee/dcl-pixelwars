@@ -92,6 +92,9 @@ import { interruptLocalLunge, setFallMoveLock } from './lunge'
 import { exitOverview, pinOverviewClosed } from './overviewCamera'
 import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
 
+/** Flip on when a replacement carry loop is ready. The mp3 and start/stop path stay in place. */
+const RESCUE_CARRY_SFX_ENABLED = false
+
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
   /** Trip timings, hang height and path clearances live in shared/rescuePath.ts (bots ride the same path). */
@@ -996,7 +999,7 @@ function tickPhase(dt: number): void {
       // Lock the cloud over where they stand, then rise. Chasing XZ during the
       // carry copied pad-vs-avatar noise onto the cloud every frame.
       phase = 'carry'
-      startRescueCarryLoop()
+      if (RESCUE_CARRY_SFX_ENABLED) startRescueCarryLoop()
       if (floater) {
         floater.mode = 'hang'
         placeFloater(FALL_RESCUE.HANG_Y, 1, null, playerLocalXZ())
