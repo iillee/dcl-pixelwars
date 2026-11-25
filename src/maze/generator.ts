@@ -448,7 +448,7 @@ export function generateWithRetry(startSeed: number, maxAttempts = 500): number 
     setSeed(trySeed)
     resetGrid()
     generate()
-    if (validate() && (!IS_SKY || SKY_BASES_ONLY || allTilesConnected())) return trySeed
+    if (validate() && (!IS_SKY || SKY_BASES_ONLY || allTilesConnected()) && (!IS_SKY || !SKY_BASE_LINE || twoEdgeConnected())) return trySeed
   }
   return null
 }
@@ -665,6 +665,32 @@ export function allTilesConnected(): boolean {
   return reachableFrom(red).size === grid.size && basesConnected()
 }
 
+/** True when the walkable tile graph is 2-edge-connected: no bridge edges,
+ *  so every tile is reachable from the bases by at least two edge-disjoint
+ *  routes (no island with only one way in). */
+export function twoEdgeConnected(): boolean {
+  if (!allTilesConnected()) return false
+  const disc = new Map<Placed, number>(), low = new Map<Placed, number>()
+  let time = 0, bridges = 0
+  const dfs = (u: Placed, parent: Placed | null) => {
+    disc.set(u, ++time); low.set(u, time)
+    for (const v of linkedNeighbours(u)) {
+      if (!disc.has(v)) {
+        dfs(v, u)
+        low.set(u, Math.min(low.get(u)!, low.get(v)!))
+        if (low.get(v)! > disc.get(u)!) bridges++
+      } else if (v !== parent) {
+        low.set(u, Math.min(low.get(u)!, disc.get(v)!))
+      }
+    }
+  }
+  const [rx, rz] = baseCells(1)[0]
+  const red = grid.get(key(rx, rz, BASE_Y))
+  if (!red) return false
+  dfs(red, null)
+  return bridges === 0 && disc.size === grid.size
+}
+
 /** Place a tile and its 180° image, or nothing. */
 function placeSym(t: TileType, r: number, x: number, z: number, y: number): boolean {
   const [mx, mz] = mirrorCell(x, z)
@@ -832,6 +858,49 @@ const ek = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
 /** 180° image of a cell when SKY_SYMMETRIC, else the cell itself (no mirroring). */
 const mk = (c: string) => { if (!SKY_SYMMETRIC) return c; const [x, z] = c.split(',').map(Number); const [mx, mz] = mirrorCell(x, z); return ck(mx, mz) }
 
+function netAdj(active: Set<string>, edges: Set<string>, c: string): string[] {
+  const [x, z] = c.split(',').map(Number)
+  const out: string[] = []
+  for (const d of ALL_DIRS) {
+    const n = ck(x + DX[d], z + DZ[d])
+    if (active.has(n) && edges.has(ek(c, n))) out.push(n)
+  }
+  return out
+}
+
+function netComponent(start: string, active: Set<string>, edges: Set<string>): Set<string> {
+  const seen = new Set<string>([start]), q = [start]
+  while (q.length) for (const n of netAdj(active, edges, q.pop()!)) if (!seen.has(n)) { seen.add(n); q.push(n) }
+  return seen
+}
+
+/** Graph-theory bridges (edge keys) in the undirected 2D net. */
+function netBridgeEdges(active: Set<string>, edges: Set<string>): string[] {
+  const disc = new Map<string, number>(), low = new Map<string, number>()
+  const bridges: string[] = []
+  let time = 0
+  const dfs = (u: string, parent: string | null) => {
+    disc.set(u, ++time); low.set(u, time)
+    for (const v of netAdj(active, edges, u)) {
+      if (!disc.has(v)) {
+        dfs(v, u)
+        low.set(u, Math.min(low.get(u)!, low.get(v)!))
+        if (low.get(v)! > disc.get(u)!) bridges.push(ek(u, v))
+      } else if (v !== parent) {
+        low.set(u, Math.min(low.get(u)!, disc.get(v)!))
+      }
+    }
+  }
+  for (const c of active) if (!disc.has(c)) dfs(c, null)
+  return bridges
+}
+
+function netTwoEdgeConnected(active: Set<string>, edges: Set<string>, start: string): boolean {
+  if (!active.size || !active.has(start)) return false
+  if (netComponent(start, active, edges).size !== active.size) return false
+  return netBridgeEdges(active, edges).length === 0
+}
+
 /** Ring + exit edges of both bases (always present). */
 function fixedEdges(): Array<[string, string]> {
   const out: Array<[string, string]> = []
@@ -854,32 +923,27 @@ interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<s
 
 
 function planCrossover(base: Set<string>): { levels: Map<string, number>; ramps: Map<string, Dir>; edges: string[]; lock: Set<string>; must: Set<string> } | null {
-  // A single central L+1 straight whose two ends are ramps that step
-  // down onto an L0 behind-cell chained to a protected base exit.
-  // Only those five cells are locked, so the rest of the net can vary.
-  const cx = Math.floor(GRID_W / 2), cz = Math.floor(GRID_H / 2)
-  if (base.has(ck(cx, cz))) return null
+  // A through-path L+1 straight with ramps at both ends, each landing on
+  // an L0 behind-cell. Any cell/orientation where that 5-cell spine fits
+  // (in bounds, off bases) is legal; the seed picks among them so the
+  // crossing is not pinned to the grid centre.
   const freeCell = (x: number, z: number) => inBounds(x, z) && !base.has(ck(x, z))
-  type Ramp = { rx: number; rz: number; hd: Dir; bx: number; bz: number; ex: number; ez: number }
-  const axes: Array<{ axis: 0 | 1; ramps: Ramp[] }> = [
-    {
-      axis: 0,
-      ramps: [
-        { rx: cx, rz: cz - 1, hd: 0 as Dir, bx: cx, bz: cz - 2, ex: cx - 1, ez: cz - 2 },
-        { rx: cx, rz: cz + 1, hd: 2 as Dir, bx: cx, bz: cz + 2, ex: cx + 1, ez: cz + 2 },
-      ],
-    },
-    {
-      axis: 1,
-      ramps: [
-        { rx: cx - 1, rz: cz, hd: 1 as Dir, bx: cx - 2, bz: cz, ex: cx - 2, ez: cz - 1 },
-        { rx: cx + 1, rz: cz, hd: 3 as Dir, bx: cx + 2, bz: cz, ex: cx + 2, ez: cz + 1 },
-      ],
-    },
-  ]
-  const plans = axes.filter(p =>
-    p.ramps.every(r => [ [r.rx, r.rz], [r.bx, r.bz], [r.ex, r.ez] ].every(([a, b]) => freeCell(a, b)))
-  )
+  type Ramp = { rx: number; rz: number; hd: Dir; bx: number; bz: number }
+  type Plan = { x: number; z: number; axis: 0 | 1; ramps: Ramp[] }
+  const plans: Plan[] = []
+  for (const axis of [0, 1] as const) {
+    const fwd: Dir = axis === 0 ? 0 : 1
+    const back: Dir = axis === 0 ? 2 : 3
+    for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) {
+      if (!freeCell(x, z)) continue
+      const ramps: Ramp[] = [
+        { rx: x + DX[back], rz: z + DZ[back], hd: fwd, bx: x + 2 * DX[back], bz: z + 2 * DZ[back] },
+        { rx: x + DX[fwd], rz: z + DZ[fwd], hd: back, bx: x + 2 * DX[fwd], bz: z + 2 * DZ[fwd] },
+      ]
+      if (!ramps.every(r => freeCell(r.rx, r.rz) && freeCell(r.bx, r.bz))) continue
+      plans.push({ x, z, axis, ramps })
+    }
+  }
   if (!plans.length) return null
   const p = plans[Math.floor(rand() * plans.length)]
   const levels = new Map<string, number>()
@@ -888,15 +952,13 @@ function planCrossover(base: Set<string>): { levels: Map<string, number>; ramps:
   const lock = new Set<string>()
   const must = new Set<string>()
   const setLv = (a: number, b: number, l: number, keep = true) => { const c = ck(a, b); levels.set(c, l); lock.add(c); if (keep) must.add(c) }
-  setLv(cx, cz, 1)
+  setLv(p.x, p.z, 1)
   for (const r of p.ramps) {
     setLv(r.rx, r.rz, 0)
     setLv(r.bx, r.bz, 0)
-    setLv(r.ex, r.ez, 0)
     ramps.set(ck(r.rx, r.rz), r.hd)
-    edges.push(ek(ck(cx, cz), ck(r.rx, r.rz)))
+    edges.push(ek(ck(p.x, p.z), ck(r.rx, r.rz)))
     edges.push(ek(ck(r.rx, r.rz), ck(r.bx, r.bz)))
-    edges.push(ek(ck(r.bx, r.bz), ck(r.ex, r.ez)))
   }
   return { levels, ramps, edges, lock, must }
 }
@@ -1061,7 +1123,97 @@ function netAttempt(forceCrossover = false): Net | null {
   for (const c of [...active]) if (!comp.has(c)) active.delete(c)
   for (const c of protectedCells) if (!active.has(c)) return null
   if (!prune()) return null
-  // 5. Thin.
+  const start = ck(r0x, r0z)
+  const dirBetween = (a: string, b: string): Dir | null => {
+    const [ax, az] = a.split(',').map(Number)
+    const [bx, bz] = b.split(',').map(Number)
+    for (const d of ALL_DIRS) if (ax + DX[d] === bx && az + DZ[d] === bz) return d
+    return null
+  }
+  const canLink = (a: string, b: string): boolean => {
+    if (!active.has(a) || !active.has(b) || edges.has(ek(a, b))) return false
+    const d = dirBetween(a, b)
+    if (d === null) return false
+    const ra = ramp.get(a), rb = ramp.get(b)
+    if (ra !== undefined && rb !== undefined) return false
+    if (ra === undefined && rb === undefined) return level.get(a) === level.get(b)
+    if (ra !== undefined) return ra % 2 === d % 2
+    return rb! % 2 === d % 2
+  }
+  const addEdgePair = (a: string, b: string) => {
+    edges.add(ek(a, b))
+    const ma = mk(a), mb = mk(b)
+    if (ma !== a && active.has(ma) && active.has(mb)) edges.add(ek(ma, mb))
+  }
+  // Close one-way-in islands: add a same-level link or a second ramp across
+  // each remaining bridge so every region has two ways in.
+  const repair = (): boolean => {
+    for (let step = 0; step < 24; step++) {
+      if (reach(start).size !== active.size) return false
+      const br = netBridgeEdges(active, edges)
+      if (!br.length) return true
+      let added = false
+      for (const e of br) {
+        const [a, b] = e.split('|')
+        edges.delete(e)
+        const A = netComponent(a, active, edges)
+        edges.add(e)
+        const B = new Set([...active].filter(c => !A.has(c)))
+        if (!B.size) continue
+        const flats: Array<[string, string]> = []
+        for (const u of A) {
+          const [x, z] = u.split(',').map(Number)
+          for (const d of ALL_DIRS) {
+            const v = ck(x + DX[d], z + DZ[d])
+            if (B.has(v) && canLink(u, v)) flats.push([u, v])
+          }
+        }
+        if (flats.length) {
+          const [u, v] = flats[Math.floor(rand() * flats.length)]
+          addEdgePair(u, v)
+          added = true
+          break
+        }
+        const rampAdds: Array<[string, Dir]> = []
+        for (const u of active) {
+          if (ramp.has(u) || locked.has(u) || protectedCells.has(u) || (xover && xover.ramps.has(u))) continue
+          if (adjRamp(u) || adjRamp(mk(u))) continue
+          const [x, z] = u.split(',').map(Number)
+          for (const d of ALL_DIRS) {
+            const hx = x + DX[d], hz = z + DZ[d], lx = x - DX[d], lz = z - DZ[d]
+            const h = ck(hx, hz), l = ck(lx, lz)
+            if (!inBounds(hx, hz) || !inBounds(lx, lz) || !active.has(h) || !active.has(l)) continue
+            if (base.has(h) || base.has(l) || ramp.has(h) || ramp.has(l)) continue
+            const lv = level.get(u)!
+            if (level.get(h) !== lv + 1 || level.get(l) !== lv || lv + 1 > 1) continue
+            const sides = [u, h, l]
+            if (!sides.some(c => A.has(c)) || !sides.some(c => B.has(c))) continue
+            rampAdds.push([u, d])
+          }
+        }
+        if (!rampAdds.length) continue
+        const [c, d] = rampAdds[Math.floor(rand() * rampAdds.length)]
+        const [x, z] = c.split(',').map(Number)
+        ramp.set(c, d)
+        edges.add(ek(c, ck(x + DX[d], z + DZ[d])))
+        edges.add(ek(c, ck(x - DX[d], z - DZ[d])))
+        const m = mk(c)
+        if (m !== c && active.has(m) && !ramp.has(m)) {
+          const md = ((d + 2) % 4) as Dir
+          ramp.set(m, md)
+          const [mx, mz] = m.split(',').map(Number)
+          edges.add(ek(m, ck(mx + DX[md], mz + DZ[md])))
+          edges.add(ek(m, ck(mx - DX[md], mz + DZ[md])))
+        }
+        added = true
+        break
+      }
+      if (!added) return false
+    }
+    return netTwoEdgeConnected(active, edges, start)
+  }
+  if (!repair()) return null
+  // 5. Thin, but never reopen a one-way-in island.
   const flatEdges = [...edges].filter(e => {
     if (fixedSet.has(e)) return false
     const [a, b] = e.split('|')
@@ -1081,7 +1233,7 @@ function netAttempt(forceCrossover = false): Net | null {
     const me = ek(mk(a), mk(b))
     const ends = [a, b, mk(a), mk(b)]
     edges.delete(e); edges.delete(me)
-    if (ends.some(c => nbrs(c).length < 2) || reach(ck(r0x, r0z)).size !== active.size) {
+    if (ends.some(c => nbrs(c).length < 2) || !netTwoEdgeConnected(active, edges, start)) {
       edges.add(e); edges.add(me); continue
     }
     removed += e === me ? 1 : 2
@@ -1089,6 +1241,7 @@ function netAttempt(forceCrossover = false): Net | null {
   const lv = new Map<string, number>(), rp = new Map<string, Dir>(), es = new Set<string>()
   for (const c of active) { lv.set(c, level.get(c)!); if (ramp.has(c)) rp.set(c, ramp.get(c)!) }
   for (const e of edges) { const [a, b] = e.split('|'); if (active.has(a) && active.has(b)) es.add(e) }
+  if (!netTwoEdgeConnected(active, es, start)) return null
   return { level: lv, ramp: rp, edges: es }
 }
 
@@ -1147,7 +1300,13 @@ function verticality(n: Net): { share: number; hi: number; lo: number; ramps: nu
 function verticalOk(n: Net): boolean {
   if (SKY_SYMMETRIC) return true
   const v = verticality(n)
-  return v.share >= VERT_MIN_SHARE && v.hi >= VERT_MIN_EACH && v.lo >= VERT_MIN_EACH && v.ramps >= VERT_MIN_RAMPS
+  // A planted / realised through-path crossover already supplies the L+1
+  // landmark, so 1 flat L+1 and 2 flat L-1 is enough. Uncrossed maps still
+  // have to meet the full VERT_MIN_EACH floor.
+  const crossed = underpassSlots(n) > 0 || [...n.level].some(([c, l]) => l === 1 && !n.ramp.has(c) && n.ramp.size >= 2)
+  const hiMin = crossed ? 1 : VERT_MIN_EACH
+  const loMin = crossed ? 2 : VERT_MIN_EACH
+  return v.share >= VERT_MIN_SHARE && v.hi >= hiMin && v.lo >= loMin && v.ramps >= VERT_MIN_RAMPS
 }
 
 /** Raised straights/ramps whose two perpendicular neighbours sit at
@@ -1189,9 +1348,10 @@ function layBaseLine(): void {
   if (!baseLineFits()) return
   usedFallback = false
   let best: Net | null = null, bestScore = -1, found = 0, bestSlots = 0
-  // Prefer a planted central crossover, then fall back to the ordinary
-  // net search. Keep searching past NET_CANDIDATES until one realisable
-  // underpass slot is found (capped by NET_ATTEMPTS).
+  // Prefer a planted through-path crossover (cell and orientation chosen
+  // by the seed), then fall back to the ordinary net search. Keep
+  // searching past NET_CANDIDATES until one realisable underpass slot is
+  // found (capped by NET_ATTEMPTS). Every accepted net is 2-edge-connected.
   const XOVER_TRIES = Math.floor(NET_ATTEMPTS * 0.85)
   for (let i = 0; i < NET_ATTEMPTS && (found < NET_CANDIDATES || bestSlots === 0); i++) {
     const forced = i < XOVER_TRIES
@@ -1200,7 +1360,10 @@ function layBaseLine(): void {
     if (!n || !layNet(n)) continue
     const lv = new Set(n.level.values())
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
-    if (netJunctions(n) < NET_MIN_JUNCTIONS) continue // want a woven net
+    // A planted crossover spine uses several cells as deg-2 through-paths,
+    // so allow a slightly lower junction floor when one is present.
+    const jMin = (underpassSlots(n) > 0 || [...n.level].some(([, l]) => l === 1)) ? Math.min(2, NET_MIN_JUNCTIONS) : NET_MIN_JUNCTIONS
+    if (netJunctions(n) < jMin) continue
     if (!verticalOk(n)) { vertMisses++; continue } // asymmetric: real height every round
     if ([...n.level.keys()].length - 2 < NET_MIN_COVERAGE * (GRID_W * GRID_H - 2)) continue // verify's coverage gate
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
@@ -1276,7 +1439,10 @@ function gridVertOk(): boolean {
   const flat = (l: number) => off.filter(p => p.type !== 'ramp' && lv(p) === l).length
   const ramps = off.filter(p => p.type === 'ramp').length
   const share = (off.length - flat(0)) / Math.max(1, off.length)
-  return share >= VERT_MIN_SHARE && flat(1) >= VERT_MIN_EACH && flat(-1) >= VERT_MIN_EACH && ramps >= VERT_MIN_RAMPS
+  const crossed = tiles.some(p => p.bridge) || off.some(p => lv(p) === 1)
+  const hiMin = crossed ? 1 : VERT_MIN_EACH
+  const loMin = crossed ? 2 : VERT_MIN_EACH
+  return share >= VERT_MIN_SHARE && flat(1) >= hiMin && flat(-1) >= loMin && ramps >= VERT_MIN_RAMPS
 }
 
 /**

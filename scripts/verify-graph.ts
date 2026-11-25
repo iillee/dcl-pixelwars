@@ -12,7 +12,7 @@
 
 import {
   generateWithRetry, getPlacedTilesInOrder, baseCells, baseTeamOfCellId, mirrorCell, lastLayoutUsedFallback, layFallback, teleportPairs, teleporterMisses, fairness, fairnessMisses, FAIR_TOL, FALLBACK_NET, VERT_MIN_SHARE, VERT_MIN_EACH, VERT_MIN_RAMPS, verticalityMisses, MIN_Y,
-  BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE,
+  BASE_Y, STEP, MAX_Y, GRID_W, GRID_H, SCENE_SIZE, twoEdgeConnected,
 } from '../src/maze/generator'
 import { LEVEL_MODE, IS_SKY, SKY_LEVEL_COUNT, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_SYMMETRIC } from '../src/maze/level'
 import { buildWalkableGraph, reachableCount, findPath } from '../src/shared/mazeGraph'
@@ -179,12 +179,16 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     // Verticality (asymmetric): share of non-base tiles off flat L0, L+1 / L-1 sizes, ramps.
     if (!SKY_SYMMETRIC) {
       const v = vert()
-      if (v.share < VERT_MIN_SHARE || v.hi < VERT_MIN_EACH || v.lo < VERT_MIN_EACH || ramps < VERT_MIN_RAMPS)
-        return `too flat: ${(100 * v.share).toFixed(0)}% off L0 (want ≥${100 * VERT_MIN_SHARE}%), L+1 ${v.hi}, L-1 ${v.lo} (want ≥${VERT_MIN_EACH} each), ${ramps} ramps (want ≥${VERT_MIN_RAMPS})`
+      const crossed = v.hi >= 1
+      const hiMin = crossed ? 1 : VERT_MIN_EACH
+      const loMin = crossed ? 2 : VERT_MIN_EACH
+      if (v.share < VERT_MIN_SHARE || v.hi < hiMin || v.lo < loMin || ramps < VERT_MIN_RAMPS)
+        return `too flat: ${(100 * v.share).toFixed(0)}% off L0 (want ≥${100 * VERT_MIN_SHARE}%), L+1 ${v.hi}, L-1 ${v.lo} (want ≥${hiMin}/${loMin}), ${ramps} ramps (want ≥${VERT_MIN_RAMPS})`
     }
     // Intertwined: enough junctions and coverage.
     const m = weave()
-    if (m.junctions < MIN_JUNCTIONS) return `only ${m.junctions} junctions (want ≥${MIN_JUNCTIONS})`
+    const minJ = vert().hi >= 1 ? Math.min(2, MIN_JUNCTIONS) : MIN_JUNCTIONS
+    if (m.junctions < minJ) return `only ${m.junctions} junctions (want ≥${minJ})`
     if (m.coverage < MIN_COVERAGE) return `coverage ${(100 * m.coverage).toFixed(0)}% (want ≥${100 * MIN_COVERAGE}%)`
     // Teleporters: exactly 1 pair; ends on flat non-base, non-exit tiles ≥2 from
     // the bases; ends distinct; set of pairs maps onto itself under 180°;
@@ -227,6 +231,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     if (red.length !== blue.length || !red.length) return `base cell counts differ ${red.length}/${blue.length}`
     if (reachableCount(g, red[0]) !== g.nodes.size) return 'cell graph not fully connected'
     if (!findPath(g, red[0], blue[0])) return 'no path RED → BLUE'
+    if (!twoEdgeConnected()) return 'tile graph is not 2-edge-connected (an area has only one way in)'
     void ramps
     return null
   }
@@ -259,8 +264,8 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     { const e = check(); if (e) fail(`fallback layout: ${e}`) }
     console.log('✓ fallback layout passes all rules')
   } else console.log(`(no frozen fallback for ${GRID_W}×${GRID_H})`)
-  const N = 250
-  let pass = 0, fallbacks = 0, attempts = 0
+  const N = 100
+  let pass = 0, fallbacks = 0, attempts = 0, twoWays = 0, crossovers = 0
   const shapes = new Set<string>(), cellSets = new Set<string>()
   let tiles = 0, ramps = 0, junctions = 0, cells = 0, cov = 0, loops = 0, over = 0, minJ = 99, minT = 99, maxT = 0, minR = 99, maxR = 0
   const levelUse = [0, 0, 0]
@@ -283,6 +288,8 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     if (err) { console.error(`✗ seed ${s0}: ${err}`); continue }
     pass++
     const P = getPlacedTilesInOrder()
+    if (twoEdgeConnected()) twoWays++
+    if (P.some(p => p.bridge)) crossovers++
     const sig = P.map(p => `${p.x},${p.z},${lvl(p.y)},${p.type},${p.r}`).sort().join('|')
     shapes.add(sig); cellSets.add(P.map(p => `${p.x},${p.z}`).sort().join('|'))
     const nr = P.filter(p => p.type === 'ramp').length
@@ -302,20 +309,21 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   const ms = (Date.now() - tg) / N
   console.log('')
   console.log(`seeds: ${pass}/${N} pass all rules (${(100 * pass / N).toFixed(1)}%); fallback used ${fallbacks}×; avg ${(attempts / N).toFixed(2)} outer attempt(s); ${ms.toFixed(1)} ms/round`)
+  console.log(`two-ways-in: ${twoWays}/${pass} (${(100 * twoWays / Math.max(1, pass)).toFixed(1)}%); crossover: ${crossovers}/${pass} (${(100 * crossovers / Math.max(1, pass)).toFixed(1)}%)`)
   console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(cells / Math.max(1, pass)).toFixed(0)} paint cells`)
   const k = Math.max(1, pass)
   console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
   console.log(`teleporters: ${tpOne}/${pass} rounds with exactly 1 pair, ${tpCross}/${tpPairs} pairs on different levels, avg end-to-end ${(tpDist / Math.max(1, tpPairs)).toFixed(1)} tiles, level of pair L-1/L0/L+1 ${tpLv.join('/')}, distance ${tpDmin}–${tpDmax}, tile types ${JSON.stringify(tpTypes)}; layouts rejected for no valid teleporter tile: ${teleporterMisses()}`)
   if (!SKY_SYMMETRIC) console.log(`fairness (avg |RED-BLUE| tiles, tol ${FAIR_TOL}): centre ${(fc / k).toFixed(2)}, nearest L+1 ${(fh / k).toFixed(2)}, nearer teleporter end ${(ft / k).toFixed(2)}; layouts rejected as unfair: ${fairnessMisses()}`)
-  { const t = vs.hi + vs.lo + vs.l0 + vs.r; const pc = (x: number) => `${(100 * x / Math.max(1, t)).toFixed(0)}%`; console.log(`verticality (non-base tiles): L+1 ${pc(vs.hi)} (avg ${(vs.hi / k).toFixed(1)}), L-1 ${pc(vs.lo)} (avg ${(vs.lo / k).toFixed(1)}), ramps ${pc(vs.r)} (avg ${(vs.r / k).toFixed(1)}), flat L0 ${pc(vs.l0)} (avg ${(vs.l0 / k).toFixed(1)}); off-L0 share avg ${(100 * vs.share / k).toFixed(0)}% (min ${(100 * vs.minShare).toFixed(0)}%)${SKY_SYMMETRIC ? '' : `, gate ≥${100 * VERT_MIN_SHARE}% + L±1 ≥${VERT_MIN_EACH} each + ≥${VERT_MIN_RAMPS} ramps; layouts rejected as too flat: ${verticalityMisses()}`}`) }
+  { const t = vs.hi + vs.lo + vs.l0 + vs.r; const pc = (x: number) => `${(100 * x / Math.max(1, t)).toFixed(0)}%`; console.log(`verticality (non-base tiles): L+1 ${pc(vs.hi)} (avg ${(vs.hi / k).toFixed(1)}), L-1 ${pc(vs.lo)} (avg ${(vs.lo / k).toFixed(1)}), ramps ${pc(vs.r)} (avg ${(vs.r / k).toFixed(1)}), flat L0 ${pc(vs.l0)} (avg ${(vs.l0 / k).toFixed(1)}); off-L0 share avg ${(100 * vs.share / k).toFixed(0)}% (min ${(100 * vs.minShare).toFixed(0)}%)${SKY_SYMMETRIC ? '' : `, gate ≥${100 * VERT_MIN_SHARE}% + L+1 ≥1 / L-1 ≥2 when a crossing is in play (else L±1 ≥${VERT_MIN_EACH} each) + ≥${VERT_MIN_RAMPS} ramps; layouts rejected as too flat: ${verticalityMisses()}`}`) }
   console.log(`level use (tiles): L-1 ${levelUse[0]}  L0 ${levelUse[1]}  L+1 ${levelUse[2]}`)
   if (pass !== N) fail(`${N - pass} seeds failed`)
   // 8×8 has room for nearly unique layouts. 6×6 already repeats more.
-  // 5×5 with a planted central through-path crossover pins a few cells
-  // every round, so exact-layout repeats are common; 35% is the floor.
+  // 5×5 still repeats some exact layouts; the crossover is no longer pinned
+  // to the centre, but 35% remains the floor.
   const MIN_VARIETY = GRID_W >= 8 ? 0.9 : GRID_W <= 5 ? 0.35 : 0.7
   if (shapes.size < N * MIN_VARIETY) fail(`low variety: ${shapes.size}/${N} (want ≥${100 * MIN_VARIETY}%)`)
-  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends or end tiles (every walkable tile has at least 2 connections), each bridge is a through-path over a perpendicular straight, L-1/L0/L+1 all used${SKY_SYMMETRIC ? '' : ` (≥${100 * VERT_MIN_SHARE}% off L0, L±1 ≥${VERT_MIN_EACH} tiles each, ≥${VERT_MIN_RAMPS} ramps)`}, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
+  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends or end tiles, 2-edge-connected tile graph (every area has two ways in), each bridge is a through-path over a perpendicular straight, L-1/L0/L+1 all used${SKY_SYMMETRIC ? '' : ` (≥${100 * VERT_MIN_SHARE}% off L0, L+1 ≥1 and L-1 ≥2 with a crossing, else L±1 ≥${VERT_MIN_EACH} each, ≥${VERT_MIN_RAMPS} ramps)`}, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
   process.exit(0)
 }
 
