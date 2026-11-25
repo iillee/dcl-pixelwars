@@ -1,5 +1,5 @@
 import { setRoundState, getRoundIndex, getRoundEndMs, isRoundActive } from '../shared/roundTiming'
-import { paintOpen, setGamePhase, setMyVote, setServerLobbyCounts } from './phase'
+import { gamePhase, paintOpen, setGamePhase, setMyVote, setServerLobbyCounts } from './phase'
 import { applyServerWorld } from '../maze/rebuild'
 import { parseWorldLayout } from '../shared/worldState'
 /**
@@ -134,6 +134,20 @@ function wireInbound(): void {
       format: format ?? '',
       phase: phase ?? '',
     }, 'snapshot')
+    // A snapshot rebuilds the floor but used to leave phase and teleport
+    // to a later clock. If that clock was lost, this client stayed on the
+    // lobby hold pads — walking in mid-air on everyone else's screen.
+    const snapLayout = parseWorldLayout(layout)
+    const snapPhase = phase === 'summary' || phase === 'lobby' || phase === 'idle' || phase === 'match'
+      ? phase
+      : (snapLayout === 'arena' ? 'match' : 'idle')
+    if (snapPhase === 'match' && gamePhase() !== 'match') {
+      setGamePhase('match', 0, [], '')
+      events.emit('round:clock', {
+        idx: seed, active: true, format: wireFormat(format),
+        phase: 'match', voteMs: 0, winner: '', votes: [],
+      })
+    }
     events.emit('paint:snapshot', {
       entries: entries.map(e => ({ id: e.id, team: e.team as Team })),
       red, blue, green: green ?? 0, yellow: yellow ?? 0, total,
@@ -247,19 +261,30 @@ function wireTeamAssigned(): void {
     // per teamAssigned; server has a 5s cooldown against abuse. Fixes:
     // reloading during a round used to wipe our view of already-painted
     // cells — snapshot restores them.
-    console.log('[Client] → requestSnapshot')
-    room.send('requestSnapshot', {})
+    askSnapshot('teamAssigned')
   })
-  // Retry until a snapshot (paint + maze seed) arrives; server rate-limits to 1 per 5 s.
+  // Do not wait for a team. A missed teamAssigned used to skip this, so
+  // the boot lobby stayed up and this player walked on a floor others
+  // had already swapped for the arena.
   let retry = 0
+  let asked = false
   engine.addSystem((dt: number) => {
-    if (gotSnapshot || myTeam === Team.None) return
+    if (gotSnapshot) return
+    if (!room.isReady()) return
+    if (!asked) {
+      asked = true
+      askSnapshot('ready')
+      return
+    }
     retry += dt
     if (retry < SNAPSHOT_RETRY_S) return
     retry = 0
-    console.log('[Client] → requestSnapshot (retry, none received yet)')
-    room.send('requestSnapshot', {})
+    askSnapshot('retry')
   })
+}
+function askSnapshot(why: string): void {
+  console.log(`[Client] → requestSnapshot (${why})`)
+  room.send('requestSnapshot', {})
 }
 let gotSnapshot = false
 /** First server snapshot received (load splash). */

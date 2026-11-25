@@ -618,6 +618,10 @@ export async function setupServer(): Promise<void> {
     const assigned = assignLobbyTeams(ids, snapshotLobbyChoices())
     for (const { userId, team } of assigned) {
       setTeam(userId, team)
+      // Present players who never joinRoster'd are in lastPingAt but not
+      // `connected`. Without this they get a team and the arena, but are
+      // omitted from teamRoster, so other clients show a grey default tag.
+      markActive(userId)
       room.send('teamAssigned', { team }, { to: [userId] })
     }
     const counts = activeTeamCounts()
@@ -734,6 +738,18 @@ export async function setupServer(): Promise<void> {
     lastPingAt.set(from, Date.now())
     if (isRoundActive()) {
       sendRoundClock(from)
+      // First mid-match join: also send the arena layout. A clock can be
+      // enough, but a missed broadcast left the boot lobby standing, and
+      // this client then walked on a floor other players had already removed.
+      if (!isRepeat) {
+        room.send('roundReset', {
+          seed: currentRoundIndex(),
+          finalRed: pendingFinal.red, finalBlue: pendingFinal.blue,
+          finalGreen: pendingFinal.green ?? 0, finalYellow: pendingFinal.yellow ?? 0,
+          finalTotal: pendingFinal.total,
+          format: roundFormat, layout: 'arena', seq: worldSeq,
+        }, { to: [from] })
+      }
     } else if (lobbyOpen) {
       // A joinRoster retry must not rebuild the cross. The first join sends it.
       if (!isRepeat) sendLobbyLayout(from)

@@ -12,6 +12,7 @@ import {
   ServerWorld, isStaleWorld, shouldRebuildWorld, tilesForWorld, layoutFingerprint,
 } from '../src/shared/worldState'
 import { emptyCounts, pickWinner } from '../src/shared/lobby'
+import { readFileSync } from 'fs'
 
 class Client {
   have: ServerWorld | null = null
@@ -134,3 +135,25 @@ if (pickWinner(tieVotes, tieSeq + 1) !== 'pvp') {
 }
 
 console.log('✓ two clients, late join, stale clocks, and mode cycles stay on the server floor')
+
+// Unpicked / late-join catch-up: these clients must still build the live
+// arena and leave the boot lobby, even before teamAssigned arrives.
+const handler = readFileSync(new URL('../src/client/clientHandler.ts', import.meta.url), 'utf8')
+const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
+if (handler.includes('if (gotSnapshot || myTeam === Team.None) return')) {
+  console.error('✗ snapshot retry must not wait for a team; an unpicked or late joiner would keep the boot lobby')
+  process.exit(1)
+}
+if (!handler.includes("askSnapshot('ready')") || !handler.includes("snapPhase === 'match' && gamePhase() !== 'match'")) {
+  console.error('✗ a snapshot must be requested once the room is ready, and a match snapshot must start the match so the player teleports')
+  process.exit(1)
+}
+if (!server.includes('omitted from teamRoster') || !server.includes('if (!isRepeat)') || !server.includes("layout: 'arena', seq: worldSeq")) {
+  console.error('✗ match start must mark assigned players connected, and a mid-match first join must get the arena layout')
+  process.exit(1)
+}
+if (!server.includes('markActive(userId)')) {
+  console.error('✗ assigned lobby players must be marked connected so their nametag is in the roster')
+  process.exit(1)
+}
+console.log('✓ unpicked and late joiners request the live world and join the roster')
