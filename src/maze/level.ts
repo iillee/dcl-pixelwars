@@ -109,3 +109,28 @@ export const TELEPORT_ORBS = false
 /** Pre-water fallback and the "rescue is enabled" check (MIN_Y must stay above this).
  *  With the sea on, the live swell surface is the trigger, not this line. */
 export const FALL_RESPAWN_DROP = 66
+
+// ─── No-base bridges (stacked underpasses) ──────────────────────────
+// A raised straight / ramp becomes a no-pillar slab only when a lower
+// straight is placed in the same (x, z) cell, one STEP below, running
+// along the perpendicular axis with both ends connected — a true
+// crossover, never a one-sided lookout. Adjacent lower tiles or an
+// open drop are not enough. A ramp cannot sit underneath: its high
+// deck would rise into the slab. The lower tile is real (paint, graph,
+// bots); the upper type stays straight / ramp and only the GLB changes.
+//
+//   BRIDGE_STYLE  kept for the two exported looks, but stacked
+//                 underpasses always use 'simple'. The 'arch' GLBs
+//                 still have ~200 m legs that would cut the lower path.
+//   BRIDGE_CHANCE probability a qualified underpass slot is realised (high so maps with several slots get more than one)
+//   BRIDGE_MAX    cap per maze (2–3). Chance rolling none still forces
+//                 one valid crossover, and a second when another slot
+//                 realises. One through-path crossing is enough; two
+//                 is preferred, not required.
+//   BRIDGE_Y_NUDGE  metres added to the entity Y so the 0.50 m deck top
+//                   meets the mass01 0.546 m walking surface
+export type BridgeStyle = 'simple' | 'arch'
+export const BRIDGE_STYLE: BridgeStyle = 'simple'
+export const BRIDGE_CHANCE = 0.75
+export const BRIDGE_MAX = 3
+export const BRIDGE_Y_NUDGE = 0.046
