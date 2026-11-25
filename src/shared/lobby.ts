@@ -11,6 +11,11 @@
  */
 
 import { TEAM_HEX, emptyTeamCounts as emptyTeamTally, isPlayingTeam, smallestTeam, addTeamCount, type TeamCounts as SharedTeamCounts } from './team'
+import { PLAY_GRID_N } from '../maze/level'
+
+/** Offset a 5×5-relative lobby cell so the hub stays centred on the play grid. */
+const LO = Math.floor((PLAY_GRID_N - 5) / 2)
+const lc = (x: number, z: number) => ({ x: x + LO, z: z + LO })
 
 export type ModeId = 'pvp' | 'pvb' | 'bases' | 'prototype' | 'balloon' | 'garden' | 'pots'
 export type TeamId = 'red' | 'blue' | 'green' | 'yellow'
@@ -33,12 +38,12 @@ export type ModeDef = {
   color: { r: number; g: number; b: number }
 }
 
-export const LOBBY_CROSS = { x: 2, z: 2 }
+export const LOBBY_CROSS = lc(2, 2)
 
 /** Alternate-mode cells stay on file. The live floor uses LOBBY_TEAMS instead.
  *  Flip EAST_SLOT_MODE to `'pvb'` if Bot Invasion is ever put back on the east tile. */
-export const EAST_LOBBY_CELL = { x: 3, z: 2 }
-export const EAST_PARK_CELL = { x: 3, z: 0 }
+export const EAST_LOBBY_CELL = lc(3, 2)
+export const EAST_PARK_CELL = lc(3, 0)
 export const EAST_SLOT_MODE: 'pvb' | 'bases' = 'bases'
 const eastCell = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id ? EAST_LOBBY_CELL : EAST_PARK_CELL
 const eastLive = (id: 'pvb' | 'bases') => EAST_SLOT_MODE === id
@@ -70,13 +75,13 @@ export const MODE_PILL_TEXT_HEX: Record<'pvp' | 'pvb' | 'bases' | 'prototype' | 
 }
 
 export const LOBBY_MODES: ModeDef[] = [
-  { id: 'pvp', label: 'PIXELWARS', cell: { x: 1, z: 2 }, teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
+  { id: 'pvp', label: 'PIXELWARS', cell: lc(1, 2), teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvp) },
   { id: 'pvb', label: 'BOT INVASION', cell: eastCell('pvb'), teamRule: 'humans-together', live: eastLive('pvb'), placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.pvb) },
   { id: 'bases', label: 'BASE CHARGE', cell: eastCell('bases'), teamRule: 'balance', live: eastLive('bases'), placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.bases) },
-  { id: 'prototype', label: 'PAINT LIMIT', cell: { x: 2, z: 3 }, teamRule: 'balance', live: true, placed: false, economy: true, color: rgbFromHex(MODE_PILL_HEX.prototype) },
-  { id: 'balloon', label: 'BALLOON BATTLE', cell: { x: 2, z: 1 }, teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.balloon) },
-  { id: 'garden', label: 'COLOR GARDEN', cell: { x: 0, z: 2 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
-  { id: 'pots', label: 'POT HUNT', cell: { x: 2, z: 0 }, teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
+  { id: 'prototype', label: 'PAINT LIMIT', cell: lc(2, 3), teamRule: 'balance', live: true, placed: false, economy: true, color: rgbFromHex(MODE_PILL_HEX.prototype) },
+  { id: 'balloon', label: 'BALLOON BATTLE', cell: lc(2, 1), teamRule: 'balance', live: true, placed: false, economy: false, color: rgbFromHex(MODE_PILL_HEX.balloon) },
+  { id: 'garden', label: 'COLOR GARDEN', cell: lc(0, 2), teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.35, g: 0.75, b: 0.4 } },
+  { id: 'pots', label: 'POT HUNT', cell: lc(2, 0), teamRule: 'balance', live: false, placed: false, economy: false, color: { r: 0.92, g: 0.72, b: 0.25 } },
 ]
 
 /** West RED, east BLUE, north YELLOW, south GREEN. Exact TEAM_HEX colours. */
@@ -90,10 +95,10 @@ export type TeamDef = {
 }
 
 export const LOBBY_TEAMS: TeamDef[] = [
-  { id: 'red', team: 1, label: 'RED', cell: { x: 1, z: 2 }, color: rgbFromHex(TEAM_HEX[1]), hex: TEAM_HEX[1] },
-  { id: 'blue', team: 2, label: 'BLUE', cell: { x: 3, z: 2 }, color: rgbFromHex(TEAM_HEX[2]), hex: TEAM_HEX[2] },
-  { id: 'yellow', team: 4, label: 'YELLOW', cell: { x: 2, z: 3 }, color: rgbFromHex(TEAM_HEX[4]), hex: TEAM_HEX[4] },
-  { id: 'green', team: 3, label: 'GREEN', cell: { x: 2, z: 1 }, color: rgbFromHex(TEAM_HEX[3]), hex: TEAM_HEX[3] },
+  { id: 'red', team: 1, label: 'RED', cell: lc(1, 2), color: rgbFromHex(TEAM_HEX[1]), hex: TEAM_HEX[1] },
+  { id: 'blue', team: 2, label: 'BLUE', cell: lc(3, 2), color: rgbFromHex(TEAM_HEX[2]), hex: TEAM_HEX[2] },
+  { id: 'yellow', team: 4, label: 'YELLOW', cell: lc(2, 3), color: rgbFromHex(TEAM_HEX[4]), hex: TEAM_HEX[4] },
+  { id: 'green', team: 3, label: 'GREEN', cell: lc(2, 1), color: rgbFromHex(TEAM_HEX[3]), hex: TEAM_HEX[3] },
 ]
 
 export function lobbyTeamById(id: string): TeamDef | undefined {

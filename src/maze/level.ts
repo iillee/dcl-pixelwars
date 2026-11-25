@@ -81,7 +81,8 @@ export function sceneOriginParcel(parcels = SKY_PARCELS): number {
 }
 export const SKY_SCENE_M = SKY_PARCELS * 16
 /** Inset that leaves a 5×32 m grid centred in the scene. */
-export const SKY_EDGE_INSET = (SKY_SCENE_M - 5 * 32) / 2
+export const PLAY_GRID_N = 5
+export const SKY_EDGE_INSET = (SKY_SCENE_M - PLAY_GRID_N * 32) / 2
 /** Empty grid rows between a base and its scene edge. Bases-only: 0 = true
  *  corners (the ring has no outward openings). Full mode needs ≥1. */
 export const SKY_BASE_MARGIN = 0
@@ -111,16 +112,21 @@ export const FALL_RESPAWN_DROP = 66
 
 // ─── No-base bridges (stacked underpasses) ──────────────────────────
 // A raised straight / ramp becomes a no-pillar slab only when a lower
-// walkable tile is placed in the same (x, z) cell, at least one STEP
-// below, so a path actually loops underneath. Adjacent lower tiles or
-// an open drop are not enough. The lower tile is real (paint, graph,
+// straight is placed in the same (x, z) cell, one STEP below, running
+// along the perpendicular axis with both ends connected — a true
+// crossover, never a one-sided lookout. Adjacent lower tiles or an
+// open drop are not enough. A ramp cannot sit underneath: its high
+// deck would rise into the slab. The lower tile is real (paint, graph,
 // bots); the upper type stays straight / ramp and only the GLB changes.
 //
 //   BRIDGE_STYLE  kept for the two exported looks, but stacked
 //                 underpasses always use 'simple'. The 'arch' GLBs
 //                 still have ~200 m legs that would cut the lower path.
 //   BRIDGE_CHANCE probability a qualified underpass slot is realised (high so maps with several slots get more than one)
-//   BRIDGE_MAX    cap per maze (2–3)
+//   BRIDGE_MAX    cap per maze (2–3). Chance rolling none still forces
+//                 one valid crossover, and a second when another slot
+//                 realises. One through-path crossing is enough; two
+//                 is preferred, not required.
 //   BRIDGE_Y_NUDGE  metres added to the entity Y so the 0.50 m deck top
 //                   meets the mass01 0.546 m walking surface
 export type BridgeStyle = 'simple' | 'arch'

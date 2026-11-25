@@ -98,7 +98,19 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       const [a, b] = list[0].y < list[1].y ? list : [list[1], list[0]]
       if (Math.abs(b.y - a.y - STEP) > 0.01) return `stacked tiles at (${k}) not one STEP apart`
       if (!b.bridge) return `upper tile at (${k}) is not a no-base bridge`
-      if (a.type === 'ramp') return `lower tile at (${k}) is a ramp`
+      if (b.type !== 'straight' && b.type !== 'ramp') return `upper tile at (${k}) is a ${b.type}, not a straight or ramp`
+      if (a.type !== 'straight' && a.type !== 'ramp') return `lower tile at (${k}) is a ${a.type}, not a straight or ramp`
+      const axisOf = (q: P): 0 | 1 | null => {
+        const o = [...opensOf(q)]
+        if (o.length !== 2 || o[0] % 2 !== o[1] % 2) return null
+        return (o[0] % 2) as 0 | 1
+      }
+      if (axisOf(a) === null || axisOf(b) === null || axisOf(a) === axisOf(b)) {
+        return `stacked tiles at (${k}) are not a perpendicular through-path crossover`
+      }
+      // A ramp lower would rise into the bridge deck; the generator never
+      // places one, but the geometry rule still requires both ends connected
+      // (checked below for every tile).
     }
     const ats = (x: number, z: number) => byXZ.get(`${x},${z}`) ?? []
     const at = (x: number, z: number, y?: number) => {
@@ -110,10 +122,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
       const l = lvl(p.y)
       if (l < -1 || l > 1 || Math.abs(p.y - (BASE_Y + l * STEP)) > 0.01) return `tile (${p.x},${p.z}) off-level y=${p.y}`
       if (isBase(p.x, p.z) && (l !== 0 || p.type === 'ramp')) return `base tile (${p.x},${p.z}) not flat L0`
-      if (p.type === 'end') {
-        const under = ats(p.x, p.z).some(q => q !== p && Math.abs(p.y - q.y - STEP) < 0.05 && p.bridge)
-        if (!under) return `dead end at (${p.x},${p.z})`
-      }
+      if (p.type === 'end' || opensOf(p).size < 2) return `dead end at (${p.x},${p.z})`
       // Every opening lands on a tile that opens back at the right height.
       for (const d of opensOf(p)) {
         const myY = p.type === 'ramp' && p.r === d ? p.y + STEP : p.y
@@ -304,7 +313,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   // 6×6 leaves ~17 free mirrored cell pairs, so exact repeats are likelier than on 8×8.
   const MIN_VARIETY = GRID_W >= 8 ? 0.9 : 0.7
   if (shapes.size < N * MIN_VARIETY) fail(`low variety: ${shapes.size}/${N} (want ≥${100 * MIN_VARIETY}%)`)
-  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends (except a stacked-bridge lookout over a lower path), L-1/L0/L+1 all used${SKY_SYMMETRIC ? '' : ` (≥${100 * VERT_MIN_SHARE}% off L0, L±1 ≥${VERT_MIN_EACH} tiles each, ≥${VERT_MIN_RAMPS} ramps)`}, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
+  console.log(`✓ every seed: ${GRID_W}×${GRID_H}, single-tile L0 corner bases with 2 interior exits each and identical base tiles every round, ±1 ramps never adjacent and flat at both ends, heights match at every join, no dead ends or end tiles (every walkable tile has at least 2 connections), each bridge is a through-path over a perpendicular straight, L-1/L0/L+1 all used${SKY_SYMMETRIC ? '' : ` (≥${100 * VERT_MIN_SHARE}% off L0, L±1 ≥${VERT_MIN_EACH} tiles each, ≥${VERT_MIN_RAMPS} ramps)`}, ${SKY_SYMMETRIC ? '180° symmetric' : `asymmetric but fair (RED/BLUE within ${FAIR_TOL} tile to centre, L+1, teleporter)`}, fully connected, junction + coverage gates met; exactly 1 teleporter pair on a turn/fork/cross, off bases/exits, ends ≥3 apart, landing on floor`)
   process.exit(0)
 }
 

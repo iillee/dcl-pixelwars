@@ -23,7 +23,7 @@ import { LOBBY_CROSS, LOBBY_TEAMS } from '../shared/lobby'
 import { rand, setSeed } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
-  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, SKY_SYMMETRIC,
+  SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, PLAY_GRID_N, SKY_SYMMETRIC,
   BRIDGE_CHANCE, BRIDGE_MAX,
 } from './level'
 
@@ -36,8 +36,8 @@ export const CELL = 16 * TILE_SCALE                                  // one grid
 // maze grid (160 m) centered inside the scene with an 8 m border on all
 // sides. MAZE_ORIGIN is added to every tile→world / cell→world conversion
 // so cell (2,2) — the true center — lands exactly at world (88, 88).
-// Sky mode: SKY_PARCELS × SKY_PARCELS. The inset keeps the play grid at 5×5,
-// centred, so the 180° mirror is also a mirror about the scene centre.
+// Sky mode: SKY_PARCELS × SKY_PARCELS. The inset keeps the play grid at
+// PLAY_GRID_N × PLAY_GRID_N, centred, so the 180° mirror is also a mirror about the scene centre.
 export const SCENE_SIZE = IS_SKY ? SKY_SCENE_M : 176
 const EDGE_INSET = IS_SKY ? SKY_EDGE_INSET : 0
 export const GRID_W = Math.floor((SCENE_SIZE - 2 * EDGE_INSET) / CELL)
@@ -109,7 +109,7 @@ export function getPlacedTilesInOrder(): Placed[] {
  * The center is placed first. Not a generated maze.
  */
 export function placeLobbyLayout(): Placed[] {
-  if (GRID_W !== 5 || GRID_H !== 5) throw new Error('lobby layout is the 5×5 grid')
+  if (GRID_W !== PLAY_GRID_N || GRID_H !== PLAY_GRID_N) throw new Error(`lobby layout expects a ${PLAY_GRID_N}×${PLAY_GRID_N} play grid`)
   resetGrid()
   const y = BASE_Y
   const place = (t: TileType, r: number, x: number, z: number) => placeTile(t, r, x, z, y)
@@ -852,6 +852,7 @@ interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<s
 
 
 
+
 function netAttempt(): Net | null {
   const base = new Set<string>(baseCells(1).concat(baseCells(2)).map(([x, z]) => ck(x, z)))
   const fixed = fixedEdges()
@@ -1087,8 +1088,9 @@ function verticalOk(n: Net): boolean {
   return v.share >= VERT_MIN_SHARE && v.hi >= VERT_MIN_EACH && v.lo >= VERT_MIN_EACH && v.ramps >= VERT_MIN_RAMPS
 }
 
-/** Raised straights/ramps with at least two lower-level neighbours that a
- *  single lower tile could connect, i.e. a real loop-under slot. */
+/** Raised straights/ramps whose two perpendicular neighbours sit at
+ *  least one STEP below, i.e. a true crossover a lower straight can
+ *  complete without becoming a lookout or a same-axis run. */
 function underpassSlots(n: Net): number {
   let count = 0
   for (const [c, l] of n.level) {
@@ -1098,12 +1100,12 @@ function underpassSlots(n: Net): number {
     const dirs = ALL_DIRS.filter(d => n.edges.has(ek(c, ck(x + DX[d], z + DZ[d]))))
     const isStraight = !isRamp && dirs.length === 2 && dirs[0] === OPP[dirs[1]]
     if (!isRamp && !isStraight) continue
-    const lower: Dir[] = []
-    for (const d of ALL_DIRS) {
+    const axis = (isRamp ? n.ramp.get(c)! : dirs[0]) % 2
+    const perp: Dir[] = axis === 0 ? [1, 3] : [0, 2]
+    if (perp.every(d => {
       const nl = n.level.get(ck(x + DX[d], z + DZ[d]))
-      if (nl !== undefined && nl <= l - 1) lower.push(d)
-    }
-    if (lower.length >= 2 && tileFor(new Set(lower))) count++
+      return nl !== undefined && nl <= l - 1
+    })) count++
   }
   return count
 }
@@ -1138,8 +1140,8 @@ function layBaseLine(): void {
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
     if (!SKY_SYMMETRIC && !fairnessOk()) { fairMisses++; continue } // asymmetric: RED/BLUE must be on equal footing
     found++
-    const slots = hasRealisableUnderpass() ? 1 : 0
-    const sc = netScore(n) + rand() * NET_SCORE_JITTER + (slots > 0 ? 10000 : 0)
+    const slots = countRealisableUnderpasses(2)
+    const sc = netScore(n) + rand() * NET_SCORE_JITTER + (slots > 0 ? 10000 : 0) + (slots >= 2 ? 2000 : 0)
     if (sc > bestScore) { best = n; bestScore = sc; bestSlots = slots }
   }
   if (best && layNet(best)) return
@@ -1156,6 +1158,7 @@ const FALLBACKS: Record<string, { cells: string[]; edges: string[] }> = {
   },
   // 6×6 symmetric (also valid when asymmetric).
   '6x6': {
+
     cells: ['0,0,0', '0,1,0', '0,2,0', '0,3,0', '0,4,0', '0,5,0', '1,0,0', '1,1,0', '1,2,0', '1,3,0', '1,4,0', '1,5,0,1', '2,0,0,1', '2,1,-1', '2,2,-1', '2,3,-1', '2,4,-1,3', '2,5,1', '3,0,1', '3,1,-1,1', '3,2,-1', '3,3,-1', '3,4,-1', '3,5,0,3', '4,0,0,3', '4,1,0', '4,2,0', '4,3,0', '4,4,0', '4,5,0', '5,0,0', '5,1,0', '5,2,0', '5,3,0', '5,4,0', '5,5,0'],
     edges: ['0,0|0,1', '0,0|1,0', '0,1|0,2', '0,1|1,1', '0,2|0,3', '0,2|1,2', '0,3|0,4', '0,3|1,3', '0,4|0,5', '0,4|1,4', '0,5|1,5', '1,0|2,0', '1,0|1,1', '1,1|1,2', '1,2|1,3', '1,3|1,4', '1,4|2,4', '1,5|2,5', '2,0|3,0', '2,1|2,2', '2,1|3,1', '2,2|2,3', '2,2|3,2', '2,3|3,3', '2,4|3,4', '2,5|3,5', '3,0|4,0', '3,1|4,1', '3,2|3,3', '3,3|3,4', '3,5|4,5', '4,0|5,0', '4,1|5,1', '4,1|4,2', '4,2|4,3', '4,2|5,2', '4,3|4,4', '4,3|5,3', '4,4|4,5', '4,4|5,4', '4,5|5,5', '5,0|5,1', '5,1|5,2', '5,2|5,3', '5,3|5,4', '5,4|5,5'],
   },
@@ -1208,39 +1211,296 @@ function gridVertOk(): boolean {
 }
 
 /**
- * Raised tiles that can host a true stacked underpass: a walkable lower
- * tile in the same (x, z), one STEP below, with at least two doors so a
- * path actually loops underneath. Doors are existing lower flats, climb-in
- * ramps converted to flats, a new flat grown into an empty neighbour that
- * already touches the lower network, or a 1–2 cell spur out to that
- * network. No base or spawn cell is a slot.
+ * A true crossover: the upper is a straight or ramp whose own ends are
+ * already a through-path, and a straight one STEP below runs along the
+ * perpendicular axis with both of its ends connected. Climb-in ramps are
+ * not converted (that used to shrink the upper into a lookout end), and
+ * 1–2 cell spurs are not grown. No base or spawn cell is a slot.
+ *
+ * A ramp cannot be the lower tile: its high deck rises into the bridge
+ * slab (canPlace already rejects that stack).
  */
 type Attach = { p: Placed; back: Dir; add: boolean }
 type Door =
   | { kind: 'flat'; d: Dir; nb: Placed; back: Dir; add: boolean }
-  | { kind: 'rampIn'; d: Dir; nb: Placed; back: Dir }
   | { kind: 'build'; d: Dir; x: number; z: number; need: Set<Dir>; attach: Attach[] }
-  | { kind: 'chain'; d: Dir; cells: Array<{ x: number; z: number; need: Set<Dir> }>; attach: Attach[] }
-type Slot = { upper: Placed; lowY: number; doors: Door[]; lower: { t: TileType; r: number }; across: boolean }
+  | { kind: 'dipRamp'; d: Dir; nb: Placed; back: Dir; far: Placed; farAdd: boolean }
+  | { kind: 'climb'; d: Dir; x: number; z: number; attach: Attach }
+  | { kind: 'corridor'; d: Dir; cells: Array<{ x: number; z: number; need: Set<Dir> }>; attach: Attach[] }
+type Slot = {
+  upper: Placed
+  lowY: number
+  doors: [Door, Door]
+  lower: { t: TileType; r: number }
+  /** When set, morph a fork/cross upper into this through-path straight. */
+  upperStraight: { t: TileType; r: number } | null
+}
 
 function occupiedXZ(x: number, z: number): boolean {
   for (const p of grid.values()) if (p.x === x && p.z === z) return true
   return false
 }
 
+function isBaseCell(x: number, z: number): boolean {
+  for (const team of [1, 2, 3, 4]) {
+    for (const [bx, bz] of baseCells(team)) if (bx === x && bz === z) return true
+  }
+  return false
+}
+
+function openingY(p: Placed, d: Dir): number {
+  return p.type === 'ramp' && p.r === d ? p.y + STEP : p.y
+}
+
+/** 0 = N–S, 1 = E–W. Null if the tile is not a two-ended through-path. */
+function axisOfTile(p: Placed): 0 | 1 | null {
+  const opens = [...openingsAt(p.type, p.r)]
+  if (opens.length !== 2 || opens[0] % 2 !== opens[1] % 2) return null
+  return (opens[0] % 2) as 0 | 1
+}
+
+function openingConnected(p: Placed, d: Dir): boolean {
+  if (!openingsAt(p.type, p.r).has(d)) return false
+  const myY = openingY(p, d)
+  const nx = p.x + DX[d], nz = p.z + DZ[d]
+  if (!inBounds(nx, nz)) return false
+  const back = OPP[d]
+  const nb1 = grid.get(key(nx, nz, myY))
+  if (nb1 && highDirAt(nb1.type, nb1.r) !== back && openingsAt(nb1.type, nb1.r).has(back)) return true
+  if (myY >= MIN_Y + STEP - 0.001) {
+    const nb2 = grid.get(key(nx, nz, myY - STEP))
+    if (nb2 && highDirAt(nb2.type, nb2.r) === back) return true
+  }
+  return false
+}
+
+function bothEndsConnected(p: Placed): boolean {
+  const opens = openingsAt(p.type, p.r)
+  if (opens.size < 2) return false
+  for (const d of opens) if (!openingConnected(p, d)) return false
+  return true
+}
+
+/** A through-path door at height `y` in direction `d` from the upper cell. */
+function findDoor(x: number, z: number, d: Dir, y: number): Door | null {
+  const nx = x + DX[d], nz = z + DZ[d]
+  if (!inBounds(nx, nz) || isBaseCell(nx, nz)) return null
+  const back = OPP[d]
+  const nb = grid.get(key(nx, nz, y))
+  if (nb) {
+    const opens = openingsAt(nb.type, nb.r)
+    if (TILES[nb.type].isRamp) {
+      // Only the low end meets at `y`; a high end would be a climb-in
+      // that used to force the upper to close and shrink into an end.
+      if (opens.has(back) && highDirAt(nb.type, nb.r) !== back && Math.abs(nb.y - y) < 0.05) {
+        return { kind: 'flat', d, nb, back, add: false }
+      }
+      return null
+    }
+    if (opens.has(back)) return { kind: 'flat', d, nb, back, add: false }
+    const need = new Set<Dir>([...opens, back])
+    if (need.size >= 2 && tileFor(need)) return { kind: 'flat', d, nb, back, add: true }
+    return null
+  }
+  if (occupiedXZ(nx, nz)) return null
+  const attach: Attach[] = []
+  const need = new Set<Dir>([back])
+  for (const ed of ALL_DIRS) {
+    if (ed === back) continue
+    const ex = nx + DX[ed], ez = nz + DZ[ed]
+    if (!inBounds(ex, ez) || isBaseCell(ex, ez)) continue
+    const ep = grid.get(key(ex, ez, y))
+    if (!ep) continue
+    const eBack = OPP[ed]
+    const eOpens = openingsAt(ep.type, ep.r)
+    if (TILES[ep.type].isRamp) {
+      if (eOpens.has(eBack) && highDirAt(ep.type, ep.r) !== eBack) {
+        attach.push({ p: ep, back: eBack, add: false })
+        need.add(ed)
+      }
+      continue
+    }
+    if (eOpens.has(eBack) || tileFor(new Set([...eOpens, eBack]))) {
+      attach.push({ p: ep, back: eBack, add: !eOpens.has(eBack) })
+      need.add(ed)
+    }
+  }
+  if (attach.length && need.size >= 2 && tileFor(need)) {
+    return { kind: 'build', d, x: nx, z: nz, need, attach }
+  }
+  return null
+}
+
+function hasAdjacentRamp(x: number, z: number): boolean {
+  for (const d of ALL_DIRS) {
+    const nx = x + DX[d], nz = z + DZ[d]
+    for (const p of grid.values()) if (p.x === nx && p.z === nz && p.type === 'ramp') return true
+  }
+  return false
+}
+
+/**
+ * Empty neighbour at `y` that drops a ramp one STEP down into the
+ * existing lower network. The ramp's high end feeds the underpass; both
+ * ends stay connected, so this is not a dead-end spur.
+ */
+function findClimbDoor(x: number, z: number, d: Dir, y: number): Door | null {
+  const nx = x + DX[d], nz = z + DZ[d]
+  if (!inBounds(nx, nz) || isBaseCell(nx, nz) || occupiedXZ(nx, nz)) return null
+  if (hasAdjacentRamp(nx, nz)) return null
+  const downY = Math.round((y - STEP) * 1000) / 1000
+  if (downY < MIN_Y - 0.01) return null
+  const back = OPP[d] // high side points at the underpass
+  const lowD = d
+  const lx = nx + DX[lowD], lz = nz + DZ[lowD]
+  if (!inBounds(lx, lz) || isBaseCell(lx, lz)) return null
+  const ep = grid.get(key(lx, lz, downY))
+  if (!ep || ep.type === 'end') return null
+  const eBack = OPP[lowD]
+  const eOpens = openingsAt(ep.type, ep.r)
+  if (TILES[ep.type].isRamp) {
+    if (!(eOpens.has(eBack) && highDirAt(ep.type, ep.r) !== eBack)) return null
+    return { kind: 'climb', d, x: nx, z: nz, attach: { p: ep, back: eBack, add: false } }
+  }
+  if (eOpens.has(eBack) || (tileFor(new Set([...eOpens, eBack]))?.t !== 'end' && tileFor(new Set([...eOpens, eBack])))) {
+    return { kind: 'climb', d, x: nx, z: nz, attach: { p: ep, back: eBack, add: !eOpens.has(eBack) } }
+  }
+  return null
+}
+
+/**
+ * A 2–3 cell through-path from an empty door cell at `y` into the existing
+ * network at that height. Every new tile has ≥2 openings (a corridor, not
+ * a 1–2 cell end-spur).
+ */
+function findCorridorDoor(x: number, z: number, d: Dir, y: number): Door | null {
+  const sx = x + DX[d], sz = z + DZ[d]
+  if (!inBounds(sx, sz) || isBaseCell(sx, sz) || occupiedXZ(sx, sz)) return null
+  const back0 = OPP[d]
+  const emptyAt = (cx: number, cz: number): boolean =>
+    inBounds(cx, cz) && !isBaseCell(cx, cz) && !occupiedXZ(cx, cz)
+  type Step = { x: number; z: number; via: Dir | null }
+  const attachAt = (cx: number, cz: number, forbidden: Set<Dir>): Attach[] | null => {
+    const out: Attach[] = []
+    for (const ed of ALL_DIRS) {
+      if (forbidden.has(ed)) continue
+      const ex = cx + DX[ed], ez = cz + DZ[ed]
+      if (!inBounds(ex, ez) || isBaseCell(ex, ez)) continue
+      const ep = grid.get(key(ex, ez, y))
+      if (!ep || ep.type === 'end') continue
+      const eBack = OPP[ed]
+      const eOpens = openingsAt(ep.type, ep.r)
+      if (TILES[ep.type].isRamp) {
+        if (eOpens.has(eBack) && highDirAt(ep.type, ep.r) !== eBack) out.push({ p: ep, back: eBack, add: false })
+        continue
+      }
+      if (eOpens.has(eBack) || tileFor(new Set([...eOpens, eBack]))) {
+        out.push({ p: ep, back: eBack, add: !eOpens.has(eBack) })
+      }
+    }
+    return out.length ? out : null
+  }
+  const queue: Step[][] = [[{ x: sx, z: sz, via: back0 }]]
+  const seen = new Set<string>([`${sx},${sz}`])
+  while (queue.length) {
+    const path = queue.shift()!
+    if (path.length > 3) continue
+    const last = path[path.length - 1]
+    const forbidden = new Set<Dir>()
+    if (last.via !== null) forbidden.add(last.via)
+    const attach = attachAt(last.x, last.z, forbidden)
+    if (attach && path.length >= 2) {
+      const cells: Array<{ x: number; z: number; need: Set<Dir> }> = []
+      for (let i = 0; i < path.length; i++) {
+        const need = new Set<Dir>()
+        if (i === 0) need.add(back0)
+        if (i > 0) need.add(OPP[path[i].via!]) // via is the dir from the previous cell to this one
+        if (i < path.length - 1) need.add(path[i + 1].via!)
+        if (i === path.length - 1) for (const a of attach) need.add(OPP[a.back])
+        if (need.size < 2 || !tileFor(need) || tileFor(need)!.t === 'end') { cells.length = 0; break }
+        cells.push({ x: path[i].x, z: path[i].z, need })
+      }
+      if (cells.length === path.length) return { kind: 'corridor', d, cells, attach }
+    }
+    if (path.length === 3) continue
+    for (const ed of ALL_DIRS) {
+      if (last.via !== null && ed === last.via) continue
+      const nx = last.x + DX[ed], nz = last.z + DZ[ed]
+      const id = `${nx},${nz}`
+      if (!emptyAt(nx, nz) || seen.has(id)) continue
+      // Do not walk back into the upper cell.
+      if (nx === x && nz === z) continue
+      seen.add(id)
+      queue.push([...path, { x: nx, z: nz, via: ed }])
+    }
+  }
+  return null
+}
+
+function findDoorOrCorridor(x: number, z: number, d: Dir, y: number): Door | null {
+  return findDoor(x, z, d, y) || findClimbDoor(x, z, d, y) || findCorridorDoor(x, z, d, y)
+}
+
+/**
+ * When the upper will close a same-level branch, replace that neighbour
+ * with a ramp that drops to lowY (low end into the underpass) and climbs
+ * back up to the next tile. Only straights along the dip axis, so no
+ * extra openings are left dangling.
+ */
+function findDipRamp(x: number, z: number, d: Dir, highY: number, lowY: number): Door | null {
+  const nx = x + DX[d], nz = z + DZ[d]
+  if (!inBounds(nx, nz) || isBaseCell(nx, nz)) return null
+  const back = OPP[d]
+  const nb = grid.get(key(nx, nz, highY))
+  if (!nb || TILES[nb.type].isRamp || nb.type === 'end') return null
+  if (grid.get(key(nx, nz, lowY))) return null
+  if (hasAdjacentRamp(nx, nz)) return null
+  const opens = openingsAt(nb.type, nb.r)
+  if (!opens.has(back) || !opens.has(d) || opens.size !== 2) return null
+  const fx = nx + DX[d], fz = nz + DZ[d]
+  if (!inBounds(fx, fz) || isBaseCell(fx, fz)) return null
+  const far = grid.get(key(fx, fz, highY))
+  if (!far || TILES[far.type].isRamp || far.type === 'end') return null
+  const farOpens = openingsAt(far.type, far.r)
+  const farAdd = !farOpens.has(back)
+  if (farAdd) {
+    const need = new Set<Dir>([...farOpens, back])
+    if (need.size < 2 || !tileFor(need) || tileFor(need)!.t === 'end') return null
+  } else if (highDirAt(far.type, far.r) === back) {
+    return null
+  }
+  return { kind: 'dipRamp', d, nb, back, far, farAdd }
+}
 
 function findBridgeSlots(): Slot[] {
-  const isBaseCell = (x: number, z: number): boolean => {
-    for (const team of [1, 2, 3, 4]) {
-      for (const [bx, bz] of baseCells(team)) if (bx === x && bz === z) return true
-    }
-    return false
-  }
   const levelOf = (p: Placed) => Math.round((p.y - BASE_Y) / STEP)
   const slots: Slot[] = []
+  const tryAxis = (upper: Placed, ax: 0 | 1, lowY: number, upperStraight: { t: TileType; r: number } | null): void => {
+    const perp: Dir[] = ax === 0 ? [1, 3] : [0, 2]
+    const closing = new Set<Dir>()
+    if (upperStraight) {
+      const current = openingsAt(upper.type, upper.r)
+      for (const d of perp) if (current.has(d)) closing.add(d)
+    }
+    const doors: Door[] = []
+    for (const d of perp) {
+      if (closing.has(d)) {
+        const dip = findDipRamp(upper.x, upper.z, d, upper.y, lowY)
+        if (!dip) return
+        doors.push(dip)
+      } else {
+        const door = findDoorOrCorridor(upper.x, upper.z, d, lowY)
+        if (!door) return
+        doors.push(door)
+      }
+    }
+    if (doors.length !== 2) return
+    const lower = tileFor(new Set(perp))
+    if (!lower || lower.t !== 'straight') return
+    slots.push({ upper, lowY, doors: [doors[0], doors[1]], lower, upperStraight })
+  }
+
   for (const upper of grid.values()) {
-    // Straights, ramps, and junctions; an end can sit over a through-path.
-    if (!['straight', 'ramp', 'turn', 'fork', 'cross', 'end'].includes(upper.type)) continue
     if (upper.bridge) continue
     if (isBaseCell(upper.x, upper.z)) continue
     const lv = levelOf(upper)
@@ -1249,98 +1509,21 @@ function findBridgeSlots(): Slot[] {
     if (lowY < MIN_Y - 0.01) continue
     if (grid.has(key(upper.x, upper.z, lowY))) continue
 
-    const doors: Door[] = []
-    for (const d of ALL_DIRS) {
-      const nx = upper.x + DX[d], nz = upper.z + DZ[d]
-      if (!inBounds(nx, nz) || isBaseCell(nx, nz)) continue
-      const back = OPP[d]
-      const nb = grid.get(key(nx, nz, lowY))
-      if (nb && !TILES[nb.type].isRamp) {
-        const opens = openingsAt(nb.type, nb.r)
-        if (opens.has(back)) { doors.push({ kind: 'flat', d, nb, back, add: false }); continue }
-        if (tileFor(new Set([...opens, back]))) { doors.push({ kind: 'flat', d, nb, back, add: true }); continue }
-      }
-      if (nb && TILES[nb.type].isRamp && highDirAt(nb.type, nb.r) === back) {
-        // Climb-in ramp: drop the high landing and keep the low-end straight.
-        // The upper must be a flat that can close this side and still have
-        // at least one opening (a ramp upper cannot lose an end).
-        if (!TILES[upper.type].isRamp && tileFor(new Set([back, d]))) {
-          doors.push({ kind: 'rampIn', d, nb, back })
-        }
-        continue
-      }
-      // Grow a lower flat into a fully empty neighbour that already
-      // touches the lower network on at least one other side.
-      if (nb || occupiedXZ(nx, nz)) continue
-      const attach: Array<{ p: Placed; back: Dir; add: boolean }> = []
-      const need = new Set<Dir>([back])
-      for (const ed of ALL_DIRS) {
-        if (ed === back) continue
-        const ex = nx + DX[ed], ez = nz + DZ[ed]
-        if (!inBounds(ex, ez) || isBaseCell(ex, ez)) continue
-        const ep = grid.get(key(ex, ez, lowY))
-        if (!ep || TILES[ep.type].isRamp) continue
-        const eBack = OPP[ed]
-        const eOpens = openingsAt(ep.type, ep.r)
-        if (eOpens.has(eBack) || tileFor(new Set([...eOpens, eBack]))) {
-          attach.push({ p: ep, back: eBack, add: !eOpens.has(eBack) })
-          need.add(ed)
-        }
-      }
-      if (attach.length && tileFor(need)) doors.push({ kind: 'build', d, x: nx, z: nz, need, attach })
-    }
-    // If this raised cell still has fewer than two lower doors, grow a
-    // 1–2 cell spur from an empty neighbour out to the lower network.
-    const usedDirs = new Set(doors.map(o => o.d))
-    const emptyAt = (x: number, z: number): boolean =>
-      inBounds(x, z) && !isBaseCell(x, z) && !occupiedXZ(x, z) && !grid.has(key(x, z, lowY))
-    const lowerAttach = (x: number, z: number, skip: Dir | null): Attach[] => {
-      const out: Attach[] = []
-      for (const ed of ALL_DIRS) {
-        if (ed === skip) continue
-        const ex = x + DX[ed], ez = z + DZ[ed]
-        if (!inBounds(ex, ez) || isBaseCell(ex, ez)) continue
-        const ep = grid.get(key(ex, ez, lowY))
-        if (!ep || TILES[ep.type].isRamp) continue
-        const eBack = OPP[ed]
-        const eOpens = openingsAt(ep.type, ep.r)
-        if (eOpens.has(eBack) || tileFor(new Set([...eOpens, eBack]))) {
-          out.push({ p: ep, back: eBack, add: !eOpens.has(eBack) })
-        }
-      }
-      return out
-    }
-    if (doors.length < 2) {
-      for (const d of ALL_DIRS) {
-        if (usedDirs.has(d) || doors.length >= 2) continue
-        const ax = upper.x + DX[d], az = upper.z + DZ[d]
-        const back = OPP[d]
-        if (!emptyAt(ax, az)) continue
-        for (const ed of ALL_DIRS) {
-          if (ed === back || doors.length >= 2) continue
-          const bx = ax + DX[ed], bz = az + DZ[ed]
-          if (!emptyAt(bx, bz)) continue
-          const attach = lowerAttach(bx, bz, OPP[ed])
-          if (!attach.length) continue
-          const needA = new Set<Dir>([back, ed])
-          const needB = new Set<Dir>([OPP[ed], ...attach.map(a => OPP[a.back])])
-          if (!tileFor(needA) || !tileFor(needB)) continue
-          doors.push({
-            kind: 'chain', d,
-            cells: [{ x: ax, z: az, need: needA }, { x: bx, z: bz, need: needB }],
-            attach,
-          })
-          usedDirs.add(d)
-          break
-        }
+    if (upper.type === 'straight' || upper.type === 'ramp') {
+      if (!bothEndsConnected(upper)) continue
+      const ax = axisOfTile(upper)
+      if (ax === null) continue
+      tryAxis(upper, ax, lowY, null)
+    } else if (upper.type === 'fork' || upper.type === 'cross') {
+      for (const ax of [0, 1] as const) {
+        const along: Dir[] = ax === 0 ? [0, 2] : [1, 3]
+        const opens = openingsAt(upper.type, upper.r)
+        if (!along.every(d => opens.has(d) && openingConnected(upper, d))) continue
+        const straight = tileFor(new Set(along))
+        if (!straight || straight.t !== 'straight') continue
+        tryAxis(upper, ax, lowY, straight)
       }
     }
-    if (doors.length < 2) continue
-    const lower = tileFor(new Set(doors.map(o => o.d)))
-    if (!lower) continue
-    const upperOpens = openingsAt(upper.type, upper.r)
-    const overlap = doors.some(o => upperOpens.has(o.d))
-    slots.push({ upper, lowY, doors, lower, across: !overlap })
   }
   return slots
 }
@@ -1350,29 +1533,38 @@ function realiseSlot(s: Slot, preview = false): boolean {
   if (grid.has(key(s.upper.x, s.upper.z, s.lowY))) return false
   const saved: Array<{ p: Placed; type: TileType; r: number }> = []
   const added: string[] = []
+  const removed: Placed[] = []
   const remember = (p: Placed) => {
     if (!saved.some(u => u.p === p)) saved.push({ p, type: p.type, r: p.r })
   }
   const undo = () => {
     for (const u of saved) { u.p.type = u.type; u.p.r = u.r }
     for (const k of added) grid.delete(k)
+    for (const p of removed) grid.set(key(p.x, p.z, p.y), p)
     s.upper.bridge = false
   }
   const morph = (p: Placed, need: Set<Dir>): boolean => {
     const next = tileFor(need)
-    if (!next) return false
+    if (!next || next.t === 'end') return false
     remember(p)
     p.type = next.t
     p.r = next.r
     return true
   }
 
+  // Morph a fork/cross into a straight first so dip ramps see the
+  // through-path upper and the closed branches no longer open onto them.
+  if (s.upperStraight) {
+    remember(s.upper)
+    s.upper.type = s.upperStraight.t
+    s.upper.r = s.upperStraight.r
+    if (s.upper.type === 'end' || openingsAt(s.upper.type, s.upper.r).size < 2) { undo(); return false }
+  }
+
   for (const o of s.doors) {
     if (o.kind === 'flat') {
       if (!o.add) continue
       if (!morph(o.nb, new Set([...openingsAt(o.nb.type, o.nb.r), o.back]))) { undo(); return false }
-    } else if (o.kind === 'rampIn') {
-      if (!morph(o.nb, new Set([o.back, o.d]))) { undo(); return false }
     } else if (o.kind === 'build') {
       for (const a of o.attach) {
         if (!a.add) continue
@@ -1382,9 +1574,28 @@ function realiseSlot(s: Slot, preview = false): boolean {
       // two underpasses cannot stack a side corridor under a non-bridge.
       if (occupiedXZ(o.x, o.z)) { undo(); return false }
       const built = tileFor(o.need)
-      if (!built || !canPlace(built.t, built.r, o.x, o.z, s.lowY, true)) { undo(); return false }
+      if (!built || built.t === 'end' || !canPlace(built.t, built.r, o.x, o.z, s.lowY, true)) { undo(); return false }
       placeTile(built.t, built.r, o.x, o.z, s.lowY)
       added.push(key(o.x, o.z, s.lowY))
+    } else if (o.kind === 'dipRamp') {
+      if (o.farAdd) {
+        if (!morph(o.far, new Set([...openingsAt(o.far.type, o.far.r), o.back]))) { undo(); return false }
+      }
+      removed.push(o.nb)
+      grid.delete(key(o.nb.x, o.nb.z, o.nb.y))
+      if (occupiedXZ(o.nb.x, o.nb.z)) { undo(); return false }
+      if (!canPlace('ramp', o.d, o.nb.x, o.nb.z, s.lowY, true)) { undo(); return false }
+      placeTile('ramp', o.d, o.nb.x, o.nb.z, s.lowY)
+      added.push(key(o.nb.x, o.nb.z, s.lowY))
+    } else if (o.kind === 'climb') {
+      if (o.attach.add) {
+        if (!morph(o.attach.p, new Set([...openingsAt(o.attach.p.type, o.attach.p.r), o.attach.back]))) { undo(); return false }
+      }
+      if (occupiedXZ(o.x, o.z)) { undo(); return false }
+      const downY = Math.round((s.lowY - STEP) * 1000) / 1000
+      if (!canPlace('ramp', OPP[o.d], o.x, o.z, downY, true)) { undo(); return false }
+      placeTile('ramp', OPP[o.d], o.x, o.z, downY)
+      added.push(key(o.x, o.z, downY))
     } else {
       for (const a of o.attach) {
         if (!a.add) continue
@@ -1393,55 +1604,73 @@ function realiseSlot(s: Slot, preview = false): boolean {
       for (const c of o.cells) {
         if (occupiedXZ(c.x, c.z)) { undo(); return false }
         const built = tileFor(c.need)
-        if (!built || !canPlace(built.t, built.r, c.x, c.z, s.lowY, true)) { undo(); return false }
+        if (!built || built.t === 'end' || !canPlace(built.t, built.r, c.x, c.z, s.lowY, true)) { undo(); return false }
         placeTile(built.t, built.r, c.x, c.z, s.lowY)
         added.push(key(c.x, c.z, s.lowY))
       }
     }
   }
-  // Climb-in ramps used as doors no longer meet the upper deck, so
-  // close those openings on the upper tile (a straight may shrink to an end).
-  const close = new Set(s.doors.filter(o => o.kind === 'rampIn').map(o => o.d))
-  if (close.size) {
-    const keep = new Set([...openingsAt(s.upper.type, s.upper.r)].filter(d => !close.has(d)))
-    if (keep.size < 1 || TILES[s.upper.type].isRamp || !morph(s.upper, keep)) { undo(); return false }
-  }
+  // The upper stays a through-path; never close an opening or shrink it
+  // to an end.
   if (!canPlace(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY, true)) { undo(); return false }
   placeTile(s.lower.t, s.lower.r, s.upper.x, s.upper.z, s.lowY)
   added.push(key(s.upper.x, s.upper.z, s.lowY))
   s.upper.bridge = true
+  if (!bothEndsConnected(s.upper)) { undo(); return false }
+  const lower = grid.get(key(s.upper.x, s.upper.z, s.lowY))
+  if (!lower || lower.type !== 'straight' || !bothEndsConnected(lower)) { undo(); return false }
+  for (const p of grid.values()) {
+    if (p.type === 'ramp' && hasAdjacentRamp(p.x, p.z)) { undo(); return false }
+  }
   if (!validate() || !allTilesConnected()) { undo(); return false }
   if (IS_SKY && teleportPairs().length !== 1) { undo(); return false }
   if (IS_SKY && !SKY_SYMMETRIC && !fairnessOk()) { undo(); return false }
   if (IS_SKY && !gridVertOk()) { undo(); return false }
+  for (const p of grid.values()) {
+    if (openingsAt(p.type, p.r).size < 2 || p.type === 'end') { undo(); return false }
+  }
   if (preview) undo()
   return true
 }
 
 function hasRealisableUnderpass(): boolean {
-  for (const s of findBridgeSlots()) if (realiseSlot(s, true)) return true
-  return false
+  return countRealisableUnderpasses(1) > 0
+}
+
+function countRealisableUnderpasses(cap: number): number {
+  let n = 0
+  for (const s of findBridgeSlots()) {
+    if (realiseSlot(s, true)) {
+      n++
+      if (n >= cap) return n
+    }
+  }
+  return n
 }
 
 /**
- * Realise underpass slots: place the lower tile and swap the upper deck
- * to a no-base slab. Deterministic given the seeded RNG. If the chance
- * roll gives none, one true underpass is still placed when a valid slot
- * realises. Realise still has to pass fairnessOk, so the search prefers
- * a 2D net where at least one stacked loop stays within FAIR_TOL.
+ * Realise underpass slots: place the perpendicular lower straight and
+ * swap the upper deck to a no-base slab. Deterministic given the seeded
+ * RNG. If the chance roll gives none, one true crossover is still placed
+ * when a valid slot realises; a second is placed whenever another slot
+ * still works. One through-path crossover is enough for the graph (no
+ * lookout dead-end), so layouts with only one slot still pass. Realise
+ * still has to pass fairnessOk, so the search prefers a 2D net where at
+ * least one stacked loop stays within FAIR_TOL.
  */
 function assignBridges(): void {
   if (BRIDGE_CHANCE <= 0 || BRIDGE_MAX <= 0) return
   const slots = findBridgeSlots()
   slots.sort((a, b) => {
     const score = (s: Slot) =>
-      s.doors.filter(o => o.kind === 'flat').length * 3
-      + s.doors.filter(o => o.kind === 'rampIn').length * 2
-      + s.doors.filter(o => o.kind === 'build' || o.kind === 'chain').length
+      s.doors.filter(o => o.kind === 'flat' && !o.add).length * 4
+      + s.doors.filter(o => o.kind === 'flat' && o.add).length * 2
+      + s.doors.filter(o => o.kind === 'dipRamp').length * 2
+      + s.doors.filter(o => o.kind === 'climb').length * 2
+      + s.doors.filter(o => o.kind === 'build').length
+      + s.doors.filter(o => o.kind === 'corridor').length
     const da = score(a), db = score(b)
     if (da !== db) return db - da
-    if (a.across !== b.across) return a.across ? -1 : 1
-    if (a.doors.length !== b.doors.length) return b.doors.length - a.doors.length
     if (a.upper.order !== b.upper.order) return a.upper.order - b.upper.order
     return a.upper.x - b.upper.x || a.upper.z - b.upper.z || a.upper.y - b.upper.y
   })
@@ -1453,11 +1682,14 @@ function assignBridges(): void {
     if (!realiseSlot(s)) continue
     chosen.push(s)
   }
-  // Force one true stacked underpass if chance rolled none and a slot works.
-  // Never force a decorative span over a drop or a side-by-side lower tile.
-  if (chosen.length === 0) {
+  // Force one true crossover if chance rolled none, and a second when
+  // another legal slot still realises. Never force a lookout or a span
+  // over a drop.
+  if (chosen.length < 2) {
     for (const s of slots) {
-      if (realiseSlot(s)) { chosen.push(s); break }
+      if (chosen.length >= 2) break
+      if (s.upper.bridge) continue
+      if (realiseSlot(s)) chosen.push(s)
     }
   }
 }
