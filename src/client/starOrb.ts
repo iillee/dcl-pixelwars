@@ -38,6 +38,8 @@ const BEACON_EMISSIVE_IN = 0.55
 const BEACON_EMISSIVE_OUT = 0.28
 const BEACON_PULSE_SPEED = 2.5
 const BEACON_PULSE_RANGE = 0.15
+/** Seconds of eased alpha/emissive fade-in when the beacon first appears. */
+const BEACON_FADE_IN = 0.5
 const GRADIENT_TEX = 'assets/images/star-beacon-gradient.png'
 const ALPHA_TEX = 'assets/images/star-beacon-alpha.png'
 export const STAR_IDLE_SRC = 'assets/sounds/star-idle.mp3'
@@ -91,15 +93,22 @@ export function clearStarOrbs(): void {
   orbs.clear()
 }
 
-function beaconMat(inner: boolean) {
+function beaconFade(clock: number): number {
+  if (clock >= BEACON_FADE_IN) return 1
+  if (clock <= 0) return 0
+  const u = 1 - clock / BEACON_FADE_IN
+  return 1 - u * u * u
+}
+
+function beaconMat(inner: boolean, fade = 1) {
   const c = BEACON_COLOR
-  const a = inner ? BEACON_INNER_A : BEACON_OUTER_A
+  const a = (inner ? BEACON_INNER_A : BEACON_OUTER_A) * fade
   return {
     texture: Material.Texture.Common({ src: GRADIENT_TEX }),
     alphaTexture: Material.Texture.Common({ src: ALPHA_TEX }),
     albedoColor: Color4.create(c.r, c.g, c.b, a),
     emissiveColor: Color3.create(c.r, c.g, c.b),
-    emissiveIntensity: inner ? BEACON_EMISSIVE_IN : BEACON_EMISSIVE_OUT,
+    emissiveIntensity: (inner ? BEACON_EMISSIVE_IN : BEACON_EMISSIVE_OUT) * fade,
     roughness: 1,
     metallic: 0,
     specularIntensity: 0,
@@ -117,7 +126,7 @@ function makeBeacon(parent: Entity, inner: boolean): Entity {
   })
   MeshRenderer.setPlane(ent)
   Billboard.create(ent, { billboardMode: BillboardMode.BM_Y })
-  Material.setPbrMaterial(ent, beaconMat(inner))
+  Material.setPbrMaterial(ent, beaconMat(inner, 0))
   return ent
 }
 
@@ -278,6 +287,11 @@ export function initStarOrbs(): void {
       const outerT = rec.outer ? Transform.getMutableOrNull(rec.outer) : null
       if (innerT) innerT.scale = Vector3.create(BEACON_INNER_W * pulse, BEACON_H, 1)
       if (outerT) outerT.scale = Vector3.create(BEACON_OUTER_W * (2 - pulse), BEACON_H, 1)
+      if (rec.clock <= BEACON_FADE_IN + dt) {
+        const fade = beaconFade(rec.clock)
+        if (rec.inner) Material.setPbrMaterial(rec.inner, beaconMat(true, fade))
+        if (rec.outer) Material.setPbrMaterial(rec.outer, beaconMat(false, fade))
+      }
     }
   })
 }
