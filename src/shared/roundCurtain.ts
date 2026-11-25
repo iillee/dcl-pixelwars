@@ -7,6 +7,8 @@
  * curtain only hides the client's presentation of that swap.
  */
 
+import { TEAM_RGB, isPlayingTeam } from './team'
+
 export const CURTAIN_DOWN_S = 0.45
 export const CURTAIN_UP_S = 0.4
 /** Longest the opaque hold may last while the lobby floor / colliders load. */
@@ -15,6 +17,29 @@ export const CURTAIN_READY_CAP_S = 2.5
 export const CURTAIN_COVER_MIN_S = 0.12
 /** Virtual px the mask extends past every edge of the HUD root (phone safe areas). */
 export const CURTAIN_BLEED = 4000
+
+/** Original dark ink, used only if no team leaders are available yet. */
+export const CURTAIN_NEUTRAL_RGB = { r: 0.07, g: 0.07, b: 0.09 }
+
+/**
+ * Fill colours for the round-end curtain, as 0..1 RGB.
+ *
+ * A single winner uses that team's palette colour (TEAM_RGB / TEAM_HEX:
+ * red #FF7577, blue #6A99FC, green #4FD68C, yellow #FFE04A).
+ * A tie or draw uses equal vertical stripes of every leading team, in
+ * team-id order (red, blue, green, yellow). A 3- or 4-way tie, including
+ * a zero-score board, follows the same rule. An empty leader list falls
+ * back to the original dark ink.
+ */
+export function curtainFillRgbs(leaders: readonly number[]): Array<{ r: number; g: number; b: number }> {
+  const cols: Array<{ r: number; g: number; b: number }> = []
+  for (const t of leaders) {
+    if (!isPlayingTeam(t)) continue
+    const c = TEAM_RGB[t]
+    if (c) cols.push({ r: c.r, g: c.g, b: c.b })
+  }
+  return cols.length > 0 ? cols : [CURTAIN_NEUTRAL_RGB]
+}
 
 export type CurtainPhase = 'idle' | 'down' | 'cover' | 'up'
 

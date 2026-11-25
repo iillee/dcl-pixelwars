@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs'
 import {
   CURTAIN_COVER_MIN_S,
   CURTAIN_DOWN_S,
+  CURTAIN_NEUTRAL_RGB,
   CURTAIN_READY_CAP_S,
   CURTAIN_UP_S,
   abortRoundCurtain,
   advanceCurtain,
   curtainDrop,
   curtainDropAt,
+  curtainFillRgbs,
   curtainPhase,
   easeCurtain,
   isCurtainBlockingDismiss,
@@ -20,11 +22,33 @@ import {
   resetCurtain,
   startRoundCurtain,
 } from '../src/shared/roundCurtain'
+import { Team, TEAM_RGB } from '../src/shared/team'
 
 function fail(msg: string): never {
   console.error('✗ ' + msg)
   process.exit(1)
 }
+
+function sameRgb(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): boolean {
+  return a.r === b.r && a.g === b.g && a.b === b.b
+}
+
+const redFill = curtainFillRgbs([Team.Red])
+if (redFill.length !== 1 || !sameRgb(redFill[0], TEAM_RGB[Team.Red])) fail('a red win should fill with TEAM_RGB red')
+const blueFill = curtainFillRgbs([Team.Blue])
+if (blueFill.length !== 1 || !sameRgb(blueFill[0], TEAM_RGB[Team.Blue])) fail('a blue win should fill with TEAM_RGB blue')
+const greenFill = curtainFillRgbs([Team.Green])
+if (greenFill.length !== 1 || !sameRgb(greenFill[0], TEAM_RGB[Team.Green])) fail('a green win should fill with TEAM_RGB green')
+const yellowFill = curtainFillRgbs([Team.Yellow])
+if (yellowFill.length !== 1 || !sameRgb(yellowFill[0], TEAM_RGB[Team.Yellow])) fail('a yellow win should fill with TEAM_RGB yellow')
+const tieFill = curtainFillRgbs([Team.Red, Team.Blue])
+if (tieFill.length !== 2 || !sameRgb(tieFill[0], TEAM_RGB[Team.Red]) || !sameRgb(tieFill[1], TEAM_RGB[Team.Blue])) {
+  fail('a two-way tie should split the curtain into the leading team colours')
+}
+const fourFill = curtainFillRgbs([Team.Red, Team.Blue, Team.Green, Team.Yellow])
+if (fourFill.length !== 4) fail('a four-way tie should stripe every team colour')
+const fallback = curtainFillRgbs([])
+if (fallback.length !== 1 || !sameRgb(fallback[0], CURTAIN_NEUTRAL_RGB)) fail('no leaders should fall back to the original dark ink')
 
 resetCurtain()
 const t0 = 1_000_000
@@ -117,6 +141,12 @@ if (!mask.includes('CURTAIN_BLEED') || !mask.includes('pointerFilter:')) {
   fail('the mask should bleed past phone safe areas and block pointers')
 }
 if (mask.includes('SUMMARY_TITLE_BG')) fail('keep the mask color local so verify-summary stays valid')
+if (!mask.includes('curtainFillRgbs') || !mask.includes('CURTAIN_LIP') || !mask.includes('Color4.White()')) {
+  fail('the mask should use curtainFillRgbs and keep the white lip')
+}
+if (!ui.includes('RoundCurtainMask teams={leaders}') || !ui.includes('isCurtainIdle()') || !ui.includes('SUMMARY_INK')) {
+  fail('the title should go dark on the team-colored curtain, and the mask should receive the leaders')
+}
 
 const server = readFileSync(new URL('../src/server/server.ts', import.meta.url), 'utf8')
 if (server.includes('summaryWait') || server.includes('CURTAIN_DOWN_S')) {

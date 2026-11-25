@@ -1,5 +1,6 @@
 import { SplashScreen } from "./client/splash"
 import { RoundCurtainMask, summarySlideY } from './client/roundCurtainUi'
+import { isCurtainIdle } from './shared/roundCurtain'
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
@@ -395,10 +396,19 @@ function HeadlineRow(props: { text: string; font: number }) {
   const words = props.text.trim().split(/\s+/).filter(Boolean)
   const gap = Math.max(2, props.font * TITLE_WORD_GAP)
   const h = props.font * 1.2
+  // Team-colored words vanish on a same-color curtain, and white "WINS!"
+  // fails contrast on every TEAM_RGB fill. While the mask is up, use the
+  // dark summary ink with a light halo. After it retracts, the original
+  // team-coloured title and dark shadow return over the lobby.
+  const onCurtain = !isCurtainIdle()
   const ink = (w: string) => {
+    if (onCurtain) return SUMMARY_INK
     const tok = w.replace(/!$/, '')
     return tok === 'RED' ? BAR_RED : tok === 'BLUE' ? BAR_BLUE : tok === 'GREEN' ? BAR_GREEN : tok === 'YELLOW' ? BAR_YELLOW : SUMMARY_TITLE_FG
   }
+  const shadowCol = onCurtain
+    ? Color4.create(1, 1, 1, 0.88)
+    : Color4.create(0.04, 0.04, 0.06, 0.92)
   const wordRow = (offset: number, shadow: boolean) => (
     <UiEntity uiTransform={{
       positionType: offset ? 'absolute' : 'relative',
@@ -410,7 +420,7 @@ function HeadlineRow(props: { text: string; font: number }) {
         <Label
           value={w}
           fontSize={props.font}
-          color={shadow ? Color4.create(0.04, 0.04, 0.06, 0.92) : ink(w)}
+          color={shadow ? shadowCol : ink(w)}
           textAlign="middle-center"
           textWrap="nowrap"
           uiTransform={{ width: Math.max(textWSafe(w, props.font), 4), height: h, flexShrink: 0, margin: { left: i === 0 ? 0 : gap } }}
@@ -1093,9 +1103,11 @@ export const uiMenu = () => (
       const cv = canvasSize()
       const slide = summarySlideY(cv.h)
       if (p < 0 && slide === 0) return null
+      const b = getBanner()
+      const leaders = leadingTeams({ red: b.red, blue: b.blue, green: b.green, yellow: b.yellow, total: b.total })
       return (
         <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 }, pointerFilter: 'none', overflow: 'visible' }}>
-          <RoundCurtainMask />
+          <RoundCurtainMask teams={leaders} />
           {p >= 0 ? (
             <UiEntity uiTransform={{ width: '100%', height: '100%', positionType: 'absolute', position: { top: slide, left: 0 }, pointerFilter: 'none' }}>
               {RoundSummary(p)}

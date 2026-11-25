@@ -2,17 +2,22 @@
  * Full-screen mask that slides down from the top at round end, covering the
  * messy lobby rebuild, then retracts once the floor is ready. The win summary
  * is a sibling drawn on top and stays after the mask lifts.
+ *
+ * The fill is the winning team's palette colour. A tie is a vertical split of
+ * every leading team; the white lip on the leading edge is unchanged.
  */
 import ReactEcs, { UiEntity } from '@dcl/sdk/react-ecs'
 import { Color4 } from '@dcl/sdk/math'
 import { engine, UiCanvasInformation } from '@dcl/sdk/ecs'
-import { CURTAIN_BLEED, curtainDrop, curtainPhase } from '../shared/roundCurtain'
+import { CURTAIN_BLEED, curtainDrop, curtainFillRgbs, curtainPhase } from '../shared/roundCurtain'
 
-/** Same dark ink as the summary title, so team-colored words stay opaque. */
-const CURTAIN_MASK = Color4.create(0.07, 0.07, 0.09, 1)
 /** Light lip at the leading edge — same family as the hotbar / summary panels. */
 const CURTAIN_LIP = Color4.White()
 const LIP_H = 10
+
+function rgb4(c: { r: number; g: number; b: number }): Color4 {
+  return Color4.create(c.r, c.g, c.b, 1)
+}
 
 function canvasSize(): { w: number; h: number } {
   const c = UiCanvasInformation.getOrNull(engine.RootEntity)
@@ -27,7 +32,7 @@ export function summarySlideY(canvasH: number, now = Date.now()): number {
   return (curtainDrop(now) - 1) * canvasH
 }
 
-export function RoundCurtainMask() {
+export function RoundCurtainMask(props: { teams?: readonly number[] } = {}) {
   const drop = curtainDrop()
   if (drop <= 0) return null
   const cv = canvasSize()
@@ -35,6 +40,8 @@ export function RoundCurtainMask() {
   const left = -CURTAIN_BLEED
   const width = cv.w + CURTAIN_BLEED * 2
   const height = cv.h + CURTAIN_BLEED * 2
+  const fills = curtainFillRgbs(props.teams ?? [])
+  const split = fills.length > 1
   return (
     <UiEntity
       uiTransform={{
@@ -52,10 +59,26 @@ export function RoundCurtainMask() {
           position: { top, left },
           width,
           height,
+          flexDirection: 'row',
           pointerFilter: 'block',
         }}
-        uiBackground={{ color: CURTAIN_MASK }}
-      />
+        uiBackground={split ? undefined : { color: rgb4(fills[0]) }}
+      >
+        {split
+          ? fills.map((c) => (
+              <UiEntity
+                uiTransform={{
+                  flexGrow: 1,
+                  width: `${100 / fills.length}%`,
+                  height: '100%',
+                  flexShrink: 0,
+                  pointerFilter: 'block',
+                }}
+                uiBackground={{ color: rgb4(c) }}
+              />
+            ))
+          : null}
+      </UiEntity>
       <UiEntity
         uiTransform={{
           positionType: 'absolute',
