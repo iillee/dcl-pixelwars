@@ -20,7 +20,7 @@
 
 import { Storage } from '@dcl/sdk/server'
 import { LeaderboardState, leaderboardStateEntity } from '../shared/components'
-import { hiddenLeaderboardName } from '../shared/leaderboardHide'
+import { excludedLeaderboardUser } from '../shared/leaderboardHide'
 
 // ─── State ──────────────────────────────────────────────────────────
 export interface LeaderboardEntry {
@@ -34,10 +34,8 @@ export interface LeaderboardEntry {
 // same address arrives with mixed casing (e.g. checksummed vs not).
 const entries = new Map<string, LeaderboardEntry>()
 /** In-memory names for the live and end-of-round scoreboards (and Discord).
- *  Kept even when that name is left off the persisted wins board. */
+ *  Kept even when that wallet is left off the persisted wins board. */
 const displayNames = new Map<string, string>()
-/** User ids that joined under a hidden display name. Wins must not recreate the row. */
-const hiddenIds = new Set<string>()
 
 const STORAGE_KEY = 'leaderboard-v1'
 const TOP_N = 10
@@ -69,8 +67,7 @@ export async function loadFromStorage(): Promise<void> {
       const key = e.userId.toLowerCase()
       const name = typeof e.name === 'string' ? e.name : e.userId.slice(0, 8)
       if (name) displayNames.set(key, name)
-      if (hiddenLeaderboardName(name)) {
-        hiddenIds.add(key)
+      if (excludedLeaderboardUser(key)) {
         dropped++
         continue
       }
@@ -83,7 +80,7 @@ export async function loadFromStorage(): Promise<void> {
     }
     console.log(`[Leaderboard] loaded ${entries.size} entries from storage`)
     if (dropped > 0) {
-      console.log(`[Leaderboard] dropped ${dropped} hidden name(s)`)
+      console.log(`[Leaderboard] dropped ${dropped} excluded wallet(s)`)
       await saveToStorage()
     }
     publish()
@@ -97,7 +94,9 @@ export async function loadFromStorage(): Promise<void> {
 /** Persist current state. Called on round boundaries. */
 export async function saveToStorage(): Promise<void> {
   try {
-    for (const key of [...entries.keys()]) if (isBotId(key)) entries.delete(key)
+    for (const key of [...entries.keys()]) {
+      if (isBotId(key) || excludedLeaderboardUser(key)) entries.delete(key)
+    }
     const arr = [...entries.values()]
     await Storage.set(STORAGE_KEY, JSON.stringify(arr))
     console.log(`[Leaderboard] persisted ${arr.length} entries`)
@@ -116,13 +115,8 @@ export async function saveToStorage(): Promise<void> {
 export function incrementPaint(userId: string, count: number): void {
   if (count <= 0 || isBotId(userId)) return
   const key = userId.toLowerCase()
-  if (hiddenIds.has(key)) return
+  if (excludedLeaderboardUser(key)) return
   const e = entries.get(key)
-  if (e && hiddenLeaderboardName(e.name)) {
-    hiddenIds.add(key)
-    entries.delete(key)
-    return
-  }
   if (e) {
     e.cellsPainted += count
   } else {
@@ -138,20 +132,18 @@ export function incrementPaint(userId: string, count: number): void {
 /**
  * Capture a player's display name. Client sends this once on join with
  * their avatar name (or falls back to a short address). The name is
- * always kept for the live and end-of-round scoreboards. A hidden name
- * is left off the persisted wins board and is not recreated later.
+ * always kept for the live and end-of-round scoreboards. An excluded
+ * test wallet is left off the persisted wins board and is not recreated.
  */
 export function updateName(userId: string, name: string): void {
   if (!name || typeof name !== 'string' || isBotId(userId)) return
   const key = userId.toLowerCase()
   const trimmed = name.slice(0, 32)  // display cap
   displayNames.set(key, trimmed)
-  if (hiddenLeaderboardName(trimmed)) {
-    hiddenIds.add(key)
+  if (excludedLeaderboardUser(key)) {
     if (entries.delete(key)) publish()
     return
   }
-  if (hiddenIds.has(key)) return
   const e = entries.get(key)
   if (e) {
     if (e.name !== trimmed) {
@@ -166,13 +158,8 @@ export function updateName(userId: string, name: string): void {
 export function recordWin(userId: string): void {
   if (!userId || isBotId(userId)) return
   const key = userId.toLowerCase()
-  if (hiddenIds.has(key)) return
+  if (excludedLeaderboardUser(key)) return
   const e = entries.get(key)
-  if (e && hiddenLeaderboardName(e.name)) {
-    hiddenIds.add(key)
-    entries.delete(key)
-    return
-  }
   if (e) e.wins += 1
   else entries.set(key, { userId: key, name: shortAddress(key), cellsPainted: 0, wins: 1 })
 }
@@ -186,10 +173,10 @@ export function getName(userId: string): string | null {
   return n && !n.startsWith('0x') && !n.includes('…') ? n : null
 }
 
-/** Top players who have at least one win, highest first. Hidden names stay off this board. */
+/** Top players who have at least one win, highest first. Excluded wallets stay off this board. */
 export function getTopN(n: number = TOP_N): LeaderboardEntry[] {
   return [...entries.values()]
-    .filter(e => !isBotId(e.userId) && e.wins > 0 && !hiddenIds.has(e.userId) && !hiddenLeaderboardName(e.name))
+    .filter(e => !isBotId(e.userId) && e.wins > 0 && !excludedLeaderboardUser(e.userId))
     .sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
     .slice(0, n)
 }
