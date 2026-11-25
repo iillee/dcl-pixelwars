@@ -93,7 +93,7 @@ import { exitOverview, pinOverviewClosed } from './overviewCamera'
 import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
 
 /** Flip on when a replacement carry loop is ready. The mp3 and start/stop path stay in place. */
-const RESCUE_CARRY_SFX_ENABLED = true
+const RESCUE_CARRY_SFX_ENABLED = false
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
@@ -164,6 +164,12 @@ let floaterPending = false
 /** False from a home teleport until we're above the fall line again (or REARM_S). */
 let rearm = true
 let rearmLeft = 0
+/** Highest feet Y seen during the current rearm hold, to tell a new fall from a stale post-teleport pose. */
+let rearmPeakY = Number.NEGATIVE_INFINITY
+/** Last [Rescue] check decision, so a held skip does not spam the console. */
+let lastRescueCheck = ''
+/** Hidden, reusable local cloud. Built at init and shown/hidden instead of being recreated. */
+let cloudPool: Floater | null = null
 /** Tweened physics box. Its center is the transform; the surface is PAD_THICK/2 above that. */
 let pad: Entity | null = null
 /** Unit-scale child on the top face so the floater doesn't inherit the pad's scale. */
@@ -324,10 +330,30 @@ function placeFloater(yOff: number, scale: number, world: Vec | null, localXZ?: 
   else if (world) tr.position = Vector3.create(world.x + x, world.y + yOff, world.z + z)
 }
 
+function hidePooledCloud(): void {
+  if (!cloudPool) return
+  stopCloudFace(cloudPool.root)
+  if (Tween.has(cloudPool.root)) Tween.deleteFrom(cloudPool.root)
+  // Unparent before the pad is removed, otherwise destroying the anchor can take the cloud with it.
+  Transform.createOrReplace(cloudPool.root, {
+    position: Vector3.create(0, -2000, 0),
+    scale: Vector3.create(0.01, 0.01, 0.01),
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+  })
+}
+
+function ensureCloud(): Floater {
+  if (cloudPool) return cloudPool
+  const root = engine.addEntity()
+  Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
+  cloudPool = { root, ents: cloudParts(root), mode: 'in', peelLeft: 0, waitLeft: 0 }
+  stopCloudFace(root)
+  return cloudPool
+}
+
 function despawnFloater(): void {
   if (!floater) return
-  stopCloudFace(floater.root)
-  for (let i = floater.ents.length - 1; i >= 0; i--) engine.removeEntity(floater.ents[i])
+  hidePooledCloud()
   floater = null
 }
 
@@ -390,6 +416,7 @@ function spawnPad(hold: Vec): void {
   })
   pad = root
   anchor = hang
+  console.log(`[Rescue] pad placed y=${(hold.y - thick / 2).toFixed(2)} surface=${hold.y.toFixed(2)}`)
 }
 
 /** World position of the floater root. Anchor world scale is 1 and rotation stays identity. */
@@ -594,18 +621,26 @@ function tickCloudFaces(dt: number): void {
   }
 }
 
-/** Local cloud parented to the pad: body, face, and a static line. No character model. */
+/** Local cloud parented to the pad: body, face, and a static line. No character model. Reuses the init-preloaded entity. */
 function spawnFloater(): void {
   floaterPending = false
   if (!anchor) return
-  despawnFloater()
-  const root = engine.addEntity()
-  Transform.create(root, {
+  const f = ensureCloud()
+  if (Tween.has(f.root)) Tween.deleteFrom(f.root)
+  Transform.createOrReplace(f.root, {
     parent: anchor,
     position: Vector3.create(0, FALL_RESCUE.HANG_Y + FALL_RESCUE.APPROACH_EXTRA_Y, 0),
     scale: Vector3.create(0.2, 0.2, 0.2),
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
   })
-  floater = { root, ents: cloudParts(root), mode: 'in', peelLeft: 0, waitLeft: 0 }
+  // ents: root, spin, body, normal, blink, laugh, line, optional bead
+  startCloudFace(f.root, f.ents[3], f.ents[4], f.ents[5])
+  f.mode = 'in'
+  f.peelLeft = 0
+  f.waitLeft = 0
+  floater = f
+  const at = playerPos()
+  console.log(`[Rescue] grab cloud shown y=${at ? at.y.toFixed(2) : 'n/a'}`)
 }
 
 /** Constant-speed leg. No start point, so replacing it does not snap the entity. */
@@ -935,6 +970,8 @@ function finish(how: FallRescueEnd, why: string): void {
   if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else if (rode) console.log(`[FallRescue] mobile camera ride arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
+  const endAt = playerPos()
+  console.log(`[Rescue] end ${how} y=${endAt ? endAt.y.toFixed(2) : 'n/a'} (${why})`)
   onEnd(how)
   assignedHome = null
   // After onEnd's exitOverview, so a mobile overview does not steal the ride
@@ -994,6 +1031,7 @@ function begin(p: Vec): void {
   console.log(
     `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, ${how} in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
   )
+  console.log(`[Rescue] start y=${p.y.toFixed(2)} line=${line.toFixed(2)} pad=${hold.y.toFixed(2)}`)
 }
 
 function tickPhase(dt: number): void {
@@ -1008,6 +1046,8 @@ function tickPhase(dt: number): void {
       // Lock the cloud over where they stand, then rise. Chasing XZ during the
       // carry copied pad-vs-avatar noise onto the cloud every frame.
       phase = 'carry'
+      const carryAt = playerPos()
+      console.log(`[Rescue] carry y=${carryAt ? carryAt.y.toFixed(2) : 'n/a'}`)
       if (RESCUE_CARRY_SFX_ENABLED) startRescueCarryLoop()
       if (floater) {
         floater.mode = 'hang'
@@ -1230,15 +1270,29 @@ function tick(dt: number): void {
   if (!rearm) {
     if (rearmLeft > 0) rearmLeft -= step
     const y = p?.y
+    if (y !== undefined) rearmPeakY = Math.max(rearmPeakY, y)
     if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
   }
   if (phase !== 'idle') tickPhase(step)
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
-  if (p && phase === 'idle' && rearm) {
-    // Feet crossing the visible sea. Phase !== idle and rearm prevent a second trip.
-    if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) begin(p)
+  if (p && phase === 'idle') {
+    // Height test, not an edge crossing, so a skipped frame still trips. Rearm
+    // only skips a stale post-teleport pose that never rose above the line.
+    if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) {
+      const go = rearm || rearmPeakY >= line
+      const kind = go ? 'start' : 'skip-rearm'
+      if (kind === 'start' || lastRescueCheck !== kind) {
+        lastRescueCheck = kind
+        console.log(
+          `[Rescue] check y=${p.y.toFixed(2)} line=${line.toFixed(2)} phase=${phase} rearm=${rearm} peak=${Number.isFinite(rearmPeakY) ? rearmPeakY.toFixed(2) : 'n/a'} -> ${kind}`,
+        )
+      }
+      if (go) begin(p)
+    } else {
+      lastRescueCheck = ''
+    }
   }
   // Sample after the trip so the lead uses the fall, not the frame we just caught.
   if (p && phase === 'idle') remember(p)
@@ -1248,6 +1302,9 @@ function tick(dt: number): void {
 export function holdFallLine(): void {
   rearm = false
   rearmLeft = FALL_RESCUE.REARM_S
+  const at = playerPos()
+  rearmPeakY = at ? at.y : Number.NEGATIVE_INFINITY
+  lastRescueCheck = ''
 }
 
 /** Round reset / team / initial spawn: drop the pickup, the panel, and the tween. Idempotent. */
@@ -1255,6 +1312,8 @@ export function cancelFallRescue(why: string): void {
   stopRescueCarryLoop()
   if (phase === 'idle' && !floater && !pad) return
   console.log(`[FallRescue] cancel (${why})`)
+  const cancelAt = playerPos()
+  console.log(`[Rescue] cancel y=${cancelAt ? cancelAt.y.toFixed(2) : 'n/a'} (${why})`)
   sendRescueEnd()
   localCatch = null
   assignedHome = null
@@ -1277,15 +1336,10 @@ export function cancelFallRescue(why: string): void {
   setFallMoveLock('open')
 }
 
-/** Hidden instances so the first trip does not hitch while the cloud GLBs decode. */
+/** Build the real local cloud once, hidden, so the first trip reuses already-decoded GLBs. */
 function preloadRescueCloud(): void {
-  const root = engine.addEntity()
-  Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
-  for (const src of [CLOUD_BODY_SRC, CLOUD_FACE_SRC, CLOUD_FACE_BLINK_SRC, CLOUD_FACE_LAUGH_SRC]) {
-    const e = engine.addEntity()
-    Transform.create(e, { parent: root })
-    GltfContainer.create(e, { src, visibleMeshesCollisionMask: 0, invisibleMeshesCollisionMask: 0 })
-  }
+  ensureCloud()
+  console.log('[Rescue] preload cloud hidden at y=-2000')
 }
 
 /** Warm the first physics box so the trip pad is not the first MeshCollider of the session. */
@@ -1307,6 +1361,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
   preloadRescueCloud()
   preloadRescuePad()
+  console.log('[Rescue] preload cloud+pad ready')
   events.on('rescue:start', onRemoteStart)
   events.on('rescue:end', ({ who }) => clearRemote(who, 'ended'))
   engine.addSystem(tick)
