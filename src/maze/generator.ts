@@ -917,55 +917,264 @@ function fixedEdges(): Array<[string, string]> {
   return out
 }
 
-interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<string> }
+interface Net { level: Map<string, number>; ramp: Map<string, Dir>; edges: Set<string>; prefer?: { x: number; z: number }; kind?: string }
+let plantedCrossing: { x: number; z: number } | null = null
 
 
 
 
-function planCrossover(base: Set<string>): { levels: Map<string, number>; ramps: Map<string, Dir>; edges: string[]; lock: Set<string>; must: Set<string> } | null {
-  // A through-path L+1 straight with ramps at both ends, each landing on
-  // an L0 behind-cell. Any cell/orientation where that 5-cell spine fits
-  // (in bounds, off bases) is legal; the seed picks among them so the
-  // crossing is not pinned to the grid centre.
+
+function planCrossover(base: Set<string>, plateauOnly = false): { levels: Map<string, number>; ramps: Map<string, Dir>; edges: string[]; lock: Set<string>; must: Set<string>; vacate: Set<string>; prefer: { x: number; z: number }; kind: string } | null {
+  // Pick a crossing shape, then a cell and orientation, so the same
+  // ramp-up / flat deck / ramp-down hump does not land every round.
+  //   ramp-deck-ramp       — classic 5-cell spine
+  //   plateau-deck-ramp    — one end joins already-raised L+1 ground
+  //   plateau-deck-plateau — both ends join a raised run; side ramps
+  //                          drop off the wings, not the deck
+  //   ramp-over            — the crossing itself is a ramp over a
+  //                          lower perpendicular path (tile-ramp_bridgesimple)
   const freeCell = (x: number, z: number) => inBounds(x, z) && !base.has(ck(x, z))
-  type Ramp = { rx: number; rz: number; hd: Dir; bx: number; bz: number }
-  type Plan = { x: number; z: number; axis: 0 | 1; ramps: Ramp[] }
-  const plans: Plan[] = []
+  type Kind = 'ramp-deck-ramp' | 'plateau-deck-ramp' | 'plateau-deck-plateau' | 'ramp-over'
+  type Ramp = { rx: number; rz: number; hd: Dir }
+  type Cell = { x: number; z: number; l: number; must: boolean }
+  type Plan = { kind: Kind; cells: Cell[]; ramps: Ramp[]; edges: Array<[string, string]>; vacate: Array<[number, number]>; prefer: { x: number; z: number } }
+  const WEIGHT: Record<Kind, number> = {
+    'ramp-deck-ramp': 16,
+    'plateau-deck-ramp': 45,
+    'plateau-deck-plateau': 39,
+    'ramp-over': 0,
+  }
+  const byKind: Record<Kind, Plan[]> = {
+    'ramp-deck-ramp': [],
+    'plateau-deck-ramp': [],
+    'plateau-deck-plateau': [],
+    'ramp-over': [],
+  }
+  const hasCell = (cells: Cell[], x: number, z: number) => cells.some(c => c.x === x && c.z === z)
+  const addPerpLocks = (cells: Cell[], x: number, z: number, axis: 0 | 1, l: number) => {
+    const perp: Dir[] = axis === 0 ? [1, 3] : [0, 2]
+    for (const d of perp) {
+      const px = x + DX[d], pz = z + DZ[d]
+      if (hasCell(cells, px, pz)) {
+        const existing = cells.find(c => c.x === px && c.z === pz)!
+        if (existing.l > l) return false
+        continue
+      }
+      if (!freeCell(px, pz)) return false
+      cells.push({ x: px, z: pz, l, must: false })
+    }
+    return true
+  }
+  const extend = (x: number, z: number, d: Dir, n: number): Array<[number, number]> | null => {
+    const out: Array<[number, number]> = []
+    for (let i = 1; i <= n; i++) {
+      const px = x + i * DX[d], pz = z + i * DZ[d]
+      if (!freeCell(px, pz)) return null
+      out.push([px, pz])
+    }
+    return out
+  }
+
   for (const axis of [0, 1] as const) {
     const fwd: Dir = axis === 0 ? 0 : 1
     const back: Dir = axis === 0 ? 2 : 3
     for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) {
       if (!freeCell(x, z)) continue
-      const ramps: Ramp[] = [
-        { rx: x + DX[back], rz: z + DZ[back], hd: fwd, bx: x + 2 * DX[back], bz: z + 2 * DZ[back] },
-        { rx: x + DX[fwd], rz: z + DZ[fwd], hd: back, bx: x + 2 * DX[fwd], bz: z + 2 * DZ[fwd] },
-      ]
-      if (!ramps.every(r => freeCell(r.rx, r.rz) && freeCell(r.bx, r.bz))) continue
-      plans.push({ x, z, axis, ramps })
+
+      {
+        const ramps: Ramp[] = [
+          { rx: x + DX[back], rz: z + DZ[back], hd: fwd },
+          { rx: x + DX[fwd], rz: z + DZ[fwd], hd: back },
+        ]
+        const behinds: Array<[number, number]> = [
+          [x + 2 * DX[back], z + 2 * DZ[back]],
+          [x + 2 * DX[fwd], z + 2 * DZ[fwd]],
+        ]
+        if (ramps.every(r => freeCell(r.rx, r.rz)) && behinds.every(([bx, bz]) => freeCell(bx, bz))) {
+          const cells: Cell[] = [
+            { x, z, l: 1, must: true },
+            ...ramps.map(r => ({ x: r.rx, z: r.rz, l: 0, must: true })),
+            ...behinds.map(([bx, bz]) => ({ x: bx, z: bz, l: 0, must: true })),
+          ]
+          if (addPerpLocks(cells, x, z, axis, 0)) {
+            const edges: Array<[string, string]> = []
+            for (let i = 0; i < ramps.length; i++) {
+              const r = ramps[i], [bx, bz] = behinds[i]
+              edges.push([ck(x, z), ck(r.rx, r.rz)], [ck(r.rx, r.rz), ck(bx, bz)])
+            }
+            byKind['ramp-deck-ramp'].push({ kind: 'ramp-deck-ramp', cells, ramps, edges, vacate: [], prefer: { x, z } })
+          }
+        }
+      }
+
+      for (const rampDir of [fwd, back] as Dir[]) {
+        const platDir: Dir = OPP[rampDir]
+        const ramp: Ramp = { rx: x + DX[rampDir], rz: z + DZ[rampDir], hd: platDir }
+        const bx = x + 2 * DX[rampDir], bz = z + 2 * DZ[rampDir]
+        if (!freeCell(ramp.rx, ramp.rz) || !freeCell(bx, bz)) continue
+        for (const len of [1, 2]) {
+          const plats = extend(x, z, platDir, len)
+          if (!plats) continue
+          const cells: Cell[] = [
+            { x, z, l: 1, must: true },
+            { x: ramp.rx, z: ramp.rz, l: 0, must: true },
+            { x: bx, z: bz, l: 0, must: true },
+            ...plats.map(([px, pz]) => ({ x: px, z: pz, l: 1, must: true })),
+          ]
+          if (!addPerpLocks(cells, x, z, axis, 0)) continue
+          const edges: Array<[string, string]> = [
+            [ck(x, z), ck(ramp.rx, ramp.rz)],
+            [ck(ramp.rx, ramp.rz), ck(bx, bz)],
+            [ck(x, z), ck(plats[0][0], plats[0][1])],
+          ]
+          for (let i = 1; i < plats.length; i++) edges.push([ck(plats[i - 1][0], plats[i - 1][1]), ck(plats[i][0], plats[i][1])])
+          byKind['plateau-deck-ramp'].push({ kind: 'plateau-deck-ramp', cells, ramps: [ramp], edges, vacate: [], prefer: { x, z } })
+        }
+      }
+
+      for (const backLen of [1, 2]) for (const fwdLen of [1, 2]) {
+        const backPlats = extend(x, z, back, backLen)
+        const fwdPlats = extend(x, z, fwd, fwdLen)
+        if (!backPlats || !fwdPlats) continue
+        const tips: Array<[number, number]> = [backPlats[backPlats.length - 1], fwdPlats[fwdPlats.length - 1]]
+        const used = new Set<string>([ck(x, z), ...backPlats.concat(fwdPlats).map(([px, pz]) => ck(px, pz))])
+        const sides: Dir[] = axis === 0 ? [1, 3] : [0, 2]
+        const pickSide = (tx: number, tz: number): { ramp: Ramp; bx: number; bz: number } | null => {
+          for (const side of sides) {
+            const rx = tx + DX[side], rz = tz + DZ[side]
+            const bx = tx + 2 * DX[side], bz = tz + 2 * DZ[side]
+            if (!freeCell(rx, rz) || !freeCell(bx, bz)) continue
+            if (used.has(ck(rx, rz)) || used.has(ck(bx, bz))) continue
+            return { ramp: { rx, rz, hd: OPP[side] }, bx, bz }
+          }
+          return null
+        }
+        const s0 = pickSide(tips[0][0], tips[0][1])
+        if (s0) { used.add(ck(s0.ramp.rx, s0.ramp.rz)); used.add(ck(s0.bx, s0.bz)) }
+        const s1 = pickSide(tips[1][0], tips[1][1])
+        if (!s0 || !s1) continue
+        const cells: Cell[] = [
+          { x, z, l: 1, must: true },
+          ...backPlats.map(([px, pz]) => ({ x: px, z: pz, l: 1, must: true })),
+          ...fwdPlats.map(([px, pz]) => ({ x: px, z: pz, l: 1, must: true })),
+          { x: s0.ramp.rx, z: s0.ramp.rz, l: 0, must: true },
+          { x: s0.bx, z: s0.bz, l: 0, must: true },
+          { x: s1.ramp.rx, z: s1.ramp.rz, l: 0, must: true },
+          { x: s1.bx, z: s1.bz, l: 0, must: true },
+        ]
+        if (!addPerpLocks(cells, x, z, axis, 0)) continue
+        const edges: Array<[string, string]> = [
+          [ck(x, z), ck(backPlats[0][0], backPlats[0][1])],
+          [ck(x, z), ck(fwdPlats[0][0], fwdPlats[0][1])],
+          [ck(tips[0][0], tips[0][1]), ck(s0.ramp.rx, s0.ramp.rz)],
+          [ck(s0.ramp.rx, s0.ramp.rz), ck(s0.bx, s0.bz)],
+          [ck(tips[1][0], tips[1][1]), ck(s1.ramp.rx, s1.ramp.rz)],
+          [ck(s1.ramp.rx, s1.ramp.rz), ck(s1.bx, s1.bz)],
+        ]
+        for (let i = 1; i < backPlats.length; i++) edges.push([ck(backPlats[i - 1][0], backPlats[i - 1][1]), ck(backPlats[i][0], backPlats[i][1])])
+        for (let i = 1; i < fwdPlats.length; i++) edges.push([ck(fwdPlats[i - 1][0], fwdPlats[i - 1][1]), ck(fwdPlats[i][0], fwdPlats[i][1])])
+        byKind['plateau-deck-plateau'].push({ kind: 'plateau-deck-plateau', cells, ramps: [s0.ramp, s1.ramp], edges, vacate: [], prefer: { x, z } })
+      }
+
+      if (WEIGHT['ramp-over'] > 0) {
+            for (const hd of [fwd, back] as Dir[]) {
+              const lx = x - DX[hd], lz = z - DZ[hd]
+              const hx = x + DX[hd], hz = z + DZ[hd]
+              if (!freeCell(lx, lz) || !freeCell(hx, hz)) continue
+              const perp: Dir[] = axis === 0 ? [1, 3] : [0, 2]
+              if (!perp.every(d => freeCell(x + DX[d], z + DZ[d]))) continue
+              // Landing attachment continues forward so it does not sit on a perp door cell.
+              const srx = hx + DX[hd], srz = hz + DZ[hd]
+              const sbx = hx + 2 * DX[hd], sbz = hz + 2 * DZ[hd]
+              if (!freeCell(srx, srz) || !freeCell(sbx, sbz)) continue
+              const used = new Set<string>([ck(x, z), ck(lx, lz), ck(hx, hz), ck(srx, srz), ck(sbx, sbz)])
+              const doorCells: Cell[] = []
+              const doorRamps: Ramp[] = []
+              const doorEdges: Array<[string, string]> = []
+              let doorsOk = true
+              for (const d of perp) {
+                const cx = x + DX[d], cz = z + DZ[d]
+                let attached = false
+                for (const ad of [fwd, back, d] as Dir[]) {
+                  const rx = cx + DX[ad], rz = cz + DZ[ad]
+                  const bx = rx + DX[ad], bz = rz + DZ[ad]
+                  const ids = [ck(cx, cz), ck(rx, rz), ck(bx, bz)]
+                  if (!freeCell(rx, rz) || !freeCell(bx, bz)) continue
+                  if (ids.some(id => used.has(id) && id !== ck(cx, cz))) continue
+                  if (Math.abs(rx - x) + Math.abs(rz - z) === 1) continue // no ramp adjacent to the crossing
+                  doorCells.push({ x: cx, z: cz, l: -1, must: true }, { x: rx, z: rz, l: -1, must: true }, { x: bx, z: bz, l: 0, must: true })
+                  doorRamps.push({ rx, rz, hd: ad })
+                  doorEdges.push([ck(cx, cz), ck(rx, rz)], [ck(rx, rz), ck(bx, bz)])
+                  for (const id of ids) used.add(id)
+                  attached = true
+                  break
+                }
+                if (!attached) { doorsOk = false; break }
+              }
+              if (!doorsOk) continue
+              const cells: Cell[] = [
+                { x, z, l: 0, must: true },
+                { x: lx, z: lz, l: 0, must: true },
+                { x: hx, z: hz, l: 1, must: true },
+                { x: srx, z: srz, l: 0, must: true },
+                { x: sbx, z: sbz, l: 0, must: true },
+                ...doorCells,
+              ]
+              byKind['ramp-over'].push({
+                kind: 'ramp-over',
+                cells,
+                ramps: [{ rx: x, rz: z, hd }, { rx: srx, rz: srz, hd: OPP[hd] }, ...doorRamps],
+                edges: [
+                  [ck(x, z), ck(lx, lz)],
+                  [ck(x, z), ck(hx, hz)],
+                  [ck(hx, hz), ck(srx, srz)],
+                  [ck(srx, srz), ck(sbx, sbz)],
+                  ...doorEdges,
+                ],
+                vacate: [],
+                prefer: { x, z },
+              })
+            }
+      }
     }
   }
-  if (!plans.length) return null
-  const p = plans[Math.floor(rand() * plans.length)]
+
+  const available = (Object.keys(WEIGHT) as Kind[]).filter(k => {
+    if (!byKind[k].length || WEIGHT[k] <= 0) return false
+    if (plateauOnly && k === 'ramp-deck-ramp') return false
+    return true
+  })
+  if (!available.length) return null
+  const total = available.reduce((s, k) => s + WEIGHT[k], 0)
+  let roll = rand() * total
+  let kind: Kind = available[available.length - 1]
+  for (const k of available) {
+    roll -= WEIGHT[k]
+    if (roll < 0) { kind = k; break }
+  }
+  const bag = byKind[kind]
+  const p = bag[Math.floor(rand() * bag.length)]
   const levels = new Map<string, number>()
   const ramps = new Map<string, Dir>()
   const edges: string[] = []
   const lock = new Set<string>()
   const must = new Set<string>()
-  const setLv = (a: number, b: number, l: number, keep = true) => { const c = ck(a, b); levels.set(c, l); lock.add(c); if (keep) must.add(c) }
-  setLv(p.x, p.z, 1)
-  for (const r of p.ramps) {
-    setLv(r.rx, r.rz, 0)
-    setLv(r.bx, r.bz, 0)
-    ramps.set(ck(r.rx, r.rz), r.hd)
-    edges.push(ek(ck(p.x, p.z), ck(r.rx, r.rz)))
-    edges.push(ek(ck(r.rx, r.rz), ck(r.bx, r.bz)))
+  const vacate = new Set<string>(p.vacate.map(([vx, vz]) => ck(vx, vz)))
+  for (const c of p.cells) {
+    const id = ck(c.x, c.z)
+    if (vacate.has(id)) continue
+    levels.set(id, c.l)
+    lock.add(id)
+    if (c.must) must.add(id)
   }
-  return { levels, ramps, edges, lock, must }
+  for (const r of p.ramps) ramps.set(ck(r.rx, r.rz), r.hd)
+  for (const [a, b] of p.edges) edges.push(ek(a, b))
+  return { levels, ramps, edges, lock, must, vacate, prefer: p.prefer, kind: p.kind }
 }
 
-function netAttempt(forceCrossover = false): Net | null {
+function netAttempt(forceCrossover = false, plateauOnly = false): Net | null {
   const base = new Set<string>(baseCells(1).concat(baseCells(2)).map(([x, z]) => ck(x, z)))
-  const xover = forceCrossover ? planCrossover(base) : null
+  const xover = forceCrossover ? planCrossover(base, plateauOnly) : null
   if (forceCrossover && !xover) return null
   const fixed = fixedEdges()
   const protectedCells = new Set<string>(base)
@@ -1018,12 +1227,13 @@ function netAttempt(forceCrossover = false): Net | null {
     }
   }
   // 2. Ramps.
+
   const ramp = new Map<string, Dir>()
   const maxRamps = SKY_SYMMETRIC ? Math.max(4, 2 * Math.round((3 + Math.floor(rand() * 5)) * NET_SCALE)) // 8×8: 6–14, 6×6: 4–8
     : 5 + Math.floor(rand() * 4) // asymmetric: 5–8 (each level region needs ≥2 to avoid dead ends)
   const cands: Array<[string, Dir]> = []
   for (const [c, l] of level) {
-    if (protectedCells.has(c) || locked.has(c) || (xover && xover.ramps.has(c))) continue
+    if (protectedCells.has(c) || locked.has(c) || (xover && (xover.ramps.has(c) || xover.vacate.has(c)))) continue
     const [x, z] = c.split(',').map(Number)
     for (const d of ALL_DIRS) {
       const hx = x + DX[d], hz = z + DZ[d], lx = x - DX[d], lz = z - DZ[d]
@@ -1061,14 +1271,15 @@ function netAttempt(forceCrossover = false): Net | null {
   const edges = new Set<string>()
   const fixedSet = new Set<string>(fixed.map(([a, b]) => ek(a, b)))
   for (const e of fixedSet) edges.add(e)
+  const vacated = xover ? xover.vacate : new Set<string>()
   for (let x = 0; x < GRID_W; x++) for (let z = 0; z < GRID_H; z++) {
     const c = ck(x, z)
-    if (base.has(c)) continue
+    if (base.has(c) || vacated.has(c)) continue
     for (const d of [0, 1] as Dir[]) {
       const nx = x + DX[d], nz = z + DZ[d]
       if (!inBounds(nx, nz)) continue
       const n = ck(nx, nz)
-      if (base.has(n)) continue
+      if (base.has(n) || vacated.has(n)) continue
       const rc = ramp.get(c), rn = ramp.get(n)
       if (rc === undefined && rn === undefined) {
         if (level.get(c) === level.get(n)) edges.add(ek(c, n))
@@ -1088,6 +1299,7 @@ function netAttempt(forceCrossover = false): Net | null {
   }
   // 4. Prune to 2-core.
   const active = new Set<string>(level.keys())
+  for (const c of vacated) active.delete(c)
   const nbrs = (c: string) => {
     const [x, z] = c.split(',').map(Number)
     const out: string[] = []
@@ -1242,7 +1454,7 @@ function netAttempt(forceCrossover = false): Net | null {
   for (const c of active) { lv.set(c, level.get(c)!); if (ramp.has(c)) rp.set(c, ramp.get(c)!) }
   for (const e of edges) { const [a, b] = e.split('|'); if (active.has(a) && active.has(b)) es.add(e) }
   if (!netTwoEdgeConnected(active, es, start)) return null
-  return { level: lv, ramp: rp, edges: es }
+  return { level: lv, ramp: rp, edges: es, prefer: xover?.prefer, kind: xover?.kind }
 }
 
 /** Put a network on the grid. False if it fails any check. */
@@ -1348,16 +1560,23 @@ function layBaseLine(): void {
   if (!baseLineFits()) return
   usedFallback = false
   let best: Net | null = null, bestScore = -1, found = 0, bestSlots = 0
-  // Prefer a planted through-path crossover (cell and orientation chosen
-  // by the seed), then fall back to the ordinary net search. Keep
+  plantedCrossing = null
+  // Prefer a planted through-path crossover (shape, cell and orientation
+  // chosen by the seed), then fall back to the ordinary net search. Keep
   // searching past NET_CANDIDATES until one realisable underpass slot is
   // found (capped by NET_ATTEMPTS). Every accepted net is 2-edge-connected.
   const XOVER_TRIES = Math.floor(NET_ATTEMPTS * 0.85)
+  // After a classic ramp-deck-ramp realises, keep a short attempt budget so a
+  // plateau crossing can still win the seed.
+  const CLASSIC_EXTRA = 16
+  const SEARCH_BUDGET_MS = 280
+  let classicAt = -1
+  const t0 = Date.now()
   for (let i = 0; i < NET_ATTEMPTS && (found < NET_CANDIDATES || bestSlots === 0); i++) {
     const forced = i < XOVER_TRIES
-    let n = netAttempt(forced)
+    let n = netAttempt(forced, classicAt >= 0)
     if (!n && forced) n = netAttempt(false)
-    if (!n || !layNet(n)) continue
+    if (!n) continue
     const lv = new Set(n.level.values())
     if (!lv.has(1) || !lv.has(-1)) continue // want all three levels
     // A planted crossover spine uses several cells as deg-2 through-paths,
@@ -1366,17 +1585,27 @@ function layBaseLine(): void {
     if (netJunctions(n) < jMin) continue
     if (!verticalOk(n)) { vertMisses++; continue } // asymmetric: real height every round
     if ([...n.level.keys()].length - 2 < NET_MIN_COVERAGE * (GRID_W * GRID_H - 2)) continue // verify's coverage gate
+    // Cheap net checks first so failed verticality / coverage / junctions
+    // do not pay for laying the grid.
+    if (!layNet(n)) continue
     if (teleportPairs().length !== 1) { tpMisses++; continue } // needs a valid turn/fork/cross teleporter pair
     if (!SKY_SYMMETRIC && !fairnessOk()) { fairMisses++; continue } // asymmetric: RED/BLUE must be on equal footing
     found++
     const slots = countRealisableUnderpasses(2)
     const sc = netScore(n) + rand() * NET_SCORE_JITTER + (slots > 0 ? 10000 : 0) + (slots >= 2 ? 2000 : 0)
     if (sc > bestScore) { best = n; bestScore = sc; bestSlots = slots }
-    // Take the first realisable crossover so layouts follow the seed
-    // instead of converging on one high-scoring planted motif.
-    if (bestSlots > 0) break
+    // Take the first realisable non-classic crossover so layouts follow the
+    // seed instead of converging on one high-scoring planted motif. After a
+    // classic hump, search a little longer (CLASSIC_EXTRA) for a plateau.
+    if (bestSlots > 0) {
+      if (best?.kind && best.kind !== 'ramp-deck-ramp') break
+      if (classicAt < 0) classicAt = i
+      if (i >= classicAt + CLASSIC_EXTRA) break
+    }
+    // Cut only the extreme no-slot tail once a valid net exists.
+    if (found > 0 && Date.now() - t0 >= SEARCH_BUDGET_MS) break
   }
-  if (best && layNet(best)) return
+  if (best && layNet(best)) { plantedCrossing = best.prefer ?? null; return }
   layFallback()
 }
 
@@ -1896,7 +2125,10 @@ function countRealisableUnderpasses(cap: number): number {
 function assignBridges(): void {
   if (BRIDGE_CHANCE <= 0 || BRIDGE_MAX <= 0) return
   const slots = findBridgeSlots()
+  const isPref = (s: Slot) => !!plantedCrossing && s.upper.x === plantedCrossing.x && s.upper.z === plantedCrossing.z
   slots.sort((a, b) => {
+    const pa = isPref(a) ? 1 : 0, pb = isPref(b) ? 1 : 0
+    if (pa !== pb) return pb - pa
     const score = (s: Slot) =>
       s.doors.filter(o => o.kind === 'flat' && !o.add).length * 4
       + s.doors.filter(o => o.kind === 'flat' && o.add).length * 2
@@ -1904,6 +2136,7 @@ function assignBridges(): void {
       + s.doors.filter(o => o.kind === 'climb').length * 2
       + s.doors.filter(o => o.kind === 'build').length
       + s.doors.filter(o => o.kind === 'corridor').length
+      + (s.upper.type === 'ramp' ? 3 : 0)
     const da = score(a), db = score(b)
     if (da !== db) return db - da
     if (a.upper.order !== b.upper.order) return a.upper.order - b.upper.order
@@ -1913,7 +2146,7 @@ function assignBridges(): void {
   const chosen: Slot[] = []
   for (const s of slots) {
     if (chosen.length >= BRIDGE_MAX) break
-    if (rand() >= BRIDGE_CHANCE) continue
+    if (!isPref(s) && rand() >= BRIDGE_CHANCE) continue
     if (!realiseSlot(s)) continue
     chosen.push(s)
   }

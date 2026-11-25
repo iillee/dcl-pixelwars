@@ -259,13 +259,55 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     return rows
   }
 
+
+  const CROSSING_KINDS = ['ramp-deck-ramp', 'plateau-deck-ramp', 'plateau-deck-plateau', 'ramp-over', 'other'] as const
+  type CrossingKind = typeof CROSSING_KINDS[number]
+  function crossingKind(upper: P, byXZ: Map<string, P[]>): CrossingKind {
+    if (upper.type === 'ramp') return 'ramp-over'
+    let rampEnds = 0, plateauEnds = 0
+    for (const d of opensOf(upper)) {
+      const myY = upper.y
+      const ns = byXZ.get(`${upper.x + DXZ[d][0]},${upper.z + DXZ[d][1]}`) ?? []
+      const back = (d + 2) % 4
+      const n = ns.find(q => {
+        if (!opensOf(q).has(back)) return false
+        const theirY = q.type === 'ramp' && q.r === back ? q.y + STEP : q.y
+        return Math.abs(myY - theirY) < 0.05
+      })
+      if (!n) continue
+      if (n.type === 'ramp' && n.r === back) rampEnds++
+      else if (n.type !== 'ramp') plateauEnds++
+    }
+    if (rampEnds === 2) return 'ramp-deck-ramp'
+    if (rampEnds === 1 && plateauEnds >= 1) return 'plateau-deck-ramp'
+    if (plateauEnds === 2) return 'plateau-deck-plateau'
+    return 'other'
+  }
+  function crossingKindsOf(placed: P[]): CrossingKind[] {
+    const byXZ = new Map<string, P[]>()
+    for (const p of placed) {
+      const k = `${p.x},${p.z}`
+      const list = byXZ.get(k) ?? []
+      list.push(p)
+      byXZ.set(k, list)
+    }
+    const out: CrossingKind[] = []
+    for (const list of byXZ.values()) {
+      if (list.length !== 2) continue
+      const upper = list[0].y > list[1].y ? list[0] : list[1]
+      if (upper.bridge) out.push(crossingKind(upper, byXZ))
+    }
+    return out
+  }
+
   if (FALLBACK_NET) {
     layFallback()
     { const e = check(); if (e) fail(`fallback layout: ${e}`) }
     console.log('✓ fallback layout passes all rules')
   } else console.log(`(no frozen fallback for ${GRID_W}×${GRID_H})`)
   const N = 100
-  let pass = 0, fallbacks = 0, attempts = 0, twoWays = 0, crossovers = 0
+  let pass = 0, fallbacks = 0, attempts = 0, twoWays = 0, crossovers = 0, crossingTiles = 0
+  const crossingDist: Record<CrossingKind, number> = { 'ramp-deck-ramp': 0, 'plateau-deck-ramp': 0, 'plateau-deck-plateau': 0, 'ramp-over': 0, other: 0 }
   const shapes = new Set<string>(), cellSets = new Set<string>()
   let tiles = 0, ramps = 0, junctions = 0, cells = 0, cov = 0, loops = 0, over = 0, minJ = 99, minT = 99, maxT = 0, minR = 99, maxR = 0
   const levelUse = [0, 0, 0]
@@ -290,6 +332,7 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
     const P = getPlacedTilesInOrder()
     if (twoEdgeConnected()) twoWays++
     if (P.some(p => p.bridge)) crossovers++
+    for (const k of crossingKindsOf(P)) { crossingDist[k]++; crossingTiles++ }
     const sig = P.map(p => `${p.x},${p.z},${lvl(p.y)},${p.type},${p.r}`).sort().join('|')
     shapes.add(sig); cellSets.add(P.map(p => `${p.x},${p.z}`).sort().join('|'))
     const nr = P.filter(p => p.type === 'ramp').length
@@ -310,6 +353,11 @@ if (IS_SKY && SKY_BASES_ONLY && SKY_BASE_LINE) {
   console.log('')
   console.log(`seeds: ${pass}/${N} pass all rules (${(100 * pass / N).toFixed(1)}%); fallback used ${fallbacks}×; avg ${(attempts / N).toFixed(2)} outer attempt(s); ${ms.toFixed(1)} ms/round`)
   console.log(`two-ways-in: ${twoWays}/${pass} (${(100 * twoWays / Math.max(1, pass)).toFixed(1)}%); crossover: ${crossovers}/${pass} (${(100 * crossovers / Math.max(1, pass)).toFixed(1)}%)`)
+  {
+    const tot = Math.max(1, crossingTiles)
+    const part = (k: CrossingKind) => `${k} ${crossingDist[k]}/${crossingTiles} (${(100 * crossingDist[k] / tot).toFixed(1)}%)`
+    console.log(`crossing shapes (${crossingTiles} bridges): ${CROSSING_KINDS.map(part).join(', ')}`)
+  }
   console.log(`variety: ${shapes.size} distinct layouts, ${cellSets.size} distinct footprints; tiles ${minT}–${maxT} (avg ${(tiles / Math.max(1, pass)).toFixed(1)}), ramps ${minR}–${maxR} (avg ${(ramps / Math.max(1, pass)).toFixed(1)}), avg ${(cells / Math.max(1, pass)).toFixed(0)} paint cells`)
   const k = Math.max(1, pass)
   console.log(`intertwined: junctions avg ${(junctions / k).toFixed(1)} (min ${minJ}, gate ≥${MIN_JUNCTIONS}), coverage avg ${(100 * cov / k).toFixed(0)}% of non-base cells (gate ≥${100 * MIN_COVERAGE}%), independent loops avg ${(loops / k).toFixed(1)}, L+1 tiles overlooking unlinked lower tiles avg ${(over / k).toFixed(1)}`)
