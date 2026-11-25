@@ -93,7 +93,7 @@ import { exitOverview, pinOverviewClosed } from './overviewCamera'
 import { RESCUE_PATH, rescueCloudPose, rescueHangY } from '../shared/rescuePath'
 
 /** Flip on when a replacement carry loop is ready. The mp3 and start/stop path stay in place. */
-const RESCUE_CARRY_SFX_ENABLED = false
+const RESCUE_CARRY_SFX_ENABLED = true
 
 /** Pickup timings, carry path, and floater offsets. One place to tune in playtest. */
 export const FALL_RESCUE = {
