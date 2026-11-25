@@ -12,9 +12,9 @@ import { TEAM_RGB, isPlayingTeam } from './team'
 export const CURTAIN_DOWN_S = 0.45
 export const CURTAIN_UP_S = 0.4
 /** Longest the opaque hold may last while the lobby floor / colliders load. */
-export const CURTAIN_READY_CAP_S = 2.5
-/** Brief hold after the curtain is down so the first swap frames stay hidden. */
-export const CURTAIN_COVER_MIN_S = 0.12
+export const CURTAIN_READY_CAP_S = 5
+/** Hold after the curtain is down: at least this long, and until the lobby is ready. */
+export const CURTAIN_COVER_MIN_S = 2
 /** Virtual px the mask extends past every edge of the HUD root (phone safe areas). */
 export const CURTAIN_BLEED = 4000
 

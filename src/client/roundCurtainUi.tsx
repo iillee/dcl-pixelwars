@@ -33,7 +33,8 @@ export function RoundCurtainMask(props: { teams?: readonly number[] } = {}) {
   const drop = curtainDrop()
   if (drop <= 0) return null
   const cv = canvasSize()
-  const top = (drop - 1) * cv.h - CURTAIN_BLEED
+  // Travel by the viewport plus bottom bleed so the retract leaves the screen.
+  const top = (drop - 1) * (cv.h + CURTAIN_BLEED) - CURTAIN_BLEED
   const left = -CURTAIN_BLEED
   const width = cv.w + CURTAIN_BLEED * 2
   const height = cv.h + CURTAIN_BLEED * 2
