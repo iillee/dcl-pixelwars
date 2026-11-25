@@ -376,7 +376,22 @@ const RESCUE_VOL = 0.45
 let rescueSfxEnt: Entity | null = null
 const RESCUE_CARRY_SRC = 'assets/sounds/rescue-carry.mp3'
 const RESCUE_CARRY_VOL = 0.55
+/** The clip is ~1s with ~0.7s of trailing silence; the audible pop2 meep is ~0.29s. Retrigger near the tail so the next pop cuts off the end and there is no pause. */
+const RESCUE_CARRY_RETRIG_S = 0.22
 let rescueCarryEnt: Entity | null = null
+let rescueCarryOn = false
+let rescueCarryRetrigIn = 0
+function retriggerRescueCarry(): void {
+  if (!rescueCarryEnt) return
+  AudioSource.createOrReplace(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: true, loop: false, volume: RESCUE_CARRY_VOL, global: true, currentTime: 0 })
+}
+function tickRescueCarry(dt: number): void {
+  if (!rescueCarryOn || !rescueCarryEnt) return
+  rescueCarryRetrigIn -= dt
+  if (rescueCarryRetrigIn > 0) return
+  rescueCarryRetrigIn += RESCUE_CARRY_RETRIG_S
+  retriggerRescueCarry()
+}
 function initRescueSfx(): void {
   const pre = engine.addEntity()
   AssetLoad.create(pre, { assets: [RESCUE_SRC, RESCUE_CARRY_SRC] })
@@ -385,7 +400,8 @@ function initRescueSfx(): void {
   AudioSource.create(rescueSfxEnt, { audioClipUrl: RESCUE_SRC, playing: false, loop: false, volume: RESCUE_VOL, global: true })
   rescueCarryEnt = engine.addEntity()
   Transform.create(rescueCarryEnt, { parent: engine.CameraEntity })
-  AudioSource.create(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: false, loop: true, volume: RESCUE_CARRY_VOL, global: true })
+  AudioSource.create(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: false, loop: false, volume: RESCUE_CARRY_VOL, global: true })
+  engine.addSystem(tickRescueCarry)
 }
 export function playFallRescueSfx(): void {
   if (!rescueSfxEnt) return
@@ -394,9 +410,13 @@ export function playFallRescueSfx(): void {
 /** Loop while the local player is on the rescue cloud. Camera-parented, local only. */
 export function startRescueCarryLoop(): void {
   if (!rescueCarryEnt) return
-  AudioSource.createOrReplace(rescueCarryEnt, { audioClipUrl: RESCUE_CARRY_SRC, playing: true, loop: true, volume: RESCUE_CARRY_VOL, global: true, currentTime: 0 })
+  rescueCarryOn = true
+  rescueCarryRetrigIn = RESCUE_CARRY_RETRIG_S
+  retriggerRescueCarry()
 }
 export function stopRescueCarryLoop(): void {
+  rescueCarryOn = false
+  rescueCarryRetrigIn = 0
   if (!rescueCarryEnt) return
   const src = AudioSource.getMutableOrNull(rescueCarryEnt)
   if (src) src.playing = false

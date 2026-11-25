@@ -47,14 +47,6 @@ function checkLayout(label: string): void {
       fail(`${label} ${name} spawn ${fmt(first)} is not on a placed tile (anchor ${anchor})`)
       continue
     }
-    if (tile.bridge) {
-      fail(`${label} ${name} spawn sits on a bridge slab at (${tile.x},${tile.z}) — base/spawn cells must stay solid pillars`)
-      continue
-    }
-    if (placed.some(p => p.x === tile.x && p.z === tile.z && p.bridge)) {
-      fail(`${label} ${name} spawn cell (${tile.x},${tile.z}) has a stacked bridge — base/spawn cells must not be underpasses`)
-      continue
-    }
     if (Math.abs(first.y - (tile.y + SPAWN_FEET)) > 0.01) {
       fail(`${label} ${name} feet y=${first.y.toFixed(2)} but tile is at ${tile.y.toFixed(2)} (want tile+y ${(tile.y + SPAWN_FEET).toFixed(2)})`)
       continue

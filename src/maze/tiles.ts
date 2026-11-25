@@ -69,14 +69,3 @@ export const highDirAt = (t: TileType, r: number): Dir | null => {
     ? rotDir(def.rampHighDir, r)
     : null
 }
-
-/** Visual GLB for a placed tile. Bridge swaps are cosmetic: the upper type
- *  may shrink to an end when a climb-in ramp is converted into a lower door,
- *  but the simple slab is still used so no pillar cuts the lower path.
- *  Arched GLBs still have ~200 m legs and are not used over a corridor. */
-export function tileModel(p: { type: TileType; bridge?: boolean }): string {
-  if (p.bridge && p.type === 'ramp') return 'assets/models/tile-ramp_bridgesimple.glb'
-  if (p.bridge) return 'assets/models/tile-straight_bridgesimple.glb'
-  return TILES[p.type].model
-}
-

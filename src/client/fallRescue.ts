@@ -159,6 +159,8 @@ let onEnd: (how: FallRescueEnd) => void = () => {}
 let phase: Phase = 'idle'
 let phaseLeft = 0
 let floater: Floater | null = null
+/** Spawn the cloud on the next grab tick so the first-trip GLB hitch cannot run on the same frame the pad collider is created. */
+let floaterPending = false
 /** False from a home teleport until we're above the fall line again (or REARM_S). */
 let rearm = true
 let rearmLeft = 0
@@ -352,16 +354,21 @@ function despawnPad(): void {
  * its full window again. After that the pad stays put so the rise is clean.
  */
 function seatIfMissed(p: Vec): void {
-  if (padReseats >= 2 || phase !== 'grab' || !pad) return
+  if (phase !== 'grab' || !pad) return
   const surface = surfaceNow()
   if (!surface) return
   if (p.y >= surface.y - FALL_RESCUE.PAD_THICK) return
-  padReseats++
   const top = p.y - FALL_RESCUE.CATCH_MIN_DROP
   const tf = Transform.getMutable(pad)
   tf.position = Vector3.create(p.x, top - FALL_RESCUE.PAD_THICK / 2, p.z)
-  trippedAt = Date.now()
-  phaseLeft = FALL_RESCUE.GRAB_S
+  // The first trip can hitch long enough to fall past two reseats and hit the
+  // bottom. Keep the pad under the feet for the whole grab, but only restart
+  // the grab window twice so the rise still begins and does not stutter.
+  if (padReseats < 2) {
+    trippedAt = Date.now()
+    phaseLeft = FALL_RESCUE.GRAB_S
+  }
+  padReseats++
   console.log(`[FallRescue] pad was below the body, reseated under y=${p.y.toFixed(1)} (${padReseats})`)
 }
 
@@ -589,6 +596,7 @@ function tickCloudFaces(dt: number): void {
 
 /** Local cloud parented to the pad: body, face, and a static line. No character model. */
 function spawnFloater(): void {
+  floaterPending = false
   if (!anchor) return
   despawnFloater()
   const root = engine.addEntity()
@@ -967,7 +975,7 @@ function begin(p: Vec): void {
   holdFallLine()
   exitOverview()
   spawnPad(hold)
-  spawnFloater()
+  floaterPending = true
   trippedAt = Date.now()
   padReseats = 0
   carryReseats = 0
@@ -990,6 +998,7 @@ function begin(p: Vec): void {
 
 function tickPhase(dt: number): void {
   if (phase === 'grab') {
+    if (floaterPending) { floaterPending = false; spawnFloater() }
     const falling = playerPos()
     if (falling) seatIfMissed(falling)
     // Wall clock, same as the slip grace, so a hitch doesn't shorten the swoop.
@@ -1262,6 +1271,7 @@ export function cancelFallRescue(why: string): void {
   padReseats = 0
   carryReseats = 0
   lastCarryY = null
+  floaterPending = false
   despawnFloater()
   despawnPad()
   setFallMoveLock('open')
@@ -1278,6 +1288,13 @@ function preloadRescueCloud(): void {
   }
 }
 
+/** Warm the first physics box so the trip pad is not the first MeshCollider of the session. */
+function preloadRescuePad(): void {
+  const e = engine.addEntity()
+  Transform.create(e, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(FALL_RESCUE.PAD_SIZE, FALL_RESCUE.PAD_THICK, FALL_RESCUE.PAD_SIZE) })
+  MeshCollider.setBox(e, ColliderLayer.CL_PHYSICS)
+}
+
 /**
  * `endRescue('snap')` is the single base teleport (they slipped off).
  * `endRescue('carry')` means the panel already delivered them — emit player:respawned, do not movePlayerTo.
@@ -1289,6 +1306,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
   preloadRescueCloud()
+  preloadRescuePad()
   events.on('rescue:start', onRemoteStart)
   events.on('rescue:end', ({ who }) => clearRemote(who, 'ended'))
   engine.addSystem(tick)
