@@ -264,8 +264,6 @@ export function initStarOrbs(): void {
         const elapsed = rec.fallDur - Math.max(0, rec.fallLeft)
         const t = Transform.getMutableOrNull(rec.root)
         if (t) t.position = Vector3.create(t.position.x, rec.baseY + fallHeight(elapsed, rec.fallDur), t.position.z)
-        const s = Transform.getMutableOrNull(rec.spin)
-        if (s) s.rotation = Quaternion.fromEulerDegrees((rec.clock * 160) % 360, (rec.clock * 240) % 360, 0)
         if (rec.fallLeft <= 0) landStar(rec)
         continue
       }
