@@ -234,8 +234,8 @@ export function smallestTeam(counts: Partial<TeamCounts>, teams: readonly Playin
 
 /** PvP bot fill: even each team up to max(1, largest human side), then cap
  *  per team and total so a lopsided lobby does not flood the server. */
-export const PVP_MAX_BOTS = 9
-export const PVP_MAX_BOTS_PER_TEAM = 3
+export const PVP_MAX_BOTS = 45
+export const PVP_MAX_BOTS_PER_TEAM = 15
 
 export function pvpBotFill(humans: Partial<TeamCounts>): TeamCounts {
   const h: TeamCounts = {

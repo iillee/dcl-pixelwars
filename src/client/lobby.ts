@@ -2,18 +2,18 @@
  * Lobby signs and the feet report. The tiles themselves come from rebuildMaze.
  * Counts are whatever the server last broadcast. This file does not assign a team.
  */
-import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, AudioSource, TextAlignMode, TextureFilterMode, TextureWrapMode } from '@dcl/sdk/ecs'
+import { engine, Entity, TextShape, Transform, Billboard, BillboardMode, Material, MaterialTransparencyMode, MeshRenderer, TextAlignMode, TextureFilterMode, TextureWrapMode } from '@dcl/sdk/ecs'
 import { Color3, Color4, Quaternion, Vector3 } from '@dcl/sdk/math'
 import { CELL, MAZE_ORIGIN, BASE_Y, SCENE_SIZE } from '../maze/generator'
 import { sceneOriginParcel, SKY_PARCELS } from '../maze/level'
 import { events } from '../shared/events'
 import { LOBBY_TEAMS, SIGN_BADGE_H_M, SIGN_BADGE_W_M, SIGN_COUNT_FONT, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_W_M, type TeamId, billboardAnchor, cellAt, hudVoteHeadline, LOBBY_STATUS_STARTING, lobbyFeet, signBadgeY, signFaceZ, signTitlePlane, teamTitle, isStandingOnLobbyFloor, toSceneFeet, voteTeamIdAt, voteTintPose } from '../shared/lobby'
-import { gamePhase, inLobby, isLobbyStarting, myVote, serverLobbyCounts, voteCount, voteRemainingMs } from './phase'
+import { gamePhase, inLobby, isLobbyStarting, serverLobbyCounts, voteCount, voteDisplayRemainingMs } from './phase'
 import { sendLobbyPos, sendLobbyReady } from './clientHandler'
 import { isLobbyLayout } from '../maze/rebuild'
 import { isMobile } from '@dcl/sdk/platform'
 import { isOverviewActive, overviewSignRotation, overviewSignScale, overviewViewScale } from './overviewCamera'
-import { playUiClick } from './audio'
+import { playCountdownGo, playCountdownTick, playUpgradeHoverSfx } from './audio'
 
 /** On-screen lobby trace. Turn off once a playtest shows votes landing. */
 export const DEBUG_LOBBY = false
@@ -60,9 +60,18 @@ const TITLE_INK = Color4.create(1, 1, 1, 1)
 const tints: Entity[] = []
 const tintSize: Vector3[] = []
 let readySent = false
-let confirmEnt: Entity = 0 as Entity
 let pulsed: TeamId | '' = ''
-const CONFIRM_SOUND = 'assets/sounds/click.wav'
+/** 0-1 ease toward selected (full colour) and toward dim (other tiles). */
+const tintSel: number[] = []
+const tintDim: number[] = []
+const TINT_NORMAL_LIFT = 0.52
+const TINT_DIM_LIFT = 0.88
+const TINT_EASE_S = 0.2
+/** Tint top sits 0.05 m above the lobby floor (BASE_Y + 0.5), the same as in-game paint (FLAT_OFFSET 0.55). */
+const TINT_TOP = 0.55
+const TINT_THICK = 0.08
+type TileFrame = { bars: Entity[]; width: number; length: number; ease: number; dim: number }
+const tileFrames = new Map<TeamId, TileFrame>()
 
 type Rgb = { r: number; g: number; b: number }
 
@@ -88,7 +97,10 @@ function clearSigns(): void {
   boards.length = 0
   tints.length = 0
   tintSize.length = 0
+  tintSel.length = 0
+  tintDim.length = 0
   pulsed = ''
+  tileFrames.clear()
 }
 
 function add(parent: Entity, pos: Vector3, scale: Vector3, rot = Quaternion.Identity()): Entity {
@@ -188,27 +200,55 @@ function laySigns(): void {
     })
     boards.push({ count })
 
-    const tint = voteTintPose(m.cell, MAZE_ORIGIN, CELL)
+    // Visual only: stretch each tint inward to the center square's edge (side = tint width)
+    // so tiles, square and frames meet flush. Vote detection still uses voteTintPose.
+    const raw = voteTintPose(m.cell, MAZE_ORIGIN, CELL)
+    const hubC = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+    const off = Math.hypot(raw.x - hubC.x, raw.z - hubC.z)
+    const gap = Math.max(0, off - raw.length / 2 - raw.width / 2)
+    const ux = (raw.x - hubC.x) / off
+    const uz = (raw.z - hubC.z) / off
+    void gap // all five tiles are the same square, touching the center one edge to edge
+    const len = raw.width + 6 // 6 m longer than the center square, inner edge touching it
+    const tint = { ...raw, x: hubC.x + ux * (raw.width + len) / 2, z: hubC.z + uz * (raw.width + len) / 2, length: len }
     const pad = engine.addEntity()
     Transform.create(pad, {
-      position: Vector3.create(tint.x, BASE_Y + 0.58, tint.z),
+      position: Vector3.create(tint.x, BASE_Y + TINT_TOP - TINT_THICK / 2, tint.z),
       rotation: Quaternion.fromEulerDegrees(0, tint.yawDeg, 0),
-      scale: Vector3.Zero(),
+      scale: Vector3.create(tint.width, 0.08, tint.length),
     })
     MeshRenderer.setBox(pad)
-    Material.setPbrMaterial(pad, zoneMat(pillRgb(m.id), false))
+    Material.setPbrMaterial(pad, zoneMat(pillRgb(m.id), TINT_NORMAL_LIFT))
     spawned.push(pad)
     tints.push(pad)
     tintSize.push(Vector3.create(tint.width, 0.08, tint.length))
+    tintSel.push(0)
+    tintDim.push(0)
     layTileFrame(tint)
   }
+  // White center square at tint height so the corners between the four colour tiles read as one floor.
+  // Visual only (the hub's invisible pad already holds players); a hair below the tints so the overlap doesn't flicker.
+  const hub = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+  // Side reaches each colour tile's inner edge so the square meets all four.
+  const t0 = voteTintPose(LOBBY_TEAMS[0].cell, MAZE_ORIGIN, CELL)
+  const hubSide = t0.width // tints are stretched inward to meet this edge
+  const center = engine.addEntity()
+  Transform.create(center, {
+    position: Vector3.create(hub.x, BASE_Y + TINT_TOP - TINT_THICK / 2 - 0.005, hub.z),
+    scale: Vector3.create(hubSide, 0.08, hubSide),
+  })
+  MeshRenderer.setBox(center)
+  Material.setPbrMaterial(center, zoneMat({ r: 1, g: 1, b: 1 }, 0))
+  spawned.push(center)
+  layTileFrame({ x: hub.x, z: hub.z, yawDeg: 0, width: hubSide, length: hubSide })
   syncSignFacing()
 }
 
 /** Mobile signs are 1.5x the desktop size, in play and in overview. */
 function signWorldScale(): number {
   const zoom = isOverviewActive() ? overviewSignScale() : 1
-  return zoom * (isMobile() ? 1.5 : 1)
+  // Mobile ortho signs read too small at 1.5x; use 3x there. Play stays 1.5x.
+  return zoom * (isMobile() ? (isOverviewActive() ? 3 : 1.5) : 1)
 }
 
 function applySignPose(root: Entity): void {
@@ -266,14 +306,33 @@ function refreshSigns(): void {
  *  floor seam that showed in the inset around the pad. */
 const TILE_FRAME_M = 0.07
 const TILE_FRAME_H = 0.024
-function frameMat() {
-  return { diffuseColor: Color4.create(0, 0, 0, 1), castShadows: false }
+const TILE_FRAME_SELECTED_MUL = 3
+const TILE_FRAME_EASE_S = 0.18
+const FRAME_DIM_GREY = 0 // frames stay black; only the color surface fades
+function frameMat(dim = 0) {
+  const g = FRAME_DIM_GREY * dim
+  return { diffuseColor: Color4.create(g, g, g, 1), castShadows: false }
+}
+
+function poseTileFrameBars(bars: Entity[], w: number, l: number, bw: number): void {
+  const poses = [
+    { lx: 0, lz: (l + bw) / 2, sx: w + 2 * bw, sz: bw },
+    { lx: 0, lz: -(l + bw) / 2, sx: w + 2 * bw, sz: bw },
+    { lx: (w + bw) / 2, lz: 0, sx: bw, sz: l },
+    { lx: -(w + bw) / 2, lz: 0, sx: bw, sz: l },
+  ]
+  for (let i = 0; i < bars.length && i < poses.length; i++) {
+    const tr = Transform.getMutableOrNull(bars[i])
+    if (!tr) continue
+    tr.position = Vector3.create(poses[i].lx, 0, poses[i].lz)
+    tr.scale = Vector3.create(poses[i].sx, TILE_FRAME_H, poses[i].sz)
+  }
 }
 
 function layTileFrame(tint: { x: number; z: number; yawDeg: number; width: number; length: number }): void {
   // Tint box center is BASE_Y+0.58, height 0.08, so its top is +0.04.
   // Sit just above that top so the bars stay visible without floating.
-  const y = BASE_Y + 0.58 + 0.04 + TILE_FRAME_H / 2 + 0.004
+  const y = BASE_Y + TINT_TOP + TILE_FRAME_H / 2 + 0.004
   const root = engine.addEntity()
   Transform.create(root, {
     position: Vector3.create(tint.x, y, tint.z),
@@ -283,6 +342,7 @@ function layTileFrame(tint: { x: number; z: number; yawDeg: number; width: numbe
   const w = tint.width
   const l = tint.length
   const bw = TILE_FRAME_M
+  const bars: Entity[] = []
   const addBar = (lx: number, lz: number, sx: number, sz: number) => {
     const e = engine.addEntity()
     Transform.create(e, {
@@ -293,16 +353,41 @@ function layTileFrame(tint: { x: number; z: number; yawDeg: number; width: numbe
     MeshRenderer.setBox(e)
     Material.setBasicMaterial(e, frameMat())
     spawned.push(e)
+    bars.push(e)
   }
   addBar(0, (l + bw) / 2, w + 2 * bw, bw)
   addBar(0, -(l + bw) / 2, w + 2 * bw, bw)
   addBar((w + bw) / 2, 0, bw, l)
   addBar(-(w + bw) / 2, 0, bw, l)
+  const team = LOBBY_TEAMS.find((m) => {
+    const pose = voteTintPose(m.cell, MAZE_ORIGIN, CELL)
+    return Math.abs(pose.x - tint.x) < 8 && Math.abs(pose.z - tint.z) < 8
+  })
+  if (team) tileFrames.set(team.id, { bars, width: w, length: l, ease: 0, dim: 0 })
+}
+
+/** Grow the selected tile's frame outward from the inner edge; ease back when deselected. */
+function tickTileFrames(dt: number, local: TeamId | ''): void {
+  const step = dt / TILE_FRAME_EASE_S
+  tileFrames.forEach((frame, id) => {
+    const target = local === id ? 1 : 0
+    if (frame.ease < target) frame.ease = Math.min(target, frame.ease + step)
+    else if (frame.ease > target) frame.ease = Math.max(target, frame.ease - step)
+    const u = frame.ease
+    const e = u * u * (3 - 2 * u)
+    const bw = TILE_FRAME_M * (1 + (TILE_FRAME_SELECTED_MUL - 1) * e)
+    poseTileFrameBars(frame.bars, frame.width, frame.length, bw)
+    const dimTarget = local && local !== id ? 1 : 0
+    if (frame.dim < dimTarget) frame.dim = Math.min(dimTarget, frame.dim + step)
+    else if (frame.dim > dimTarget) frame.dim = Math.max(dimTarget, frame.dim - step)
+    const d = frame.dim * frame.dim * (3 - 2 * frame.dim)
+    const mat = frameMat(d)
+    for (const bar of frame.bars) Material.setBasicMaterial(bar, mat)
+  })
 }
 
 /** Opaque matte slab in the pill colour. Alpha blend over the white floor was washing it out. */
-function zoneMat(c: Rgb, occupied: boolean) {
-  const lift = occupied ? 0 : 0.38
+function zoneMat(c: Rgb, lift: number) {
   const mix = (v: number) => v + (1 - v) * lift
   return {
     albedoColor: Color4.create(mix(c.r), mix(c.g), mix(c.b), 1),
@@ -316,61 +401,69 @@ function zoneMat(c: Rgb, occupied: boolean) {
   }
 }
 
-function playConfirm(): void {
-  if (!confirmEnt) {
-    confirmEnt = engine.addEntity()
-    Transform.create(confirmEnt, { position: Vector3.create(0, 0, 0) })
-  }
-  AudioSource.createOrReplace(confirmEnt, {
-    audioClipUrl: CONFIRM_SOUND, playing: true, loop: false, volume: 0.55, global: true,
-  })
-}
-
-/** Local tint while standing on an end. A little more opaque once it counts. No glow. */
-function tickTints(_dt: number, local: TeamId | ''): void {
-  const mine = myVote()
+/** Selected tile stays full strength; other tiles ease toward a very light tint. */
+function tickTints(dt: number, local: TeamId | ''): void {
   const teams = LOBBY_TEAMS
   if (tints.length !== teams.length) return
-  if ((mine === 'red' || mine === 'blue') && mine === local && mine !== pulsed) { pulsed = mine; playConfirm() }
-  if (!mine) pulsed = ''
+  if (local && local !== pulsed) { pulsed = local; playUpgradeHoverSfx() }
+  if (!local) pulsed = ''
+  const step = dt / TINT_EASE_S
   for (let i = 0; i < teams.length; i++) {
     const m = teams[i]
     const tr = Transform.getMutableOrNull(tints[i])
     if (!tr) continue
-    const here = local === m.id
-    const confirmed = here && mine === m.id
-    const others = voteCount(m.id) > (mine === m.id ? 1 : 0)
-    const show = here || others
-    if (!show) { tr.scale = Vector3.Zero(); continue }
     tr.scale = tintSize[i]
-    Material.setPbrMaterial(tints[i], zoneMat(pillRgb(m.id), here || confirmed))
+    const selTarget = local === m.id ? 1 : 0
+    const dimTarget = local && local !== m.id ? 1 : 0
+    let sel = tintSel[i] ?? 0
+    let dim = tintDim[i] ?? 0
+    if (sel < selTarget) sel = Math.min(selTarget, sel + step)
+    else if (sel > selTarget) sel = Math.max(selTarget, sel - step)
+    if (dim < dimTarget) dim = Math.min(dimTarget, dim + step)
+    else if (dim > dimTarget) dim = Math.max(dimTarget, dim - step)
+    tintSel[i] = sel
+    tintDim[i] = dim
+    const s = sel * sel * (3 - 2 * sel)
+    const d = dim * dim * (3 - 2 * dim)
+    const lift = (1 - s) * (TINT_NORMAL_LIFT + (TINT_DIM_LIFT - TINT_NORMAL_LIFT) * d)
+    Material.setPbrMaterial(tints[i], zoneMat(pillRgb(m.id), lift))
   }
 }
 
+/** Lobby teleports land at a random spot on the white center tile (within the 16 m hub hold pad) so players don't stack. */
+const LOBBY_SCATTER_M = 7.5
 export function lobbyStand(): { x: number; y: number; z: number } {
-  return lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+  const c = lobbyFeet(CELL, MAZE_ORIGIN, BASE_Y)
+  return { x: c.x + (Math.random() * 2 - 1) * LOBBY_SCATTER_M, y: c.y, z: c.z + (Math.random() * 2 - 1) * LOBBY_SCATTER_M }
 }
 
-/** Play click.wav once as each of the last 5 seconds of the lobby countdown begins. */
+/** Play countdown-tick once at displayed 3, 2, and 1, then countdown-go once at displayed 0. */
 let lastLobbyTickSec = -1
+let playedLobbyGo = false
 function tickLobbyStartSfx(): void {
-  if (!inLobby() || isLobbyStarting()) {
+  if (!inLobby()) {
     lastLobbyTickSec = -1
+    playedLobbyGo = false
     return
   }
-  const ms = voteRemainingMs()
-  if (ms <= 0) {
+  const ms = voteDisplayRemainingMs()
+  if (ms <= 0 && !isLobbyStarting()) {
     lastLobbyTickSec = -1
+    playedLobbyGo = false
     return
   }
-  const sec = Math.ceil(ms / 1000)
-  if (sec > 5) {
+  const sec = ms <= 0 ? 0 : Math.ceil(ms / 1000)
+  if (sec > 3) {
     lastLobbyTickSec = -1
+    playedLobbyGo = false
     return
   }
-  if (sec >= 1 && sec !== lastLobbyTickSec) {
-    lastLobbyTickSec = sec
-    playUiClick()
+  if (sec === lastLobbyTickSec) return
+  lastLobbyTickSec = sec
+  if (sec >= 1 && sec <= 3) playCountdownTick()
+  else if (sec === 0 && !playedLobbyGo) {
+    playedLobbyGo = true
+    playCountdownGo()
   }
 }
 
@@ -415,6 +508,7 @@ export function initLobby(): void {
     // Tint follows the live stand, not the 2 Hz sample, so a jump clears it immediately.
     const zoneNow = onFloor ? voteTeamIdAt(sceneNow.x, sceneNow.z, MAZE_ORIGIN, CELL) : ''
     tickTints(dt, zoneNow)
+    tickTileFrames(dt, zoneNow)
     refreshSigns()
     posClock += dt
     const standChanged = onFloor !== lastSentGrounded || zoneNow !== lastSentZone
@@ -452,9 +546,10 @@ export function hudClockText(matchSecs: number): string {
   }
   if (phase === 'summary') return 'END'
   if (phase === 'lobby' || phase === 'idle') {
+    const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteDisplayRemainingMs() / 1000)) : 0
+    if (left > 0) return hudVoteHeadline(left)
     if (isLobbyStarting()) return LOBBY_STATUS_STARTING
-    const left = phase === 'lobby' ? Math.max(0, Math.ceil(voteRemainingMs() / 1000)) : 0
-    return hudVoteHeadline(left)
+    return hudVoteHeadline(0)
   }
   return 'VOTE'
 }

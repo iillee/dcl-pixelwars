@@ -138,8 +138,10 @@ export const VOTE_TINT_INSET_M = 0.15
 /** How far past the cell edge the team sign sits, on the outer side.
  *  Kept short so the pills sit a little closer in toward the lobby cross. */
 export const SIGN_CLEAR_M = 6
+/** Colour pads and team signs sit this many metres closer to the hub along each arm. */
+export const LOBBY_ARM_INSET_M = 6
 /** World Y of a sign root, metres above the tile floor. */
-export const SIGN_LIFT_M = 17
+export const SIGN_LIFT_M = 15
 /** Reference width used only to keep the short 58×8.6 pill height after the earlier shrink. */
 export const SIGN_REF_W_M = 32
 /** Shared height of every team pill. Width now follows the word, not this height's old aspect. */
@@ -365,6 +367,22 @@ export function endYawQuarter(cell: { x: number; z: number }): number {
   return 0
 }
 
+/** Metres toward the hub along a team arm. */
+export function armTowardHub(cell: { x: number; z: number }): { x: number; z: number } {
+  return {
+    x: -Math.sign(cell.x - LOBBY_CROSS.x) * LOBBY_ARM_INSET_M,
+    z: -Math.sign(cell.z - LOBBY_CROSS.z) * LOBBY_ARM_INSET_M,
+  }
+}
+
+function armMid(modeCell: { x: number; z: number }, origin: number, cell: number): { x: number; z: number } {
+  const pull = armTowardHub(modeCell)
+  return {
+    x: modeCell.x * cell + cell / 2 + origin + pull.x,
+    z: modeCell.z * cell + cell / 2 + origin + pull.z,
+  }
+}
+
 /** Canonical floor rectangle of an end tile, in metres from the cell's SW corner.
  *  Local +Z is the opening. Inset so a box of this size sits inside the floor. */
 export function voteZoneLocal(cell: number, inset = VOTE_TINT_INSET_M): { x0: number; z0: number; x1: number; z1: number; width: number; length: number } {
@@ -385,9 +403,10 @@ export function voteLocalToWorld(
   const sin = Math.sin(rad)
   const cx = lx - cell / 2
   const cz = lz - cell / 2
+  const mid = armMid(modeCell, origin, cell)
   return {
-    x: modeCell.x * cell + cell / 2 + origin + cx * cos + cz * sin,
-    z: modeCell.z * cell + cell / 2 + origin - cx * sin + cz * cos,
+    x: mid.x + cx * cos + cz * sin,
+    z: mid.z - cx * sin + cz * cos,
   }
 }
 
@@ -418,7 +437,7 @@ export function voteLead(counts: VoteCounts): ModeId | 'tie' | '' {
 /** Top HUD line. Idle stays CHOOSE A TEAM; the countdown is just STARTING IN N.
  *  After the last second, hudClockText shows STARTING... until the match clock, so
  *  a 0-second leftover does not fall back to CHOOSE A TEAM. */
-export const LOBBY_STATUS_IDLE = 'CHOOSE A TEAM'
+export const LOBBY_STATUS_IDLE = 'CHOOSE A COLOR!'
 export const LOBBY_STATUS_COUNTDOWN = 'STARTING IN'
 export const LOBBY_STATUS_STARTING = 'STARTING...'
 export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
@@ -427,11 +446,12 @@ export function hudVoteHeadline(leftSecs = 0, _lead?: unknown): string {
   return `${LOBBY_STATUS_COUNTDOWN} ${n}`
 }
 
-/** Big center line shown to every lobby player during the countdown. */
+/** Big center line for the last three lobby seconds: 3, 2, 1, then GO!. */
 export function hudRoundStartsLine(leftSecs = 0): string {
   const n = Math.max(0, Math.ceil(leftSecs))
-  if (n <= 0) return ''
-  return `ROUND STARTS IN ${n}`
+  if (n <= 0) return 'GO!'
+  if (n > 3) return ''
+  return String(n)
 }
 
 
@@ -442,10 +462,11 @@ export function billboardAnchor(
   const dx = Math.sign(modeCell.x - LOBBY_CROSS.x)
   const dz = Math.sign(modeCell.z - LOBBY_CROSS.z)
   const out = cell / 2 + SIGN_CLEAR_M
+  const mid = armMid(modeCell, origin, cell)
   return {
-    x: modeCell.x * cell + cell / 2 + origin + dx * out,
+    x: mid.x + dx * out,
     y: baseY + SIGN_LIFT_M,
-    z: modeCell.z * cell + cell / 2 + origin + dz * out,
+    z: mid.z + dz * out,
     yawDeg: endYawQuarter(modeCell) * 90,
   }
 }
@@ -459,10 +480,9 @@ export function inEndZone(
   const rad = endYawQuarter(modeCell) * Math.PI / 2
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
-  const midX = modeCell.x * cell + cell / 2 + origin
-  const midZ = modeCell.z * cell + cell / 2 + origin
-  const wx = worldX - midX
-  const wz = worldZ - midZ
+  const mid = armMid(modeCell, origin, cell)
+  const wx = worldX - mid.x
+  const wz = worldZ - mid.z
   const lx = wx * cos - wz * sin + cell / 2
   const lz = wx * sin + wz * cos + cell / 2
   return lx >= zone.x0 && lx <= zone.x1 && lz >= zone.z0 && lz <= zone.z1
@@ -477,10 +497,9 @@ export function voteModeAt(worldX: number, worldZ: number, origin: number, cell:
     const rad = endYawQuarter(m.cell) * Math.PI / 2
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
-    const midX = m.cell.x * cell + cell / 2 + origin
-    const midZ = m.cell.z * cell + cell / 2 + origin
-    const wx = worldX - midX
-    const wz = worldZ - midZ
+    const mid = armMid(m.cell, origin, cell)
+    const wx = worldX - mid.x
+    const wz = worldZ - mid.z
     const lx = wx * cos - wz * sin + cell / 2
     const lz = wx * sin + wz * cos + cell / 2
     if (lx >= zone.x0 && lx <= zone.x1 && lz >= zone.z0 && lz <= zone.z1) return m.id

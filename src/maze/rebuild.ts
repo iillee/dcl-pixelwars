@@ -30,7 +30,6 @@ import {
 import { TILES } from './tiles'
 import { spawnCellsForTile, removePaintForTile, resetPaintForTile } from '../paint'
 import { events } from '../shared/events'
-import { LOBBY_TEAMS } from '../shared/lobby'
 import { installLobbyHoldFloor } from '../lobbyHoldFloor'
 import { SeedHolder, seedHolder } from '../shared/components'
 import { ServerWorld, isStaleWorld, parseWorldLayout, shouldRebuildWorld } from '../shared/worldState'
@@ -50,7 +49,7 @@ const heldFloor: Entity[] = []
 let releaseHeldAt = 0
 /** Team spawn / base tiles placed at full scale as soon as the arena is laid. */
 const spawnFloorEntities: Entity[] = []
-/** Early lobby tiles (cross + solid ends) placed at full scale before teleport. */
+/** Lobby platform, placed at full scale before teleport. */
 const lobbyFloorEntities: Entity[] = []
 
 // ─── Persistent tiles ───────────────────────────────────────────────
@@ -102,13 +101,10 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   if (nextLobby) {
     layoutKind = 'lobby'
     placeLobbyLayout()
-    const earlyEnd = (x: number, z: number) => LOBBY_TEAMS.some(m => m.cell.x === x && m.cell.z === z)
-    // Cross, Prototype north, and Balloon Battle south are full size before
-    // anyone is moved onto them. Team Fight and Bot Fight ends still grow in.
-    const solid = getPlacedTilesInOrder().filter(p =>
-      p.type !== 'end' || earlyEnd(p.x, p.z))
+    // One lobby.glb at the old hub pose stands in for the five logical cells.
+    const hub = getPlacedTilesInOrder().filter(p => p.type === 'cross')
     lobbyFloorEntities.length = 0
-    for (const p of solid) early.push(spawnTile(p, true))
+    for (const p of hub) early.push(spawnTile(p, true))
     for (const e of early) lobbyFloorEntities.push(e)
     if (early.length) events.emit('lobby:floor', { ready: true })
   }
@@ -116,8 +112,8 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   // Returning to the lobby: keep the arena shells until the teleport has
   // landed. Deleting them in this same turn drops the camera through the
   // hollow blocks for a frame.
-  // Leaving the lobby: do not keep the voting floor. Those 5 tiles sit on
-  // the same cells as the new maze, so holding them until spawn-floor
+  // Leaving the lobby: do not keep the voting floor. The lobby platform sits
+  // on the same cells as the new maze, so holding it until spawn-floor
   // colliders load left two layouts overlapping for seconds. The primitive
   // hold pads (already under the cross, and reinstalled at the bases when
   // the player teleports) cover that gap without a visible second maze.
@@ -151,11 +147,8 @@ export function rebuildMaze(seed: number, layout: MazeLayout = 'arena', why = 'c
   if (nextLobby) {
     spawnFloorEntities.length = 0
     currentSeed = seed
-    const earlyEnd = (x: number, z: number) => LOBBY_TEAMS.some(m => m.cell.x === x && m.cell.z === z)
-    const arms = getPlacedTilesInOrder().filter(p =>
-      p.type === 'end' && !earlyEnd(p.x, p.z))
-    spawnQueue = arms.map((p, i) => ({ p, delay: i * STAGGER }))
-    console.log(`Lobby laid, ${gridSize()} tiles`)
+    spawnQueue = []
+    console.log(`Lobby laid, ${gridSize()} cells, one platform`)
     return
   }
 
@@ -369,6 +362,76 @@ engine.addSystem((dt: number) => {
   }
 })
 
+const TILE_MASK = ColliderLayer.CL_PHYSICS | ColliderLayer.CL_POINTER
+type TileLoad = { ent: Entity; src: string; age: number; wait: number; tries: number; wrote: boolean }
+const tileLoads: TileLoad[] = []
+let tileWatch = false
+let tileRetryGap = 0
+let tileSealLogged = false
+
+function armTileCollider(ent: Entity): void {
+  const src = GltfContainer.getOrNull(ent)?.src ?? ''
+  tileLoads.push({ ent, src, age: 0, wait: 0, tries: 0, wrote: false })
+  if (tileWatch) return
+  tileWatch = true
+  engine.addSystem(pumpTileColliders)
+}
+
+function pumpTileColliders(dt: number): void {
+  tileRetryGap = Math.max(0, tileRetryGap - dt)
+  const keep: TileLoad[] = []
+  let retried = false
+  for (const item of tileLoads) {
+    if (!GltfContainer.getOrNull(item.ent)) continue
+    item.age += dt
+    const state = GltfContainerLoadingState.getOrNull(item.ent)?.currentState
+    const scale = Transform.getOrNull(item.ent)?.scale.y ?? 0
+    // First collider is this write. A mask on the spawn frame bakes on the
+    // origin, half a meter under the deck, and a later rewrite can leave it there.
+    if (state === LoadingState.FINISHED && scale >= TILE_SCALE * 0.99) {
+      const mesh = GltfContainer.getMutable(item.ent)
+      mesh.visibleMeshesCollisionMask = TILE_MASK
+      mesh.invisibleMeshesCollisionMask = 0
+      if (item.wrote) {
+        if (!tileSealLogged) {
+          tileSealLogged = true
+          console.log('[Tiles] collider on the loaded deck')
+        }
+        continue
+      }
+      item.wrote = true
+      keep.push(item)
+      continue
+    }
+    const failed = state === LoadingState.NOT_FOUND || state === LoadingState.FINISHED_WITH_ERROR
+    const never = state === undefined || state === LoadingState.UNKNOWN
+    item.wait += dt
+    const giveUp = item.tries >= 3
+    if (!giveUp && !retried && tileRetryGap <= 0 && ((failed && item.wait >= 1) || (never && item.wait >= 6))) {
+      retried = true
+      tileRetryGap = 0.75
+      item.tries += 1
+      item.wait = 0
+      item.wrote = false
+      console.log(`[Tiles] mesh not in, retry ${item.tries} src=${item.src} state=${state ?? 'none'}`)
+      GltfContainer.deleteFrom(item.ent)
+      GltfContainer.create(item.ent, {
+        src: item.src,
+        visibleMeshesCollisionMask: 0,
+        invisibleMeshesCollisionMask: 0,
+      })
+    }
+    if (!giveUp) keep.push(item)
+  }
+  tileLoads.length = 0
+  for (const item of keep) tileLoads.push(item)
+  if (!tileLoads.length) {
+    engine.removeSystem(pumpTileColliders)
+    tileWatch = false
+    tileSealLogged = false
+  }
+}
+
 function spawnTile(p: Placed, full: boolean): Entity {
   const [dx, dz] = ROT_OFFSET[p.r]
   const e = engine.addEntity()
@@ -379,17 +442,22 @@ function spawnTile(p: Placed, full: boolean): Entity {
   }
   const scale = full ? TILE_SCALE : 0.001
   Transform.create(e, {
-    position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, p.y, p.z * CELL + dz + MAZE_ORIGIN),
+    // lobby.glb sits 1.6 m lower than the old hub cross.
+    position: Vector3.create(p.x * CELL + dx + MAZE_ORIGIN, layoutKind === 'lobby' ? p.y - 1.6 : p.y, p.z * CELL + dz + MAZE_ORIGIN),
     rotation: Quaternion.fromEulerDegrees(0, p.r * 90, 0),
     scale: Vector3.create(scale, scale, scale),
   })
   GltfContainer.create(e, {
-    src: TILES[p.type].model,
-    // PHYSICS + POINTER on the same (visible) geometry: the Explorer's 3rd-person camera is only
-    // blocked when both layers sit on one mesh (docs: Colliders → Cameras and colliders). No scene
-    // pointer events or CL_POINTER raycasts use these tiles; gameplay raycasts stay CL_PHYSICS.
-    visibleMeshesCollisionMask: ColliderLayer.CL_PHYSICS | ColliderLayer.CL_POINTER,
+    src: layoutKind === 'lobby' ? 'assets/models/lobby.glb' : TILES[p.type].model,
+    // No shape yet. The deck is 0.25 local (0.5 m) above the origin. A collider
+    // baked before this GLB is in, or while the grow-in scale is still tiny,
+    // sits on that origin and other clients show the body knee-deep. The mask
+    // (physics and camera on the visible mesh) is written once the load and
+    // the full scale are both in.
+    visibleMeshesCollisionMask: 0,
+    invisibleMeshesCollisionMask: 0,
   })
+  armTileCollider(e)
   if (!full) {
     Tween.create(e, {
       mode: Tween.Mode.Scale({
@@ -436,3 +504,8 @@ engine.addSystem(() => {
     engine.removeEntity(e)
   }
 })
+
+/** [Sink] probe: the live tile entities, read-only. */
+export function sinkProbeTiles(): readonly Entity[] {
+  return spawnedEntities
+}

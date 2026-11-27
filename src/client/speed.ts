@@ -14,6 +14,7 @@
 import { engine, AvatarLocomotionSettings } from '@dcl/sdk/ecs'
 import { isOnOwnPaint, resetOwnPaint } from '../paint'
 import { events } from '../shared/events'
+import { HUMAN_GLIDE_SPEED } from '../shared/pvp'
 
 export const OWN_PAINT_SPEED_MULT: number = 1
 
@@ -30,6 +31,7 @@ function applySpeed(): void {
   AvatarLocomotionSettings.createOrReplace(engine.PlayerEntity, {
     jogSpeed: DEFAULT_JOG * mult,
     runSpeed: DEFAULT_RUN * mult,
+    glidingSpeed: HUMAN_GLIDE_SPEED * mult,
   })
 }
 
@@ -39,7 +41,7 @@ function setBoost(on: boolean): void {
   applySpeed()
 }
 
-/** Compose with the own-paint bonus. 1 = no upgrade boost. Jog/run only. */
+/** Compose with the own-paint bonus. 1 = no upgrade boost. Jog, run, and glide. */
 export function setUpgradeSpeedMult(m: number): void {
   const next = Number.isFinite(m) && m > 0 ? m : 1
   if (next === upgradeMult) return

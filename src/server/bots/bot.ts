@@ -564,7 +564,8 @@ export class Bot {
       const next = this.path[0]
       if (!next) break
       const onDeep = graph.deepNodes.has(this.currentCell)
-      const edge = (onDeep ? graph.deepAir : graph.air).get(this.currentCell)?.find(e => e.to === next)
+      // Air maps are lazy and cost ~1.4 s to build (linkAir). Only touch them when leaps are on.
+      const edge = this.useAir ? (onDeep ? graph.deepAir : graph.air).get(this.currentCell)?.find(e => e.to === next) : undefined
       const walk = (onDeep ? graph.deepAdj : graph.adj).get(this.currentCell) ?? []
       const fromP = graph.worldPos.get(this.currentCell)
       const toP = graph.worldPos.get(next)

@@ -26,6 +26,7 @@ import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { initPaintScore } from './paintScore'
 import { initOverdrive } from './overdrive'
+import { initRecoveryOrb } from './recoveryOrb'
 import { initUpgrades } from './upgrades'
 import { Team, teamName } from '../shared/team'
 import { drainPaintOutbox, getCurrentCellId, isPlayerGrounded, setLocalTeam } from '../paint'
@@ -64,6 +65,7 @@ export function initClientHandler(): void {
   })
   initPaintScore()
   initOverdrive()
+  initRecoveryOrb()
   initUpgrades()
   wireInbound()
   wireTeamAssigned()
@@ -118,6 +120,15 @@ function wireInbound(): void {
   })
   room.onMessage('starDespawn', ({ i, who }) => {
     events.emit('star:despawn', { i: i ?? 0, who: who ?? '' })
+  })
+  room.onMessage('recoveryOrb', ({ x, y, z }) => {
+    events.emit('recovery:orb', { x: x ?? 0, y: y ?? 0, z: z ?? 0 })
+  })
+  room.onMessage('recoveryOrbClear', () => {
+    events.emit('recovery:clear', {})
+  })
+  room.onMessage('recoveryHome', () => {
+    events.emit('recovery:home', {})
   })
   room.onMessage('feed', ({ kind, a, b, team, teamB }) => {
     events.emit('feed:line', { kind: kind ?? 0, a: a ?? '', b: b ?? '', team: team ?? 0, teamB: teamB ?? 0 })

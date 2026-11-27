@@ -257,26 +257,19 @@ function IconRow(props: { hud: UpgradeHud; size: number }) {
 }
 
 /** Center of one buff tile, as an offset from the screen center. Slot 0 sits just right of the score. */
-function buffDock(mobile: boolean, count: number, slot: number): { x: number; y: number; size: number } {
+function buffDock(_mobile: boolean, count: number, slot: number): { x: number; y: number; size: number } {
   const size = TOP_BTN
   const n = Math.max(1, count)
   const i = Math.max(0, Math.min(slot, n - 1))
   const step = size + ICON_GAP
-  if (!mobile) {
-    const pillW = TOP_BTN + TOP_GAP + TOP_BTN
-    const rowW = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW
-    const fromLeft = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW + TOP_GAP + ICON_GAP + i * step
-    return { x: -rowW / 2 + fromLeft + size / 2, y: HUD_TOP + size / 2, size }
-  }
-  const rowW = n * step
-  const below = 30
-  const top = HUD_TOP + size + below + 8
-  return { x: -rowW / 2 + ICON_GAP + i * step + size / 2, y: top + size / 2, size }
+  const pillW = TOP_BTN + TOP_GAP + TOP_BTN
+  const rowW = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW
+  const fromLeft = TOP_BTN + TOP_GAP + TOP_BTN + TOP_GAP + TIMER_W + TOP_GAP + pillW + TOP_GAP + ICON_GAP + i * step
+  return { x: -rowW / 2 + fromLeft + size / 2, y: HUD_TOP + size / 2, size }
 }
 
-/** Desktop extras immediately right of the painted-tile pill: buff icons only. */
+/** Buff icons immediately right of the painted-tile pill, on desktop and mobile. */
 export function DesktopUpgradeExtras(props: { pillWidth: number; topBtn: number; gap: number }) {
-  if (isMobile()) return null
   const hud = getUpgradeHud()
   if (!hud.show) return null
   const left = props.pillWidth + props.gap
@@ -286,19 +279,6 @@ export function DesktopUpgradeExtras(props: { pillWidth: number; topBtn: number;
       height: props.topBtn, flexDirection: 'row', alignItems: 'center', pointerFilter: 'none',
     }}>
       <IconRow hud={hud} size={props.topBtn} />
-    </UiEntity>
-  )
-}
-
-/** Mobile buff icons under the territory bar, sized to the top-button height. */
-export function MobileUpgradeRow() {
-  if (!isMobile()) return null
-  const hud = getUpgradeHud()
-  if (!hud.show) return null
-  if (hud.iconOrder.length === 0) return null
-  return (
-    <UiEntity uiTransform={{ width: '100%', margin: { top: 8 }, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
-      <IconRow hud={hud} size={68} />
     </UiEntity>
   )
 }

@@ -18,10 +18,11 @@ import { assignTeam, rosterSize, getTeam, markActive, markInactive, activeHumanC
 import { onLeaveScene } from '@dcl/sdk/players'
 import { applyPaint, ownerCounts, coverage, drainDelta, paintWaitMs, getFullState, paintedCount, teamOfCell, sampleEnemyCells, clearAll as clearPaintState, setPaintListener } from './paintState'
 import { pickTeamRescueCell } from '../shared/teamRescue'
-import { botCount, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, rebuildBotGraph, sleepBots, tickBots, botSimTime } from './bots/manager'
+import { botCount, getBotBroadcast, getBotHitPoints, getBotPositions, getWalkableGraph, hitBot, initBots, precomputeArena, rebuildBotGraph, sleepBots, tickBots, botSimTime } from './bots/manager'
 import { lungeKnock, burstKnock, spikeKnock } from '../shared/knocks'
 import { canSpawnStar, nextStarSpawnAt, overdriveFeetFresh, pickStarSpawn, starPickupWinner, type StarCell } from '../shared/overdrive'
 import { OverdriveBook } from './overdriveBook'
+import { clearRecovery, recoveryLive, spawnRecovery, tryUseRecovery } from './recoveryOrb'
 import { UpgradeBook } from './upgradeBook'
 import { burstPaintRadiusCellsFor, hasteCooldownMult, upgradeChargeFor, upgradeKindFromId } from '../shared/upgrades'
 import { RESCUE_TIMES } from '../shared/rescuePath'
@@ -148,6 +149,7 @@ export async function setupServer(): Promise<void> {
     starRoundStart = 0
     starNextAt = 0
     starLandAt.clear()
+    if (clearRecovery()) room.send('recoveryOrbClear', {})
   }
   const armStarRound = (now: number): void => {
     clearStars()
@@ -158,6 +160,42 @@ export async function setupServer(): Promise<void> {
     if (!id || id.startsWith('bot:')) return
     for (const o of overdrive.liveOrbs()) {
       room.send('starSpawn', { i: o.i, x: o.x, y: o.y, z: o.z, fall: Math.max(0, (starLandAt.get(o.i) ?? 0) - now) }, { to: [id] })
+    }
+  }
+  const sendRecoverySnapshotTo = (id: string): void => {
+    if (!id || id.startsWith('bot:')) return
+    const o = recoveryLive()
+    if (o) room.send('recoveryOrb', { x: o.x, y: o.y, z: o.z }, { to: [id] })
+  }
+  const spawnMatchRecovery = (): void => {
+    if (!matchLive()) return
+    const o = spawnRecovery()
+    if (!o) {
+      console.log('[Orb] rejected no-seam')
+      room.send('recoveryOrbClear', {})
+      return
+    }
+    room.send('recoveryOrb', { x: o.x, y: o.y, z: o.z })
+    console.log(`[Orb] spawn seam=${o.seam} pos=${o.x.toFixed(1)},${o.y.toFixed(1)},${o.z.toFixed(1)}`)
+  }
+  const applyRecoveryUse = (id: string, result: ReturnType<typeof tryUseRecovery>): void => {
+    if (!result.ok) return
+    room.send('recoveryHome', {}, { to: [id] })
+    if (result.next) {
+      room.send('recoveryOrb', { x: result.next.x, y: result.next.y, z: result.next.z })
+      console.log(`[Orb] used by ${id} -> moved to ${result.next.seam} ${result.next.x.toFixed(1)},${result.next.y.toFixed(1)},${result.next.z.toFixed(1)}`)
+    } else {
+      room.send('recoveryOrbClear', {})
+      console.log(`[Orb] used by ${id} -> moved to none`)
+    }
+  }
+  const tryPickupRecovery = (now: number): void => {
+    if (!matchLive() || !recoveryLive()) return
+    for (const e of rosterEntries()) {
+      const result = tryUseRecovery(e.userId, overdriveFeet(e.userId, now), now)
+      if (!result.ok) continue
+      applyRecoveryUse(e.userId, result)
+      return
     }
   }
   const tryPickupStars = (now: number): void => {
@@ -197,6 +235,7 @@ export async function setupServer(): Promise<void> {
   }
   const tickOverdrive = (now: number): void => {
     tryPickupStars(now)
+    tryPickupRecovery(now)
     trySpawnStar(now)
   }
   const flushPaintScores = (): void => {
@@ -481,6 +520,12 @@ export async function setupServer(): Promise<void> {
   let hadVotes = false
   let emptySince = 0
   let lobbyLogAt = 0
+  /** After the vote timer hits 0, wait this long so the client 3-2-1-GO (which runs 1s past voteMs) can reach GO before the arena swap. */
+  const LOBBY_GO_HOLD_MS = 1_000
+  /** Set when the timer expires; resolveVote runs after LOBBY_GO_HOLD_MS. */
+  let lobbyGoAt = 0
+  /** When the lobby last opened. The next arena is pre-built from ~1.5s after. */
+  let lobbyOpenedAt = 0
 
   function sendLobbyLayout(to?: string): void {
     const msg = {
@@ -502,6 +547,7 @@ export async function setupServer(): Promise<void> {
     countdownEnds = 0
     hadVotes = false
     emptySince = 0
+    lobbyGoAt = 0
     setRoundState(currentRoundIndex(), Date.now(), false)
     sleepBots()
     placeLobbyLayout()
@@ -510,6 +556,7 @@ export async function setupServer(): Promise<void> {
     clearUpgradesAndNotify()
     if (!lobbyOpen) {
       lobbyOpen = true
+      lobbyOpenedAt = Date.now()
       clearLobbyVotes()
       bumpWorld()
       sendLobbyLayout()
@@ -564,6 +611,7 @@ export async function setupServer(): Promise<void> {
 
   function closeCountdown(): void {
     countdownEnds = 0
+    lobbyGoAt = 0
     hadVotes = false
     wantFull = false
     emptySince = 0
@@ -575,6 +623,7 @@ export async function setupServer(): Promise<void> {
     const present = presentIds()
     const teams = tallyTeams(present, now)
     countdownEnds = 0
+    lobbyGoAt = 0
     hadVotes = false
     wantFull = false
     emptySince = 0
@@ -644,12 +693,26 @@ export async function setupServer(): Promise<void> {
     console.log(`[Server] round ${seed} started bots=${plannedBots} (activeHumans=${activeHumanCount()})`)
     sendRoundClock()
     armStarRound(Date.now())
+    spawnMatchRecovery()
   }
 
   room.onMessage('lagPing', ({ t }, context) => {
     const from = context?.from
     if (!from || typeof t !== 'number' || !Number.isFinite(t)) return
     room.send('lagPong', { t }, { to: [from] })
+  })
+
+  const sinkLogAt = new Map<string, number[]>()
+  room.onMessage('sinkLog', ({ line }, context) => {
+    const from = context?.from
+    if (!from || typeof line !== 'string') return
+    const now = Date.now()
+    const times = (sinkLogAt.get(from) ?? []).filter(t => now - t < 1000)
+    if (times.length >= 2) return
+    times.push(now)
+    sinkLogAt.set(from, times)
+    const text = line.length > 300 ? line.slice(0, 300) : line
+    console.log(`[Sink] from ${from.slice(0, 8)}: ${text}`)
   })
 
   room.onMessage('presencePing', (_d, context) => {
@@ -1214,6 +1277,19 @@ export async function setupServer(): Promise<void> {
     const by = anvilCredit(i)
     if (by && by !== from && getTeam(by) !== null && getTeam(by) !== getTeam(from)) noteHit(by, from)
   })
+  room.onMessage('recoveryTouch', (_m, context) => {
+    const from = context?.from
+    const now = Date.now()
+    if (!from) return
+    if (!matchLive()) { console.log('[Orb] rejected not-live'); return }
+    const result = tryUseRecovery(from, overdriveFeet(from, now), now)
+    if (!result.ok) {
+      console.log(`[Orb] rejected ${result.reason}`)
+      return
+    }
+    applyRecoveryUse(from, result)
+  })
+
   room.onMessage('playerFell', (_m, context) => {
     const from = context?.from
     if (!from || !matchLive() || getTeam(from) === null) return
@@ -1345,6 +1421,7 @@ export async function setupServer(): Promise<void> {
     sendUpgradeTo(from)
     sendUpgradeBuffsSnapshot(from)
     sendStarSnapshotTo(from)
+    sendRecoverySnapshotTo(from)
   })
 
   // Round loop (Phase 4 Step 6). Server owns the boundary. On crossing:
@@ -1409,6 +1486,12 @@ export async function setupServer(): Promise<void> {
     const now = Date.now()
 
     if (intermission === 'lobby') {
+      // Build the next arena a few ms per tick (same seed as startNextRound),
+      // so the match-start tick only swaps it in. The live grid stays the lobby.
+      // The bot graph (~160ms, one go) waits while a countdown is about to end.
+      if (now - lobbyOpenedAt >= 1500) {
+        precomputeArena(pendingNextIdx > 0 ? pendingNextIdx : currentRoundIndex(), 12, countdownEnds === 0 || countdownEnds - now > 1500)
+      }
       const present = presentIds()
       if (now - lobbyLogAt >= 1000) {
         lobbyLogAt = now
@@ -1419,6 +1502,19 @@ export async function setupServer(): Promise<void> {
         console.log(`[Lobby] present=${present.length} pvp=${verdict.counts.pvp} pvb=${verdict.counts.pvb} prototype=${verdict.counts.prototype} srvZone=${verdict.zone} why=${verdict.why} ${bits || '(no feet)'}`)
       }
       const step = stepLobby({ wantFull, countdownEnds, hadVotes, readyAt, emptySince }, present, now)
+      // Timer has ended: hold for the client GO beat, and ignore a last-second walk-off.
+      if (lobbyGoAt !== 0 || step.log === 'resolve') {
+        if (lobbyGoAt === 0) {
+          lobbyGoAt = now
+          console.log('[Lobby] countdown done → GO')
+          sendRoundClock()
+        }
+        if (now - lobbyGoAt >= LOBBY_GO_HOLD_MS) {
+          lobbyGoAt = 0
+          resolveVote()
+        }
+        return
+      }
       wantFull = step.next.wantFull
       countdownEnds = step.next.countdownEnds
       hadVotes = step.next.hadVotes
@@ -1434,8 +1530,6 @@ export async function setupServer(): Promise<void> {
       } else if (step.log === 'close') {
         console.log('[Lobby] votes left → idle')
         sendRoundClock()
-      } else if (step.log === 'resolve') {
-        resolveVote()
       }
       return
     }

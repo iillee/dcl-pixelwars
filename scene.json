@@ -6425,21 +6425,21 @@
       "default": true,
       "position": {
         "x": [
-          638,
-          642
+          632,
+          648
         ],
         "y": [
-          190.733,
-          190.733
+          190.72999572753906,
+          190.72999572753906
         ],
         "z": [
-          638,
-          642
+          632,
+          648
         ]
       },
       "cameraTarget": {
         "x": 640,
-        "y": 190.733,
+        "y": 190.73300170898438,
         "z": 648
       }
     },
@@ -6452,8 +6452,8 @@
           642
         ],
         "y": [
-          190.733,
-          190.733
+          190.72999572753906,
+          190.72999572753906
         ],
         "z": [
           638,
@@ -6462,7 +6462,7 @@
       },
       "cameraTarget": {
         "x": 640,
-        "y": 190.733,
+        "y": 190.73300170898438,
         "z": 648
       }
     }
@@ -6477,7 +6477,9 @@
     "nearbyVoiceChat": "enabled"
   },
   "creator": "0x1e93e534c5e26b01ed242410b43ae23dd0faa52b",
-  "skyboxConfig": {},
+  "skyboxConfig": {
+    "transitionMode": 0
+  },
   "source": {
     "origin": "creator-hub",
     "projectId": "53a16a3f-329d-44c0-8e6a-d3c1389a1899"
@@ -6490,5 +6492,6 @@
   "worldConfiguration": {
     "name": "pixelwars.dcl.eth"
   },
-  "landscapeTerrain": false
+  "landscapeTerrain": false,
+  "rating": "A"
 }

@@ -1,6 +1,5 @@
 import { SplashScreen } from "./client/splash"
 import { RoundCurtainMask, summarySlideY } from './client/roundCurtainUi'
-import { isCurtainIdle } from './shared/roundCurtain'
 import ReactEcs, { ReactEcsRenderer, UiEntity, Label } from "@dcl/sdk/react-ecs"
 import { Color4 } from "@dcl/sdk/math"
 import { toggleMusic, isMusicMuted, playUiClick } from "./client/audio"
@@ -8,9 +7,10 @@ import { coverage } from "./paint"
 import { hudClockText } from "./client/lobby"
 import { hudRoundStartsLine } from "./shared/lobby"
 import { lagHudLine, lagHudOn } from "./client/lagHud"
-import { inLobby, isLobbyStarting, voteRemainingMs } from "./client/phase"
+import { inLobby, isLobbyStarting, voteDisplayRemainingMs } from "./client/phase"
 import { getCountdownSeconds, getBanner, getSummaryProgress, dismissSummary, summarySecondsLeft, ROUND_LENGTH_MINUTES } from "./round"
 import { LeaderboardState, leaderboardStateEntity } from "./shared/components"
+import { hiddenLeaderboardName } from "./shared/leaderboardHide"
 import { room } from "./shared/messages"
 import { Team, TEAM_NAME, TEAM_RGB, PLAYING_TEAMS, isPlayingTeam, leadingTeams, rankedTeams, type TeamCoverage } from "./shared/team"
 import {
@@ -20,7 +20,7 @@ import {
 } from "./shared/summaryLayout"
 import { OverviewEye, OverviewRow, TileButton, TOP_BTN, TOP_GAP } from "./client/overviewUi"
 import { AbilityHotbar, RADIUS as HOTBAR_RADIUS, BORDER_W as HOTBAR_BORDER_W, PANEL_LIGHT, SLOT_BG as HOTBAR_TILE_BG, GOLD_BORDER as HOTBAR_RIM, TILE_RING } from "./client/abilityHotbar"
-import { DesktopUpgradeExtras, MobileUpgradeRow, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
+import { DesktopUpgradeExtras, PaintedCountPill, UpgradeOverlay } from "./client/upgradeUi"
 import { FeedToasts } from "./client/feedUi"
 import { getUpgradeHud } from "./client/upgrades"
 import { OutlinedLabel } from "./client/outlinedLabel"
@@ -31,7 +31,8 @@ import { engine, UiCanvasInformation, PrimaryPointerInfo, inputSystem, InputActi
 // The star slides the board down from above the HUD. React-ECS re-renders
 // every frame, so the duck is just a clock and a 0–1 progress.
 const LB_SLIDE_MS = 350
-const LB_REST_TOP = 10 + TOP_BTN + 8
+const HUD_TOP = 0
+const LB_REST_TOP = HUD_TOP + TOP_BTN + 8
 let lbShown = false
 let lbFrom = 0
 let lbTo = 0
@@ -119,7 +120,9 @@ function readLeaderboard(): LbEntry[] {
       if (!e || typeof e.userId !== 'string') continue
       const wins = typeof e.wins === 'number' ? Math.max(0, Math.floor(e.wins)) : 0
       if (wins <= 0) continue
-      rows.push({ userId: e.userId, name: typeof e.name === 'string' && e.name ? e.name : e.userId.slice(0, 8), wins })
+      const name = typeof e.name === 'string' && e.name ? e.name : e.userId.slice(0, 8)
+      if (hiddenLeaderboardName(name)) continue
+      rows.push({ userId: e.userId, name, wins })
     }
     rows.sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name))
     return rows.slice(0, 10)
@@ -180,13 +183,13 @@ function onTeamInk(team: number): Color4 {
 // ─── Round-end summary: title, four-team territory pill, ranked team cards, stats row ───
 // Sizes are at a 1280-wide reference and scale with the canvas (k). Card height is fixed;
 // every player is shown, with rows compacting (and two columns past six) so they stay inside the box.
-const BAR_TOP_PX = 10 + 68 + 6 // the score bar's top edge: the pill grows out of it
+const BAR_TOP_PX = HUD_TOP + 68 + 6 // the score bar's top edge: the pill grows out of it
 const SUMMARY_PILL_CAP = 24 // 0% side still shows this much colour, like the bar's end caps
 const CLOCK_RING = TILE_RING // dark ring between the clock's light rim and its light fill
 const LOBBY_BUTTONS = 4 // eye, mute, star, how-to
 function lobbyPillWidth(mobile: boolean): number {
   const lobbyFont = mobile ? 16 : 22
-  const full = Math.ceil(Math.max(textWSafe('CHOOSE A TEAM', lobbyFont), textWSafe('STARTING IN 15', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
+  const full = Math.ceil(Math.max(textWSafe('CHOOSE A COLOR!', lobbyFont), textWSafe('STARTING IN 15', lobbyFont), textWSafe('STARTING...', lobbyFont)) + 36 + CLOCK_RING * 2 + HOTBAR_BORDER_W * 2)
   if (!mobile) return full
   const canvasW = UiCanvasInformation.getOrNull(engine.RootEntity)?.width ?? 1280
   return Math.min(full, Math.max(MOBILE_TIMER_W, canvasW - 120 - 2 * (TOP_BTN + TOP_GAP)))
@@ -284,10 +287,8 @@ function TeamScorePill(props: {
   const innerW = Math.max(1, props.width - props.border * 2)
   const f = props.fontSize ?? 12
   const uniqueLead = (props.leaders ?? []).length === 1 ? props.leaders![0] : -1
-  // Rectangular slices inside a rounded, overflow-hidden track (same pattern
-  // as DUCK's ProgressBar). A per-segment end cap wider than a thin first
-  // slice was getting clipped off the rounded left. Boost short painted
-  // slivers to at least the cap diameter, taking the extra from unpainted.
+  // Short painted slivers grow to the cap diameter, taking the extra from unpainted,
+  // so a team colour still owns its end cap.
   const widths = pieces.map(p => p.frac * innerW)
   if (props.showUnpainted) {
     const minW = innerR * 2
@@ -307,18 +308,47 @@ function TeamScorePill(props: {
       widths[whiteI] -= give
     }
   }
+  // Mobile does not clip children to a parent's rounded corner, so square slices
+  // paint boxed ends. The track and the two end colours are circles; the slices
+  // only fill the straight middle and stay clear of those caps.
+  const H = props.height
+  const b = props.border
+  const innerH = innerR * 2
+  const r = innerR
+  const fillOf = (team: number) => team === Team.None ? Color4.White() : barColor(team)
+  const first = pieces[0]
+  const last = pieces[pieces.length - 1]
+  const midW = Math.max(0, innerW - innerH)
+  const midWidths = widths.map((w, i) => {
+    if (pieces.length <= 1) return Math.max(0, w - innerH)
+    if (i === 0 || i === pieces.length - 1) return Math.max(0, w - r)
+    return Math.max(0, w)
+  })
   return (
-    <UiEntity uiTransform={{ width: props.width, height: props.height, flexShrink: 0, borderRadius: props.height / 2, padding: props.border }} uiBackground={{ color: props.track }}>
-      <UiEntity uiTransform={{ width: '100%', height: '100%', flexDirection: 'row', borderRadius: innerR, overflow: 'hidden' }} uiBackground={{ color: props.innerBg }}>
+    <UiEntity uiTransform={{ width: props.width, height: H, flexShrink: 0, overflow: 'hidden' }}>
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { left: 0, top: 0 }, width: H, height: H, borderRadius: H / 2 }} uiBackground={{ color: props.track }} />
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { right: 0, top: 0 }, width: H, height: H, borderRadius: H / 2 }} uiBackground={{ color: props.track }} />
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { left: H / 2, top: 0 }, width: Math.max(0, props.width - H), height: H }} uiBackground={{ color: props.track }} />
+      {first && (
+        <UiEntity uiTransform={{ positionType: 'absolute', position: { left: b, top: b }, width: innerH, height: innerH, borderRadius: innerR }} uiBackground={{ color: fillOf(first.team) }} />
+      )}
+      {last && (
+        <UiEntity uiTransform={{ positionType: 'absolute', position: { right: b, top: b }, width: innerH, height: innerH, borderRadius: innerR }} uiBackground={{ color: fillOf(last.team) }} />
+      )}
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { left: b + r, top: b }, width: midW, height: innerH, flexDirection: 'row', overflow: 'hidden' }} uiBackground={{ color: props.innerBg }}>
+        {pieces.map((piece, i) => (
+          <UiEntity uiTransform={{ width: midWidths[i], height: '100%', flexShrink: 0 }} uiBackground={{ color: fillOf(piece.team) }} />
+        ))}
+      </UiEntity>
+      <UiEntity uiTransform={{ positionType: 'absolute', position: { left: b, top: 0 }, width: innerW, height: '100%', flexDirection: 'row', pointerFilter: 'none' }}>
         {pieces.map((piece, i) => {
           const w = widths[i]
           const team = piece.team
           const label = `${Math.round(piece.pct)}%`
           const showLbl = !!props.showLabels && team !== Team.None && w >= textWSafe(label, f) + 8
           const showStar = !!props.showStar && uniqueLead === team && !showLbl && w >= STAR_SIZE + STAR_PAD * 2
-          const fill = team === Team.None ? Color4.White() : barColor(team)
           return (
-            <UiEntity uiTransform={{ width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center' }} uiBackground={{ color: fill }}>
+            <UiEntity uiTransform={{ width: w, height: '100%', flexShrink: 0, justifyContent: 'center', alignItems: 'center', pointerFilter: 'none' }}>
               {showLbl && <Label value={label} fontSize={f} color={onTeamInk(team)} textAlign="middle-center" textWrap="nowrap" uiTransform={{ width: w, height: '100%' }} />}
               {showStar && <UiEntity uiTransform={{ width: STAR_SIZE, height: STAR_SIZE }} uiBackground={{ textureMode: 'stretch', texture: { src: STAR_SRC } }} />}
             </UiEntity>
@@ -396,19 +426,10 @@ function HeadlineRow(props: { text: string; font: number }) {
   const words = props.text.trim().split(/\s+/).filter(Boolean)
   const gap = Math.max(2, props.font * TITLE_WORD_GAP)
   const h = props.font * 1.2
-  // Team-colored words vanish on a same-color curtain, and white "WINS!"
-  // fails contrast on every TEAM_RGB fill. While the mask is up, use the
-  // dark summary ink with a light halo. After it retracts, the original
-  // team-coloured title and dark shadow return over the lobby.
-  const onCurtain = !isCurtainIdle()
-  const ink = (w: string) => {
-    if (onCurtain) return SUMMARY_INK
-    const tok = w.replace(/!$/, '')
-    return tok === 'RED' ? BAR_RED : tok === 'BLUE' ? BAR_BLUE : tok === 'GREEN' ? BAR_GREEN : tok === 'YELLOW' ? BAR_YELLOW : SUMMARY_TITLE_FG
-  }
-  const shadowCol = onCurtain
-    ? Color4.create(1, 1, 1, 0.88)
-    : Color4.create(0.04, 0.04, 0.06, 0.92)
+  // Keep the curtain-down look the whole time the title shows: ink #212126
+  // with a light halo, including after the mask retracts.
+  const ink = SUMMARY_INK
+  const shadowCol = Color4.create(1, 1, 1, 0.88)
   const wordRow = (offset: number, shadow: boolean) => (
     <UiEntity uiTransform={{
       positionType: offset ? 'absolute' : 'relative',
@@ -420,7 +441,7 @@ function HeadlineRow(props: { text: string; font: number }) {
         <Label
           value={w}
           fontSize={props.font}
-          color={shadow ? shadowCol : ink(w)}
+          color={shadow ? shadowCol : ink}
           textAlign="middle-center"
           textWrap="nowrap"
           uiTransform={{ width: Math.max(textWSafe(w, props.font), 4), height: h, flexShrink: 0, margin: { left: i === 0 ? 0 : gap } }}
@@ -686,18 +707,62 @@ function bannerHeadline(): string {
 /** Shared vertical pill used by the Prototype paint tank. */
 
 /** Centered lobby countdown, shown to every player in the lobby (including
- *  anyone not standing on a team tile). The top status pill is unchanged. */
+ *  anyone not standing on a team tile). The top status pill is unchanged.
+ *  Only the last three seconds appear here, as 3, 2, 1, then GO!. */
+let lobbyGoHoldUntil = 0
+let lobbySawStartBeats = false
 function LobbyStartCountdown() {
-  if (!inLobby() || isLobbyStarting()) return null
-  const ms = voteRemainingMs()
-  if (ms <= 0) return null
-  const n = Math.max(1, Math.ceil(ms / 1000))
-  const text = hudRoundStartsLine(n)
+  const now = Date.now()
+  const lobby = inLobby()
+  const ms = lobby ? voteDisplayRemainingMs() : 0
+  const sec = Math.ceil(ms / 1000)
+
+  if (lobby && sec > 3) {
+    lobbySawStartBeats = false
+    lobbyGoHoldUntil = 0
+    return null
+  }
+  if (lobby && sec >= 1 && sec <= 3) lobbySawStartBeats = true
+
+  const reachedGo = lobbySawStartBeats && ms <= 0 && (isLobbyStarting() || !lobby)
+  if (reachedGo && lobbyGoHoldUntil === 0) lobbyGoHoldUntil = now + 800
+
+  // A cancelled countdown drops to 0 while still in the lobby and not starting.
+  if (lobby && ms <= 0 && !isLobbyStarting() && now >= lobbyGoHoldUntil) {
+    lobbySawStartBeats = false
+    lobbyGoHoldUntil = 0
+    return null
+  }
+
+  const holdingGo = lobbyGoHoldUntil > now
+  const showBeat = lobby && sec >= 1 && sec <= 3
+  if (!holdingGo && !showBeat) {
+    if (now >= lobbyGoHoldUntil) {
+      lobbySawStartBeats = false
+      lobbyGoHoldUntil = 0
+    }
+    return null
+  }
+
+  const showingGo = holdingGo || reachedGo
+  const text = hudRoundStartsLine(showingGo ? 0 : sec)
+  let t = 0
+  if (showingGo) {
+    const elapsed = lobbyGoHoldUntil > 0 ? 800 - (lobbyGoHoldUntil - now) : 0
+    t = Math.min(1, Math.max(0, elapsed / 800))
+  } else {
+    const rem = ms % 1000
+    t = rem === 0 ? 0 : 1 - rem / 1000
+  }
+  const ease = 1 - Math.pow(1 - t, 3)
+  const scale = 1.6 - 0.6 * ease
   const mobile = isMobile()
-  const font = mobile ? 48 : 84
+  const font = Math.round((mobile ? 48 : 84) * scale)
   const stroke = mobile ? 4 : 6
-  const width = Math.ceil(text.length * font * 0.62 + 48)
   const height = font + stroke * 2 + 8
+  const width = Math.max(height, Math.ceil(text.length * font * 0.62 + 48))
+  const canvasH = UiCanvasInformation.getOrNull(engine.RootEntity)?.height ?? 1080
+  const lift = Math.round(canvasH * 0.05) + (mobile ? 80 : 40)
   return (
     <UiEntity uiTransform={{
       width: '100%', height: '100%', positionType: 'absolute', position: { top: 0, left: 0 },
@@ -711,7 +776,7 @@ function LobbyStartCountdown() {
         outline={stroke}
         width={width}
         height={height}
-        margin={{ bottom: mobile ? 80 : 40 }}
+        margin={{ bottom: lift }}
       />
     </UiEntity>
   )
@@ -756,16 +821,19 @@ function PaintedHud() {
 
 /** Same framed tile as mute. The ★ is the old top-painters button. */
 function LobbyStarButton() {
+  // The star glyph sits low in its em box on mobile. A bottom margin lifts it.
+  const lift = isMobile() ? 22 : 0
   return (
     <TileButton id="ui_lobby_star" onPress={toggleLeaderboard}>
-      <Label value="★" fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+      <Label value="★" fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32, margin: { bottom: lift } }} />
     </TileButton>
   )
 }
 function LobbyHelpButton() {
+  const lift = isMobile() ? 10 : 0
   return (
     <TileButton id="ui_lobby_help" onPress={toggleHowTo}>
-      <Label value={hudBold('?')} fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32 }} />
+      <Label value={hudBold('?')} fontSize={30} color={SUMMARY_INK} textAlign="middle-center" uiTransform={{ width: 32, height: 32, margin: { bottom: lift } }} />
     </TileButton>
   )
 }
@@ -795,12 +863,12 @@ export const uiMenu = () => (
       return (
         <UiEntity
           uiTransform={{
-            positionType: 'absolute', position: { top: 10, left: 0 },
+            positionType: 'absolute', position: { top: HUD_TOP, left: 0 },
             width: '100%', flexDirection: 'row', justifyContent: 'center',
             pointerFilter: 'none',
           }}
         >
-          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined }}>
+          <UiEntity uiTransform={{ flexDirection: 'column', alignItems: 'center', width: lobby ? voteW : undefined, overflow: 'visible' }}>
             {/* Lobby: eye | mute | timer | star | ?. Match: eye | mute | timer | score.
                 View controls overlay to the left of the eye so the top bar never shifts. */}
             {isMobile() ? (
@@ -936,7 +1004,6 @@ export const uiMenu = () => (
               )
             })()}
             <FeedToasts />
-            <MobileUpgradeRow />
           </UiEntity>
         </UiEntity>
       )

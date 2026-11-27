@@ -18,6 +18,11 @@ export function setSeed(s: number): void {
   _seed = s | 0
 }
 
+/** Current RNG state, so a time-sliced generation job can pause and resume exactly. */
+export function getSeedState(): number {
+  return _seed
+}
+
 export function rand(): number {
   _seed |= 0
   _seed = (_seed + 0x6D2B79F5) | 0

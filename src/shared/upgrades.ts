@@ -231,7 +231,7 @@ export const UPGRADE_LABEL: Record<UpgradeKind, string> = {
 }
 
 export const UPGRADE_DESCRIPTION: Record<UpgradeKind, string> = {
-  speed: 'Faster jogging and running.',
+  speed: 'Faster jogging, running, and gliding.',
   paint: 'Wider movement, Dash, and Burst paint.',
   haste: 'Shorter Dash and Burst cooldowns.',
 }

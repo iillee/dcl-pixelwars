@@ -16,8 +16,9 @@
  * The plate has no team word. Color is the team. A ★ per upgrade level
  * (Speed + Paint + Haste, nine at most) is how strong that player is.
  * The plate starts at the width of four stars and stays that wide until
- * a fifth star, then it grows. Empty slots are spaces, which this plate
- * keeps. A blank plate is four stars drawn in the plate color.
+ * a fifth star, then it grows. Empty slots are spaces. A blank plate is
+ * spaces too: stars painted in the plate color show through once the
+ * Explorer fades the plate, and the glyphs fade on a different curve.
  */
 
 import { engine, Entity, PlayerIdentityData, AvatarNametag } from '@dcl/sdk/ecs'
@@ -49,10 +50,10 @@ function color(team: Team): Color3 {
   return Color3.create(c.r, c.g, c.b)
 }
 
-/** Four stars wide until there are more than four. The blank plate is four stars in the plate color. */
+/** Four stars wide until there are more than four. A blank plate is spaces, not stars in the plate color. */
 function plateLabel(marks: number, team: Team): { label: string; labelColor: Color3 } {
   const n = Math.max(0, Math.min(STAR_CAP, marks))
-  if (n <= 0) return { label: STAR.repeat(PLATE_MIN), labelColor: color(team) }
+  if (n <= 0) return { label: ' '.repeat(PLATE_MIN * SPACES_PER_SLOT), labelColor: Color3.White() }
   if (n >= PLATE_MIN) return { label: STAR.repeat(n), labelColor: Color3.White() }
   const spaces = (PLATE_MIN - n) * SPACES_PER_SLOT
   const left = Math.floor(spaces / 2)

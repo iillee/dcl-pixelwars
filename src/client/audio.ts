@@ -23,6 +23,8 @@ import { OCEAN_AMBIENCE_SRC, OCEAN_AMBIENCE_VOLUME } from '../shared/waterLook'
 const MUSIC_VOLUME = 0.4
 const MUSIC_SRC = 'assets/sounds/bgm-main.mp3'
 const CLICK_SRC = 'assets/sounds/click.wav'
+const COUNTDOWN_TICK_SRC = 'assets/sounds/countdown-tick.mp3'
+const COUNTDOWN_GO_SRC = 'assets/sounds/countdown-go.mp3'
 const CLAIM_SRC = 'assets/sounds/pop.mp3'
 const UPGRADE_READY_SRC = 'assets/sounds/pickup2.wav'
 /** Fantasy UI hover tick. */
@@ -37,6 +39,8 @@ export const DASH_HIT_SRC = 'assets/sounds/pop.mp3'
 
 let musicEnt: Entity = 0 as Entity
 let muteClickEnt: Entity = 0 as Entity
+let countdownTickEnt: Entity = 0 as Entity
+let countdownGoEnt: Entity = 0 as Entity
 let claimSfxEnt: Entity = 0 as Entity
 let upgradeReadySfxEnt: Entity = 0 as Entity
 let upgradeHoverSfxEnt: Entity = 0 as Entity
@@ -54,6 +58,11 @@ let pausedPositionSec = 0
 export function initAudio(): void {
   muteClickEnt = engine.addEntity()
   Transform.create(muteClickEnt, { parent: engine.CameraEntity })
+  countdownTickEnt = engine.addEntity()
+  Transform.create(countdownTickEnt, { parent: engine.CameraEntity })
+  countdownGoEnt = engine.addEntity()
+  Transform.create(countdownGoEnt, { parent: engine.CameraEntity })
+  AssetLoad.create(engine.addEntity(), { assets: [COUNTDOWN_TICK_SRC, COUNTDOWN_GO_SRC] })
   claimSfxEnt = engine.addEntity()
   Transform.create(claimSfxEnt, { parent: engine.CameraEntity })
   upgradeReadySfxEnt = engine.addEntity()
@@ -142,6 +151,24 @@ export function playUiClick(): void {
   AudioSource.createOrReplace(muteClickEnt, {
     audioClipUrl: CLICK_SRC,
     playing: true, loop: false, volume: 0.5, global: true,
+  })
+}
+
+/** Lobby countdown tick for displayed 3, 2, and 1. */
+export function playCountdownTick(): void {
+  if (!countdownTickEnt) return
+  AudioSource.createOrReplace(countdownTickEnt, {
+    audioClipUrl: COUNTDOWN_TICK_SRC,
+    playing: true, loop: false, volume: 0.7, global: true, currentTime: 0,
+  })
+}
+
+/** Lobby countdown go, played once at displayed 0. */
+export function playCountdownGo(): void {
+  if (!countdownGoEnt) return
+  AudioSource.createOrReplace(countdownGoEnt, {
+    audioClipUrl: COUNTDOWN_GO_SRC,
+    playing: true, loop: false, volume: 0.8, global: true, currentTime: 0,
   })
 }
 

@@ -20,7 +20,7 @@ import {
   openingsAt, highDirAt,
 } from './tiles'
 import { LOBBY_CROSS, LOBBY_TEAMS } from '../shared/lobby'
-import { rand, setSeed } from './rng'
+import { rand, setSeed, getSeedState } from './rng'
 import {
   IS_SKY, SKY_ALTITUDE, SKY_LEVEL_COUNT, SKY_BASE_SIZE, SKY_BASE_MARGIN, SKY_SCENE_M,
   SKY_CENTRE_HUB, SKY_BRANCH_DENSITY, SKY_RAMP_WEIGHT, SKY_MAX_TILES, SKY_BASES_ONLY, SKY_BASE_LINE, SKY_EDGE_INSET, SKY_SYMMETRIC,
@@ -445,6 +445,102 @@ export function generateWithRetry(startSeed: number, maxAttempts = 500): number 
     if (validate() && (!IS_SKY || SKY_BASES_ONLY || allTilesConnected())) return trySeed
   }
   return null
+}
+
+/** generateWithRetry, pausing between net attempts and seeds. Same seeds, same tiles. */
+function* generateWithRetrySteps(startSeed: number, maxAttempts = 500): Generator<void, number | null, void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const trySeed = startSeed + i
+    setSeed(trySeed)
+    resetGrid()
+    if (LINE_MODE && baseLineFits()) yield* layBaseLineSteps()
+    else generate()
+    if (validate() && (!IS_SKY || SKY_BASES_ONLY || allTilesConnected())) return trySeed
+    yield
+  }
+  return null
+}
+
+/** Finished background generation: what generateWithRetry(startSeed) would have produced. */
+export interface GenResult {
+  startSeed: number
+  winning: number | null
+  fallback: boolean
+  tiles: Placed[]
+  /** Generation time summed over slices, and how many slices / steps it took. */
+  ms: number
+  slices: number
+  steps: number
+}
+
+export interface GenJob {
+  readonly startSeed: number
+  /** True if the job threw; the caller should drop it and generate normally. */
+  readonly dead: boolean
+  /** Run up to budgetMs of attempts. Returns the result once done, else null. */
+  step(budgetMs: number): GenResult | null
+}
+
+/**
+ * Time-sliced generateWithRetry. Each step swaps the job's own grid, RNG state
+ * and fallback flag in, runs attempts for the budget, then puts the caller's
+ * grid (e.g. the lobby cross), RNG and flag back exactly as they were.
+ */
+export function startGenJob(startSeed: number): GenJob {
+  const it = generateWithRetrySteps(startSeed)
+  let saved: Array<[string, Placed]> = []
+  let savedCounter = 0
+  let savedRng = 0
+  let savedFallback = false
+  let ms = 0, slices = 0, steps = 0
+  let result: GenResult | null = null
+  let dead = false
+  return {
+    startSeed,
+    get dead() { return dead },
+    step(budgetMs: number): GenResult | null {
+      if (result || dead) return result
+      const outer = { tiles: [...grid.entries()], counter: placeCounter, rng: getSeedState(), fallback: usedFallback }
+      grid.clear()
+      for (const [k, p] of saved) grid.set(k, p)
+      placeCounter = savedCounter
+      setSeed(savedRng)
+      usedFallback = savedFallback
+      const t0 = Date.now()
+      slices++
+      try {
+        let r: IteratorResult<void, number | null>
+        do { r = it.next(); steps++ } while (!r.done && Date.now() - t0 < budgetMs)
+        ms += Date.now() - t0
+        if (r.done) {
+          result = { startSeed, winning: r.value, fallback: usedFallback, tiles: getPlacedTilesInOrder(), ms, slices, steps }
+        } else {
+          saved = [...grid.entries()]
+          savedCounter = placeCounter
+          savedRng = getSeedState()
+          savedFallback = usedFallback
+        }
+      } catch (e) {
+        dead = true
+        console.log('[Gen] background job failed: ' + String(e))
+      } finally {
+        grid.clear()
+        for (const [k, p] of outer.tiles) grid.set(k, p)
+        placeCounter = outer.counter
+        setSeed(outer.rng)
+        usedFallback = outer.fallback
+      }
+      return result
+    },
+  }
+}
+
+/** Put a finished job's tiles on the grid, exactly as generateWithRetry would have left them. */
+export function applyPlacedTiles(tiles: Placed[], fallback: boolean): void {
+  resetGrid()
+  for (const p of tiles) grid.set(key(p.x, p.z, p.y), p)
+  placeCounter = tiles.reduce((m, p) => Math.max(m, p.order + 1), 0)
+  usedFallback = fallback
 }
 
 // ═══ Sky mode ═══════════════════════════════════════════════════════
@@ -1091,10 +1187,17 @@ function netJunctions(n: Net): number {
 const NET_MIN_JUNCTIONS = Math.round(12 * NET_SCALE) // 8×8: 12, 6×6: 7
 
 function layBaseLine(): void {
+  const it = layBaseLineSteps()
+  while (!it.next().done) { /* run every attempt now */ }
+}
+
+/** layBaseLine's body, pausing before each net attempt so a lobby job can time-slice it. */
+function* layBaseLineSteps(): Generator<void, void, void> {
   if (!baseLineFits()) return
   usedFallback = false
   let best: Net | null = null, bestScore = -1, found = 0
   for (let i = 0; i < NET_ATTEMPTS && found < NET_CANDIDATES; i++) {
+    if (i > 0) yield
     const n = netAttempt()
     if (!n || !layNet(n)) continue
     const lv = new Set(n.level.values())

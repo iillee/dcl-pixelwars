@@ -7,7 +7,7 @@ import { CELL, BASE_Y, MAZE_ORIGIN, baseSpawn, placeLobbyLayout, validate, getPl
 import { openingsAt } from '../src/maze/tiles'
 import { buildWalkableGraph } from '../src/shared/mazeGraph'
 import {
-  LOBBY_AFK_MS, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
+  LOBBY_AFK_MS, LOBBY_ARM_INSET_M, LOBBY_CROSS, LOBBY_MODES, LOBBY_MOVE_M, LOBBY_READY_MS, LOBBY_TEAMS, LOBBY_VOTE_MS, MODE_PILL_HEX, MODE_PILL_TEXT_HEX, SIGN_BADGE_H_M, SIGN_CAMERA_AXIS, SIGN_CLEAR_M, SIGN_H_M, SIGN_LIP_DEPTH_M, SIGN_LIP_PAD_H, SIGN_LIP_PAD_W, SIGN_LIP_Z, SIGN_COUNT_FONT, SIGN_LIFT_M, SIGN_ORTHO_AT_REF, SIGN_PLATE_DEPTH_M, SIGN_REF_W_M, SIGN_TITLE_FONT, SIGN_W_M, SIGN_ZOOM_MAX, SIGN_ZOOM_MIN, SIGN_ZOOM_REF, assignLobbyTeams, emptyCounts, everyPresentInZone, rgbFromHex,
   LOBBY_AIR_GRACE_MS, LOBBY_SLAB_TOP, LOBBY_STAND_SLACK_M, billboardAnchor, earlySpawnPads, hudRoundStartsLine, hudVoteHeadline, isStandingOnLobbyFloor, leadingModes, lobbyFeet, lobbySlabY, modeSubtitle, modeTitle, padContains, pickWinner, placedModes, signBadgeY, signFaceZ, signPlateWidth, SIGN_TITLE_PAD_M, signTitlePlane, signTitleScale, signZoomScale, stillAfk, teamTitle, toSceneFeet, voteLead, voteLocalToWorld, voteModeAt, voteTeamAt, voteTeamAtStanding, voteTeamIdAt, voteTintPose, voteZoneLocal,
 } from '../src/shared/lobby'
 import { PVB_BOT_MAX, PVB_RATIO, pvbBotCount } from '../src/shared/pvp'
@@ -268,12 +268,12 @@ if (LOBBY_VOTE_MS !== 15_000 || LOBBY_READY_MS !== 5_000) {
 }
 
 const uiSrc = readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8')
-if (!uiSrc.includes("textWSafe('CHOOSE A TEAM', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 15', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING...', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
-  console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A TEAM and STARTING IN 15')
+if (!uiSrc.includes("textWSafe('CHOOSE A COLOR!', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING IN 15', lobbyFont)") || !uiSrc.includes("textWSafe('STARTING...', lobbyFont)") || uiSrc.includes('textWSafe(lobbyClock')) {
+  console.error('✗ the lobby status box should stay one fixed width that fits both CHOOSE A COLOR! and STARTING IN 15')
   process.exit(1)
 }
-if (hudVoteHeadline() !== 'CHOOSE A TEAM' || hudVoteHeadline(0, 'pvp') !== 'CHOOSE A TEAM') {
-  console.error(`✗ the top lobby line should stay CHOOSE A TEAM when no countdown is running (${hudVoteHeadline()})`)
+if (hudVoteHeadline() !== 'CHOOSE A COLOR!' || hudVoteHeadline(0, 'pvp') !== 'CHOOSE A COLOR!') {
+  console.error(`✗ the top lobby line should stay CHOOSE A COLOR! when no countdown is running (${hudVoteHeadline()})`)
   process.exit(1)
 }
 if (hudVoteHeadline(5) !== 'STARTING IN 5' || hudVoteHeadline(10, 'bases') !== 'STARTING IN 10' || hudVoteHeadline(3, 'prototype') !== 'STARTING IN 3' || hudVoteHeadline(1, 'balloon') !== 'STARTING IN 1') {
@@ -466,8 +466,8 @@ if (afkStart.log !== 'start' || afkStart.next.countdownEnds !== afkNow + LOBBY_R
   process.exit(1)
 }
 
-if (hudRoundStartsLine(12) !== 'ROUND STARTS IN 12' || hudRoundStartsLine(1) !== 'ROUND STARTS IN 1' || hudRoundStartsLine(0) !== '') {
-  console.error(`✗ the center lobby line should read ROUND STARTS IN N (${hudRoundStartsLine(12)})`)
+if (hudRoundStartsLine(12) !== '' || hudRoundStartsLine(3) !== '3' || hudRoundStartsLine(2) !== '2' || hudRoundStartsLine(1) !== '1' || hudRoundStartsLine(0) !== 'GO!') {
+  console.error(`✗ the center lobby line should read 3, 2, 1, then GO! (${hudRoundStartsLine(3)})`)
   process.exit(1)
 }
 const ring = outlineOffsets(6)
@@ -486,16 +486,16 @@ if (!uiOutlined.includes('<OutlinedLabel') || !upgradeUi.includes('<OutlinedLabe
   process.exit(1)
 }
 const lobbyClientSrc = readFileSync(new URL('../src/client/lobby.ts', import.meta.url), 'utf8')
-if (!lobbyClientSrc.includes('tickLobbyStartSfx') || !lobbyClientSrc.includes('playUiClick()') || !lobbyClientSrc.includes('sec > 5')) {
-  console.error('✗ the lobby should tick click.wav once for each of the last 5 seconds')
+if (!lobbyClientSrc.includes('tickLobbyStartSfx') || !lobbyClientSrc.includes('playCountdownTick()') || !lobbyClientSrc.includes('playCountdownGo()') || !lobbyClientSrc.includes('sec > 3')) {
+  console.error('✗ the lobby should tick on displayed 3, 2, 1 and play go once at displayed 0')
   process.exit(1)
 }
 if (!uiSrc.includes('<LobbyStartCountdown />') || !uiSrc.includes('hudRoundStartsLine(')) {
-  console.error('✗ the lobby should show a centered ROUND STARTS IN N countdown')
+  console.error('✗ the lobby should show a centered 3, 2, 1, GO! countdown')
   process.exit(1)
 }
-if (hudVoteHeadline(0) !== 'CHOOSE A TEAM') {
-  console.error(`✗ after the timer resets the status should be CHOOSE A TEAM (${hudVoteHeadline(0)})`)
+if (hudVoteHeadline(0) !== 'CHOOSE A COLOR!') {
+  console.error(`✗ after the timer resets the status should be CHOOSE A COLOR! (${hudVoteHeadline(0)})`)
   process.exit(1)
 }
 clearLobbyVotes()
@@ -516,16 +516,16 @@ for (const m of LOBBY_TEAMS) {
   const midZ = m.cell.z * CELL + CELL / 2 + MAZE_ORIGIN
   if (m.cell.x !== LOBBY_CROSS.x) {
     const edge = m.cell.x * CELL + (m.cell.x < LOBBY_CROSS.x ? 0 : CELL) + MAZE_ORIGIN
-    const outside = m.cell.x < LOBBY_CROSS.x ? sign.x < edge - SIGN_CLEAR_M + 0.01 : sign.x > edge + SIGN_CLEAR_M - 0.01
-    if (!outside || Math.abs(sign.z - midZ) > 0.01) {
-      console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
+    const want = m.cell.x < LOBBY_CROSS.x ? edge - SIGN_CLEAR_M + LOBBY_ARM_INSET_M : edge + SIGN_CLEAR_M - LOBBY_ARM_INSET_M
+    if (Math.abs(sign.x - want) > 0.01 || Math.abs(sign.z - midZ) > 0.01) {
+      console.error(`✗ ${m.id} billboard is not 3 m closer to the hub on the outer side of its tile`)
       process.exit(1)
     }
   } else {
     const edge = m.cell.z * CELL + (m.cell.z < LOBBY_CROSS.z ? 0 : CELL) + MAZE_ORIGIN
-    const outside = m.cell.z < LOBBY_CROSS.z ? sign.z < edge - SIGN_CLEAR_M + 0.01 : sign.z > edge + SIGN_CLEAR_M - 0.01
-    if (!outside || Math.abs(sign.x - midX) > 0.01) {
-      console.error(`✗ ${m.id} billboard is not on the outer side of its tile`)
+    const want = m.cell.z < LOBBY_CROSS.z ? edge - SIGN_CLEAR_M + LOBBY_ARM_INSET_M : edge + SIGN_CLEAR_M - LOBBY_ARM_INSET_M
+    if (Math.abs(sign.z - want) > 0.01 || Math.abs(sign.x - midX) > 0.01) {
+      console.error(`✗ ${m.id} billboard is not 3 m closer to the hub on the outer side of its tile`)
       process.exit(1)
     }
   }
@@ -586,7 +586,7 @@ if (!readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').in
   process.exit(1)
 }
 if (!lobbySrc.includes('isLobbyStarting()') || !readFileSync(new URL('../src/shared/lobby.ts', import.meta.url), 'utf8').includes("LOBBY_STATUS_STARTING = 'STARTING...'") || !lobbySrc.includes('return LOBBY_STATUS_STARTING')) {
-  console.error('✗ after the countdown hits 0 the status should stay STARTING... until the match, not fall back to CHOOSE A TEAM')
+  console.error('✗ after the countdown hits 0 the status should stay STARTING... until the match, not fall back to CHOOSE A COLOR!')
   process.exit(1)
 }
 if (uiSrc.includes('hudYourVote') || lobbySrc.includes('Your vote:')) {
@@ -771,14 +771,14 @@ if (modeTitle('bases') !== 'BASE CHARGE' || modeSubtitle('bases') !== 'Prototype
 }
 const redSign = billboardAnchor(LOBBY_TEAMS[0].cell, MAZE_ORIGIN, CELL, BASE_Y)
 const westEdge = LOBBY_TEAMS[0].cell.x * CELL + MAZE_ORIGIN
-if (Math.abs(redSign.x - (westEdge - SIGN_CLEAR_M)) > 0.01 || redSign.y !== BASE_Y + SIGN_LIFT_M) {
-  console.error(`✗ the RED sign should sit just past the west edge at the lowered height, got ${redSign.x}, ${redSign.y}`)
+if (Math.abs(redSign.x - (westEdge - SIGN_CLEAR_M + LOBBY_ARM_INSET_M)) > 0.01 || redSign.y !== BASE_Y + SIGN_LIFT_M) {
+  console.error(`✗ the RED sign should sit 3 m closer than the old west-edge clearance, at the lowered height, got ${redSign.x}, ${redSign.y}`)
   process.exit(1)
 }
 const blueSign = billboardAnchor(LOBBY_TEAMS[1].cell, MAZE_ORIGIN, CELL, BASE_Y)
 const eastEdge = LOBBY_TEAMS[1].cell.x * CELL + CELL + MAZE_ORIGIN
-if (Math.abs(blueSign.x - (eastEdge + SIGN_CLEAR_M)) > 0.01 || blueSign.y !== BASE_Y + SIGN_LIFT_M) {
-  console.error(`✗ the BLUE sign should sit just past the east edge at the lowered height, got ${blueSign.x}, ${blueSign.y}`)
+if (Math.abs(blueSign.x - (eastEdge + SIGN_CLEAR_M - LOBBY_ARM_INSET_M)) > 0.01 || blueSign.y !== BASE_Y + SIGN_LIFT_M) {
+  console.error(`✗ the BLUE sign should sit 3 m closer than the old east-edge clearance, at the lowered height, got ${blueSign.x}, ${blueSign.y}`)
   process.exit(1)
 }
 const signSpan = signPlateWidth('YELLOW') * SIGN_ORTHO_AT_REF / 2
@@ -953,8 +953,8 @@ if (!spawn.includes("layoutKind !== 'lobby'") || !spawn.includes("layoutKind ===
   console.error('✗ lobby tiles should skip paint masks and should not latch')
   process.exit(1)
 }
-if (!rebuild.includes('gridSize() === 5') || !rebuild.includes("p.type === 'end'")) {
-  console.error('✗ the lobby rebuild should skip a 5-tile floor and queue only the growing end tiles')
+if (!rebuild.includes('gridSize() === 5') || !rebuild.includes("p.type === 'cross'") || !rebuild.includes('assets/models/lobby.glb') || rebuild.includes("p.type === 'end'")) {
+  console.error('✗ the lobby rebuild should keep the 5-cell grid, spawn only lobby.glb at the hub, and skip a floor already up')
   process.exit(1)
 }
 if (!rebuild.includes('holdSeed || layoutKind === \'lobby\'')) {

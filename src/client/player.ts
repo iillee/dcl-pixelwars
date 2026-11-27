@@ -100,7 +100,7 @@ function teleportHome(why: string): void {
   // lobby. Sending those teleports to lobbyStand leaves the player hanging
   // in the air as if they were still voting. Match destinations must go to
   // the team base even if the arena mesh has not swapped yet.
-  if (IS_SKY && (why === 'lobby' || why === 'lobby-drop' || (isLobbyLayout() && why !== 'match' && why !== 'team assigned' && why !== 'round reset' && why !== 'match-drop'))) {
+  if (IS_SKY && (why === 'lobby' || why === 'lobby-drop' || (isLobbyLayout() && why !== 'match' && why !== 'team assigned' && why !== 'round reset' && why !== 'match-drop' && why !== 'orb'))) {
     const c = lobbyStand()
     pos = c
     look = { x: c.x, y: c.y, z: c.z + 8 }
@@ -142,6 +142,7 @@ function teleportHome(why: string): void {
 }
 
 export function initPlayerNet(): void {
+  events.on('recovery:home', () => { teleportHome('orb') })
   events.on('round:reset', ({ layout }) => {
     if (layout === 'lobby') return // lobby:floor teleports after the cross exists
     teleportHome('round reset')

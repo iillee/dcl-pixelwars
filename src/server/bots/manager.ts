@@ -20,7 +20,7 @@
  * that count; they fill the gap after humans are assigned.
  */
 
-import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, Placed } from '../../maze/generator'
+import { generateWithRetry, getPlacedTilesInOrder, baseSpawn, baseTeamOfCellId, Placed, startGenJob, applyPlacedTiles, lastLayoutUsedFallback, GenJob, GenResult } from '../../maze/generator'
 import { TILES } from '../../maze/tiles'
 import { buildWalkableGraph, WalkableGraph } from '../../shared/mazeGraph'
 import { BotBody } from '../../shared/botBody'
@@ -127,9 +127,70 @@ export function initBots(d: ManagerDeps): void {
  * server startup and every round boundary. Any bots currently alive are
  * reseated to random walkable cells (their previous cellIds are stale).
  */
+/** Next arena built during the lobby: tiles first (time-sliced), then the bot graph. */
+interface ArenaCache { seed: number; gen: GenResult; graph: WalkableGraph | null; graphMs: number }
+let genJob: GenJob | null = null
+let arenaCache: ArenaCache | null = null
+let genDeadSeed = NaN
+
+/**
+ * Lobby tick: advance the next arena's generation by about budgetMs, keyed on
+ * the seed startNextRound will use. The live grid (lobby cross) is untouched.
+ * Once tiles are done, a later tick builds the bot graph when allowGraph.
+ * A changed seed drops the old work. rebuildBotGraph uses it on a seed match.
+ */
+export function precomputeArena(seed: number, budgetMs: number, allowGraph: boolean): void {
+  if (arenaCache && arenaCache.seed !== seed) {
+    console.log(`[Gen] precompute dropped: next seed ${arenaCache.seed} → ${seed}`)
+    arenaCache = null
+  }
+  if (genJob && genJob.startSeed !== seed) {
+    console.log(`[Gen] precompute restarted: next seed ${genJob.startSeed} → ${seed}`)
+    genJob = null
+  }
+  if (arenaCache) {
+    if (!arenaCache.graph && allowGraph && arenaCache.gen.winning !== null) {
+      const t0 = Date.now()
+      arenaCache.graph = buildWalkableGraph(arenaCache.gen.tiles)
+      arenaCache.graphMs = Date.now() - t0
+      console.log(`[Gen] precomputed graph seed=${seed}: ${arenaCache.graph.nodes.size} cells, ${arenaCache.graphMs}ms`)
+    }
+    return
+  }
+  if (genDeadSeed === seed) return
+  if (!genJob) genJob = startGenJob(seed)
+  const res = genJob.step(budgetMs)
+  if (genJob.dead) {
+    genDeadSeed = seed
+    genJob = null
+    return
+  }
+  if (!res) return
+  genJob = null
+  arenaCache = { seed, gen: res, graph: null, graphMs: 0 }
+  console.log(`[Gen] precomputed seed=${seed} winning=${res.winning} fallback=${res.fallback} gen=${res.ms}ms slices=${res.slices} steps=${res.steps} tiles=${res.tiles.length}`)
+}
+
 export function rebuildBotGraph(seed: number): void {
-  const winning = generateWithRetry(seed)
+  const cached = arenaCache && arenaCache.seed === seed ? arenaCache : null
+  arenaCache = null
+  genJob = null
+  genDeadSeed = NaN
+  const tg = Date.now()
+  let winning: number | null
+  let fallback: boolean
+  if (cached) {
+    winning = cached.gen.winning
+    fallback = cached.gen.fallback
+    if (winning !== null) applyPlacedTiles(cached.gen.tiles, fallback)
+  } else {
+    winning = generateWithRetry(seed)
+    fallback = lastLayoutUsedFallback()
+  }
+  const genMs = Date.now() - tg
+  const pre = cached ? ` pre=${cached.gen.ms}+${cached.graphMs}ms` : ''
   if (winning === null) {
+    console.log(`[Gen] startSeed=${seed} winning=null fallback=${fallback} gen=${genMs}ms graph=0ms tiles=0 cells=0 cache=${cached ? 'hit' : 'miss'}${pre}`)
     console.log('[Bots] graph rebuild failed: no valid maze from seed ' + seed)
     graph = null
     rampTiles = []
@@ -142,12 +203,13 @@ export function rebuildBotGraph(seed: number): void {
   }
   const t0 = Date.now()
   const tiles = getPlacedTilesInOrder()
-  graph = buildWalkableGraph(tiles)
+  graph = cached && cached.graph ? cached.graph : buildWalkableGraph(tiles)
   rampTiles = tiles.filter(t => TILES[t.type].isRamp)
   placedTiles = tiles
   cacheBaseCells()
   const dt = Date.now() - t0
   console.log(`[Bots] graph rebuilt: ${graph.nodes.size} cells, ${dt}ms (seed ${seed} → winning ${winning})`)
+  console.log(`[Gen] startSeed=${seed} winning=${winning} fallback=${fallback} gen=${genMs}ms graph=${dt}ms tiles=${tiles.length} cells=${graph.nodes.size} cache=${cached ? 'hit' : 'miss'}${pre}`)
 
   // New round: spread any surviving ghost across its own base (the old
   // cellIds are stale). tickBots() then re-checks its team next tick.

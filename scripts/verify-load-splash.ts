@@ -6,17 +6,13 @@ import { fileURLToPath } from 'node:url'
 
 const SPLASH_SRC = 'assets/images/splash.png'
 const SPLASH_AR = 16 / 9
+const SPLASH_SCALE = 0.5
 
 function splashImageSize(canvasW = 1920, canvasH = 1080): { w: number; h: number } {
-  const boxW = 1920
-  const boxH = 1080
-  const w = canvasW > 0 ? canvasW : boxW
-  const h = canvasH > 0 ? canvasH : boxH
-  const ar = w / h
-  if (Math.abs(ar - SPLASH_AR) < 0.02) return { w: boxW, h: boxH }
-  const virtAR = (SPLASH_AR * SPLASH_AR) / ar
-  if (virtAR >= boxW / boxH) return { w: boxW, h: boxW / virtAR }
-  return { w: boxH * virtAR, h: boxH }
+  const w = canvasW > 0 ? canvasW : 1920
+  const h = canvasH > 0 ? canvasH : 1080
+  const full = w / h > SPLASH_AR ? { w: h * SPLASH_AR, h } : { w, h: w / SPLASH_AR }
+  return { w: full.w * SPLASH_SCALE, h: full.h * SPLASH_SCALE }
 }
 
 function fail(msg: string): never {
@@ -38,6 +34,7 @@ if (!splashSrc.includes("export const SPLASH_SRC = 'assets/images/splash.png'"))
 if (splashSrc.includes('value="pixelwars"')) fail('the text "pixelwars" label should be replaced by the logo')
 if (!splashSrc.includes("Color4.create(1, 1, 1, alpha)")) fail('the splash backdrop should stay white so the logo blends')
 if (!splashSrc.includes('export function splashImageSize') || !splashSrc.includes('SPLASH_AR = 16 / 9')) fail('the logo should be contained at 16:9')
+if (!splashSrc.includes('SPLASH_SCALE = 0.5')) fail('the logo should render at half the contained frame')
 ok('splash UI uses the logo on a white cover')
 
 if (!uiSrc.includes('<SplashScreen />') || !uiSrc.includes('from "./client/splash"')) fail('ui.tsx should still mount SplashScreen last')
@@ -46,11 +43,11 @@ ok('SplashScreen is still the top-most load layer')
 const wide = splashImageSize(2560, 1080)
 const tall = splashImageSize(1080, 1920)
 const hd = splashImageSize(1920, 1080)
-if (hd.w !== 1920 || hd.h !== 1080) fail('16:9 canvas should fill with a 16:9 logo')
-if (Math.abs(wide.w / wide.h - (SPLASH_AR * SPLASH_AR) / (2560 / 1080)) > 0.02) fail('ultrawide should letterbox the logo instead of stretching it')
-if (wide.h !== 1080 || wide.w >= 1920) fail('ultrawide contain should shrink the virtual width')
-if (Math.abs(tall.w / tall.h - (SPLASH_AR * SPLASH_AR) / (1080 / 1920)) > 0.02) fail('portrait should letterbox the logo instead of stretching it')
-if (tall.w !== 1920 || tall.h >= 1080) fail('portrait contain should shrink the virtual height')
-ok('logo stays 16:9 on 16:9, ultrawide, and portrait')
+if (Math.abs(hd.w / hd.h - SPLASH_AR) > 0.02 || hd.w !== 960 || hd.h !== 540) fail('16:9 canvas should show a half-size 16:9 logo')
+if (Math.abs(wide.w / wide.h - SPLASH_AR) > 0.02) fail('ultrawide should keep the logo at 16:9')
+if (wide.h !== 540 || wide.w !== 960) fail('ultrawide should letterbox a half-size logo on white')
+if (Math.abs(tall.w / tall.h - SPLASH_AR) > 0.02) fail('portrait should keep the logo at 16:9')
+if (tall.w !== 540 || Math.abs(tall.h - 540 * 9 / 16) > 1) fail('portrait should letterbox the half-size logo above and below')
+ok('logo stays 16:9 at half scale on 16:9, ultrawide, and portrait')
 
 console.log('✓ load-splash checks passed')

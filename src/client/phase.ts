@@ -13,6 +13,8 @@ let voteMs = 0
 let voteEndsAt = 0
 let sawCountdown = false
 let starting = false
+/** Highest whole second this countdown may show (15 or 5). Keeps the +1s offset from flashing 16/6. */
+let displayCapSec = 0
 let votes: VoteRow[] = []
 let winner = ''
 let serverPresent = 0
@@ -44,6 +46,16 @@ export function voteRemainingMs(): number {
   return Math.max(0, voteEndsAt - Date.now())
 }
 
+/** Visible countdown stays up this long after the server timer so 0 lands when the level appears. */
+export const LOBBY_COUNTDOWN_DISPLAY_MS = 1_000
+
+export function voteDisplayRemainingMs(): number {
+  if (voteEndsAt <= 0) return 0
+  const raw = Math.max(0, voteEndsAt + LOBBY_COUNTDOWN_DISPLAY_MS - Date.now())
+  if (displayCapSec <= 0) return raw
+  return Math.min(raw, displayCapSec * 1000)
+}
+
 /** True in the gap after the lobby countdown hits 0 and before the match clock.
  *  A mid-countdown cancel (votes left) is not starting — that goes back to CHOOSE A TEAM. */
 export function isLobbyStarting(): boolean {
@@ -64,7 +76,14 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
   if (next === 'match' || next === 'summary') {
     sawCountdown = false
     starting = false
+    displayCapSec = 0
   } else if (nextVoteMs > 0) {
+    const nextSec = Math.ceil(nextVoteMs / 1000)
+    if (!sawCountdown || displayCapSec <= 0 || nextSec > displayCapSec) {
+      displayCapSec = nextSec
+    } else if (voteRemainingMs() - nextVoteMs > 400) {
+      displayCapSec = nextSec
+    }
     sawCountdown = true
     starting = false
   } else if (sawCountdown) {
@@ -73,13 +92,18 @@ export function setGamePhase(next: LobbyPhase, nextVoteMs: number, nextVotes: Vo
     if (voteEndsAt > Date.now() + 400) {
       sawCountdown = false
       starting = false
+      displayCapSec = 0
     } else {
       starting = true
     }
   }
   phase = next
   voteMs = nextVoteMs
-  voteEndsAt = nextVoteMs > 0 ? Date.now() + nextVoteMs : 0
+  if (nextVoteMs > 0) {
+    voteEndsAt = Date.now() + nextVoteMs
+  } else if (!starting) {
+    voteEndsAt = 0
+  }
   votes = nextVotes
   winner = nextWinner
   if (next === 'match' || next === 'summary') mine = ''

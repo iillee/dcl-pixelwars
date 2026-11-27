@@ -16,3 +16,6 @@ server.log
 
 # Local env vars (secrets — never commit)
 .env
+
+# Full match recordings linked into the kit. The short cuts live in promote/videos.
+promote/footage/

@@ -90,6 +90,14 @@ export const Messages = {
   // who on despawn is the picker (empty when the round just clears the orb).
   starSpawn: Schemas.Map({ i: Schemas.Int, x: Schemas.Number, y: Schemas.Number, z: Schemas.Number, fall: Schemas.Int }),
   starDespawn: Schemas.Map({ i: Schemas.Int, who: Schemas.String }),
+
+  // Server -> everyone: recovery orb position (spawn, move, or mid-join replay).
+  recoveryOrb: Schemas.Map({ x: Schemas.Number, y: Schemas.Number, z: Schemas.Number }),
+  recoveryOrbClear: Schemas.Map({}),
+  // Server -> the player who touched it: teleport home (a save, not a KO).
+  recoveryHome: Schemas.Map({}),
+  // Client -> Server: I am inside the orb radius. Server validates against known feet.
+  recoveryTouch: Schemas.Map({}),
   // Server → everyone. kind 1 = team took the sole lead (a is the team name).
   // kind 2 = a KO (a knocked out b). team / teamB tint those names.
   feed: Schemas.Map({
@@ -330,6 +338,8 @@ export const Messages = {
   // sender only. Used by the optional lag HUD, about once every 2s.
   lagPing: Schemas.Map({ t: Schemas.Number }),
   lagPong: Schemas.Map({ t: Schemas.Number }),
+  // Client → Server: [Sink] probe line for the server log. Rate-limited both sides.
+  sinkLog: Schemas.Map({ line: Schemas.String }),
 }
 
 export const room = registerMessages(Messages)

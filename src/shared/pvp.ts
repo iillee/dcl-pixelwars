@@ -361,10 +361,10 @@ export const BOT_FRICTION = 14 // m/s² of horizontal slow-down on a floor
 /** A knocked bot walks again once it is on a floor below this speed and its lock has run out (m/s). */
 export const BOT_RECOVER_SPEED = 1.5
 /**
- * Human locomotion the scene does not override.
- * client/speed.ts writes jog 8 and run 10 (the docs defaults). Jump, double jump, and glide
- * stay at the explorer defaults (docs.decentraland.org locomotion): jump 1 m, run-jump 1.5 m,
- * double jump 2 m, glide 6 m/s, glide fall 1 m/s. Walk is listed so the set stays complete.
+ * Human locomotion. client/speed.ts writes jog 8, run 10, and glide 6, then multiplies all three by the
+ * Speed upgrade. Jump and double jump stay at the explorer defaults
+ * (docs.decentraland.org locomotion): jump 1 m, run-jump 1.5 m, double jump 2 m,
+ * glide fall 1 m/s. Walk is listed so the set stays complete.
  * The body integrates at BOT_GRAVITY (20), not explorer gravity (~10), so a jump's vertical
  * speed is solved to reach the same apex inside this integrator (botJumpSpeed). Glide speed
  * and the fall cap are already m/s and are used as-is.
@@ -398,8 +398,8 @@ export function botRecoveryEnabled(format: RoundFormat): boolean {
 /** Default for a body with no mode set (unit tests that do not pass a format). */
 export const BOT_RECOVERY_ENABLED = false
 /**
- * Recovery after a knock, when botRecoveryEnabled(format). The bot always attempts
- * (CHANCE 1). It is imperfect on purpose: each bot rolls one reaction delay
+ * Recovery after a knock, when botRecoveryEnabled(format). Most knocks are attempted
+ * (CHANCE 0.85). It is imperfect on purpose: each bot rolls one reaction delay
  * in [REACT_MIN, REACT_MAX] and keeps it, then each knock can skip the double
  * jump or aim wide — often enough that a weak shove is saved most of the time,
  * with a human-like miss now and then. Steering accelerates toward the human
@@ -407,7 +407,7 @@ export const BOT_RECOVERY_ENABLED = false
  * carries them past the floor. Tune only these.
  */
 /** 0 = never attempts, 1 = always attempts. Execution error is the other knobs. */
-export const BOT_RECOVER_CHANCE = 1
+export const BOT_RECOVER_CHANCE = 0.85
 /** Per-bot reaction after control returns (the knock lock, or a spike's glide lock). Seconds. */
 export const BOT_RECOVER_REACT_MIN_S = 0.15
 export const BOT_RECOVER_REACT_MAX_S = 0.45
@@ -563,7 +563,7 @@ export const UPGRADE_CHARGE_NEUTRAL = 1
 export const UPGRADE_CHARGE_ENEMY = 2
 /** Charge for a friendly tile (no conversion, no credit). */
 export const UPGRADE_CHARGE_FRIENDLY = 0
-/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog/run only. */
+/** Movement speed bonus by level: 0, +15%, +25% total, +30% total. Jog, run, and glide. */
 export const UPGRADE_SPEED_BONUS = [0, 0.15, 0.25, 0.30] as const
 /** Paint *area* bonus by level: 0, +20%, +35% total, +45% total. Applied as a tile-count approximation, not a raw radius bump. */
 export const UPGRADE_PAINT_AREA_BONUS = [0, 0.20, 0.35, 0.45] as const

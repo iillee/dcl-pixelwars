@@ -77,11 +77,11 @@ import { getPlayer } from '@dcl/sdk/players'
 import { room } from '../shared/messages'
 import { events } from '../shared/events'
 import { isMazeReady } from '../maze/rebuild'
-import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn, MIN_Y } from '../maze/generator'
+import { BASE_Y, CELL, MAZE_ORIGIN, baseSpawn, MIN_Y, SCENE_SIZE } from '../maze/generator'
 import { isLobbyLayout } from '../maze/rebuild'
 import { lobbyFeet } from '../shared/lobby'
 import { FALL_RESPAWN_DROP, IS_SKY, SKY_TOP_Y } from '../maze/level'
-import { fallTriggerY, shouldBeginRescue } from '../shared/swell'
+import { fallTriggerY, liveSwell, shouldBeginRescue } from '../shared/swell'
 import { LOOK, resolvedWaterY } from '../shared/waterLook'
 import { waterClipArmed, waterVisualSeconds } from './water'
 import { Team, isPlayingTeam } from '../shared/team'
@@ -101,8 +101,14 @@ export const FALL_RESCUE = {
   ...RESCUE_PATH,
   /** Rise-and-shrink after arrival. */
   PEEL_S: 0.3,
-  /** If a teleport hasn't put us back above the fall line, allow another trip after this. */
-  REARM_S: 2,
+  /** Cooldown after a home teleport (holdFallLine) before the water line can trip again. */
+  REARM_S: 1,
+  /** Metres between the lowest swell trough and the top of the invisible catch floor. */
+  CATCH_FLOOR_GAP: 2,
+  /** Catch floor thickness (m). Thick so a fast fall cannot tunnel through it. */
+  CATCH_FLOOR_THICK: 4,
+  /** Feet within this of the catch floor top count as standing on it. */
+  CATCH_FLOOR_STAND_M: 0.6,
   /** Don't wait longer than this for a snap teleport before peeling the floater. */
   PEEL_WAIT_S: 0.45,
   /** How far the floater climbs while it peels off. */
@@ -161,11 +167,10 @@ let phaseLeft = 0
 let floater: Floater | null = null
 /** Spawn the cloud on the next grab tick so the first-trip GLB hitch cannot run on the same frame the pad collider is created. */
 let floaterPending = false
-/** False from a home teleport until we're above the fall line again (or REARM_S). */
-let rearm = true
+/** Seconds left on the post-teleport cooldown (holdFallLine). The water line cannot trip while > 0. */
 let rearmLeft = 0
-/** Highest feet Y seen during the current rearm hold, to tell a new fall from a stale post-teleport pose. */
-let rearmPeakY = Number.NEGATIVE_INFINITY
+/** Constant invisible physics floor under the lowest swell trough. Created once at init, never removed. */
+let catchFloor: Entity | null = null
 /** Last [Rescue] check decision, so a held skip does not spam the console. */
 let lastRescueCheck = ''
 /** Hidden, reusable local cloud. Built at init and shown/hidden instead of being recreated. */
@@ -201,6 +206,18 @@ let carryReseats = 0
 let lastCarryY: number | null = null
 
 function fallLine(): number { return MIN_Y - FALL_RESPAWN_DROP }
+/** Top of the catch floor: the lowest swell trough (mean - amplitude, or the flat line) minus a gap. */
+function catchFloorTopY(): number {
+  const mean = resolvedWaterY(MIN_Y, FALL_RESPAWN_DROP)
+  const amp = LOOK.sea ? liveSwell().amplitudeM : 0
+  const low = Math.min(mean - amp, fallLine())
+  return Math.max(FALL_RESCUE.CATCH_FLOOR_THICK + 2, low - FALL_RESCUE.CATCH_FLOOR_GAP)
+}
+/** In-bounds hidden spot for the pooled cloud and the warm-up pad: under the catch floor, above y=0. */
+function parkY(): number { return Math.max(1, catchFloorTopY() - FALL_RESCUE.CATCH_FLOOR_THICK - 4) }
+function onCatchFloor(p: Vec): boolean { return p.y <= catchFloorTopY() + FALL_RESCUE.CATCH_FLOOR_STAND_M }
+/** Pad top for these feet. Standing on the catch floor: right at the feet, so the rise lifts them. */
+function padTopFor(p: Vec): number { return onCatchFloor(p) ? p.y - 0.02 : p.y - FALL_RESCUE.CATCH_MIN_DROP }
 /** Visible sea at these feet, or the pre-water line when the sea is off. */
 function liveTrigger(p: { x: number; z: number } | null | undefined): number {
   // Until the wave clip is running the visible mesh sits at rest (mean Y).
@@ -336,7 +353,7 @@ function hidePooledCloud(): void {
   if (Tween.has(cloudPool.root)) Tween.deleteFrom(cloudPool.root)
   // Unparent before the pad is removed, otherwise destroying the anchor can take the cloud with it.
   Transform.createOrReplace(cloudPool.root, {
-    position: Vector3.create(0, -2000, 0),
+    position: Vector3.create(2, parkY(), 2),
     scale: Vector3.create(0.01, 0.01, 0.01),
     rotation: { x: 0, y: 0, z: 0, w: 1 },
   })
@@ -345,7 +362,7 @@ function hidePooledCloud(): void {
 function ensureCloud(): Floater {
   if (cloudPool) return cloudPool
   const root = engine.addEntity()
-  Transform.create(root, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(0.01, 0.01, 0.01) })
+  Transform.create(root, { position: Vector3.create(2, parkY(), 2), scale: Vector3.create(0.01, 0.01, 0.01) })
   cloudPool = { root, ents: cloudParts(root), mode: 'in', peelLeft: 0, waitLeft: 0 }
   stopCloudFace(root)
   return cloudPool
@@ -384,7 +401,7 @@ function seatIfMissed(p: Vec): void {
   const surface = surfaceNow()
   if (!surface) return
   if (p.y >= surface.y - FALL_RESCUE.PAD_THICK) return
-  const top = p.y - FALL_RESCUE.CATCH_MIN_DROP
+  const top = padTopFor(p)
   const tf = Transform.getMutable(pad)
   tf.position = Vector3.create(p.x, top - FALL_RESCUE.PAD_THICK / 2, p.z)
   // The first trip can hitch long enough to fall past two reseats and hit the
@@ -396,6 +413,7 @@ function seatIfMissed(p: Vec): void {
   }
   padReseats++
   console.log(`[FallRescue] pad was below the body, reseated under y=${p.y.toFixed(1)} (${padReseats})`)
+  console.log(`[Rescue] pad placed at feet top=${top.toFixed(2)} onFloor=${onCatchFloor(p)} (reseat ${padReseats})`)
 }
 
 function spawnPad(hold: Vec): void {
@@ -897,11 +915,12 @@ function atDestination(player: Vec): boolean {
 function reseatAndContinue(p: Vec): void {
   if (!pad) { finish('snap', 'no panel'); return }
   stopMotion()
-  const top = p.y - FALL_RESCUE.CATCH_MIN_DROP
+  const top = padTopFor(p)
   const tf = Transform.getMutable(pad)
   tf.position = Vector3.create(p.x, top - FALL_RESCUE.PAD_THICK / 2, p.z)
   lastCarryY = p.y
   console.log(`[FallRescue] body fell through the pad, reseated under y=${p.y.toFixed(1)} (${carryReseats})`)
+  console.log(`[Rescue] pad placed at feet top=${top.toFixed(2)} onFloor=${onCatchFloor(p)} (carry reseat ${carryReseats})`)
   startPath({ x: tf.position.x, y: tf.position.y, z: tf.position.z }, trippedAt)
 }
 
@@ -917,7 +936,8 @@ function tickCarry(dt: number): void {
     // A ~40 m/s rise can leave the reported avatar several metres behind the
     // live pad. That lag is not a fall. Only a body whose height is dropping
     // below the pad has left it.
-    const fallingThrough = p.y < surface.y - FALL_RESCUE.SLIP_M && (lastCarryY === null || p.y < lastCarryY - 0.5)
+    // Left standing on the catch floor while the pad rose away counts too, so the pad reseats at the feet.
+    const fallingThrough = p.y < surface.y - FALL_RESCUE.SLIP_M && (lastCarryY === null || p.y < lastCarryY - 0.5 || onCatchFloor(p))
     if (fallingThrough) slipAccum += dt
     else slipAccum = 0
     if (slipAccum >= FALL_RESCUE.SLIP_SUSTAIN_S) {
@@ -927,6 +947,7 @@ function tickCarry(dt: number): void {
         reseatAndContinue(p)
         return
       }
+      console.log(`[Rescue] snap LAST RESORT (drifted off the panel) after ${carryReseats} reseats y=${p.y.toFixed(2)} pad=${surface.y.toFixed(2)}`)
       finish('snap', 'drifted off the panel')
       return
     }
@@ -967,6 +988,7 @@ function finish(how: FallRescueEnd, why: string): void {
   sendRescueEnd()
   setFallMoveLock('walk')
   if (floater) { floater.mode = 'wait'; floater.waitLeft = FALL_RESCUE.PEEL_WAIT_S }
+  if (how === 'snap') console.log(`[Rescue] snap (${why})`)
   if (how === 'snap') console.log(`[FallRescue] snap fallback (${why}) — one teleport, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else if (rode) console.log(`[FallRescue] mobile camera ride arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
   else console.log(`[FallRescue] tween-carry arrived (${why}) — pad removed, land lock ${FALL_RESCUE.LAND_LOCK_S}s`)
@@ -1000,7 +1022,9 @@ function sendRescueEnd(): void {
 function begin(p: Vec): void {
   const line = liveTrigger(p)
   const v = fallVelocity(p)
-  const hold = catchPoint(p, v)
+  // Already on the catch floor: put the pad right at the feet (a standing body lands on it every time).
+  const onFloor = onCatchFloor(p)
+  const hold = onFloor ? { x: p.x, y: padTopFor(p), z: p.z } : catchPoint(p, v)
   phase = 'grab'
   phaseLeft = FALL_RESCUE.GRAB_S
   // Interrupt first: cancelling a lunge rewrites InputModifier, then the freeze wins.
@@ -1031,7 +1055,7 @@ function begin(p: Vec): void {
   console.log(
     `[FallRescue] trip y=${p.y.toFixed(1)} line=${line.toFixed(1)} pad=${hold.y.toFixed(1)} catch no teleport, pad ${under.toFixed(2)}m under feet, ${how} in ${FALL_RESCUE.GRAB_S}s, trip ${trip}s`,
   )
-  console.log(`[Rescue] start y=${p.y.toFixed(2)} line=${line.toFixed(2)} pad=${hold.y.toFixed(2)}`)
+  console.log(`[Rescue] start y=${p.y.toFixed(2)} line=${line.toFixed(2)} onFloor=${onFloor} pad=${hold.y.toFixed(2)}`)
 }
 
 function tickPhase(dt: number): void {
@@ -1060,7 +1084,7 @@ function tickPhase(dt: number): void {
       // If the grab hitch left them under the box, put it back under their
       // feet and rise from there. Do not drop the pad and start a camera ride.
       if (feet && surface && pad && feet.y < surface.y - FALL_RESCUE.PAD_THICK) {
-        const top = feet.y - FALL_RESCUE.CATCH_MIN_DROP
+        const top = padTopFor(feet)
         const tf = Transform.getMutable(pad)
         tf.position = Vector3.create(feet.x, top - FALL_RESCUE.PAD_THICK / 2, feet.z)
         console.log(`[FallRescue] below the pad when the rise started, reseated under y=${feet.y.toFixed(1)}`)
@@ -1267,26 +1291,21 @@ function tick(dt: number): void {
   tickRemotes(step)
   const p = playerPos()
   const line = liveTrigger(p)
-  if (!rearm) {
-    if (rearmLeft > 0) rearmLeft -= step
-    const y = p?.y
-    if (y !== undefined) rearmPeakY = Math.max(rearmPeakY, y)
-    if ((y !== undefined && y >= line) || rearmLeft <= 0) rearm = true
-  }
+  if (rearmLeft > 0) rearmLeft = Math.max(0, rearmLeft - step)
   if (phase !== 'idle') tickPhase(step)
   if (carry && pad && (phase === 'grab' || phase === 'carry')) tickCarry(step)
   if (mobileRide && phase === 'carry') tickMobile()
   tickFloater(step, line)
   if (p && phase === 'idle') {
-    // Height test, not an edge crossing, so a skipped frame still trips. Rearm
-    // only skips a stale post-teleport pose that never rose above the line.
+    // Height test, not an edge crossing, so a skipped frame still trips. The only
+    // gate is the ~1 s cooldown after a home teleport (movePlayerTo is async).
     if (shouldBeginRescue(p.y, isMazeReady(), line, MIN_Y)) {
-      const go = rearm || rearmPeakY >= line
-      const kind = go ? 'start' : 'skip-rearm'
+      const go = rearmLeft <= 0
+      const kind = go ? 'start' : 'skip-cooldown'
       if (kind === 'start' || lastRescueCheck !== kind) {
         lastRescueCheck = kind
         console.log(
-          `[Rescue] check y=${p.y.toFixed(2)} line=${line.toFixed(2)} phase=${phase} rearm=${rearm} peak=${Number.isFinite(rearmPeakY) ? rearmPeakY.toFixed(2) : 'n/a'} -> ${kind}`,
+          `[Rescue] check y=${p.y.toFixed(2)} line=${line.toFixed(2)} phase=${phase} cooldown=${rearmLeft.toFixed(2)} onFloor=${onCatchFloor(p)} -> ${kind}`,
         )
       }
       if (go) begin(p)
@@ -1298,13 +1317,14 @@ function tick(dt: number): void {
   if (p && phase === 'idle') remember(p)
 }
 
-/** Ignore the fall line until we're above it again. movePlayerTo is async. */
+/** Ignore the water line for REARM_S (~1 s) after a home teleport. movePlayerTo is async. */
 export function holdFallLine(): void {
-  rearm = false
   rearmLeft = FALL_RESCUE.REARM_S
-  const at = playerPos()
-  rearmPeakY = at ? at.y : Number.NEGATIVE_INFINITY
   lastRescueCheck = ''
+}
+/** True once the Lakitu tween/camera carry has started. Grab (pre-carry) can still be saved by the orb. */
+export function fallRescueCarryAttached(): boolean {
+  return phase === 'carry'
 }
 
 /** Round reset / team / initial spawn: drop the pickup, the panel, and the tween. Idempotent. */
@@ -1339,13 +1359,35 @@ export function cancelFallRescue(why: string): void {
 /** Build the real local cloud once, hidden, so the first trip reuses already-decoded GLBs. */
 function preloadRescueCloud(): void {
   ensureCloud()
-  console.log('[Rescue] preload cloud hidden at y=-2000')
+  console.log(`[Rescue] preload cloud hidden in bounds at y=${parkY().toFixed(1)}`)
+}
+
+/**
+ * One constant invisible floor under the lowest swell trough, over the whole
+ * scene. MeshCollider box on CL_PHYSICS only: no MeshRenderer, no Material,
+ * not CL_POINTER. A falling body always ends up standing on it, and the
+ * rescue pad is then placed at those feet. Never removed.
+ */
+function createCatchFloor(): void {
+  if (catchFloor) return
+  const thick = FALL_RESCUE.CATCH_FLOOR_THICK
+  const top = catchFloorTopY()
+  const size = Math.max(16, SCENE_SIZE - 2)
+  const e = engine.addEntity()
+  Transform.create(e, {
+    position: Vector3.create(SCENE_SIZE / 2, top - thick / 2, SCENE_SIZE / 2),
+    scale: Vector3.create(size, thick, size),
+  })
+  MeshCollider.setBox(e, ColliderLayer.CL_PHYSICS)
+  catchFloor = e
+  console.log(`[Rescue] catch floor ready top=${top.toFixed(2)} size=${size}x${thick}x${size} center=${(SCENE_SIZE / 2).toFixed(1)}`)
 }
 
 /** Warm the first physics box so the trip pad is not the first MeshCollider of the session. */
 function preloadRescuePad(): void {
   const e = engine.addEntity()
-  Transform.create(e, { position: Vector3.create(0, -2000, 0), scale: Vector3.create(FALL_RESCUE.PAD_SIZE, FALL_RESCUE.PAD_THICK, FALL_RESCUE.PAD_SIZE) })
+  const c = FALL_RESCUE.PAD_SIZE / 2 + 1
+  Transform.create(e, { position: Vector3.create(c, parkY(), c), scale: Vector3.create(FALL_RESCUE.PAD_SIZE, FALL_RESCUE.PAD_THICK, FALL_RESCUE.PAD_SIZE) })
   MeshCollider.setBox(e, ColliderLayer.CL_PHYSICS)
 }
 
@@ -1359,6 +1401,7 @@ export function initFallRescue(endRescue: (how: FallRescueEnd) => void): void {
   installed = true
   onEnd = endRescue
   if (!IS_SKY || MIN_Y < FALL_RESPAWN_DROP) return
+  createCatchFloor()
   preloadRescueCloud()
   preloadRescuePad()
   console.log('[Rescue] preload cloud+pad ready')

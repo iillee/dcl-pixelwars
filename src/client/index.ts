@@ -48,11 +48,13 @@ import { events } from '../shared/events'
 import { armSea } from './water'
 import { initLobby } from './lobby'
 import { initLagHud } from './lagHud'
+import { initSinkProbe } from './sinkProbe'
 
 // ─── Seed watcher ───────────────────────────────────────────────────
 // Reacts to any change in the synced seed (set by first-joiner init or by
 // the server's roundReset message) and rebuilds the maze.
 engine.addSystem(() => ensureMazeSeed(SeedHolder.get(seedHolder).seed))
+initSinkProbe() // [Sink] logs
 
 // ─── First-joiner initialization ────────────────────────
 // If we've been in-scene for a grace period and the synced seed is still 0,

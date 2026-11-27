@@ -59,6 +59,9 @@ export type Events = {
 
   'star:spawn': { i: number; x: number; y: number; z: number; fall: number }
   'star:despawn': { i: number; who: string }
+  'recovery:orb': { x: number; y: number; z: number }
+  'recovery:clear': Record<string, never>
+  'recovery:home': Record<string, never>
   'feed:line': { kind: number; a: string; b: string; team: number; teamB: number }
 
   // One-shot response to requestSnapshot: full paint map at time of send.

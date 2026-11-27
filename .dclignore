@@ -21,3 +21,11 @@ README.md
 src
 
 *.skp
+*.blend1
+*.skb
+*.obj
+*.mtl
+*.py
+*.mjs
+thumbnails/
+promote/
